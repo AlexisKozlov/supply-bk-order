@@ -679,7 +679,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db, getDownloadUrl } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
-import { getEntityGroup } from '@/lib/legalEntities.js';
+import { getEntityGroup, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -831,7 +831,7 @@ async function loadAgreements() {
   const gen = ++_loadAgrGen;
   loadingAgreements.value = true;
   try {
-    const { data, error } = await db.from('price_agreements').select('*').eq('legal_entity', le).order('created_at', { ascending: false });
+    const { data, error } = await db.from('price_agreements').select('*').eq('legal_entity_group', getEntityGroupCode(le)).order('created_at', { ascending: false });
     if (gen !== _loadAgrGen) return;
     if (error) { toast.error('Ошибка', error); return; }
     agreements.value = data || [];
@@ -1168,7 +1168,7 @@ async function saveAgreement() {
     };
     let newId = null;
     if (editingAgreement.value) {
-      const { error } = await db.from('price_agreements').update(payload).eq('id', editingAgreement.value.id).eq('legal_entity', le);
+      const { error } = await db.from('price_agreements').update(payload).eq('id', editingAgreement.value.id).eq('legal_entity_group', getEntityGroupCode(le));
       if (error) { toast.error('Ошибка', error); return; }
     } else {
       payload.created_by = userStore.currentUser?.name || '';
@@ -1180,7 +1180,7 @@ async function saveAgreement() {
         await uploadPscFile(newId);
         // Обновить запись протокола с путём к файлу
         if (agForm.value.file_name) {
-          const { error: fileErr } = await db.from('price_agreements').update({ file_name: agForm.value.file_name, file_path: agForm.value.file_path }).eq('id', newId).eq('legal_entity', le);
+          const { error: fileErr } = await db.from('price_agreements').update({ file_name: agForm.value.file_name, file_path: agForm.value.file_path }).eq('id', newId).eq('legal_entity_group', getEntityGroupCode(le));
           if (fileErr) toast.error('Предупреждение', 'Файл загружен, но не привязан к протоколу');
         }
       }
@@ -1867,7 +1867,7 @@ async function loadDynamics() {
     const sinceStr = toLocalDateStr(since);
     const { data, error } = await db.from('price_history')
       .select('*')
-      .eq('legal_entity', le)
+      .eq('legal_entity_group', getEntityGroupCode(le))
       .gte('changed_at', sinceStr)
       .order('changed_at', { ascending: false })
       .limit(200);

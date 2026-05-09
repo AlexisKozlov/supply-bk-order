@@ -195,10 +195,10 @@ if ($endpoint === 'upload' && $subpoint === 'psc') {
     $agreementId = $_POST['agreement_id'] ?? '';
     if (!$agreementId) respond(['error' => 'Не указан ID соглашения'], 400);
 
-    $chk = $pdo->prepare("SELECT id, legal_entity FROM price_agreements WHERE id=?"); $chk->execute([$agreementId]);
+    $chk = $pdo->prepare("SELECT id, legal_entity, legal_entity_group FROM price_agreements WHERE id=?"); $chk->execute([$agreementId]);
     $ag = $chk->fetch();
     if (!$ag) respond(['error' => 'Соглашение не найдено'], 404);
-    if (!checkLegalEntityAccess($su, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+    if (!checkLegalEntityGroupAccess($su, $ag['legal_entity_group'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
 
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
         respond(['error' => 'Ошибка загрузки файла'], 400);
@@ -245,11 +245,11 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'psc' && isset($parts[2])) 
     $caller = getSessionUser($pdo);
     if ($caller) {
         $safeName = str_replace(['%', '_'], ['\\%', '\\_'], $filename);
-        $fchk = $pdo->prepare("SELECT legal_entity FROM price_agreements WHERE file_path LIKE ? ESCAPE '\\\\'");
+        $fchk = $pdo->prepare("SELECT legal_entity_group FROM price_agreements WHERE file_path LIKE ? ESCAPE '\\\\'");
         $fchk->execute(['%' . $safeName]);
-        $fle = $fchk->fetchColumn();
-        if ($fle === false) respond(['error' => 'Файл не найден'], 404);
-        if ($fle && !checkLegalEntityAccess($caller, $fle)) respond(['error' => 'Нет доступа'], 403);
+        $flg = $fchk->fetchColumn();
+        if ($flg === false) respond(['error' => 'Файл не найден'], 404);
+        if ($flg && !checkLegalEntityGroupAccess($caller, $flg)) respond(['error' => 'Нет доступа'], 403);
     }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     $mime = finfo_file($finfo, $filepath);

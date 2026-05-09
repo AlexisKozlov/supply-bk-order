@@ -8,7 +8,7 @@
           <span :class="{ spin: loading }">↻</span>
         </button>
         <select v-model="entityFilter" class="dash-select" @change="load">
-          <option value="">Все юрлица</option>
+          <option v-if="userStore.isAdmin" value="">Все юрлица</option>
           <option v-for="le in entities" :key="le" :value="le">{{ le }}</option>
         </select>
         <select v-model="period" class="dash-select" @change="load">
@@ -272,7 +272,15 @@ function formatTimeAgo(date) {
   return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-onMounted(load)
+onMounted(() => {
+  // Не-админу не показываем «Все юрлица» — данные разных юрлиц нельзя смешивать.
+  // Подставляем первое доступное; селект «Все юрлица» в шаблоне скрыт для не-админа.
+  if (!entityFilter.value && !userStore.isAdmin) {
+    const allowed = userStore.getAllowedEntities()
+    if (allowed && allowed.length) entityFilter.value = allowed[0]
+  }
+  load()
+})
 </script>
 
 <style scoped>

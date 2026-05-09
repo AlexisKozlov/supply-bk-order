@@ -606,9 +606,10 @@ async function pickProduct(item, product, idx) {
     const le = orderStore.settings.legalEntity;
     // Найти группу аналогов товара
     let skusToQuery = [product.sku];
-    const { data: prodData } = await db.from('products')
-      .select('analog_group')
-      .eq('sku', product.sku);
+    const { data: prodData } = await applyEntityGroupFilter(
+      db.from('products').select('analog_group').eq('sku', product.sku),
+      le
+    );
     const analogGroup = prodData?.[0]?.analog_group;
     if (analogGroup) {
       let aq = db.from('products').select('sku').eq('analog_group', analogGroup);
@@ -651,9 +652,10 @@ async function reloadConsumption() {
 
     // Собрать все SKU и их группы аналогов
     const allSkus = skuItems.map(it => it.sku);
-    const { data: prodData } = await db.from('products')
-      .select('sku, analog_group')
-      .in('sku', allSkus);
+    const { data: prodData } = await applyEntityGroupFilter(
+      db.from('products').select('sku, analog_group').in('sku', allSkus),
+      le
+    );
 
     const skuToGroup = new Map();
     const groups = new Set();

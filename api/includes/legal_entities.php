@@ -108,3 +108,19 @@ function applyEntityGroupFilter($legalEntity, &$where, &$params, $column = 'lega
     $where[] = "$col = ?";
     $params[] = $group;
 }
+
+// Проверяет доступ пользователя к группе юрлиц ('BK_VM' | 'PS').
+// Используется для таблиц, где область видимости — группа, а не одно
+// юрлицо (например, stock_collections). Админ видит всё.
+function checkLegalEntityGroupAccess($sessionUser, $group) {
+    if (!$sessionUser) return true;
+    if (($sessionUser['role'] ?? '') === 'admin') return true;
+    if (!$group) return false;
+    $userEntities = $sessionUser['legal_entities'] ?? '';
+    if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
+    if (!is_array($userEntities) || empty($userEntities)) return false;
+    foreach ($userEntities as $le) {
+        if (getEntityGroup($le) === $group) return true;
+    }
+    return false;
+}

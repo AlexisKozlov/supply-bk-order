@@ -333,6 +333,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { formatDateShort as fmtDateShort, formatDateTime as formatDate } from '@/lib/utils.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -509,7 +510,7 @@ async function loadCollections() {
   try {
     const { data } = await db.from('stock_collections')
       .select('*')
-      .eq('legal_entity', orderStore.settings.legalEntity)
+      .eq('legal_entity_group', getEntityGroupCode(orderStore.settings.legalEntity))
       .order('created_at', { ascending: false })
       .limit(30);
     availableCollections.value = data || [];

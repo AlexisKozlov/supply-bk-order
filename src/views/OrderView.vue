@@ -713,15 +713,34 @@ function onUnitChange(e) {
     orderStore.items.forEach(item => {
       const qpb = getQpb(item);
       if (oldUnit === 'pieces' && newUnit === 'boxes') {
+        // Запоминаем исходные штуки — при обратном переключении вернём
+        // ровно те же значения, без двойного Math.round-дрейфа.
+        item._origPieces = {
+          consumptionPeriod: item.consumptionPeriod,
+          stock: item.stock,
+          transit: item.transit,
+          finalOrder: item.finalOrder,
+        };
         item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
         item.stock   = item.stock   ? Math.round(item.stock   / qpb * 100) / 100 : 0;
         item.transit = item.transit ? Math.round(item.transit / qpb * 100) / 100 : 0;
-        item.finalOrder = item.finalOrder ? Math.round(item.finalOrder / qpb) : 0;
+        item.finalOrder = item.finalOrder ? Math.ceil(item.finalOrder / qpb) : 0;
       } else if (oldUnit === 'boxes' && newUnit === 'pieces') {
-        item.consumptionPeriod = Math.round(item.consumptionPeriod * qpb);
-        item.stock   = Math.round(item.stock * qpb);
-        item.transit = Math.round(item.transit * qpb);
-        item.finalOrder = Math.round(item.finalOrder * qpb);
+        if (item._origPieces) {
+          // Возвращаем сохранённые штуки, если значение в коробках не менялось
+          // (округление вперёд-назад иначе сдвинет finalOrder вверх на остаток qpb).
+          const savedAccBoxes = item._origPieces.finalOrder ? Math.ceil(item._origPieces.finalOrder / qpb) : 0;
+          item.finalOrder = (item.finalOrder === savedAccBoxes) ? item._origPieces.finalOrder : Math.round(item.finalOrder * qpb);
+          item.consumptionPeriod = item._origPieces.consumptionPeriod ?? Math.round(item.consumptionPeriod * qpb);
+          item.stock   = item._origPieces.stock ?? Math.round(item.stock * qpb);
+          item.transit = item._origPieces.transit ?? Math.round(item.transit * qpb);
+          delete item._origPieces;
+        } else {
+          item.consumptionPeriod = Math.round(item.consumptionPeriod * qpb);
+          item.stock   = Math.round(item.stock * qpb);
+          item.transit = Math.round(item.transit * qpb);
+          item.finalOrder = Math.round(item.finalOrder * qpb);
+        }
       }
     });
   }
@@ -1066,10 +1085,13 @@ async function loadFrom1c() {
       const d = item.sku ? stockMap.get(item.sku) : null;
       if (!d) return;
       const qpb = getQpb(item);
-      item.stock = isBoxes ? Math.round(d.stock / qpb) : Math.round(d.stock || 0);
+      // Для медленнооборачиваемых SKU (ADU=0.1 шт/день) после деления на qpb
+      // расход за период даёт <1 коробки и обнуляется при Math.round → заказ
+      // не считается. Храним один знак после запятой (как в loadFromAnalysis).
+      item.stock = isBoxes ? Math.round((d.stock / qpb) * 10) / 10 : Math.round(d.stock || 0);
       const daily = (d.period_days || 30) > 0 ? (d.consumption || 0) / (d.period_days || 30) : 0;
       const adj   = daily * periodDays;
-      item.consumptionPeriod = isBoxes ? Math.round(adj / qpb) : Math.round(adj);
+      item.consumptionPeriod = isBoxes ? Math.round((adj / qpb) * 10) / 10 : Math.round(adj);
       filled++;
     });
 

@@ -534,7 +534,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -734,7 +734,7 @@ async function loadCollections() {
   try {
     const { data } = await db.from('stock_collections')
       .select('*')
-      .eq('legal_entity', orderStore.settings.legalEntity)
+      .eq('legal_entity_group', getEntityGroupCode(orderStore.settings.legalEntity))
       .order('created_at', { ascending: false })
       .limit(50);
     collections.value = data || [];
@@ -903,7 +903,7 @@ function openRename() {
 async function saveRename() {
   if (!renameName.value.trim()) return;
   try {
-    const { error } = await db.from('stock_collections').update({ name: renameName.value.trim() }).eq('id', activeCollection.value.id).eq('legal_entity', orderStore.settings.legalEntity);
+    const { error } = await db.from('stock_collections').update({ name: renameName.value.trim() }).eq('id', activeCollection.value.id).eq('legal_entity_group', getEntityGroupCode(orderStore.settings.legalEntity));
     if (error) { toastStore.error('Ошибка', 'Не удалось переименовать'); return; }
     activeCollection.value.name = renameName.value.trim();
     showRename.value = false;

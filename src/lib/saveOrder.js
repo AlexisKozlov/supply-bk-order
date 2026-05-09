@@ -21,6 +21,11 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       consumption_period: Math.round(item.consumptionPeriod || 0),
       stock:              Math.round((item.stock || 0) * 100) / 100,
       transit:            Math.round((item.transit || 0) * 100) / 100,
+      // final_order/unit_of_measure хранят исходное количество в той единице,
+      // что выбрана при сохранении. При загрузке обратно используются для
+      // точного восстановления — без дрейфа из-за округления через qty_boxes.
+      final_order:        Math.round(item.finalOrder || 0),
+      unit_of_measure:    settings.unit === 'boxes' ? 'boxes' : 'pieces',
     };
   });
 
@@ -28,13 +33,20 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
   // карточек одного товара в БД сохранятся 2 строки, а при загрузке
   // обратно через loadOrderIntoForm дубль пропускается → потеря количества
   // для второй карточки. Нет SKU (свободные позиции) — оставляем как есть.
+  // При несовпадении qty_per_box/multiplicity у одинаковых SKU предупреждаем
+  // пользователя — простое схлопывание исказит количество в штуках.
   const aggregated = [];
   const bySku = new Map();
+  const conflicts = [];
   for (const it of allItems.filter(i => i.qty_boxes > 0)) {
     if (!it.sku) { aggregated.push(it); continue; }
     const prev = bySku.get(it.sku);
     if (prev) {
+      if (prev.qty_per_box !== it.qty_per_box || prev.multiplicity !== it.multiplicity) {
+        conflicts.push({ sku: it.sku, name: it.name });
+      }
       prev.qty_boxes += it.qty_boxes;
+      prev.final_order = (prev.final_order || 0) + (it.final_order || 0);
       // consumption_period/stock/transit: берём максимум — все карточки
       // одного SKU должны были показывать одни и те же значения,
       // но если расходятся — выбираем безопасное.
@@ -45,6 +57,10 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       bySku.set(it.sku, it);
       aggregated.push(it);
     }
+  }
+  if (conflicts.length) {
+    const skus = conflicts.slice(0, 3).map(c => c.sku).join(', ');
+    return { error: `В заказе несколько позиций с одинаковым SKU (${skus}${conflicts.length > 3 ? ' и др.' : ''}), но с разной фасовкой. Объедините их перед сохранением.` };
   }
   const itemsWithOrder = aggregated.map((i, idx) => ({ ...i, sort_order: idx }));
   if (!itemsWithOrder.length) {
@@ -112,28 +128,31 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       const diffKey = (i) => i.sku ? `sku:${i.sku}` : `name:${i.name}`;
       const oldMap = new Map(oldItems.map(i => [diffKey(i), i]));
       const changes = [];
+      // БД отдаёт числа как string/Decimal в JSON, фронт даёт number. Без приведения
+      // через Number() сравнение !== всегда true и аудит ловит ложные «изменения».
+      const num = (v) => Number(v ?? 0);
       allItems.forEach(newItem => {
         const key = diffKey(newItem);
         const old = oldMap.get(key);
         if (!old) {
           if (newItem.qty_boxes > 0) changes.push({ item: key, type: 'added', boxes: newItem.qty_boxes });
         } else {
-          if (old.qty_boxes > 0 && newItem.qty_boxes === 0) {
+          if (num(old.qty_boxes) > 0 && num(newItem.qty_boxes) === 0) {
             // Позиция обнулена — считаем как удалённую
-            changes.push({ item: key, type: 'removed', boxes: old.qty_boxes });
+            changes.push({ item: key, type: 'removed', boxes: num(old.qty_boxes) });
           } else {
             const diffs = [];
-            if (old.qty_boxes !== newItem.qty_boxes) diffs.push(`заказ: ${old.qty_boxes}→${newItem.qty_boxes}`);
-            if (old.consumption_period !== newItem.consumption_period) diffs.push(`расход: ${old.consumption_period}→${newItem.consumption_period}`);
-            if (old.stock !== newItem.stock) diffs.push(`остаток: ${old.stock}→${newItem.stock}`);
-            if (old.transit !== newItem.transit) diffs.push(`транзит: ${old.transit}→${newItem.transit}`);
+            if (num(old.qty_boxes) !== num(newItem.qty_boxes)) diffs.push(`заказ: ${num(old.qty_boxes)}→${num(newItem.qty_boxes)}`);
+            if (num(old.consumption_period) !== num(newItem.consumption_period)) diffs.push(`расход: ${num(old.consumption_period)}→${num(newItem.consumption_period)}`);
+            if (num(old.stock) !== num(newItem.stock)) diffs.push(`остаток: ${num(old.stock)}→${num(newItem.stock)}`);
+            if (num(old.transit) !== num(newItem.transit)) diffs.push(`транзит: ${num(old.transit)}→${num(newItem.transit)}`);
             if (diffs.length) changes.push({ item: key, type: 'changed', diffs });
           }
           oldMap.delete(key);
         }
       });
       oldMap.forEach((old, key) => {
-        if (old.qty_boxes > 0) changes.push({ item: key, type: 'removed', boxes: old.qty_boxes });
+        if (num(old.qty_boxes) > 0) changes.push({ item: key, type: 'removed', boxes: num(old.qty_boxes) });
       });
       auditAction = 'order_updated';
       auditDetails = { supplier: settings.supplier, changes, param_changes: paramChanges.length ? paramChanges : undefined };

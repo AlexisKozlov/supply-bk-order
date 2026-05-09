@@ -355,13 +355,13 @@ function toolGetDeliveries($supplier, $product, $entity) {
 function toolGetPrices($query, $entity) {
     global $pdo;
     if ($query) {
-        // Поиск цен по товару
+        // Поиск цен по товару — цены живут на уровне группы юрлиц.
         $sql = "SELECT pp.sku, p.name, pp.price, pp.currency, pp.vat_rate, pp.unit_type, p.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity_group = pp.legal_entity_group AND p.is_active = 1
                 WHERE pp.price_type = 'purchase' AND (pp.sku LIKE ? OR p.name LIKE ? OR p.supplier LIKE ?)";
         $params = ["%{$query}%", "%{$query}%", "%{$query}%"];
-        if ($entity) { $sql .= " AND pp.legal_entity = ?"; $params[] = $entity; }
+        if ($entity) { $sql .= " AND pp.legal_entity_group = ?"; $params[] = getEntityGroup($entity); }
         $sql .= " LIMIT 20";
         $s = $pdo->prepare($sql); $s->execute($params);
         $prices = $s->fetchAll();
@@ -376,12 +376,12 @@ function toolGetPrices($query, $entity) {
         }
         return $result;
     }
-    // Последние изменения цен
+    // Последние изменения цен — на уровне группы юрлиц.
     $sql = "SELECT ph.sku, p.name, ph.supplier, ph.old_price, ph.new_price, ph.changed_at
             FROM price_history ph
-            LEFT JOIN products p ON p.sku = ph.sku AND p.legal_entity = ph.legal_entity AND p.is_active = 1";
+            LEFT JOIN products p ON p.sku = ph.sku AND p.legal_entity_group = ph.legal_entity_group AND p.is_active = 1";
     $params = [];
-    if ($entity) { $sql .= " WHERE ph.legal_entity = ?"; $params[] = $entity; }
+    if ($entity) { $sql .= " WHERE ph.legal_entity_group = ?"; $params[] = getEntityGroup($entity); }
     $sql .= " ORDER BY ph.changed_at DESC LIMIT 15";
     $s = $pdo->prepare($sql); $s->execute($params);
     $changes = $s->fetchAll();
@@ -475,7 +475,7 @@ function toolPsc($supplier, $status, $entity) {
             FROM price_agreements WHERE 1=1";
     $params = [];
     if ($status !== 'all') { $sql .= " AND status = ?"; $params[] = $status; }
-    if ($entity) { $sql .= " AND legal_entity = ?"; $params[] = $entity; }
+    if ($entity) { $sql .= " AND legal_entity_group = ?"; $params[] = getEntityGroup($entity); }
     if ($supplier) { $sql .= " AND supplier LIKE ?"; $params[] = "%{$supplier}%"; }
     $sql .= " ORDER BY valid_to ASC LIMIT 20";
     $s = $pdo->prepare($sql); $s->execute($params);
@@ -580,10 +580,11 @@ function toolSummary($entity) {
     $critCount = $s->fetchColumn();
     if ($critCount > 0) $result .= "🔴 Товаров с запасом ≤3 дней: {$critCount}\n";
 
-    // ПСЦ скоро истекают
+    // ПСЦ скоро истекают — на уровне группы юрлиц.
     $pscSql = "SELECT COUNT(*) FROM price_agreements WHERE status = 'active' AND DATEDIFF(valid_to, CURDATE()) <= 14";
-    if ($entity) $pscSql .= " AND legal_entity = ?";
-    $s = $pdo->prepare($pscSql); $s->execute($params);
+    $pscParams = [];
+    if ($entity) { $pscSql .= " AND legal_entity_group = ?"; $pscParams[] = getEntityGroup($entity); }
+    $s = $pdo->prepare($pscSql); $s->execute($pscParams);
     $pscExpiring = $s->fetchColumn();
     if ($pscExpiring > 0) $result .= "📋 ПСЦ истекают в ближайшие 14 дней: {$pscExpiring}\n";
 

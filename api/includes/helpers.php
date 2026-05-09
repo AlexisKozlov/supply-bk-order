@@ -343,20 +343,35 @@ function notifyProtocolParticipants($pdo, $protocolId, $topic, $date, $participa
     }
 }
 
-// Уведомление ресторанов о новом сборе остатков
+// Уведомление ресторанов о новом сборе остатков.
+// Уведомляются только рестораны той же группы юрлиц, что и сбор (BK_VM или PS).
 function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCount) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return 0;
 
-    // Все подписанные рестораны с включёнными уведомлениями о новых сборах (chat_id уникальные)
-    $st = $pdo->query("SELECT DISTINCT chat_id, GROUP_CONCAT(DISTINCT restaurant_number ORDER BY CAST(restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests FROM ro_telegram_subs WHERE notify_stock_sessions = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW())) GROUP BY chat_id");
+    // Группа сбора → группа подписанных ресторанов (через restaurants.legal_entity_group)
+    $g = $pdo->prepare("SELECT legal_entity_group FROM stock_collections WHERE id = ?");
+    $g->execute([$collectionId]);
+    $group = $g->fetchColumn() ?: 'BK_VM';
+
+    // Подписанные рестораны нужной группы с включёнными уведомлениями о сборах.
+    $st = $pdo->prepare("
+        SELECT DISTINCT s.chat_id, GROUP_CONCAT(DISTINCT s.restaurant_number ORDER BY CAST(s.restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests
+        FROM ro_telegram_subs s
+        JOIN restaurants r ON r.number = s.restaurant_number AND r.legal_entity_group = ?
+        WHERE s.notify_stock_sessions = 1
+          AND (s.verified_at IS NOT NULL OR (s.must_reverify_by IS NOT NULL AND s.must_reverify_by > NOW()))
+        GROUP BY s.chat_id
+    ");
+    $st->execute([$group]);
     $subs = $st->fetchAll();
     if (!$subs) return 0;
 
+    $cName = htmlspecialchars((string)$collectionName, ENT_QUOTES, 'UTF-8');
     $text = "📋 <b>Новый сбор остатков</b>\n";
     $text .= "─────────────────────\n";
-    $text .= "📝 {$collectionName}\n";
-    $text .= "📦 Товаров: {$productsCount}\n\n";
+    $text .= "📝 {$cName}\n";
+    $text .= "📦 Товаров: " . (int)$productsCount . "\n\n";
     $text .= "Заполните остатки по вашему ресторану:";
 
     // Только заполнение в боте — публичная ссылка отключена,
@@ -404,7 +419,7 @@ $TABLE_TO_MODULE = [
     'product_adu'=>'analysis','report_exclusions'=>'restaurant-sales','changelog'=>'history',
     'supplier_payments'=>'plan-fact',
     'marketing_activities'=>'marketing','marketing_activity_items'=>'marketing','marketing_activity_files'=>'marketing',
-    'recipes'=>'marketing','recipe_ingredients'=>'marketing',
+    'recipes'=>'marketing','recipe_ingredients'=>'marketing','recipe_groups'=>'marketing','recipe_group_items'=>'marketing',
     'meeting_protocols'=>'protocols','meeting_protocol_series'=>'protocols','protocol_decisions'=>'protocols',
     'tl_vehicles'=>'truck-loading','tl_plans'=>'truck-loading','tl_trucks'=>'truck-loading','tl_assignments'=>'truck-loading',
     'tasks_boards'=>'tasks','tasks_columns'=>'tasks','tasks_cards'=>'tasks','tasks_labels'=>'tasks','tasks_card_labels'=>'tasks','tasks_checklist'=>'tasks','tasks_assignees'=>'tasks','tasks_attachments'=>'tasks','tasks_comments'=>'tasks','tasks_history'=>'tasks','tasks_relations'=>'tasks','tasks_recurrence'=>'tasks',

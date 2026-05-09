@@ -124,12 +124,13 @@ function gatherContext($user) {
         }
     }
 
-    // Протоколы
+    // Протоколы (фильтр по группе юрлиц — ПСЦ живут на уровне группы)
     $sql = "SELECT number, supplier, valid_to, DATEDIFF(valid_to, CURDATE()) as days_left
             FROM price_agreements WHERE status = 'active'";
-    if ($entity) { $sql .= " AND legal_entity = ?"; }
+    $pscParams = [];
+    if ($entity) { $sql .= " AND legal_entity_group = ?"; $pscParams[] = getEntityGroup($entity); }
     $sql .= " ORDER BY valid_to ASC LIMIT 10";
-    $s = $pdo->prepare($sql); $s->execute($params);
+    $s = $pdo->prepare($sql); $s->execute($pscParams);
     $psc = $s->fetchAll();
     if ($psc) {
         $context .= "\nАктивные протоколы (ПСЦ):\n";
@@ -138,14 +139,15 @@ function gatherContext($user) {
         }
     }
 
-    // Последние изменения цен (только действующие)
+    // Последние изменения цен (только действующие). Цены и история — на уровне группы юрлиц.
     $sql = "SELECT ph.sku, p.name as product_name, ph.supplier, ph.old_price, ph.new_price, ph.changed_at
             FROM price_history ph
-            LEFT JOIN products p ON p.sku = ph.sku AND p.legal_entity = ph.legal_entity AND p.is_active = 1
-            WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci)";
-    if ($entity) { $sql .= " AND ph.legal_entity = ?"; }
+            LEFT JOIN products p ON p.sku = ph.sku AND p.legal_entity_group = ph.legal_entity_group AND p.is_active = 1
+            WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity_group = ph.legal_entity_group)";
+    $phParams = [];
+    if ($entity) { $sql .= " AND ph.legal_entity_group = ?"; $phParams[] = getEntityGroup($entity); }
     $sql .= " ORDER BY ph.changed_at DESC LIMIT 10";
-    $s = $pdo->prepare($sql); $s->execute($params);
+    $s = $pdo->prepare($sql); $s->execute($phParams);
     $prices = $s->fetchAll();
     if ($prices) {
         $context .= "\nПоследние изменения цен:\n";
@@ -471,9 +473,9 @@ function productFullInfo($prod, $entity, $skipHistory = false) {
         }
     }
 
-    // Текущая цена (только закупочная)
-    $s = $pdo->prepare("SELECT price, currency, vat_rate, unit_type FROM product_prices WHERE sku = ? AND legal_entity = ? AND price_type = 'purchase' LIMIT 1");
-    $s->execute([$sku, $le]);
+    // Текущая цена (только закупочная) — на уровне группы юрлиц.
+    $s = $pdo->prepare("SELECT price, currency, vat_rate, unit_type FROM product_prices WHERE sku = ? AND legal_entity_group = ? AND price_type = 'purchase' LIMIT 1");
+    $s->execute([$sku, getEntityGroup($le)]);
     $price = $s->fetch();
     if ($price) {
         $vat = $price['vat_rate'] ?? 20;
@@ -850,9 +852,12 @@ function lookupSupplier($question, $entity) {
                 $context .= "  Последний заказ: " . date('d.m.Y', strtotime($lastOrder['created_at'])) . ", {$lastOrder['boxes']} кор.\n";
             }
 
-            // ПСЦ
-            $s5 = $pdo->prepare("SELECT number, valid_to, DATEDIFF(valid_to, CURDATE()) as days_left FROM price_agreements WHERE supplier = ? AND status = 'active'" . $planFilter . " LIMIT 1");
-            $s5->execute($planParams);
+            // ПСЦ — на уровне группы юрлиц.
+            $pscPlanFilter = $entity ? " AND legal_entity_group = ?" : "";
+            $pscPlanParams = [$sup['short_name']];
+            if ($entity) $pscPlanParams[] = getEntityGroup($entity);
+            $s5 = $pdo->prepare("SELECT number, valid_to, DATEDIFF(valid_to, CURDATE()) as days_left FROM price_agreements WHERE supplier = ? AND status = 'active'" . $pscPlanFilter . " LIMIT 1");
+            $s5->execute($pscPlanParams);
             $psc = $s5->fetch();
             if ($psc) {
                 $context .= "  ПСЦ: {$psc['number']}, до " . date('d.m.Y', strtotime($psc['valid_to'])) . " ({$psc['days_left']} дн.)\n";
@@ -1216,13 +1221,14 @@ function lookupPrices($question, $entity) {
 
     $context = "\n== ЦЕНЫ ==\n";
     $found = false;
-    $eFilter = $entity ? " AND pp.legal_entity = ?" : "";
-    $eParams = $entity ? [$entity] : [];
+    // Цены живут на уровне группы юрлиц (BK_VM или PS).
+    $eFilter = $entity ? " AND pp.legal_entity_group = ?" : "";
+    $eParams = $entity ? [getEntityGroup($entity)] : [];
 
     foreach ($skus as $sku) {
         $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity_group = pp.legal_entity_group AND p.is_active = 1
                 WHERE pp.price_type = 'purchase' AND pp.sku = ?" . $eFilter . " LIMIT 5";
         $s = $pdo->prepare($sql); $s->execute(array_merge([$sku], $eParams));
         foreach ($s->fetchAll() as $row) {
@@ -1238,7 +1244,7 @@ function lookupPrices($question, $entity) {
     foreach ($searchTerms as $term) {
         $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity_group = pp.legal_entity_group AND p.is_active = 1
                 WHERE pp.price_type = 'purchase' AND p.name LIKE ?" . $eFilter . " LIMIT 10";
         $s = $pdo->prepare($sql); $s->execute(array_merge(["%{$term}%"], $eParams));
         foreach ($s->fetchAll() as $row) {

@@ -1,3 +1,5 @@
+import { getEntityGroupCode } from './legalEntities.js';
+
 function normalizeSku(value) {
   return String(value ?? '').trim();
 }
@@ -266,7 +268,7 @@ export async function resolveCttPreorderRows({ rows, legalEntity, db, preorderLa
     const { data, error } = await db
       .from('product_prices')
       .select('sku,price,price_type')
-      .eq('legal_entity', legalEntity)
+      .eq('legal_entity_group', getEntityGroupCode(legalEntity))
       .in('sku', matchedSkus)
       .in('price_type', ['purchase', 'deposit']);
     if (error) throw new Error(error);

@@ -343,6 +343,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { importFromFile } from '@/lib/importStock.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
@@ -411,7 +412,7 @@ async function loadPrices() {
   const le = orderStore.settings.legalEntity;
   if (!le) return;
   try {
-    const { data } = await db.from('product_prices').select('sku,price,unit_type').eq('legal_entity', le);
+    const { data } = await db.from('product_prices').select('sku,price,unit_type').eq('legal_entity_group', getEntityGroupCode(le));
     if (data && data.length) {
       const m = new Map();
       for (const row of data) {

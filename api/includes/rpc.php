@@ -144,10 +144,14 @@ if ($endpoint === 'rpc') {
         respond($row ?: ['value' => null]);
     }
 
-    // Артикулы на остатках (для поиска карточек)
+    // Артикулы на остатках (для поиска карточек).
+    // Юрлицо принимается параметром; дефолт — «Бургер БК» (исторически основная база).
     if ($fn === 'get_stock_skus') {
+        $le = $body['legal_entity'] ?? $_GET['legal_entity'] ?? 'ООО "Бургер БК"';
+        $valid = array_merge(getEntitiesInGroup('BK_VM'), getEntitiesInGroup('PS'));
+        if (!in_array($le, $valid, true)) $le = 'ООО "Бургер БК"';
         $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.legal_entity = ? AND a.stock > 0");
-        $s->execute(['ООО "Бургер БК"']);
+        $s->execute([$le]);
         $rows = $s->fetchAll();
         $result = [];
         foreach ($rows as $r) {
@@ -294,16 +298,26 @@ if ($endpoint === 'rpc') {
         $row = $s->fetch();
         if (!$row) respond(['error' => 'invalid_or_expired_token']);
         $chatId = $row['telegram_chat_id'];
-        // Убираем этот chat_id у других пользователей (если был привязан к кому-то ещё)
-        $pdo->prepare("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = ?")->execute([$chatId]);
-        // Привязываем к текущему пользователю
-        $pdo->prepare("UPDATE users SET telegram_chat_id = ? WHERE name = ?")->execute([$chatId, $sessionUser['name']]);
-        // Создаём настройки бота
-        $pdo->prepare("INSERT IGNORE INTO telegram_settings (user_name) VALUES (?)")->execute([$sessionUser['name']]);
-        // Удаляем использованный токен
-        $pdo->prepare("DELETE FROM telegram_link_tokens WHERE token = ?")->execute([$token]);
-        // Очищаем просроченные токены заодно
-        $pdo->prepare("DELETE FROM telegram_link_tokens WHERE expires_at < NOW()")->execute();
+        // Связанные изменения — в одной транзакции, чтобы при сбое не оставить
+        // chat_id отвязанным от прежнего пользователя без привязки к новому.
+        $pdo->beginTransaction();
+        try {
+            // Убираем этот chat_id у других пользователей (если был привязан к кому-то ещё)
+            $pdo->prepare("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = ?")->execute([$chatId]);
+            // Привязываем к текущему пользователю
+            $pdo->prepare("UPDATE users SET telegram_chat_id = ? WHERE name = ?")->execute([$chatId, $sessionUser['name']]);
+            // Создаём настройки бота
+            $pdo->prepare("INSERT IGNORE INTO telegram_settings (user_name) VALUES (?)")->execute([$sessionUser['name']]);
+            // Удаляем использованный токен
+            $pdo->prepare("DELETE FROM telegram_link_tokens WHERE token = ?")->execute([$token]);
+            // Очищаем просроченные токены заодно
+            $pdo->prepare("DELETE FROM telegram_link_tokens WHERE expires_at < NOW()")->execute();
+            $pdo->commit();
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('confirm_telegram_link error: ' . $e->getMessage());
+            respond(['error' => 'Ошибка привязки'], 500);
+        }
         // Отправляем приветствие в Telegram
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if ($botToken) {
@@ -649,6 +663,7 @@ if ($endpoint === 'rpc') {
 
     // ═══ STOCK COLLECTION: приватные RPC ═══
     if ($fn === 'sc_create_collection') {
+        requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $le = $body['legal_entity'] ?? '';
         $name = mb_substr($body['name'] ?? '', 0, 255);
         $products = $body['products'] ?? []; // [{name, sku?, unit}]
@@ -660,8 +675,10 @@ if ($endpoint === 'rpc') {
         $hasNote = dbColumnExists($pdo, 'stock_collection_products', 'note');
         $pdo->beginTransaction();
         try {
-            $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, name, created_by) VALUES (?, ?, ?)");
-            $s->execute([$le, $name, $uname]);
+            // legal_entity — кто создал (для аудита), legal_entity_group —
+            // область видимости (BK+VM делят сборы, PS отдельно).
+            $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, legal_entity_group, name, created_by) VALUES (?, ?, ?, ?)");
+            $s->execute([$le, getEntityGroup($le), $name, $uname]);
             $collId = $pdo->lastInsertId();
             $productCols = ['collection_id', 'product_name', 'product_sku', 'unit'];
             if ($hasNeedExpiry) $productCols[] = 'need_expiry';
@@ -696,6 +713,7 @@ if ($endpoint === 'rpc') {
 
     // Повторная отправка уведомлений ресторанам о сборе
     if ($fn === 'sc_notify_restaurants') {
+        requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'collection_id required'], 400);
         $col = $pdo->prepare("SELECT name, status FROM stock_collections WHERE id = ?");
@@ -711,27 +729,29 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'sc_close_collection') {
+        requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
-        // Проверяем доступ к юрлицу коллекции
-        $collCheck = $pdo->prepare("SELECT legal_entity FROM stock_collections WHERE id = ?");
+        // Доступ к сбору — на уровне группы юрлиц (BK_VM или PS).
+        $collCheck = $pdo->prepare("SELECT legal_entity, legal_entity_group FROM stock_collections WHERE id = ?");
         $collCheck->execute([$collId]);
         $collRow = $collCheck->fetch();
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
-        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        if ($authUser && !checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $pdo->prepare("UPDATE stock_collections SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$collId]);
         auditLog($pdo, 'collection_closed', 'stock_collection', $collId, $authUserName, ['legal_entity' => $collRow['legal_entity']]);
         respond(['success' => true]);
     }
     if ($fn === 'sc_reopen_collection') {
+        requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $collId = intval($body['collection_id'] ?? 0);
         $uname = $authUserName ?: ($body['user_name'] ?? '');
         if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
-        $collCheck = $pdo->prepare("SELECT id, name, legal_entity, status FROM stock_collections WHERE id = ?");
+        $collCheck = $pdo->prepare("SELECT id, name, legal_entity, legal_entity_group, status FROM stock_collections WHERE id = ?");
         $collCheck->execute([$collId]);
         $collRow = $collCheck->fetch();
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
-        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        if ($authUser && !checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         if ($collRow['status'] === 'active') respond(['success' => true, 'already_active' => true]);
 
         $pdo->prepare("UPDATE stock_collections SET status = 'active', closed_at = NULL WHERE id = ?")->execute([$collId]);
@@ -739,13 +759,14 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'sc_delete_collection') {
+        requireModuleAccess($authUser, 'stock-collection', 'full', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
-        $collCheck = $pdo->prepare("SELECT id, name, legal_entity FROM stock_collections WHERE id = ?");
+        $collCheck = $pdo->prepare("SELECT id, name, legal_entity, legal_entity_group FROM stock_collections WHERE id = ?");
         $collCheck->execute([$collId]);
         $collRow = $collCheck->fetch();
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
-        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        if ($authUser && !checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) respond(['error' => 'Нет доступа'], 403);
         $pdo->beginTransaction();
         try {
             $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ?")->execute([$collId]);
@@ -761,14 +782,15 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'sc_get_collection_data') {
+        requireModuleAccess($authUser, 'stock-collection', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
-        // Проверяем доступ к юрлицу коллекции
-        $collCheck = $pdo->prepare("SELECT legal_entity FROM stock_collections WHERE id = ?");
+        // Доступ к сбору — на уровне группы юрлиц (BK+VM делят сборы, PS отдельно).
+        $collCheck = $pdo->prepare("SELECT legal_entity_group FROM stock_collections WHERE id = ?");
         $collCheck->execute([$collId]);
         $collRow = $collCheck->fetch();
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
-        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        if ($authUser && !checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         // Товары
         $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
         $hasNote = dbColumnExists($pdo, 'stock_collection_products', 'note');
@@ -824,19 +846,19 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Не все параметры указаны'], 400);
         }
 
-        $collCheck = $pdo->prepare("SELECT id, legal_entity, status FROM stock_collections WHERE id = ?");
+        $collCheck = $pdo->prepare("SELECT id, legal_entity, legal_entity_group, status FROM stock_collections WHERE id = ?");
         $collCheck->execute([$collId]);
         $collRow = $collCheck->fetch();
         if (!$collRow) respond(['error' => 'Сбор не найден'], 404);
         if ($collRow['status'] !== 'active') respond(['error' => 'Сбор закрыт'], 400);
-        if (!checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        if (!checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
         $productCheck = $pdo->prepare("SELECT id, need_expiry FROM stock_collection_products WHERE id = ? AND collection_id = ?");
         $productCheck->execute([$productId, $collId]);
         $productRow = $productCheck->fetch();
         if (!$productRow) respond(['error' => 'Товар не входит в этот сбор'], 400);
 
-        $group = getEntityGroup($collRow['legal_entity']);
+        $group = $collRow['legal_entity_group'];
         $restaurantCheck = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
         $restaurantCheck->execute([$restaurantNumber, $group]);
         if (!$restaurantCheck->fetch()) respond(['error' => 'Ресторан не найден в выбранном юрлице'], 400);
@@ -1140,12 +1162,21 @@ if ($endpoint === 'rpc') {
             $admCnt = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
             if ((int)$admCnt <= 1) respond(['success' => false, 'error' => 'Нельзя удалить последнего администратора'], 400);
         }
-        // Удаляем активные сессии пользователя, чтобы он не мог продолжать работу
-        if ($target) {
-            $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$target['name']]);
-            $pdo->prepare("DELETE FROM user_presence WHERE user_name=?")->execute([$target['name']]);
+        // Связанные DELETE — в одной транзакции, чтобы при сбое не остаться
+        // с висящими сессиями уже удалённого пользователя.
+        $pdo->beginTransaction();
+        try {
+            if ($target) {
+                $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$target['name']]);
+                $pdo->prepare("DELETE FROM user_presence WHERE user_name=?")->execute([$target['name']]);
+            }
+            $pdo->prepare("DELETE FROM users WHERE id=?")->execute([$userId]);
+            $pdo->commit();
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('delete_user error: ' . $e->getMessage());
+            respond(['success' => false, 'error' => 'Ошибка удаления'], 500);
         }
-        $pdo->prepare("DELETE FROM users WHERE id=?")->execute([$userId]);
         auditLog($pdo, 'user_deleted', 'user', $target ? $target['name'] : $userId, $caller['name']);
         respond(['success' => true]);
     }
@@ -1450,24 +1481,32 @@ if ($endpoint === 'rpc') {
         if (empty($items)) respond(['error' => 'Список позиций пуст'], 400);
         if (count($items) > 5000) respond(['error' => 'Слишком много записей (макс. 5000)'], 400);
         $allowed = ['id','legal_entity','sku','stock','consumption','period_days','updated_by','updated_at'];
+        // Защита от случайной очистки: если все строки после whitelist-фильтра
+        // оказались пустыми, DELETE сработает, а INSERT нет — и данные юрлица
+        // потеряются. Проверяем заранее.
+        $validItems = [];
+        foreach ($items as $item) {
+            $f = array_intersect_key($item, array_flip($allowed));
+            if (!empty($f)) $validItems[] = $f;
+        }
+        if (empty($validItems)) respond(['error' => 'В позициях нет валидных полей'], 400);
         try {
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM `analysis_data` WHERE `legal_entity`=?")->execute([$legalEntity]);
             // Готовим один statement для всех записей
-            $firstItem = array_intersect_key($items[0], array_flip($allowed));
-            $cols = array_keys($firstItem);
+            $cols = array_keys($validItems[0]);
             $ph = implode(',', array_fill(0, count($cols), '?'));
             $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
             $stmt = $pdo->prepare("INSERT INTO `analysis_data` ($cn) VALUES ($ph)");
-            foreach ($items as $item) {
-                $item = array_intersect_key($item, array_flip($allowed));
-                if (empty($item)) continue;
+            foreach ($validItems as $item) {
+                // Если в строке другой набор колонок — пропускаем, чтобы не ловить SQL-ошибку.
+                if (array_keys($item) !== $cols) continue;
                 $stmt->execute(array_values($item));
             }
             $pdo->commit();
-            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'analysis_data', 'legal_entity' => $legalEntity, 'count' => count($items)]);
-            notifyTelegramDataUpdate($pdo, 'analysis', $caller['name'], $legalEntity, count($items));
-            respond(['success' => true, 'count' => count($items)]);
+            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'analysis_data', 'legal_entity' => $legalEntity, 'count' => count($validItems)]);
+            notifyTelegramDataUpdate($pdo, 'analysis', $caller['name'], $legalEntity, count($validItems));
+            respond(['success' => true, 'count' => count($validItems)]);
         } catch (PDOException $e) {
             $pdo->rollBack();
             error_log("replace_analysis_data error: " . $e->getMessage());
@@ -2135,9 +2174,13 @@ if ($endpoint === 'rpc') {
             }
         }
 
-        // Список юрлиц в группе выбранного юрлица: для БК/ВМ — оба, для ПС — только ПС
+        // Цены живут на уровне группы юрлиц (BK_VM или PS) — одна запись на группу.
+        // Триггер trg_product_prices_le_group_ins сам выставит legal_entity_group
+        // по legal_entity, переданному в INSERT. legal_entity сохраняется как
+        // «через какое юрлицо импортировано» (для аудита).
         $group = getEntityGroup($le);
         $entities = getEntitiesInGroup($group);
+        $leForInsert = $entities[0]; // например, «Бургер БК» для группы BK_VM
         $matched = 0;
         $skipped = [];
         $upsert = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, price_type, currency, updated_by)
@@ -2147,31 +2190,28 @@ if ($endpoint === 'rpc') {
         try {
             $pdo->beginTransaction();
             foreach ($uniquePrices as $up) {
-                $matchedAny = false;
-                // Для каждого юрлица пытаемся найти продукт
-                foreach ($entities as $le) {
-                    $product = null;
-                    if ($up['ec']) $product = $byExt[$up['ec'] . '|' . $le] ?? null;
-                    if (!$product && $up['gt']) $product = $byGtin[$up['gt'] . '|' . $le] ?? null;
-                    if (!$product && $up['sk']) $product = $bySku[$up['sk'] . '|' . $le] ?? null;
-                    // Fallback в пределах той же группы юрлиц (без выхода в чужую группу).
-                    if (!$product && $up['ec']) $product = $byExt[$up['ec'] . '|group|' . $group] ?? null;
-                    if (!$product && $up['gt']) $product = $byGtin[$up['gt'] . '|group|' . $group] ?? null;
-                    if (!$product && $up['sk']) $product = $bySku[$up['sk'] . '|group|' . $group] ?? null;
-                    if (!$product) continue;
-                    $upsert->execute([
-                        $product['sku'],
-                        $product['supplier'] ?? '',
-                        $le,
-                        $up['price'],
-                        $caller['name'] ?? 'admin',
-                    ]);
-                    $matched++;
-                    $matchedAny = true;
+                $product = null;
+                // Ищем продукт сначала по конкретным юрлицам группы, потом fallback по группе.
+                foreach ($entities as $entLe) {
+                    if ($up['ec'] && isset($byExt[$up['ec'] . '|' . $entLe])) { $product = $byExt[$up['ec'] . '|' . $entLe]; break; }
+                    if ($up['gt'] && isset($byGtin[$up['gt'] . '|' . $entLe])) { $product = $byGtin[$up['gt'] . '|' . $entLe]; break; }
+                    if ($up['sk'] && isset($bySku[$up['sk'] . '|' . $entLe])) { $product = $bySku[$up['sk'] . '|' . $entLe]; break; }
                 }
-                if (!$matchedAny) {
+                if (!$product && $up['ec']) $product = $byExt[$up['ec'] . '|group|' . $group] ?? null;
+                if (!$product && $up['gt']) $product = $byGtin[$up['gt'] . '|group|' . $group] ?? null;
+                if (!$product && $up['sk']) $product = $bySku[$up['sk'] . '|group|' . $group] ?? null;
+                if (!$product) {
                     $skipped[] = ['external_code' => $up['ec'], 'gtin' => $up['gt'], 'sku' => $up['sk'], 'name' => $up['name'], 'price' => $up['price']];
+                    continue;
                 }
+                $upsert->execute([
+                    $product['sku'],
+                    $product['supplier'] ?? '',
+                    $leForInsert,
+                    $up['price'],
+                    $caller['name'] ?? 'admin',
+                ]);
+                $matched++;
             }
             $pdo->commit();
         } catch (Exception $e) {
@@ -2201,18 +2241,21 @@ if ($endpoint === 'rpc') {
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
-        // Проверка что agreement_id принадлежит тому же юрлицу
+        // Проверка что agreement_id принадлежит той же группе юрлиц.
+        $group = getEntityGroup($le);
         if ($agreementId) {
-            $agChk = $pdo->prepare("SELECT legal_entity FROM price_agreements WHERE id=?"); $agChk->execute([$agreementId]);
-            $agLE = $agChk->fetchColumn();
-            if (!$agLE || $agLE !== $le) respond(['error' => 'Протокол не принадлежит указанному юр. лицу'], 400);
+            $agChk = $pdo->prepare("SELECT legal_entity_group FROM price_agreements WHERE id=?"); $agChk->execute([$agreementId]);
+            $agGroup = $agChk->fetchColumn();
+            if (!$agGroup || $agGroup !== $group) respond(['error' => 'Протокол не принадлежит указанному юр. лицу'], 400);
         }
         $imported = 0;
         try {
             $pdo->beginTransaction();
             $currency = in_array($body['currency'] ?? '', ['BYN', 'RUB']) ? $body['currency'] : 'BYN';
+            // INSERT пишет одну запись на группу — UNIQUE по (sku, supplier, legal_entity_group, price_type)
+            // обеспечит UPSERT даже если предыдущая запись была от соседнего юрлица той же группы.
             $stmt = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, currency, agreement_id, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE price=VALUES(price), vat_rate=VALUES(vat_rate), unit_type=VALUES(unit_type), currency=VALUES(currency), agreement_id=VALUES(agreement_id), updated_by=VALUES(updated_by), updated_at=NOW()");
-            $oldStmt = $pdo->prepare("SELECT price, currency FROM product_prices WHERE sku=? AND supplier=? AND legal_entity=?");
+            $oldStmt = $pdo->prepare("SELECT price, currency FROM product_prices WHERE sku=? AND supplier=? AND legal_entity_group=? AND price_type='purchase'");
             $histStmt = $pdo->prepare("INSERT INTO price_history (sku, supplier, legal_entity, old_price, new_price, old_currency, new_currency, agreement_id, changed_by) VALUES (?,?,?,?,?,?,?,?,?)");
             foreach ($prices as $p) {
                 $sku = trim($p['sku'] ?? '');
@@ -2222,8 +2265,8 @@ if ($endpoint === 'rpc') {
                 $cur = in_array($p['currency'] ?? '', ['BYN', 'RUB']) ? $p['currency'] : $currency;
                 $vat = floatval($p['vat_rate'] ?? 20);
                 if (!$sku || $price < 0) continue;
-                // Сохранить старую цену для истории
-                $oldStmt->execute([$sku, $supplier, $le]);
+                // Сохранить старую цену для истории (по группе).
+                $oldStmt->execute([$sku, $supplier, $group]);
                 $old = $oldStmt->fetch();
                 $stmt->execute([$sku, $supplier, $le, $price, $vat, $unitType, $cur, $agreementId, $caller['name']]);
                 // Записать в историю если цена изменилась или новая
@@ -2253,12 +2296,12 @@ if ($endpoint === 'rpc') {
         try {
             $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=? FOR UPDATE"); $s->execute([$id]); $ag = $s->fetch();
             if (!$ag) { $pdo->rollBack(); respond(['error' => 'Протокол не найден'], 404); }
-            if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) { $pdo->rollBack(); respond(['error' => 'Нет доступа к юр. лицу'], 403); }
+            if (!checkLegalEntityGroupAccess($caller, $ag['legal_entity_group'])) { $pdo->rollBack(); respond(['error' => 'Нет доступа к юр. лицу'], 403); }
             if ($ag['status'] === 'active') { $pdo->rollBack(); respond(['error' => 'Протокол уже согласован'], 400); }
             $docType = $ag['doc_type'] ?? 'psc';
-            // ПСЦ архивирует предыдущие ПСЦ этого поставщика; спецификации — не архивируют ничего
+            // ПСЦ архивирует предыдущие ПСЦ этого поставщика на уровне группы юрлиц.
             if ($docType === 'psc') {
-                $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity=? AND status='active' AND doc_type='psc'")->execute([$ag['supplier'], $ag['legal_entity']]);
+                $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity_group=? AND status='active' AND doc_type='psc'")->execute([$ag['supplier'], $ag['legal_entity_group']]);
             }
             $pdo->prepare("UPDATE price_agreements SET status='active', approved_by=?, approved_at=NOW() WHERE id=?")->execute([$caller['name'], $id]);
             $pdo->commit();
@@ -2280,7 +2323,7 @@ if ($endpoint === 'rpc') {
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
         $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=?"); $s->execute([$id]); $ag = $s->fetch();
         if (!$ag) respond(['error' => 'Протокол не найден'], 404);
-        if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        if (!checkLegalEntityGroupAccess($caller, $ag['legal_entity_group'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         if ($ag['status'] === 'archived') respond(['error' => 'Протокол уже в архиве'], 400);
         $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE id=?")->execute([$id]);
         auditLog($pdo, 'agreement_archived', 'price_agreement', $id, $caller['name'], ['supplier' => $ag['supplier'], 'legal_entity' => $ag['legal_entity']]);
@@ -2296,14 +2339,14 @@ if ($endpoint === 'rpc') {
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
         $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=?"); $s->execute([$id]); $ag = $s->fetch();
         if (!$ag) respond(['error' => 'Протокол не найден'], 404);
-        if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        if (!checkLegalEntityGroupAccess($caller, $ag['legal_entity_group'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         if ($ag['status'] !== 'archived') respond(['error' => 'Протокол не в архиве'], 400);
         $docType = $ag['doc_type'] ?? 'psc';
         $pdo->beginTransaction();
         try {
-            // Архивируем текущий активный ПСЦ того же поставщика (аналогично approve_agreement)
+            // Архивируем текущий активный ПСЦ того же поставщика на уровне группы юрлиц.
             if ($docType === 'psc') {
-                $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity=? AND status='active' AND doc_type='psc'")->execute([$ag['supplier'], $ag['legal_entity']]);
+                $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity_group=? AND status='active' AND doc_type='psc'")->execute([$ag['supplier'], $ag['legal_entity_group']]);
             }
             $pdo->prepare("UPDATE price_agreements SET status='active' WHERE id=?")->execute([$id]);
             $pdo->commit();
@@ -2323,14 +2366,16 @@ if ($endpoint === 'rpc') {
         if (!$le) respond(['error' => 'Не указано юр. лицо'], 400);
         if ($caller && !checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         $supplier = $body['supplier'] ?? ($_GET['supplier'] ?? '');
-        $sql = "SELECT pp.id, pp.sku, pp.price, pp.vat_rate, pp.unit_type, pp.currency, pp.supplier, pp.agreement_id, pp.updated_at FROM product_prices pp WHERE pp.legal_entity=? AND pp.price_type='purchase'";
-        $params = [$le];
+        // Цены — на уровне группы юрлиц (BK_VM или PS), одна запись на группу.
+        $group = getEntityGroup($le);
+        $sql = "SELECT pp.id, pp.sku, pp.price, pp.vat_rate, pp.unit_type, pp.currency, pp.supplier, pp.agreement_id, pp.updated_at FROM product_prices pp WHERE pp.legal_entity_group=? AND pp.price_type='purchase'";
+        $params = [$group];
         if ($supplier) { $sql .= " AND pp.supplier=?"; $params[] = $supplier; }
         $s = $pdo->prepare($sql); $s->execute($params);
         $rows = $s->fetchAll();
         // Залоговые цены (отдельная выборка — для колонки «Залог» в прайс-листе)
-        $dep = $pdo->prepare("SELECT sku, price FROM product_prices WHERE legal_entity=? AND price_type='deposit'");
-        $dep->execute([$le]);
+        $dep = $pdo->prepare("SELECT sku, price FROM product_prices WHERE legal_entity_group=? AND price_type='deposit'");
+        $dep->execute([$group]);
         $depositMap = [];
         foreach ($dep->fetchAll() as $d) { $depositMap[$d['sku']] = (float)$d['price']; }
         // Получаем курс RUB→BYN
@@ -2360,16 +2405,9 @@ if ($endpoint === 'rpc') {
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) respond(['error' => 'Недостаточно прав'], 403);
         $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=?"); $s->execute([$id]); $ag = $s->fetch();
         if (!$ag) respond(['error' => 'Протокол не найден'], 404);
-        if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
-        // Удалить файл с диска
-        if ($ag['file_path']) {
-            $fpBase = basename($ag['file_path']);
-            if ($fpBase) {
-                $fp = __DIR__ . '/../uploads/psc/' . $fpBase;
-                if (file_exists($fp)) @unlink($fp);
-            }
-        }
-        // Обнулить ссылки и удалить запись — в транзакции
+        if (!checkLegalEntityGroupAccess($caller, $ag['legal_entity_group'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        // Сначала транзакция БД, потом — удаление файла. Иначе при сбое каскада
+        // файл уже удалён, а запись осталась.
         $pdo->beginTransaction();
         try {
             $pdo->prepare("UPDATE product_prices SET agreement_id=NULL WHERE agreement_id=?")->execute([$id]);
@@ -2379,6 +2417,14 @@ if ($endpoint === 'rpc') {
             $pdo->rollBack();
             error_log('delete_agreement error: ' . $e->getMessage());
             respond(['error' => 'Ошибка удаления'], 500);
+        }
+        // Удалить файл с диска после успешного коммита.
+        if ($ag['file_path']) {
+            $fpBase = basename($ag['file_path']);
+            if ($fpBase) {
+                $fp = __DIR__ . '/../uploads/psc/' . $fpBase;
+                if (file_exists($fp)) @unlink($fp);
+            }
         }
         auditLog($pdo, 'agreement_deleted', 'price_agreement', $id, $caller['name'], ['supplier' => $ag['supplier'], 'legal_entity' => $ag['legal_entity']]);
         respond(['success' => true]);
@@ -2392,16 +2438,18 @@ if ($endpoint === 'rpc') {
         if (!$le) respond(['error' => 'Не указано юр. лицо'], 400);
         if ($caller && !checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         // Товар может не иметь записи в products — показываем имя из products при наличии.
+        // Цены и продукты живут на уровне группы юрлиц (BK_VM или PS).
+        $group = getEntityGroup($le);
         $sql = "SELECT pp.id, pp.sku, pp.price, pp.updated_at, pp.updated_by,
                        COALESCE(p.name, '') AS name,
                        COALESCE(p.supplier, pp.supplier, '') AS supplier,
                        COALESCE(p.external_code, '') AS external_code,
                        COALESCE(p.gtin, '') AS gtin
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
-                WHERE pp.legal_entity = ? AND pp.price_type = 'deposit'
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity_group = pp.legal_entity_group AND p.is_active = 1
+                WHERE pp.legal_entity_group = ? AND pp.price_type = 'deposit'
                 ORDER BY p.name, pp.sku";
-        $s = $pdo->prepare($sql); $s->execute([$le]);
+        $s = $pdo->prepare($sql); $s->execute([$group]);
         respond(['prices' => $s->fetchAll()]);
     }
 
@@ -2415,40 +2463,35 @@ if ($endpoint === 'rpc') {
         $sku = trim((string)($body['sku'] ?? ''));
         $le = trim((string)($body['legal_entity'] ?? ''));
         $price = isset($body['price']) && $body['price'] !== '' ? floatval($body['price']) : null; // null = удалить
-        $applyToGroup = !empty($body['apply_to_group']); // применять к обоим юрлицам группы BK/VM
         if (!$sku || !$le) respond(['error' => 'Не указан SKU или юр. лицо'], 400);
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
         if ($price !== null && $price <= 0) respond(['error' => 'Цена должна быть > 0'], 400);
 
-        // Определяем список юрлиц: если просили применить к группе — берём список
-        // всех юрлиц из соответствующей группы (BK_VM или PS).
-        $targets = $applyToGroup ? getEntitiesInGroup(getEntityGroup($le)) : [$le];
+        // Цены живут на уровне группы — одна запись на группу.
+        $group = getEntityGroup($le);
+        $entities = getEntitiesInGroup($group);
+        $leForInsert = $entities[0];
 
         // Поставщик товара (для NOT NULL supplier в product_prices)
-        $supStmt = $pdo->prepare("SELECT supplier FROM products WHERE sku = ? AND legal_entity = ? LIMIT 1");
-        $supStmt->execute([$sku, $le]);
+        $supStmt = $pdo->prepare("SELECT supplier FROM products WHERE sku = ? AND legal_entity_group = ? AND is_active = 1 LIMIT 1");
+        $supStmt->execute([$sku, $group]);
         $supplier = $supStmt->fetchColumn() ?: '';
 
         try {
-            $pdo->beginTransaction();
-            foreach ($targets as $targetLe) {
-                if ($price === null) {
-                    $pdo->prepare("DELETE FROM product_prices WHERE sku=? AND legal_entity=? AND price_type='deposit'")
-                        ->execute([$sku, $targetLe]);
-                } else {
-                    $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, price_type, currency, updated_by)
-                        VALUES (?, ?, ?, ?, 0, 'box', 'deposit', 'BYN', ?)
-                        ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type='box', updated_by=VALUES(updated_by), updated_at=NOW()")
-                        ->execute([$sku, $supplier, $targetLe, $price, $caller['name'] ?? 'admin']);
-                }
+            if ($price === null) {
+                $pdo->prepare("DELETE FROM product_prices WHERE sku=? AND legal_entity_group=? AND price_type='deposit'")
+                    ->execute([$sku, $group]);
+            } else {
+                $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, price_type, currency, updated_by)
+                    VALUES (?, ?, ?, ?, 0, 'box', 'deposit', 'BYN', ?)
+                    ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type='box', updated_by=VALUES(updated_by), updated_at=NOW()")
+                    ->execute([$sku, $supplier, $leForInsert, $price, $caller['name'] ?? 'admin']);
             }
-            $pdo->commit();
         } catch (Exception $e) {
-            $pdo->rollBack();
             error_log('set_deposit_price error: ' . $e->getMessage());
             respond(['error' => 'Ошибка сохранения: ' . $e->getMessage()], 500);
         }
-        auditLog($pdo, $price === null ? 'deposit_price_deleted' : 'deposit_price_updated', 'product_prices', null, $caller['name'], ['sku' => $sku, 'price' => $price, 'entities' => $targets]);
+        auditLog($pdo, $price === null ? 'deposit_price_deleted' : 'deposit_price_updated', 'product_prices', null, $caller['name'], ['sku' => $sku, 'price' => $price, 'group' => $group]);
         respond(['success' => true]);
     }
 
@@ -2459,7 +2502,8 @@ if ($endpoint === 'rpc') {
         if (!$id) respond(['error' => 'Не указан ID'], 400);
         $s = $pdo->prepare("SELECT * FROM product_prices WHERE id=?"); $s->execute([$id]); $row = $s->fetch();
         if (!$row) respond(['error' => 'Цена не найдена'], 404);
-        if (!checkLegalEntityAccess($caller, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        // Доступ — на уровне группы юрлиц (цены общие на группу).
+        if (!checkLegalEntityGroupAccess($caller, $row['legal_entity_group'])) respond(['error' => 'Нет доступа'], 403);
         $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
         $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$id]);
@@ -2475,8 +2519,10 @@ if ($endpoint === 'rpc') {
         $supplier = $body['supplier'] ?? '';
         if (!$sku || !$le) respond(['error' => 'Не указаны обязательные поля'], 400);
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
-        $sql = "SELECT * FROM price_history WHERE sku=? AND legal_entity=?";
-        $params = [$sku, $le];
+        // История цен — на уровне группы юрлиц.
+        $group = getEntityGroup($le);
+        $sql = "SELECT * FROM price_history WHERE sku=? AND legal_entity_group=?";
+        $params = [$sku, $group];
         if ($supplier) { $sql .= " AND supplier=?"; $params[] = $supplier; }
         $sql .= " ORDER BY changed_at DESC LIMIT 20";
         $s = $pdo->prepare($sql); $s->execute($params);
@@ -2498,8 +2544,8 @@ if ($endpoint === 'rpc') {
         $sql .= " AND " . $leWhere[0];
         $params = array_merge($params, $leParams);
         if ($supplier) { $sql .= " AND p.supplier = ?"; $params[] = $supplier; }
-        $sql .= " AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = p.sku AND pp.legal_entity = ? AND pp.price_type = 'purchase')";
-        $params[] = $le;
+        $sql .= " AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = p.sku AND pp.legal_entity_group = ? AND pp.price_type = 'purchase')";
+        $params[] = getEntityGroup($le);
         $sql .= " ORDER BY p.supplier, p.name";
         $s = $pdo->prepare($sql); $s->execute($params);
         respond($s->fetchAll());
@@ -2582,6 +2628,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_tender') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'tenders', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'Не указан ID'], 400);
 
@@ -2702,14 +2749,17 @@ if ($endpoint === 'rpc') {
         $le = $s->fetchColumn();
         if (!$le) respond(['error' => 'Тендер не найден'], 404);
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
-        // Удалить файлы КП с диска
+        // Собираем пути файлов до DELETE (после CASCADE строки уже исчезнут),
+        // но сами unlink делаем ПОСЛЕ успешного DELETE, чтобы не остаться с
+        // удалёнными файлами и неудалённой записью.
         $fs = $pdo->prepare("SELECT file_path FROM tender_files WHERE tender_id=?"); $fs->execute([$id]);
-        while ($fp = $fs->fetchColumn()) {
-            $fpath = __DIR__ . '/../uploads/tenders/' . basename($fp);
-            if (file_exists($fpath)) unlink($fpath);
-        }
+        $filePaths = $fs->fetchAll(PDO::FETCH_COLUMN);
         // CASCADE удалит items, offers, offer_prices, files
         $pdo->prepare("DELETE FROM tenders WHERE id=?")->execute([$id]);
+        foreach ($filePaths as $fp) {
+            $fpath = __DIR__ . '/../uploads/tenders/' . basename($fp);
+            if (file_exists($fpath)) @unlink($fpath);
+        }
         auditLog($pdo, 'tender_deleted', 'tender', $id, $caller['name'], ['legal_entity' => $le]);
         respond(['success' => true]);
     }
@@ -2785,6 +2835,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_marketing_activity') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'marketing', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'Не указан ID'], 400);
 
@@ -2814,13 +2865,14 @@ if ($endpoint === 'rpc') {
         $le = $s->fetchColumn();
         if (!$le) respond(['error' => 'Не найдена'], 404);
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
-        // Удалить файлы с диска
+        // Собираем пути до DELETE; unlink — после успешного DELETE.
         $fs = $pdo->prepare("SELECT file_path FROM marketing_activity_files WHERE activity_id=?"); $fs->execute([$id]);
-        while ($fp = $fs->fetchColumn()) {
-            $fpath = __DIR__ . '/../uploads/marketing/' . basename($fp);
-            if (file_exists($fpath)) unlink($fpath);
-        }
+        $filePaths = $fs->fetchAll(PDO::FETCH_COLUMN);
         $pdo->prepare("DELETE FROM marketing_activities WHERE id=?")->execute([$id]);
+        foreach ($filePaths as $fp) {
+            $fpath = __DIR__ . '/../uploads/marketing/' . basename($fp);
+            if (file_exists($fpath)) @unlink($fpath);
+        }
         auditLog($pdo, 'marketing_deleted', 'marketing', $id, $caller['name'], ['legal_entity' => $le]);
         respond(['success' => true]);
     }
@@ -2835,8 +2887,10 @@ if ($endpoint === 'rpc') {
         $recipes = $body['recipes'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
         if (empty($recipes)) respond(['error' => 'Нет данных для импорта'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $group = getEntityGroup($legalEntity);
 
         $pdo->beginTransaction();
         try {
@@ -2884,8 +2938,10 @@ if ($endpoint === 'rpc') {
         $dishCodes = $body['dish_codes'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
         if (empty($dishNames) && empty($dishCodes)) respond(['error' => 'Не указаны блюда'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $group = getEntityGroup($legalEntity);
 
         $recipes = [];
         if (!empty($dishCodes)) {
@@ -2900,22 +2956,23 @@ if ($endpoint === 'rpc') {
             $recipes = $s->fetchAll();
         }
 
-        // Собрать все SKU ингредиентов для массового поиска аналогов.
-        // JOIN с products фильтруем по группе юрлиц рецепта, чтобы не подтянуть карточку
-        // из чужой группы (например, поставщика ПС для рецепта БК_ВМ).
+        // Собрать все SKU ингредиентов одним запросом (раньше тут был N+1
+        // по числу рецептов). JOIN с products фильтруется по группе юрлиц
+        // рецепта, чтобы не подтянуть карточку из чужой группы.
         $allSkus = [];
         $recipeIngs = [];
-        foreach ($recipes as $r) {
-            $s = $pdo->prepare("SELECT ri.*, p.analog_group, p.qty_per_box, p.unit_of_measure as product_unit, p.supplier as product_supplier
+        $recipeIds = array_column($recipes, 'id');
+        if (!empty($recipeIds)) {
+            $rph = implode(',', array_fill(0, count($recipeIds), '?'));
+            $stIngs = $pdo->prepare("SELECT ri.*, p.analog_group, p.qty_per_box, p.unit_of_measure as product_unit, p.supplier as product_supplier
                 FROM recipe_ingredients ri
                 LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci
                  AND p.legal_entity_group = ?
                  AND p.is_active = 1
-                WHERE ri.recipe_id=? ORDER BY ri.sort_order");
-            $s->execute([$group, $r['id']]);
-            $ings = $s->fetchAll();
-            $recipeIngs[$r['id']] = $ings;
-            foreach ($ings as $ing) {
+                WHERE ri.recipe_id IN ({$rph}) ORDER BY ri.recipe_id, ri.sort_order");
+            $stIngs->execute(array_merge([$group], $recipeIds));
+            foreach ($stIngs->fetchAll() as $ing) {
+                $recipeIngs[$ing['recipe_id']][] = $ing;
                 if ($ing['sku'] && !$ing['analog_group']) $allSkus[] = $ing['sku'];
             }
         }
@@ -3027,6 +3084,7 @@ if ($endpoint === 'rpc') {
         $legalEntity = $body['legal_entity'] ?? null;
         if (empty($recipeIds)) respond(['error' => 'Не указаны блюда'], 400);
         if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $ph = implode(',', array_fill(0, count($recipeIds), '?'));
 
         // Загрузить ингредиенты всех блюд → найти analog_group для каждого
@@ -3100,8 +3158,10 @@ if ($endpoint === 'rpc') {
         $prefixes = $body['prefixes'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
         if (empty($prefixes)) respond(['error' => 'Не указаны префиксы'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $group = getEntityGroup($legalEntity);
 
         // Загрузить все ручные группы с ключевыми словами (только этого юрлица)
         $s = $pdo->prepare("SELECT id, name, keywords FROM recipe_groups WHERE legal_entity_group = ?");
@@ -3153,14 +3213,17 @@ if ($endpoint === 'rpc') {
     if ($fn === 'save_recipe_group') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'marketing', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = $body['id'] ?? null;
         $name = trim($body['name'] ?? '');
         $keywords = $body['keywords'] ?? [];
         $recipeIds = $body['recipe_ids'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
         if (!$name) respond(['error' => 'Укажите название группы'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $group = getEntityGroup($legalEntity);
 
         $pdo->beginTransaction();
         try {
@@ -3194,8 +3257,14 @@ if ($endpoint === 'rpc') {
     if ($fn === 'delete_recipe_group') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'marketing', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = $body['id'] ?? null;
         if (!$id) respond(['error' => 'Не указан ID'], 400);
+        $accCheck = $pdo->prepare("SELECT legal_entity_group FROM recipe_groups WHERE id = ?");
+        $accCheck->execute([$id]);
+        $rgGroup = $accCheck->fetchColumn();
+        if ($rgGroup === false) respond(['error' => 'Группа не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($caller, $rgGroup)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("DELETE FROM recipe_groups WHERE id=?")->execute([$id]);
         respond(['ok' => true]);
     }
@@ -3204,17 +3273,35 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
-        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        $group = getEntityGroup($legalEntity);
         $s = $pdo->prepare("SELECT g.id, g.name, g.keywords, COUNT(gi.id) as recipe_count FROM recipe_groups g LEFT JOIN recipe_group_items gi ON gi.group_id = g.id WHERE g.legal_entity_group = ? GROUP BY g.id ORDER BY g.name");
         $s->execute([$group]);
         $groups = $s->fetchAll(PDO::FETCH_ASSOC);
-        // Для каждой группы загрузить рецептуры (только этого юрлица)
+        // Один пакетный запрос вместо N+1: подтягиваем все рецепты всех групп
+        // и раскладываем по group_id в PHP.
+        $byGroup = [];
+        if (!empty($groups)) {
+            $groupIds = array_column($groups, 'id');
+            $gph = implode(',', array_fill(0, count($groupIds), '?'));
+            $sr = $pdo->prepare("SELECT gi.group_id, r.id, r.code, r.name
+                FROM recipe_group_items gi
+                JOIN recipes r ON r.id = gi.recipe_id
+                WHERE gi.group_id IN ({$gph}) AND r.legal_entity_group = ?
+                ORDER BY r.name");
+            $sr->execute(array_merge($groupIds, [$group]));
+            foreach ($sr->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $gid = $row['group_id'];
+                unset($row['group_id']);
+                $byGroup[$gid][] = $row;
+            }
+        }
         foreach ($groups as &$g) {
-            $s = $pdo->prepare("SELECT r.id, r.code, r.name FROM recipe_group_items gi JOIN recipes r ON r.id = gi.recipe_id WHERE gi.group_id = ? AND r.legal_entity_group = ? ORDER BY r.name");
-            $s->execute([$g['id'], $group]);
-            $g['recipes'] = $s->fetchAll(PDO::FETCH_ASSOC);
+            $g['recipes'] = $byGroup[$g['id']] ?? [];
             $g['keywords'] = json_decode($g['keywords'] ?: '[]', true);
         }
+        unset($g);
         respond($groups);
     }
 
@@ -3389,10 +3476,16 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $names = $body['names'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? '';
         if (empty($names)) respond(['error' => 'Не указаны имена'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        // Загрузить все рецептуры разом (обычно ~500 шт) вместо запроса на каждое имя
-        $allRecipes = $pdo->query("SELECT id, code, name FROM recipes")->fetchAll(PDO::FETCH_ASSOC);
+        // Загрузить все рецептуры группы пользователя (общие на BK_VM или PS).
+        $group = getEntityGroup($legalEntity);
+        $rs = $pdo->prepare("SELECT id, code, name FROM recipes WHERE legal_entity_group = ?");
+        $rs->execute([$group]);
+        $allRecipes = $rs->fetchAll(PDO::FETCH_ASSOC);
 
         // Построить индексы для быстрого поиска
         $byExact = [];       // точное совпадение (нижний регистр)
@@ -3612,13 +3705,15 @@ if ($endpoint === 'rpc') {
             // Сначала пробуем точное совпадение supplier+legal_entity, затем
             // fallback на ту же legal_entity без supplier (если в прайсе записано
             // только по юрлицу). Берём самую свежую запись.
+            // Цены живут на уровне группы юрлиц (BK_VM или PS).
+            $group = getEntityGroup($legalEntity);
             $stmt = $pdo->prepare("
                 SELECT sku, price, vat_rate, unit_type, currency
                 FROM product_prices
-                WHERE legal_entity = ? AND price_type = 'purchase' AND sku IN ($ph)
+                WHERE legal_entity_group = ? AND price_type = 'purchase' AND sku IN ($ph)
                 ORDER BY (supplier = ?) DESC, updated_at DESC
             ");
-            $stmt->execute(array_merge([$legalEntity], $skus, [$supplier]));
+            $stmt->execute(array_merge([$group], $skus, [$supplier]));
             $priceMap = [];
             foreach ($stmt->fetchAll() as $row) {
                 if (!isset($priceMap[$row['sku']])) $priceMap[$row['sku']] = $row;
@@ -3859,6 +3954,10 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
+        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$id]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         // CASCADE удалит session_products и entries
         $pdo->prepare("DELETE FROM dist_sessions WHERE id=?")->execute([$id]);
         respond(['success' => true]);
@@ -3868,6 +3967,10 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
+        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$id]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("UPDATE dist_sessions SET status='closed', closed_at=NOW() WHERE id=?")->execute([$id]);
         respond(['success' => true]);
     }
@@ -3876,6 +3979,10 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
+        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$id]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("UPDATE dist_sessions SET status='active', closed_at=NULL WHERE id=?")->execute([$id]);
         respond(['success' => true]);
     }
@@ -3890,6 +3997,7 @@ if ($endpoint === 'rpc') {
         $session = $s->fetch();
         if (!$session) respond(['error' => 'Сессия не найдена'], 404);
         $sessionGroup = $session['legal_entity_group'] ?: 'BK_VM';
+        if (!checkLegalEntityGroupAccess($authUser, $sessionGroup)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         // Товары сессии с данными из справочника
         $s = $pdo->prepare("SELECT sp.id, sp.product_id, sp.custom_name, sp.custom_sku, sp.default_qty, sp.unit, sp.sort_order,
             COALESCE(sp.custom_name, p.name) as product_name, COALESCE(sp.custom_sku, p.sku) as article, p.supplier
@@ -3947,6 +4055,10 @@ if ($endpoint === 'rpc') {
         $restNum = $body['restaurant_number'] ?? '';
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
         if (!$spId || !$restNum) respond(['error' => 'Не указан товар или ресторан'], 400);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         // Upsert
         $s = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, shipped)
             VALUES (?, ?, ?)
@@ -3961,6 +4073,10 @@ if ($endpoint === 'rpc') {
         $restNum = $body['restaurant_number'] ?? '';
         $qty = $body['qty'] ?? null;
         if (!$spId || !$restNum) respond(['error' => 'Не указан товар или ресторан'], 400);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         // Upsert
         $s = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, qty)
             VALUES (?, ?, ?)
@@ -3974,6 +4090,10 @@ if ($endpoint === 'rpc') {
         $sessionId = intval($body['session_id'] ?? 0);
         $products = $body['products'] ?? [];
         if (!$sessionId || empty($products)) respond(['error' => 'Нет данных'], 400);
+        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$sessionId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         // Получаем текущий макс sort_order
         $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order),0) FROM dist_session_products WHERE session_id=?");
         $s->execute([$sessionId]);
@@ -3992,6 +4112,10 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         if (!$spId) respond(['error' => 'Не указан товар'], 400);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("DELETE FROM dist_session_products WHERE id=?")->execute([$spId]);
         respond(['success' => true]);
     }
@@ -4002,6 +4126,10 @@ if ($endpoint === 'rpc') {
         $restNum = $body['restaurant_number'] ?? '';
         $note = trim($body['note'] ?? '');
         if (!$sessionId || !$restNum) respond(['error' => 'Нет данных'], 400);
+        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$sessionId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $s = $pdo->prepare("INSERT INTO dist_notes (session_id, restaurant_number, note)
             VALUES (?, ?, ?)
             ON DUPLICATE KEY UPDATE note = VALUES(note)");
@@ -4015,6 +4143,10 @@ if ($endpoint === 'rpc') {
         $restaurantNumbers = $body['restaurant_numbers'] ?? [];
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
         if (!$spId || empty($restaurantNumbers)) respond(['error' => 'Нет данных'], 400);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $ins = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, shipped)
             VALUES (?, ?, ?)
             ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), updated_at = NOW()");
@@ -4155,15 +4287,8 @@ if ($endpoint === 'rpc') {
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
 
-        $sent = 0;
-        foreach ($chatIds as $cid) {
-            $data = json_encode(['chat_id' => $cid, 'text' => $message, 'parse_mode' => 'HTML']);
-            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $data, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-            $res = curl_exec($ch); curl_close($ch);
-            $r = json_decode($res, true);
-            if ($r && ($r['ok'] ?? false)) $sent++;
-        }
+        // curl_multi через хелпер: одновременная отправка вместо синхронного цикла.
+        $sent = sendTelegramBulk($botToken, $chatIds, $message);
         // Логируем рассылку
         try {
             $sender = $body['sender'] ?? 'admin';
@@ -4183,27 +4308,25 @@ if ($endpoint === 'rpc') {
         requireAdmin($authUser);
         $restNumber = $body['restaurant_number'] ?? '';
         $message = trim($body['message'] ?? '');
+        $group = $body['legal_entity_group'] ?? '';
         if (!$restNumber || !$message) respond(['error' => 'Укажите ресторан и текст'], 400);
+        if (!in_array($group, ['BK_VM', 'PS'], true)) respond(['error' => 'Укажите группу юрлиц (BK_VM или PS)'], 400);
 
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
 
-        // Найти всех подписчиков этого ресторана
-        $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ?");
-        $subs->execute([$restNumber]);
+        // Подписчики ресторана только из указанной группы юрлиц.
+        // Номера BK_VM и PS могут совпадать (BK_VM использует 1..N, PS — 1001+),
+        // фильтр через JOIN restaurants гарантирует, что мы пишем тем, кому надо.
+        $subs = $pdo->prepare("SELECT DISTINCT s.chat_id FROM ro_telegram_subs s
+            JOIN restaurants r ON r.number = s.restaurant_number AND r.legal_entity_group = ?
+            WHERE s.restaurant_number = ?");
+        $subs->execute([$group, $restNumber]);
         $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
 
         if (empty($chatIds)) respond(['error' => 'Нет подписчиков у этого ресторана'], 400);
 
-        $sent = 0;
-        foreach ($chatIds as $cid) {
-            $data = json_encode(['chat_id' => $cid, 'text' => $message, 'parse_mode' => 'HTML']);
-            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $data, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-            $res = curl_exec($ch); curl_close($ch);
-            $r = json_decode($res, true);
-            if ($r && ($r['ok'] ?? false)) $sent++;
-        }
+        $sent = sendTelegramBulk($botToken, $chatIds, $message);
         respond(['success' => true, 'sent' => $sent, 'total' => count($chatIds)]);
     }
 
@@ -4224,11 +4347,14 @@ if ($endpoint === 'rpc') {
         requireAdmin($authUser);
         $chatId = $body['chat_id'] ?? '';
         $field = $body['field'] ?? '';
+        // restaurant_number обязателен — у одного chat_id могут быть подписки на несколько ресторанов;
+        // без него UPDATE влиял бы сразу на все его подписки.
+        $restNumber = $body['restaurant_number'] ?? '';
         $allowed = ['notify_so_reminders', 'notify_so_sessions', 'notify_confirmations', 'notify_stock_reminders', 'notify_stock_sessions'];
-        if (!$chatId || !in_array($field, $allowed)) respond(['error' => 'Неверные параметры'], 400);
-        $pdo->prepare("UPDATE ro_telegram_subs SET `$field` = NOT `$field` WHERE chat_id = ?")->execute([$chatId]);
-        $newVal = $pdo->prepare("SELECT `$field` FROM ro_telegram_subs WHERE chat_id = ? LIMIT 1");
-        $newVal->execute([$chatId]);
+        if (!$chatId || !$restNumber || !in_array($field, $allowed)) respond(['error' => 'Неверные параметры'], 400);
+        $pdo->prepare("UPDATE ro_telegram_subs SET `$field` = NOT `$field` WHERE chat_id = ? AND restaurant_number = ?")->execute([$chatId, $restNumber]);
+        $newVal = $pdo->prepare("SELECT `$field` FROM ro_telegram_subs WHERE chat_id = ? AND restaurant_number = ? LIMIT 1");
+        $newVal->execute([$chatId, $restNumber]);
         $val = $newVal->fetchColumn();
         respond(['success' => true, 'value' => (bool)$val]);
     }
@@ -4285,6 +4411,13 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         $callerName = $caller['name'] ?? 'unknown';
 
+        // Доступ — на уровне группы юрлиц (BK_VM или PS).
+        $accCheck = $pdo->prepare("SELECT legal_entity_group FROM order_corrections WHERE id = ?");
+        $accCheck->execute([$id]);
+        $corrGroup = $accCheck->fetchColumn();
+        if ($corrGroup === false) respond(['error' => 'Корректировка не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($caller, $corrGroup)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+
         $newStatus = $action === 'approve' ? 'approved' : 'rejected';
         $callerChatId = $caller['telegram_chat_id'] ?? null;
         $upd = $pdo->prepare("UPDATE order_corrections SET status = ?, reviewer_chat_id = ?, reviewer_name = ?, review_comment = ?, reviewed_at = NOW() WHERE id = ? AND status IN ('pending', 'in_progress')");
@@ -4312,23 +4445,25 @@ if ($endpoint === 'rpc') {
             $dow = (int)(new DateTime($c['delivery_date']))->format('N');
             $dateFmt = $dayNames[$dow] . ' ' . date('d.m', strtotime($c['delivery_date']));
 
+            $rNum = htmlspecialchars((string)$c['restaurant_number'], ENT_QUOTES, 'UTF-8');
             $text = "📋 <b>Результат корректировки заказа</b>\n";
-            $text .= "🏪 Ресторан <b>{$c['restaurant_number']}</b> | Доставка: {$dateFmt}\n";
+            $text .= "🏪 Ресторан <b>{$rNum}</b> | Доставка: {$dateFmt}\n";
             $text .= "─────────────────────\n";
             foreach ($batchItems as $bi) {
-                $uom = $bi['unit_of_measure'] ?: 'кор.';
+                $uom = htmlspecialchars((string)($bi['unit_of_measure'] ?: 'кор.'), ENT_QUOTES, 'UTF-8');
                 $qty = rtrim(rtrim(number_format(floatval($bi['quantity']), 2, '.', ''), '0'), '.') . " {$uom}";
+                $pname = htmlspecialchars((string)$bi['product_name'], ENT_QUOTES, 'UTF-8');
                 if ($bi['status'] === 'approved') {
                     $label = $bi['action'] === 'add' ? 'Добавлено' : 'Убрано';
-                    $text .= "✅ <b>{$label}:</b> {$bi['product_name']} — {$qty}\n";
+                    $text .= "✅ <b>{$label}:</b> {$pname} — {$qty}\n";
                 } else {
                     $label = $bi['action'] === 'add' ? 'Добавить' : 'Убрать';
-                    $text .= "❌ <b>Отклонено</b> ({$label}): {$bi['product_name']} — {$qty}\n";
-                    if ($bi['review_comment']) $text .= "    Причина: {$bi['review_comment']}\n";
+                    $text .= "❌ <b>Отклонено</b> ({$label}): {$pname} — {$qty}\n";
+                    if ($bi['review_comment']) $text .= "    Причина: " . htmlspecialchars((string)$bi['review_comment'], ENT_QUOTES, 'UTF-8') . "\n";
                 }
             }
             $text .= "─────────────────────\n";
-            $text .= "Обработал: {$callerName}";
+            $text .= "Обработал: " . htmlspecialchars((string)$callerName, ENT_QUOTES, 'UTF-8');
 
             $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);
             $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
@@ -4368,11 +4503,21 @@ if ($endpoint === 'rpc') {
         $callerChatId = $caller['telegram_chat_id'] ?? null;
         $newStatus = $action === 'approve' ? 'approved' : 'rejected';
 
+        // Доступ — все корректировки в батче должны быть в группе юрлиц пользователя.
+        $intIds = array_map('intval', $ids);
+        $ph = implode(',', array_fill(0, count($intIds), '?'));
+        $accStmt = $pdo->prepare("SELECT DISTINCT legal_entity_group FROM order_corrections WHERE id IN ({$ph})");
+        $accStmt->execute($intIds);
+        $groups = $accStmt->fetchAll(PDO::FETCH_COLUMN);
+        if (!$groups) respond(['error' => 'Корректировки не найдены'], 404);
+        foreach ($groups as $g) {
+            if (!checkLegalEntityGroupAccess($caller, $g)) respond(['error' => 'Нет доступа к одной из корректировок'], 403);
+        }
+
         $pdo->beginTransaction();
         try {
-            $ph = implode(',', array_fill(0, count($ids), '?'));
             $upd = $pdo->prepare("UPDATE order_corrections SET status = ?, reviewer_chat_id = ?, reviewer_name = ?, review_comment = ?, reviewed_at = NOW() WHERE id IN ({$ph}) AND status IN ('pending', 'in_progress')");
-            $upd->execute(array_merge([$newStatus, $callerChatId, $callerName, $comment ?: null], array_map('intval', $ids)));
+            $upd->execute(array_merge([$newStatus, $callerChatId, $callerName, $comment ?: null], $intIds));
             $pdo->commit();
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -4396,23 +4541,25 @@ if ($endpoint === 'rpc') {
                 $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
                 $dow = (int)(new DateTime($c['delivery_date']))->format('N');
                 $dateFmt = $dayNames[$dow] . ' ' . date('d.m', strtotime($c['delivery_date']));
+                $rNum = htmlspecialchars((string)$c['restaurant_number'], ENT_QUOTES, 'UTF-8');
                 $text = "📋 <b>Результат корректировки заказа</b>\n";
-                $text .= "🏪 Ресторан <b>{$c['restaurant_number']}</b> | Доставка: {$dateFmt}\n";
+                $text .= "🏪 Ресторан <b>{$rNum}</b> | Доставка: {$dateFmt}\n";
                 $text .= "─────────────────────\n";
                 foreach ($batchItems as $bi) {
-                    $uom = $bi['unit_of_measure'] ?: 'кор.';
+                    $uom = htmlspecialchars((string)($bi['unit_of_measure'] ?: 'кор.'), ENT_QUOTES, 'UTF-8');
                     $qty = rtrim(rtrim(number_format(floatval($bi['quantity']), 2, '.', ''), '0'), '.') . " {$uom}";
+                    $pname = htmlspecialchars((string)$bi['product_name'], ENT_QUOTES, 'UTF-8');
                     if ($bi['status'] === 'approved') {
                         $label = $bi['action'] === 'add' ? 'Добавлено' : 'Убрано';
-                        $text .= "✅ <b>{$label}:</b> {$bi['product_name']} — {$qty}\n";
+                        $text .= "✅ <b>{$label}:</b> {$pname} — {$qty}\n";
                     } else {
                         $label = $bi['action'] === 'add' ? 'Добавить' : 'Убрать';
-                        $text .= "❌ <b>Отклонено</b> ({$label}): {$bi['product_name']} — {$qty}\n";
-                        if ($bi['review_comment']) $text .= "    Причина: {$bi['review_comment']}\n";
+                        $text .= "❌ <b>Отклонено</b> ({$label}): {$pname} — {$qty}\n";
+                        if ($bi['review_comment']) $text .= "    Причина: " . htmlspecialchars((string)$bi['review_comment'], ENT_QUOTES, 'UTF-8') . "\n";
                     }
                 }
                 $text .= "─────────────────────\n";
-                $text .= "Обработал: {$callerName}";
+                $text .= "Обработал: " . htmlspecialchars((string)$callerName, ENT_QUOTES, 'UTF-8');
                 $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);
                 $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
                 curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
@@ -4425,38 +4572,54 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'correction_delete') {
-        $perms = resolvePermissions($authUser['role'] ?? 'user', $authUser['permissions'] ?? null, $ROLE_TEMPLATES);
-        if (($perms['corrections'] ?? 'none') === 'view' || ($perms['corrections'] ?? 'none') === 'none') respond(['error' => 'Нет прав'], 403);
+        requireModuleAccess($authUser, 'corrections', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $ids = $body['ids'] ?? [];
         if (empty($ids)) respond(['error' => 'Нет ID'], 400);
         $ids = array_map('intval', $ids);
         $ph = implode(',', array_fill(0, count($ids), '?'));
+        // Доступ — все корректировки в батче должны быть в группе юрлиц пользователя.
+        $accStmt = $pdo->prepare("SELECT DISTINCT legal_entity_group FROM order_corrections WHERE id IN ({$ph})");
+        $accStmt->execute($ids);
+        $groups = $accStmt->fetchAll(PDO::FETCH_COLUMN);
+        if (!$groups) respond(['error' => 'Корректировки не найдены'], 404);
+        foreach ($groups as $g) {
+            if (!checkLegalEntityGroupAccess($authUser, $g)) respond(['error' => 'Нет доступа к одной из корректировок'], 403);
+        }
         $pdo->prepare("DELETE FROM order_corrections WHERE id IN ({$ph})")->execute($ids);
         respond(['success' => true]);
     }
 
     if ($fn === 'correction_clear_all') {
-        if (($authUser['role'] ?? '') !== 'admin') respond(['error' => 'Только для администратора'], 403);
+        requireModuleAccess($authUser, 'corrections', 'full', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $pdo->exec("DELETE FROM order_corrections");
         auditLog($pdo, 'corrections_cleared', 'correction', null, $authUserName, ['scope' => 'all']);
         respond(['success' => true]);
     }
 
     if ($fn === 'correction_clear_processed') {
-        if (($authUser['role'] ?? '') !== 'admin') respond(['error' => 'Только для администратора'], 403);
+        requireModuleAccess($authUser, 'corrections', 'full', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $cnt = $pdo->exec("DELETE FROM order_corrections WHERE status IN ('approved', 'rejected')");
         auditLog($pdo, 'corrections_cleared', 'correction', null, $authUserName, ['scope' => 'processed', 'count' => $cnt]);
         respond(['success' => true, 'deleted' => $cnt]);
     }
 
     if ($fn === 'correction_get_settings') {
+        // Telegram-настройки уведомлений других пользователей — только для тех,
+        // кто работает с корректировками (не отдавать API-ключам и роли viewer).
+        requireModuleAccess($authUser, 'corrections', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $st = $pdo->query("SELECT u.name, ts.correction_notifications FROM users u JOIN telegram_settings ts ON ts.user_name = u.name WHERE u.telegram_chat_id IS NOT NULL ORDER BY u.name");
         respond($st->fetchAll());
     }
 
     if ($fn === 'correction_toggle_notification') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $userName = $body['user_name'] ?? '';
         if (!$userName) respond(['error' => 'user_name required'], 400);
+        // Менять можно только свои настройки или админу — чужие.
+        if ($userName !== ($caller['name'] ?? '') && ($caller['role'] ?? '') !== 'admin') {
+            respond(['error' => 'Нет прав менять чужие настройки'], 403);
+        }
         $pdo->prepare("UPDATE telegram_settings SET correction_notifications = NOT correction_notifications WHERE user_name = ?")->execute([$userName]);
         respond(['success' => true]);
     }
@@ -4479,7 +4642,7 @@ if ($endpoint === 'rpc') {
 
         // Получаем заказ и поставщика
         $order = $pdo->prepare("SELECT o.id, o.supplier, o.legal_entity, o.created_by, o.delivery_date,
-            (SELECT SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' WHERE oi.order_id = o.id) as total_amount
+            (SELECT SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity_group = o.legal_entity_group AND pp.price_type = 'purchase' WHERE oi.order_id = o.id) as total_amount
             FROM orders o WHERE o.id = ?");
         $order->execute([$orderId]);
         $o = $order->fetch();
@@ -4543,6 +4706,12 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'plan-fact', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
+        // Доступ — на уровне юрлица платежа.
+        $payCheck = $pdo->prepare("SELECT legal_entity FROM supplier_payments WHERE id = ?");
+        $payCheck->execute([$id]);
+        $payLe = $payCheck->fetchColumn();
+        if ($payLe === false) respond(['error' => 'Платёж не найден'], 404);
+        if ($payLe && !checkLegalEntityAccess($authUser, $payLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $allowed = ['amount', 'status', 'note', 'payment_date', 'delivery_date', 'request_deadline'];
         $sets = []; $params = [];
         foreach ($allowed as $f) {
@@ -4615,14 +4784,14 @@ if ($endpoint === 'rpc') {
         // Сумма (из order_items * product_prices)
         $amtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)), 0) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
+            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity_group = o.legal_entity_group AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ?" . $leAndAlias);
         $amtSt->execute(array_merge([$from], $leArgs));
         $totalAmount = floatval($amtSt->fetchColumn());
 
         $prevAmtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)), 0)
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
+            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity_group = o.legal_entity_group AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ? AND o.created_at_new < ?" . $leAndAlias);
         $prevAmtSt->execute(array_merge([$prevFrom, $from], $leArgs));
         $prevAmount = floatval($prevAmtSt->fetchColumn());
@@ -4660,7 +4829,7 @@ if ($endpoint === 'rpc') {
         // Топ поставщиков
         $topSt = $pdo->prepare("SELECT o.supplier, SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
+            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity_group = o.legal_entity_group AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ?" . $leAndAlias . "
             GROUP BY o.supplier ORDER BY total DESC LIMIT 10");
         $topSt->execute(array_merge([$from], $leArgs));
@@ -4809,6 +4978,12 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'chat', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $convId = intval($body['conversation_id'] ?? 0);
         if (!$convId) respond(['error' => 'conversation_id required'], 400);
+        // Доступ — на уровне группы юрлиц переписки.
+        $accCheck = $pdo->prepare("SELECT legal_entity_group FROM chat_conversations WHERE id = ?");
+        $accCheck->execute([$convId]);
+        $convGroup = $accCheck->fetchColumn();
+        if ($convGroup === false) respond(['error' => 'Диалог не найден'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $convGroup)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         // Помечаем как прочитанные
         $pdo->prepare("UPDATE chat_messages SET is_read = 1 WHERE conversation_id = ? AND direction = 'from_restaurant' AND is_read = 0")->execute([$convId]);
         $st = $pdo->prepare("SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 500");
@@ -4824,6 +4999,13 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         $senderName = $caller['name'] ?? 'Закупки';
 
+        // Доступ — на уровне группы юрлиц переписки.
+        $accCheck = $pdo->prepare("SELECT legal_entity_group FROM chat_conversations WHERE id = ?");
+        $accCheck->execute([$convId]);
+        $convGroup = $accCheck->fetchColumn();
+        if ($convGroup === false) respond(['error' => 'Диалог не найден'], 404);
+        if (!checkLegalEntityGroupAccess($caller, $convGroup)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+
         $ins = $pdo->prepare("INSERT INTO chat_messages (conversation_id, direction, sender_name, message_text, is_read) VALUES (?, 'from_purchasing', ?, ?, 1)");
         $ins->execute([$convId, $senderName, $text]);
         $pdo->prepare("UPDATE chat_conversations SET last_message_at = NOW() WHERE id = ?")->execute([$convId]);
@@ -4835,12 +5017,14 @@ if ($endpoint === 'rpc') {
         if ($c && $c['restaurant_chat_id']) {
             $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
             if ($botToken) {
+                $rNum = htmlspecialchars((string)$c['restaurant_number'], ENT_QUOTES, 'UTF-8');
+                $sName = htmlspecialchars((string)$senderName, ENT_QUOTES, 'UTF-8');
                 $tgText = "📨 <b>Ответ от отдела закупок</b>\n";
-                $tgText .= "🏪 Ресторан {$c['restaurant_number']}\n";
+                $tgText .= "🏪 Ресторан {$rNum}\n";
                 $tgText .= "─────────────────────\n";
                 $tgText .= htmlspecialchars($text, ENT_QUOTES, 'UTF-8') . "\n";
                 $tgText .= "─────────────────────\n";
-                $tgText .= "<i>Ответил: {$senderName}</i>";
+                $tgText .= "<i>Ответил: {$sName}</i>";
                 $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $tgText, 'parse_mode' => 'HTML']);
                 $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
                 curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
@@ -4855,6 +5039,11 @@ if ($endpoint === 'rpc') {
         $convId = intval($body['conversation_id'] ?? 0);
         if (!$convId) respond(['error' => 'conversation_id required'], 400);
         $caller = getSessionUser($pdo);
+        $accCheck = $pdo->prepare("SELECT legal_entity_group FROM chat_conversations WHERE id = ?");
+        $accCheck->execute([$convId]);
+        $convGroup = $accCheck->fetchColumn();
+        if ($convGroup === false) respond(['error' => 'Диалог не найден'], 404);
+        if (!checkLegalEntityGroupAccess($caller, $convGroup)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("UPDATE chat_conversations SET status = 'closed', closed_by = ?, closed_at = NOW() WHERE id = ?")
             ->execute([$caller['name'] ?? 'unknown', $convId]);
         respond(['success' => true]);
@@ -4864,6 +5053,11 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'chat', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $convId = intval($body['conversation_id'] ?? 0);
         if (!$convId) respond(['error' => 'conversation_id required'], 400);
+        $accCheck = $pdo->prepare("SELECT legal_entity_group FROM chat_conversations WHERE id = ?");
+        $accCheck->execute([$convId]);
+        $convGroup = $accCheck->fetchColumn();
+        if ($convGroup === false) respond(['error' => 'Диалог не найден'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $convGroup)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("UPDATE chat_conversations SET status = 'open', closed_by = NULL, closed_at = NULL WHERE id = ?")->execute([$convId]);
         respond(['success' => true]);
     }
@@ -4883,10 +5077,11 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         $senderName = $caller['name'] ?? 'Закупки';
 
-        $conv = $pdo->prepare("SELECT restaurant_chat_id, restaurant_number FROM chat_conversations WHERE id = ?");
+        $conv = $pdo->prepare("SELECT restaurant_chat_id, restaurant_number, legal_entity_group FROM chat_conversations WHERE id = ?");
         $conv->execute([$convId]);
         $c = $conv->fetch();
         if (!$c) respond(['error' => 'Диалог не найден'], 404);
+        if (!checkLegalEntityGroupAccess($caller, $c['legal_entity_group'])) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
 
         // Отправляем фото в Telegram ресторану и получаем file_id
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
@@ -4934,6 +5129,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_protocols') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'protocols', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $legalEntity = $body['legal_entity'] ?? $_GET['legal_entity'] ?? null;
         if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
         if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
@@ -4959,6 +5155,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_protocol') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'protocols', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
         $s = $pdo->prepare("SELECT p.*, s.name as series_name, s.recurrence, s.agenda_template FROM meeting_protocols p LEFT JOIN meeting_protocol_series s ON s.id = p.series_id WHERE p.id = ?");
@@ -5227,12 +5424,14 @@ if ($endpoint === 'rpc') {
     if ($fn === 'delete_protocol') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
-        $existing = $pdo->prepare("SELECT created_by FROM meeting_protocols WHERE id = ?");
+        $existing = $pdo->prepare("SELECT created_by, legal_entity FROM meeting_protocols WHERE id = ?");
         $existing->execute([$id]);
         $row = $existing->fetch();
         if (!$row) respond(['error' => 'Не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $row['legal_entity'] ?? null)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         if ($row['created_by'] !== $caller['name'] && !in_array($caller['role'], ['admin', 'manager'])) {
             respond(['error' => 'Удалить может только создатель или админ'], 403);
         }
@@ -5243,9 +5442,16 @@ if ($endpoint === 'rpc') {
     if ($fn === 'update_decision_status') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $decId = intval($body['id'] ?? 0);
         $newStatus = $body['status'] ?? '';
         if (!$decId || !in_array($newStatus, ['pending', 'done', 'overdue'])) respond(['error' => 'Некорректные параметры'], 400);
+        // Доступ — на уровне юрлица протокола, к которому относится решение.
+        $accCheck = $pdo->prepare("SELECT p.legal_entity FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.id = ?");
+        $accCheck->execute([$decId]);
+        $protLe = $accCheck->fetchColumn();
+        if ($protLe === false) respond(['error' => 'Решение не найдено'], 404);
+        if ($protLe && !checkLegalEntityAccess($caller, $protLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $completedAt = $newStatus === 'done' ? date('Y-m-d H:i:s') : null;
         $pdo->prepare("UPDATE protocol_decisions SET status = ?, completed_at = ? WHERE id = ?")->execute([$newStatus, $completedAt, $decId]);
         pdSyncDecisionToCard($pdo, $decId, $caller['name']);
@@ -5255,10 +5461,17 @@ if ($endpoint === 'rpc') {
     if ($fn === 'update_decision_deadline') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $decId = intval($body['id'] ?? 0);
         $deadline = $body['deadline'] ?: null;
         if (!$decId) respond(['error' => 'id required'], 400);
         if ($deadline && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deadline)) respond(['error' => 'Некорректная дата'], 400);
+        // Доступ — на уровне юрлица протокола, к которому относится решение.
+        $accCheck = $pdo->prepare("SELECT p.legal_entity FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.id = ?");
+        $accCheck->execute([$decId]);
+        $protLe = $accCheck->fetchColumn();
+        if ($protLe === false) respond(['error' => 'Решение не найдено'], 404);
+        if ($protLe && !checkLegalEntityAccess($caller, $protLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $pdo->prepare("UPDATE protocol_decisions SET deadline = ? WHERE id = ?")->execute([$deadline, $decId]);
         pdSyncDecisionToCard($pdo, $decId, $caller['name']);
         respond(['success' => true]);
@@ -5268,9 +5481,16 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_carryover_tasks') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'protocols', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $seriesId = intval($body['series_id'] ?? 0);
         $excludeProtocolId = intval($body['exclude_protocol_id'] ?? 0);
         if (!$seriesId) respond([]);
+        // Доступ — на уровне юрлица серии.
+        $sLeStmt = $pdo->prepare("SELECT legal_entity FROM meeting_protocol_series WHERE id = ?");
+        $sLeStmt->execute([$seriesId]);
+        $sLe = $sLeStmt->fetchColumn();
+        if ($sLe === false) respond([]);
+        if ($sLe && !checkLegalEntityAccess($caller, $sLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         // Находим незакрытые задачи из всех протоколов этой серии
         $sql = "SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, d.protocol_id, p.meeting_date, p.topic
                 FROM protocol_decisions d
@@ -5287,8 +5507,10 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_protocol_series') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'protocols', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $legalEntity = $body['legal_entity'] ?? $_GET['legal_entity'] ?? null;
         if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $s = $pdo->prepare("SELECT s.*, (SELECT COUNT(*) FROM meeting_protocols p WHERE p.series_id = s.id) as protocols_count FROM meeting_protocol_series s WHERE s.legal_entity = ? ORDER BY s.name");
         $s->execute([$legalEntity]);
         respond($s->fetchAll());
@@ -5307,8 +5529,17 @@ if ($endpoint === 'rpc') {
         $agendaTemplate = $body['agenda_template'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
         if (!$name) respond(['error' => 'Укажите название серии'], 400);
-        if (!$id && !$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
-        if (!$id && !checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        if ($id) {
+            // Обновление существующей: проверяем доступ к её фактическому legal_entity.
+            $existing = $pdo->prepare("SELECT legal_entity FROM meeting_protocol_series WHERE id = ?");
+            $existing->execute([$id]);
+            $existingLe = $existing->fetchColumn();
+            if ($existingLe === false) respond(['error' => 'Серия не найдена'], 404);
+            if (!checkLegalEntityAccess($caller, $existingLe)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        } else {
+            if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+            if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        }
         $agendaJson = json_encode($agendaTemplate, JSON_UNESCAPED_UNICODE);
         if ($id) {
             $pdo->prepare("UPDATE meeting_protocol_series SET name=?, recurrence=?, agenda_template=? WHERE id=?")->execute([$name, $recurrence, $agendaJson, $id]);
@@ -5322,7 +5553,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'delete_protocol_series') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        if ($caller['role'] !== 'admin') respond(['error' => 'Только для админов'], 403);
+        requireModuleAccess($caller, 'protocols', 'full', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
         $pdo->prepare("DELETE FROM meeting_protocol_series WHERE id = ?")->execute([$id]);
@@ -5332,7 +5563,11 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_users_list_short') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        $s = $pdo->query("SELECT name, display_role, telegram_chat_id FROM users ORDER BY name");
+        // telegram_chat_id — персональные данные, отдаём только admin/manager
+        // (нужны для упоминаний и Telegram-уведомлений). Остальным — без него.
+        $isPriv = in_array($caller['role'] ?? '', ['admin', 'manager'], true);
+        $cols = $isPriv ? "name, display_role, telegram_chat_id" : "name, display_role";
+        $s = $pdo->query("SELECT {$cols} FROM users ORDER BY name");
         respond($s->fetchAll());
     }
 

@@ -496,7 +496,7 @@ async function importCoupons(e) {
     // Привязка к рецептурам
     const allDishNames = [...new Set(items.flatMap(it => (it.sub_items || []).map(s => s.name)))];
     if (allDishNames.length) {
-      const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allDishNames });
+      const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allDishNames, legal_entity: legalEntity.value });
       const recipeMap = recipeData?.recipes || {};
       for (const item of items) {
         for (const sub of (item.sub_items || [])) {

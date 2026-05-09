@@ -15,14 +15,18 @@ $allowed = [
     'stock_collections', 'stock_collection_products', 'stock_collection_data',
     'price_agreements', 'product_prices', 'price_history',
     'tenders', 'tender_items', 'tender_offers', 'tender_offer_prices', 'tender_files',
-    'bug_reports', 'bug_report_replies', 'restaurant_sales', 'report_exclusions',
+    'restaurant_sales', 'report_exclusions',
     'dist_sessions', 'dist_session_products', 'dist_entries', 'dist_notes',
     'plt_products', 'plt_deliveries', 'plt_delivery_items', 'plt_daily_stock', 'plt_summary',
     'marketing_activities', 'marketing_activity_items', 'marketing_activity_files',
     'recipes', 'recipe_ingredients', 'recipe_groups', 'recipe_group_items', 'pallet_reference',
 ];
-// Защита: только чтение через REST, запись — через RPC
-$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'bug_reports', 'bug_report_replies', 'tender_files', 'marketing_activity_files'];
+// Защита: только чтение через REST, запись — через RPC.
+// supplier_payments — read-only: запись через update_payment / create_payment_if_needed,
+// иначе пользователь может выставить paid_by/paid_at напрямую через REST PATCH.
+// bug_reports / bug_report_replies — убраны из $allowed выше, читаются через RPC get_bug_reports
+// (с фильтром по created_by для не-админа).
+$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'tender_files', 'marketing_activity_files', 'supplier_payments'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
 // audit_log — только чтение и вставка (без update/delete для защиты целостности)
@@ -75,12 +79,20 @@ if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
 if ($sessionUser && in_array($table, $ENTITY_TABLES)) {
     $userRole = $sessionUser['role'] ?? 'user';
     $leFilt = $_GET['legal_entity'] ?? null;
+    $legFilt = $_GET['legal_entity_group'] ?? null;
     if ($leFilt) {
         // Извлекаем значение из фильтра eq.XXX
         $leVal = (strpos($leFilt, 'eq.') === 0) ? substr($leFilt, 3) : $leFilt;
         $leVal = urldecode($leVal);
         if (!checkLegalEntityAccess($sessionUser, $leVal)) {
             respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
+    } elseif ($legFilt) {
+        // Таблица фильтруется по группе юрлиц (например, stock_collections для ЛК и сотрудников).
+        $legVal = (strpos($legFilt, 'eq.') === 0) ? substr($legFilt, 3) : $legFilt;
+        $legVal = urldecode($legVal);
+        if (!checkLegalEntityGroupAccess($sessionUser, $legVal)) {
+            respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         }
     } elseif ($method === 'GET' && $userRole !== 'admin') {
         // notifications и orders по ID: доступ проверяется позже для каждой записи
@@ -167,11 +179,11 @@ $filterWhitelist = [
     'deficit_results'   => ['id','session_id','restaurant_number'],
     'deficit_tokens'    => ['id','legal_entity','created_by'],
     'deficit_restaurant_stock' => ['id','token_id','restaurant_number'],
-    'stock_collections'       => ['id','legal_entity','status'],
+    'stock_collections'       => ['id','legal_entity','legal_entity_group','status'],
     'stock_collection_products' => ['id','collection_id'],
     'stock_collection_data'   => ['id','collection_id','product_id','restaurant_number'],
-    'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','created_by','approved_by','created_at'],
-    'product_prices'   => ['id','sku','supplier','legal_entity','agreement_id','vat_rate','updated_by','updated_at'],
+    'price_agreements' => ['id','number','supplier','legal_entity','legal_entity_group','status','valid_from','valid_to','created_by','approved_by','created_at'],
+    'product_prices'   => ['id','sku','supplier','legal_entity','legal_entity_group','agreement_id','vat_rate','updated_by','updated_at'],
     'restaurant_sales' => ['id','analog_group','sale_date','legal_entity_group'],
     'report_exclusions' => ['id','analog_group'],
     'plt_products'          => ['id','entity_group','sku','name','storage_type','boxes_per_pallet'],
@@ -276,8 +288,9 @@ if ($method === 'GET') {
         $params[] = $searchTerm;
     }
 
-    // Внедряем фильтр по юрлицу в SQL для entity tables, если пользователь не админ и фильтр не указан
-    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && !isset($_GET['legal_entity']) && $table !== 'notifications') {
+    // Внедряем фильтр по юрлицу в SQL для entity tables, если пользователь не админ и фильтр не указан.
+    // Если фронт уже передал legal_entity_group — он сам ограничит выборку, авто-фильтр не нужен.
+    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && !isset($_GET['legal_entity']) && !isset($_GET['legal_entity_group']) && $table !== 'notifications') {
         $userEntities = $sessionUser['legal_entities'] ?? '';
         if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
         if (is_array($userEntities) && !empty($userEntities)) {

@@ -336,7 +336,7 @@
 import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db, getDownloadUrl } from '@/lib/apiClient.js';
-import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
+import { applyEntityFilter, applyEntityGroupFilter, toLocalDateStr } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -792,7 +792,7 @@ async function importDishesFromFile(e) {
     const allNames = [...new Set(regularNames)];
     let recipeMap = {};
     if (allNames.length) {
-      const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allNames });
+      const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allNames, legal_entity: legalEntity.value });
       recipeMap = recipeData?.recipes || {};
     }
 
@@ -1400,8 +1400,9 @@ watch(activity, () => {
 
 // ─── Mount ──────────────────────────────────────────────────────────────────
 onMounted(() => {
-  // Загрузить кол-во ресторанов по умолчанию
-  db.from('restaurants').select('number').then(({ data }) => { if (data?.length) defaultRestCount.value = new Set(data.map(r => r.number)).size; });
+  // Загрузить кол-во ресторанов по умолчанию (только своя группа юрлиц)
+  applyEntityGroupFilter(db.from('restaurants').select('number'), legalEntity.value)
+    .then(({ data }) => { if (data?.length) defaultRestCount.value = new Set(data.map(r => r.number)).size; });
   const id = route.params.id;
   if (id) {
     loadActivity(id);

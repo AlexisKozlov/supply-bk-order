@@ -673,6 +673,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const AbcXyzPanel = defineAsyncComponent(() => import('@/views/AbcXyzView.vue'));
@@ -732,8 +733,8 @@ const tabs = [
 async function loadPrices() {
   if (!userStore.hasAccess('pricing', 'view')) { prices.value = null; return; }
   const entity = orderStore.settings.legalEntity;
-  let q = db.from('product_prices').select('sku,price,vat_rate,unit_type,legal_entity');
-  if (entity) q = q.eq('legal_entity', entity);
+  let q = db.from('product_prices').select('sku,price,vat_rate,unit_type,legal_entity_group');
+  if (entity) q = q.eq('legal_entity_group', getEntityGroupCode(entity));
   const { data: d } = await q;
   if (d) {
     prices.value = {};

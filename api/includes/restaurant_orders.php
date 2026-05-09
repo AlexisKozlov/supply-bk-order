@@ -1811,12 +1811,10 @@ if ($roAction === 'change-password' && $method === 'POST') {
 if ($roAction === 'stock-collection-status' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
-    $group = getEntityGroup($le);
-    // Ищем активные сборы для юрлица ресторана
-    $where = ["sc.status = 'active'"];
-    $params = [];
-    applyEntityTextFilter($group, $where, $params, 'sc.legal_entity');
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    // Сборы видны на уровне группы юрлиц (BK+VM делят, PS отдельно).
+    $where = ["sc.status = 'active'", "sc.legal_entity_group = ?"];
+    $params = [$group];
     $sql = "SELECT sc.id, sc.name, sc.created_at,
                 (SELECT COUNT(DISTINCT scd.product_id) FROM stock_collection_data scd
                  JOIN stock_collection_products scp ON scp.id = scd.product_id AND scp.collection_id = sc.id
@@ -1857,12 +1855,11 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
 if ($roAction === 'stock-collection-data' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
-    $group = getEntityGroup($le);
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
     $collectionId = intval($_GET['collection_id'] ?? 0);
-    $where = ["sc.status = 'active'"];
-    $params = [];
-    applyEntityTextFilter($group, $where, $params, 'sc.legal_entity');
+    // Сборы видны на уровне группы юрлиц (BK+VM делят, PS отдельно).
+    $where = ["sc.status = 'active'", "sc.legal_entity_group = ?"];
+    $params = [$group];
     $sql = "SELECT id, name, created_at FROM stock_collections sc WHERE " . implode(' AND ', $where);
     if ($collectionId > 0) {
         $sql .= " AND sc.id = ?";
@@ -1983,15 +1980,13 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
     if ($collId <= 0) roRespond(['error' => 'Не указан сбор'], 400);
     if (!is_array($items)) roRespond(['error' => 'Некорректные данные'], 400);
 
-    // Проверяем, что сбор активен и принадлежит юрлицу ресторана
-    $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
-    $group = getEntityGroup($le);
-    $check = $pdo->prepare("SELECT id, legal_entity FROM stock_collections WHERE id = ? AND status = 'active'");
+    // Проверяем, что сбор активен и принадлежит группе юрлиц ресторана.
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $check = $pdo->prepare("SELECT id, legal_entity_group FROM stock_collections WHERE id = ? AND status = 'active'");
     $check->execute([$collId]);
     $coll = $check->fetch();
     if (!$coll) roRespond(['error' => 'Сбор не найден или уже закрыт'], 404);
-    $collGroup = getEntityGroup($coll['legal_entity']);
-    if ($collGroup !== $group) roRespond(['error' => 'Сбор не для вашего юрлица'], 403);
+    if ($coll['legal_entity_group'] !== $group) roRespond(['error' => 'Сбор не для вашего юрлица'], 403);
 
     // Загружаем допустимые product_id для этой коллекции
     $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
@@ -3045,20 +3040,20 @@ if ($roAction === 'my-orders' && $method === 'GET') {
     roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $rest['legal_entity_group'] ?? 'BK_VM');
 
     $limit = min((int)($_GET['limit'] ?? 20), 50);
-    $group = $rest['legal_entity_group'] ?? 'BK_VM';
-    $where = ["o.restaurant_number = ?"];
-    $params = [$rest['restaurant_number']];
-    applyEntityTextFilter($group, $where, $params, 'o.legal_entity');
+    // Один ресторан = одно юрлицо. История показывается только по своему юрлицу
+    // (как в all-history ниже).
+    $restEntity = $rest['legal_entity'] ?? '';
+    if (!$restEntity) roRespond(['error' => 'У ресторана не задано юр. лицо'], 400);
     $s = $pdo->prepare("
         SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.updated_at,
                (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
                (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
         FROM ro_orders o
-        WHERE " . implode(' AND ', $where) . "
+        WHERE o.restaurant_number = ? AND o.legal_entity = ?
         ORDER BY o.delivery_date DESC
         LIMIT {$limit}
     ");
-    $s->execute($params);
+    $s->execute([$rest['restaurant_number'], $restEntity]);
     roRespond(['orders' => $s->fetchAll()]);
 }
 
@@ -3082,7 +3077,7 @@ if ($roAction === 'all-history' && $method === 'GET') {
                    (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty,
                    (SELECT SUM(oi.quantity * COALESCE(pp.price, 0))
                       FROM ro_order_items oi
-                      LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit'
+                      LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity_group = o.legal_entity_group AND pp.price_type = 'deposit'
                       WHERE oi.order_id = o.id) as total_deposit
             FROM ro_orders o WHERE o.restaurant_number = ? AND o.legal_entity = ?
             ORDER BY o.delivery_date DESC LIMIT {$limit}
@@ -3927,7 +3922,7 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
-                   (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = ? AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
+                   (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity_group = ? AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
             FROM ro_order_items oi
             LEFT JOIN ro_templates t
                 ON t.legal_entity = ?
@@ -3942,7 +3937,9 @@ if (strpos($roAction, 'admin') === 0) {
                 LIMIT 1
             )
             WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
-        $items->execute([$order['legal_entity'], $order['legal_entity'], $order['legal_entity'], $order['id']]);
+        // Первый параметр — group для product_prices (цены живут на группе),
+        // остальные — конкретное юрлицо для ro_templates и products.
+        $items->execute([$order['legal_entity_group'] ?? getEntityGroup($order['legal_entity']), $order['legal_entity'], $order['legal_entity'], $order['id']]);
 
         $order['items'] = $items->fetchAll();
         roRespond(['order' => $order]);
@@ -4647,7 +4644,7 @@ if (strpos($roAction, 'admin') === 0) {
             }
             $st = $pdo->prepare("SELECT oi.id, oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
                        (SELECT pp.price FROM product_prices pp JOIN ro_orders o2 ON o2.id = oi.order_id
-                           WHERE pp.sku = oi.sku AND pp.legal_entity = o2.legal_entity AND pp.price_type = 'deposit'
+                           WHERE pp.sku = oi.sku AND pp.legal_entity_group = o2.legal_entity_group AND pp.price_type = 'deposit'
                            ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
                 FROM ro_order_items oi WHERE oi.order_id IN ({$ph}){$catWhere} ORDER BY oi.category, oi.product_name");
             $st->execute($catParams);

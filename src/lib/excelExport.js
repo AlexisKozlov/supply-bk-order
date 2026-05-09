@@ -995,11 +995,10 @@ export async function exportSupplierOrder(settings, items, priceMap) {
   items.forEach(item => {
     if (!item.finalOrder || item.finalOrder <= 0) return;
     const qpb = getQpb(item);
-    const mult = getMultiplicity(item);
-    const accountingBoxes = settings.unit === 'boxes'
-      ? item.finalOrder
-      : Math.round(item.finalOrder / qpb);
-    const physBoxes = Math.round(accountingBoxes / mult);
+    // Единое округление (Math.ceil) — иначе физ. коробки в Excel-заявке
+    // расходятся с тем, что сохранено в БД и показано в UI.
+    const accountingBoxes = toAccountingBoxes(item, item.finalOrder, settings.unit);
+    const physBoxes = toPhysicalBoxes(item, item.finalOrder, settings.unit);
 
     idx++;
     const productLabel = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
@@ -1044,9 +1043,9 @@ export async function exportSupplierOrder(settings, items, priceMap) {
         if (!item.finalOrder || item.finalOrder <= 0) return;
         const pi = priceMap[item.sku];
         if (!pi) return;
-        const qpb_ = getQpb(item); const mult_ = getMultiplicity(item);
-        const ab_ = settings.unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb_);
-        const pb_ = Math.round(ab_ / mult_);
+        const qpb_ = getQpb(item);
+        const ab_ = toAccountingBoxes(item, item.finalOrder, settings.unit);
+        const pb_ = toPhysicalBoxes(item, item.finalOrder, settings.unit);
         const pc_ = settings.unit === 'pieces' ? item.finalOrder : ab_ * qpb_;
         const pr_ = parseFloat(pi.price) || 0;
         let ls = 0;
@@ -1112,11 +1111,8 @@ export function printSupplierOrder(settings, items, priceMap) {
 
   const rows = filteredItems.map((item, idx) => {
     const qpb = getQpb(item);
-    const mult = getMultiplicity(item);
-    const accountingBoxes = settings.unit === 'boxes'
-      ? item.finalOrder
-      : Math.round(item.finalOrder / qpb);
-    const physBoxes = Math.round(accountingBoxes / mult);
+    const accountingBoxes = toAccountingBoxes(item, item.finalOrder, settings.unit);
+    const physBoxes = toPhysicalBoxes(item, item.finalOrder, settings.unit);
     totalBoxes += physBoxes;
 
     let priceTd = '';
@@ -1158,9 +1154,8 @@ export function printSupplierOrder(settings, items, priceMap) {
   if (hasPrices) {
     filteredItems.forEach(item => {
       const qpb = getQpb(item);
-      const mult = getMultiplicity(item);
-      const accountingBoxes = settings.unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb);
-      const physBoxes = Math.round(accountingBoxes / mult);
+      const accountingBoxes = toAccountingBoxes(item, item.finalOrder, settings.unit);
+      const physBoxes = toPhysicalBoxes(item, item.finalOrder, settings.unit);
       const pi = priceMap[item.sku];
       if (!pi) return;
       const price = parseFloat(pi.price) || 0;

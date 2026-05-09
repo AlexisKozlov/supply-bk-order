@@ -936,7 +936,11 @@ async function sendVegReminder(rest) {
   const msg = prompt('Текст напоминания:', defaultMsg)
   if (!msg) return
   try {
-    const { data } = await db.rpc('tg_admin_send_restaurant_reminder', { restaurant_number: rest.number, message: msg })
+    const { data } = await db.rpc('tg_admin_send_restaurant_reminder', {
+      restaurant_number: rest.number,
+      legal_entity_group: rest.legal_entity_group || (parseInt(rest.number, 10) >= 1000 ? 'PS' : 'BK_VM'),
+      message: msg,
+    })
     alert(`Отправлено: ${data.sent} из ${data.total}`)
   } catch (e) {
     alert('Ошибка: ' + (e.message || e))
@@ -945,11 +949,15 @@ async function sendVegReminder(rest) {
 
 async function toggleRestNotif(sub, field) {
   try {
-    const { data } = await db.rpc('tg_admin_toggle_rest_notif', { chat_id: String(sub.chat_id), field })
+    const { data } = await db.rpc('tg_admin_toggle_rest_notif', {
+      chat_id: String(sub.chat_id),
+      restaurant_number: String(sub.restaurant_number),
+      field,
+    })
     sub[field] = data.value ? 1 : 0
-    // Обновить и в restaurantSubs
+    // Обновить и в restaurantSubs (только запись того же chat_id+restaurant_number)
     for (const s of restaurantSubs.value) {
-      if (String(s.chat_id) === String(sub.chat_id)) s[field] = sub[field]
+      if (String(s.chat_id) === String(sub.chat_id) && String(s.restaurant_number) === String(sub.restaurant_number)) s[field] = sub[field]
     }
   } catch (e) {
     alert('Ошибка: ' + (e.message || e))

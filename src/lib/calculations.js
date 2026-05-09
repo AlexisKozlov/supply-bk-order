@@ -25,8 +25,11 @@ function calcCoverageDate(deliveryDate, stockAfterDelivery, finalOrder, daily) {
   const availableAfterDelivery = stockAfterDelivery + (finalOrder || 0);
   const daysAfterDelivery = daily > 0 ? availableAfterDelivery / daily : 0;
   if (daily > 0 && daysAfterDelivery > 0) {
+    // Ограничиваем сверху ~100 годами: иначе при огромном остатке/малом расходе
+    // setDate() уходит в Invalid Date, и весь UI получает NaN при разнице дат.
+    const days = Math.min(Math.floor(daysAfterDelivery), 36500);
     const coverageDate = new Date(deliveryDate);
-    coverageDate.setDate(coverageDate.getDate() + Math.floor(daysAfterDelivery));
+    coverageDate.setDate(coverageDate.getDate() + days);
     return coverageDate;
   }
   return null;

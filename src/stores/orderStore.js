@@ -97,7 +97,17 @@ export const useOrderStore = defineStore('order', () => {
   });
 
   function _snapshot() {
-    _history.push({ items: toRaw(items.value).map(i => ({ ...toRaw(i) })), unit: settings.unit });
+    // Сохраняем не только items+unit, но и параметры расчёта — иначе undo
+    // возвращает позиции, но safetyDays/periodDays/deliveryDate остаются
+    // новыми, и расчёт даёт неконсистентные значения.
+    _history.push({
+      items: toRaw(items.value).map(i => ({ ...toRaw(i) })),
+      unit: settings.unit,
+      safetyDays: settings.safetyDays,
+      periodDays: settings.periodDays,
+      deliveryDate: settings.deliveryDate ? new Date(settings.deliveryDate.getTime()) : null,
+      today: settings.today ? new Date(settings.today.getTime()) : null,
+    });
     _historyVersion.value++;
   }
 
@@ -172,7 +182,9 @@ export const useOrderStore = defineStore('order', () => {
     _ensureInitialState();
     item[field] = value;
     if (field === 'finalOrder') item._manualOrder = true;
-    if (field === 'consumptionPeriod') item._manualOrder = false;
+    // Раньше изменение consumptionPeriod сбрасывало _manualOrder → массовый
+    // «Применить расчёт» затирал ручной заказ. Теперь правка расхода не
+    // отменяет ручной режим заказа; пользователь снимает его явно.
     _scheduleSnapshot();
   }
 
@@ -229,24 +241,29 @@ export const useOrderStore = defineStore('order', () => {
     _history.clear(); _historyVersion.value++;
   }
 
+  function _applyHistoryState(state) {
+    if (!state) return;
+    // Обратная совместимость: старый формат — массив, новый — {items, unit, ...}
+    items.value = Array.isArray(state) ? state : state.items;
+    if (Array.isArray(state)) return;
+    if (state.unit) settings.unit = state.unit;
+    if (state.safetyDays !== undefined) settings.safetyDays = state.safetyDays;
+    if (state.periodDays !== undefined) settings.periodDays = state.periodDays;
+    if (state.deliveryDate !== undefined) settings.deliveryDate = state.deliveryDate;
+    if (state.today !== undefined) settings.today = state.today;
+  }
+
   function undo() {
     // Сначала закоммитим ожидающий snapshot — иначе откатим к состоянию ДО
     // последних быстрых правок (они «исчезнут» вместе с дебаунсом).
     _flushSnapshot();
-    const state = _history.undo();
-    if (!state) return;
-    // Обратная совместимость: старый формат — массив, новый — {items, unit}
-    items.value = Array.isArray(state) ? state : state.items;
-    if (state.unit) settings.unit = state.unit;
+    _applyHistoryState(_history.undo());
     _historyVersion.value++;
   }
 
   function redo() {
     _flushSnapshot();
-    const state = _history.redo();
-    if (!state) return;
-    items.value = Array.isArray(state) ? state : state.items;
-    if (state.unit) settings.unit = state.unit;
+    _applyHistoryState(_history.redo());
     _historyVersion.value++;
   }
 
@@ -331,11 +348,28 @@ export const useOrderStore = defineStore('order', () => {
       addedItem.stock = Math.round(parseFloat(String(histItem.stock || '0').replace(',', '.')) || 0);
       addedItem.transit = Math.round(parseFloat(String(histItem.transit || '0').replace(',', '.')) || 0);
 
+      // Если в БД сохранено исходное количество (final_order + unit_of_measure),
+      // восстанавливаем точно. Иначе — fallback через qty_boxes*qpb (старые заказы).
       const accountingBoxes = parseFloat(String(histItem.qty_boxes || '0').replace(',', '.')) || 0;
       const itemQpb = getQpb(addedItem);
-      addedItem.finalOrder = settings.unit === 'boxes'
-        ? Math.round(accountingBoxes)
-        : Math.round(accountingBoxes * itemQpb);
+      const savedFinal = histItem.final_order != null && histItem.final_order !== ''
+        ? parseFloat(String(histItem.final_order).replace(',', '.'))
+        : null;
+      const savedUnit = histItem.unit_of_measure || null;
+      if (savedFinal !== null && Number.isFinite(savedFinal) && savedUnit) {
+        // Конвертируем в текущий unit заказа (если пользователь сменил режим).
+        if (savedUnit === settings.unit) {
+          addedItem.finalOrder = Math.round(savedFinal);
+        } else if (savedUnit === 'pieces' && settings.unit === 'boxes') {
+          addedItem.finalOrder = Math.ceil(savedFinal / itemQpb);
+        } else {
+          addedItem.finalOrder = Math.round(savedFinal * itemQpb);
+        }
+      } else {
+        addedItem.finalOrder = settings.unit === 'boxes'
+          ? Math.round(accountingBoxes)
+          : Math.round(accountingBoxes * itemQpb);
+      }
     }
 
     editingOrderId.value = (isEditing || isViewOnly) ? order.id : null;

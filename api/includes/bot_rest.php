@@ -470,8 +470,16 @@ function restShowMySubs($chatId, $msgId = null) {
     $btns = [];
 
     if ($subs) {
-        // Статистика для приветствия
-        $activeSc = $pdo->query("SELECT id, name FROM stock_collections WHERE status = 'active' LIMIT 1")->fetch();
+        // Статистика для приветствия — учитываем только сборы группы подписанных ресторанов.
+        $subGroups = array_values(array_unique(array_filter(array_map(fn($s) => $s['legal_entity_group'] ?? null, $subs))));
+        if ($subGroups) {
+            $ph = implode(',', array_fill(0, count($subGroups), '?'));
+            $scStmt = $pdo->prepare("SELECT id, name FROM stock_collections WHERE status = 'active' AND legal_entity_group IN ($ph) LIMIT 1");
+            $scStmt->execute($subGroups);
+            $activeSc = $scStmt->fetch();
+        } else {
+            $activeSc = false;
+        }
         $orderFile = $pdo->query("SELECT file_name, uploaded_at FROM order_file ORDER BY id DESC LIMIT 1")->fetch();
         $mainOrdersEnabled = botAnyRestaurantOrdersEnabled($pdo, $subs);
 
@@ -1370,9 +1378,17 @@ function restStockSearch($chatId, $query, $userMsgId = null) {
 function restScStart($chatId, $msgId) {
     global $pdo, $SITE_URL;
 
-    // Ищем активные сборы
-    $st = $pdo->query("SELECT id, name, legal_entity FROM stock_collections WHERE status = 'active' ORDER BY created_at DESC");
-    $collections = $st->fetchAll();
+    // Активные сборы только для группы юрлиц, на которые подписан пользователь.
+    $userSubs = botGetSubscribedRestaurants($pdo, $chatId);
+    $subGroups = array_values(array_unique(array_filter(array_map(fn($s) => $s['legal_entity_group'] ?? null, $userSubs))));
+    if (!$subGroups) {
+        $collections = [];
+    } else {
+        $ph = implode(',', array_fill(0, count($subGroups), '?'));
+        $st = $pdo->prepare("SELECT id, name, legal_entity, legal_entity_group FROM stock_collections WHERE status = 'active' AND legal_entity_group IN ($ph) ORDER BY created_at DESC");
+        $st->execute($subGroups);
+        $collections = $st->fetchAll();
+    }
 
     if (!$collections) {
         editMessage($chatId, $msgId, "📋 <b>Сбор остатков</b>\n\nНет активных сборов.", ['inline_keyboard' => [

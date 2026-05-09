@@ -34,11 +34,15 @@ export async function recalculateAdu(legalEntity, supplier, lookbackDays = 90) {
 /**
  * Конвертировать ADU (шт/день) в расход за период в нужных единицах.
  * ADU всегда хранится в штуках/день.
+ * Для медленнооборачиваемых товаров (ADU=0.1 шт/день) расход за месяц
+ * в коробках бывает <1 — округление до целого обнулит позицию. Поэтому
+ * для unit='boxes' храним один знак после запятой.
  */
 export function aduToConsumption(adu, periodDays, unit, qtyPerBox) {
   const totalPieces = adu * periodDays;
   if (unit === 'boxes') {
-    return Math.round(totalPieces / (qtyPerBox || 1));
+    const boxes = totalPieces / (qtyPerBox || 1);
+    return Math.round(boxes * 10) / 10;
   }
   return Math.round(totalPieces);
 }

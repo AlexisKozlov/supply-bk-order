@@ -720,15 +720,19 @@ try {
 // ═══ Напоминания о сборе остатков ═══
 try {
     // Активные сборы старше 4 часов — напоминаем незаполнившим ресторанам
-    $activeSc = $pdo->query("SELECT id, name FROM stock_collections WHERE status = 'active' AND created_at < NOW() - INTERVAL 4 HOUR")->fetchAll();
+    $activeSc = $pdo->query("SELECT id, name, legal_entity_group FROM stock_collections WHERE status = 'active' AND created_at < NOW() - INTERVAL 4 HOUR")->fetchAll();
     foreach ($activeSc as $sc) {
         // Рестораны которые уже заполнили
         $filled = $pdo->prepare("SELECT DISTINCT restaurant_number FROM stock_collection_data WHERE collection_id = ?");
         $filled->execute([$sc['id']]);
         $filledSet = array_flip($filled->fetchAll(PDO::FETCH_COLUMN));
 
-        // Все подписанные рестораны (с учётом настроек уведомлений)
-        $subs = $pdo->query("SELECT DISTINCT chat_id, restaurant_number, notify_stock_reminders FROM ro_telegram_subs")->fetchAll();
+        // Подписанные рестораны только из группы юрлиц этого сбора (BK_VM или PS).
+        $subsStmt = $pdo->prepare("SELECT DISTINCT s.chat_id, s.restaurant_number, s.notify_stock_reminders
+            FROM ro_telegram_subs s
+            JOIN restaurants r ON r.number = s.restaurant_number AND r.legal_entity_group = ?");
+        $subsStmt->execute([$sc['legal_entity_group']]);
+        $subs = $subsStmt->fetchAll();
         foreach ($subs as $sub) {
             if (isset($filledSet[$sub['restaurant_number']])) continue;
             if (!$sub['notify_stock_reminders']) continue;
