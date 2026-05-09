@@ -134,6 +134,8 @@ class QueryBuilder {
 
   rawParam(key, value) { this._rawParams = this._rawParams || {}; this._rawParams[key] = value; return this; }
 
+  header(key, value) { this._headers = this._headers || {}; this._headers[key] = value; return this; }
+
   async _run() {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(this._f)) p.set(k, v);
@@ -167,9 +169,9 @@ class QueryBuilder {
   }
 
   async _exec(url) {
-    if (this._emptyIn) return { data: [], error: null };
+    if (this._emptyIn) return { data: [], error: null, status: 200 };
     try {
-      const opts = { headers: buildHeaders() };
+      const opts = { headers: { ...buildHeaders(), ...(this._headers || {}) } };
       if (this._method !== 'GET') {
         opts.method = this._method;
         if (this._method === 'POST') {
@@ -182,24 +184,24 @@ class QueryBuilder {
 
       const r = await fetchWithRetry(url, opts);
       trackServerStatus(true);
-      if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
+      if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired', status: r.status }; }
       if (!r.ok) {
         if (r.status >= 500) trackServerStatus(false);
         const e = await r.json().catch(() => ({}));
-        return { data: null, error: e.error || r.statusText };
+        return { data: null, error: e.error || r.statusText, status: r.status };
       }
 
       let d = await r.json().catch(() => null);
       if (d && typeof d === 'object') d = Array.isArray(d) ? d.map(parseJsonFields) : parseJsonFields(d);
 
-      if (this._head) return { data: null, count: Array.isArray(d) ? d.length : 0, error: null };
+      if (this._head) return { data: null, count: Array.isArray(d) ? d.length : 0, error: null, status: r.status };
       if (this._single) {
         if (Array.isArray(d)) d = d[0] || null;
-        if (!d && !this._maybe) return { data: null, error: 'Row not found' };
+        if (!d && !this._maybe) return { data: null, error: 'Row not found', status: r.status };
       }
       if (this._method === 'PATCH' && d && !Array.isArray(d)) d = [d];
-      return { data: d, error: null };
-    } catch (e) { trackServerStatus(false); return { data: null, error: e.message }; }
+      return { data: d, error: null, status: r.status };
+    } catch (e) { trackServerStatus(false); return { data: null, error: e.message, status: 0 }; }
   }
 }
 

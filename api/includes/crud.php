@@ -436,14 +436,37 @@ if ($method === 'PATCH' || $method === 'PUT') {
     // PATCH не должен менять created_by / created_at
     unset($body['created_by'], $body['created_at']);
     if (empty($body)) respond(['error' => 'Нет допустимых колонок для записи'], 400);
+    // Optimistic lock: если клиент прислал X-Expected-Updated-At — проверяем версию.
+    // ID может прийти как $subpoint (/api/plans/UUID) или как ?id=eq.UUID — поддерживаем оба варианта.
+    $expectedUpdatedAt = $_SERVER['HTTP_X_EXPECTED_UPDATED_AT'] ?? null;
+    $lockRowId = $subpoint;
+    if (!$lockRowId && isset($_GET['id'])) {
+        $idFilter = $_GET['id'];
+        if (strpos($idFilter, 'eq.') === 0) $lockRowId = substr($idFilter, 3);
+    }
+    $useOptimisticLock = $expectedUpdatedAt && $lockRowId && in_array($table, ['orders', 'plans']);
     // Автоматически обновляем updated_at для таблиц с этой колонкой
     if (in_array($table, ['orders', 'plans']) && !isset($body['updated_at'])) { $body['updated_at'] = date('Y-m-d H:i:s'); }
     $set = []; $sp = [];
     foreach ($body as $c => $v) { $set[] = "`$c`=?"; $sp[] = $v; }
     $all = array_merge($sp, $params);
     try {
-        $s = $pdo->prepare("UPDATE `$table` SET " . implode(',', $set) . " WHERE " . implode(' AND ', $where)); $s->execute($all);
+        if ($useOptimisticLock) {
+            $pdo->beginTransaction();
+            $chk = $pdo->prepare("SELECT updated_at FROM `$table` WHERE id=? FOR UPDATE");
+            $chk->execute([$lockRowId]);
+            $row = $chk->fetch(PDO::FETCH_ASSOC);
+            if (!$row || rtrim($row['updated_at']) !== rtrim($expectedUpdatedAt)) {
+                $pdo->rollBack();
+                respond(['error' => 'Запись была изменена другим пользователем'], 409);
+            }
+            $s = $pdo->prepare("UPDATE `$table` SET " . implode(',', $set) . " WHERE " . implode(' AND ', $where)); $s->execute($all);
+            $pdo->commit();
+        } else {
+            $s = $pdo->prepare("UPDATE `$table` SET " . implode(',', $set) . " WHERE " . implode(' AND ', $where)); $s->execute($all);
+        }
     } catch (PDOException $e) {
+        if ($useOptimisticLock && $pdo->inTransaction()) { $pdo->rollBack(); }
         error_log("UPDATE error [{$table}]: " . $e->getMessage());
         respond(['error' => 'Ошибка обновления записи'], 500);
     }

@@ -602,6 +602,7 @@ const existingOrdersLoading = ref(false);
 let _prevPlanItems = null;
 const _loadedCreatedBy = ref(null);
 const _loadedNote = ref('');
+const _loadedUpdatedAt = ref(null);
 
 // ─── Фильтр и добавление ──────────────────────────────────────────────────
 const filterQuery           = ref('');
@@ -2091,7 +2092,27 @@ async function confirmSave() {
   let newPlanId = null;
   if (editingPlanId.value) {
     planData.updated_by = userStore.currentUser?.name || null;
-    ({ error } = await db.from('plans').update(planData).eq('id', editingPlanId.value).eq('legal_entity', orderStore.settings.legalEntity));
+    let q = db.from('plans').update(planData).eq('id', editingPlanId.value).eq('legal_entity', orderStore.settings.legalEntity);
+    if (_loadedUpdatedAt.value) q = q.header('X-Expected-Updated-At', _loadedUpdatedAt.value);
+    const res = await q;
+    error = res.error;
+    if (res.status === 409) {
+      saving.value = false;
+      showSaveModal.value = false;
+      const ok = await confirmAction(
+        'План изменён другим пользователем',
+        'Кто-то ещё сохранил этот план, пока вы редактировали. Загрузить актуальную версию? Ваши несохранённые изменения будут потеряны.',
+        { okText: 'Загрузить актуальную', cancelText: 'Оставить как есть' }
+      );
+      if (ok) await loadPlanFromHistory(editingPlanId.value);
+      return;
+    }
+    // Обновляем _loadedUpdatedAt из ответа сервера, чтобы следующее сохранение прошло без 409
+    if (!error && Array.isArray(res.data) && res.data[0]?.updated_at) {
+      _loadedUpdatedAt.value = res.data[0].updated_at;
+    } else if (!error && res.data?.updated_at) {
+      _loadedUpdatedAt.value = res.data.updated_at;
+    }
   } else {
     planData.created_by = userStore.currentUser?.name || null;
     const res = await db.from('plans').insert([planData]);
@@ -2182,7 +2203,7 @@ function formatLogDate(str) {
 }
 
 function resetPlan() {
-  editingPlanId.value = null; viewOnly.value = false; showFullPlan.value = false; expandedSummaryPeriods.value = {}; _prevPlanItems = null; _loadedCreatedBy.value = null; _loadedNote.value = '';
+  editingPlanId.value = null; viewOnly.value = false; showFullPlan.value = false; expandedSummaryPeriods.value = {}; _prevPlanItems = null; _loadedCreatedBy.value = null; _loadedNote.value = ''; _loadedUpdatedAt.value = null;
   items.value.forEach(i => { i.plan = []; i.monthlyConsumption = 0; i.stockOnHand = 0; i.stockAtSupplier = 0; });
   undoStack.value = []; redoStack.value = [];
   recalcAll(); draftStore.clearPlanDraft();
@@ -2225,6 +2246,7 @@ async function loadPlanFromHistory(planId) {
   editingPlanId.value = plan.id;
   _loadedCreatedBy.value = plan.created_by || null;
   _loadedNote.value = plan.note || '';
+  _loadedUpdatedAt.value = plan.updated_at || null;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   _prevPlanItems = JSON.parse(JSON.stringify(plan.items || []));
   items.value = (plan.items || []).map(i => ({
