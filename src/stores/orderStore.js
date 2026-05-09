@@ -102,6 +102,27 @@ export const useOrderStore = defineStore('order', () => {
     _historyVersion.value++;
   }
 
+  // Дебаунсированный snapshot для частых изменений (ввод цифр в полях):
+  // раньше каждое нажатие клавиши клонировало массив из 500 строк и пушило
+  // в историю — заметная задержка ввода в больших заказах. Теперь снапшот
+  // случается один раз через 500 мс после последнего изменения. Undo
+  // откатывает к состоянию ДО серии правок, а не до каждой цифры.
+  let _snapshotTimer = null;
+  function _scheduleSnapshot() {
+    if (_snapshotTimer) clearTimeout(_snapshotTimer);
+    _snapshotTimer = setTimeout(() => { _snapshotTimer = null; _snapshot(); }, 500);
+  }
+  // Принудительный коммит ожидающего snapshot — вызывается перед операциями,
+  // которые меняют структуру (add/remove/apply), чтобы серия мелких правок
+  // не «слиплась» с крупным изменением в один шаг истории.
+  function _flushSnapshot() {
+    if (_snapshotTimer) {
+      clearTimeout(_snapshotTimer);
+      _snapshotTimer = null;
+      _snapshot();
+    }
+  }
+
   // FIX баг 3: сохраняем начальное состояние ДО первого изменения
   function _ensureInitialState() {
     if (_history.states.length === 0) {
@@ -117,7 +138,7 @@ export const useOrderStore = defineStore('order', () => {
     );
     if (exists) return null;
     // FIX баг 3: сохраняем начальное состояние ДО изменения
-    if (!skipSnapshot) _ensureInitialState();
+    if (!skipSnapshot) { _flushSnapshot(); _ensureInitialState(); }
     const item = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       productId: product.id || null,
@@ -140,6 +161,7 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   function removeItem(itemId) {
+    _flushSnapshot();
     _ensureInitialState();
     const idx = items.value.findIndex(i => i.id === itemId);
     if (idx !== -1) { items.value.splice(idx, 1); _snapshot(); }
@@ -152,10 +174,11 @@ export const useOrderStore = defineStore('order', () => {
     item[field] = value;
     if (field === 'finalOrder') item._manualOrder = true;
     if (field === 'consumptionPeriod') item._manualOrder = false;
-    _snapshot();
+    _scheduleSnapshot();
   }
 
   function applyAllCalculated() {
+    _flushSnapshot();
     _ensureInitialState();
     items.value.forEach(item => {
       if (!item._manualOrder) {
@@ -169,6 +192,7 @@ export const useOrderStore = defineStore('order', () => {
   function moveItem(fromIndex, toIndex) {
     const arr = items.value;
     if (fromIndex < 0 || fromIndex >= arr.length || toIndex < 0 || toIndex >= arr.length) return;
+    _flushSnapshot();
     _ensureInitialState();
     const [moved] = arr.splice(fromIndex, 1);
     arr.splice(toIndex, 0, moved);
@@ -207,6 +231,9 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   function undo() {
+    // Сначала закоммитим ожидающий snapshot — иначе откатим к состоянию ДО
+    // последних быстрых правок (они «исчезнут» вместе с дебаунсом).
+    _flushSnapshot();
     const state = _history.undo();
     if (!state) return;
     // Обратная совместимость: старый формат — массив, новый — {items, unit}
@@ -216,6 +243,7 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   function redo() {
+    _flushSnapshot();
     const state = _history.redo();
     if (!state) return;
     items.value = Array.isArray(state) ? state : state.items;

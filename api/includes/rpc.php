@@ -2651,12 +2651,26 @@ if ($endpoint === 'rpc') {
         unset($item);
         $tender['items'] = $items;
 
-        // Предложения + цены
+        // Предложения + цены: один запрос вместо N+1.
+        // Раньше для каждого предложения делался отдельный SELECT в tender_offer_prices.
+        // На тендере с 20 предложениями = 20 запросов; теперь — 2 (offers + одна выборка цен).
         $s = $pdo->prepare("SELECT id, tender_id, supplier, delivery_days, payment_terms, conditions, note, created_at FROM tender_offers WHERE tender_id=? ORDER BY id"); $s->execute([$id]);
         $offers = $s->fetchAll();
-        foreach ($offers as &$offer) {
-            $s2 = $pdo->prepare("SELECT item_id, price, price_rub, price_byn FROM tender_offer_prices WHERE offer_id=?"); $s2->execute([$offer['id']]);
-            $offer['prices'] = $s2->fetchAll();
+        if ($offers) {
+            $offerIds = array_column($offers, 'id');
+            $ph = implode(',', array_fill(0, count($offerIds), '?'));
+            $sp = $pdo->prepare("SELECT offer_id, item_id, price, price_rub, price_byn FROM tender_offer_prices WHERE offer_id IN ($ph)");
+            $sp->execute($offerIds);
+            $pricesByOffer = [];
+            foreach ($sp->fetchAll() as $row) {
+                $oid = $row['offer_id'];
+                unset($row['offer_id']);
+                $pricesByOffer[$oid][] = $row;
+            }
+            foreach ($offers as &$offer) {
+                $offer['prices'] = $pricesByOffer[$offer['id']] ?? [];
+            }
+            unset($offer);
         }
         $tender['offers'] = $offers;
 

@@ -494,7 +494,7 @@ import { ref, computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch,
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
-import { useSupplierStore } from '@/stores/supplierStore.js';
+import { useSupplierStore, loadProductsForSupplier } from '@/stores/supplierStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -630,10 +630,7 @@ async function loadSupplierProducts() {
   const sup = supplier.value;
   if (!sup) { allSupplierProducts.value = []; return; }
   try {
-    let q = db.from('products').select(PLAN_PRODUCT_FIELDS).eq('supplier', sup);
-    q = applyEntityGroupFilter(q, orderStore.settings.legalEntity);
-    const { data } = await q;
-    allSupplierProducts.value = data || [];
+    allSupplierProducts.value = await loadProductsForSupplier(sup, orderStore.settings.legalEntity, PLAN_PRODUCT_FIELDS);
   } catch { allSupplierProducts.value = []; }
 }
 
@@ -717,12 +714,29 @@ const redoStack = ref([]);
 const canUndo = computed(() => undoStack.value.length > 0);
 const canRedo = computed(() => redoStack.value.length > 0);
 
-function snapshot() {
+// Snapshot планирования: stringify ~200 строк × 12 периодов на каждое нажатие
+// в калькуляторе раньше съедал кадр. Решения: дебаунс 500 мс +
+// JSON.stringify оставляем (даёт независимый текстовый снимок и легко
+// парсится обратно — структура item.plan содержит вложенные объекты).
+let _snapshotTimer = null;
+function _doSnapshot() {
   undoStack.value.push(JSON.stringify(items.value.map(i => ({ ...i, plan: [...i.plan] }))));
   if (undoStack.value.length > 30) undoStack.value.shift();
   redoStack.value = [];
 }
+function snapshot() {
+  if (_snapshotTimer) clearTimeout(_snapshotTimer);
+  _snapshotTimer = setTimeout(() => { _snapshotTimer = null; _doSnapshot(); }, 500);
+}
+function _flushSnapshot() {
+  if (_snapshotTimer) {
+    clearTimeout(_snapshotTimer);
+    _snapshotTimer = null;
+    _doSnapshot();
+  }
+}
 function undo() {
+  _flushSnapshot();
   if (!undoStack.value.length) return;
   redoStack.value.push(JSON.stringify(items.value.map(i => ({ ...i, plan: [...i.plan] }))));
   const data = JSON.parse(undoStack.value.pop());
@@ -730,6 +744,7 @@ function undo() {
   recalcAll();
 }
 function redo() {
+  _flushSnapshot();
   if (!redoStack.value.length) return;
   undoStack.value.push(JSON.stringify(items.value.map(i => ({ ...i, plan: [...i.plan] }))));
   const data = JSON.parse(redoStack.value.pop());

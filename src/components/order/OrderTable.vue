@@ -110,6 +110,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { db } from '@/lib/apiClient.js';
 import { getQpb, getMultiplicity, applyEntityGroupFilter } from '@/lib/utils.js';
+import { loadProductsForSupplier } from '@/stores/supplierStore.js';
 import OrderRow from './OrderRow.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
@@ -210,10 +211,9 @@ async function loadSupplierProducts() {
   const sup = settings.value.supplier;
   if (!sup) { allSupplierProducts.value = []; return; }
   try {
-    let q = db.from('products').select('*').eq('supplier', sup);
-    q = applyEntityGroupFilter(q, settings.value.legalEntity);
-    const { data } = await q;
-    allSupplierProducts.value = data || [];
+    // Кеш в supplierStore — не дёргает API повторно при переключении табов
+    // и при параллельной загрузке из OrderView/PlanningView.
+    allSupplierProducts.value = await loadProductsForSupplier(sup, settings.value.legalEntity, '*');
   } catch { allSupplierProducts.value = []; }
 }
 

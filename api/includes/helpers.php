@@ -645,10 +645,13 @@ function getSessionUser($pdo) {
     // Очистка сессий перенесена в cron_telegram.php
     // Абсолютный потолок жизни сессии — 30 дней от created_at, для admin — 7.
     // После этого «скользящее» продление expires_at не помогает: токен умирает.
+    // expires_at сразу выбираем — раньше делали отдельный SELECT перед UPDATE,
+    // что давало 3 запроса к user_sessions на каждый авторизованный hit.
     $s = $pdo->prepare("
         SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions,
                u.created_at, u.telegram_chat_id, u.hidden_modules,
-               s.created_at AS session_created_at
+               s.created_at AS session_created_at,
+               s.expires_at AS session_expires_at
         FROM user_sessions s
         JOIN users u ON u.name = s.user_name
         WHERE s.token = ?
@@ -660,9 +663,7 @@ function getSessionUser($pdo) {
     if (!$row) { $_sessionUserCache['result'] = null; return null; }
     static $sessionUpdated = false;
     if (!$sessionUpdated) {
-        $s2 = $pdo->prepare("SELECT expires_at FROM user_sessions WHERE token = ?");
-        $s2->execute([$token]);
-        $exp = $s2->fetchColumn();
+        $exp = $row['session_expires_at'] ?? null;
         if ($exp && strtotime($exp) - time() < 6 * 86400) {
             // Продление expires_at не должно перепрыгнуть абсолютный потолок:
             // CASE по роли подбирается на стороне MySQL.
@@ -678,6 +679,8 @@ function getSessionUser($pdo) {
         }
         $sessionUpdated = true;
     }
+    // Не возвращаем session_expires_at в caller — это деталь внутренней логики.
+    unset($row['session_expires_at']);
     $_sessionUserCache['result'] = $row;
     return $row;
 }
