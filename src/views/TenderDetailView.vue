@@ -206,7 +206,7 @@
               <div class="td-offer-prices-title">Файлы КП</div>
               <div v-if="getOfferFiles(offer.supplier).length" class="td-files-list">
                 <div v-for="f in getOfferFiles(offer.supplier)" :key="f.id" class="td-file-item">
-                  <a :href="'/api/uploads/tenders/' + f.file_path + '?download=1&token=' + sessionToken" class="td-file-link" target="_blank">
+                  <a :href="tenderFileUrl(f)" class="td-file-link" target="_blank">
                     <span class="td-file-icon">{{ fileIcon(f.file_name) }}</span>
                     {{ f.file_name }}
                   </a>
@@ -444,7 +444,7 @@
 import { ref, reactive, computed, defineAsyncComponent, onMounted, nextTick, inject, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
-import { db } from '@/lib/apiClient.js';
+import { db, getDownloadUrl } from '@/lib/apiClient.js';
 import { formatDate, applyEntityGroupFilter } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -804,6 +804,18 @@ function removeOffer(oi) {
 
 // Файлы КП
 const API_BASE = '/api';
+const tenderFileUrls = ref({}); // file id → одноразовый URL
+function tenderFileUrl(f) { return tenderFileUrls.value[f.id] || ''; }
+async function refreshTenderFileUrls() {
+  const map = {};
+  for (const f of tender.value.files || []) {
+    if (!f.file_path) continue;
+    try { map[f.id] = await getDownloadUrl(`/api/uploads/tenders/${f.file_path}`, { download: true }); }
+    catch { map[f.id] = ''; }
+  }
+  tenderFileUrls.value = map;
+}
+watch(() => tender.value.files, () => { refreshTenderFileUrls(); }, { deep: true });
 function getOfferFiles(supplier) {
   if (!supplier) return [];
   return tender.value.files.filter(f => f.supplier === supplier);

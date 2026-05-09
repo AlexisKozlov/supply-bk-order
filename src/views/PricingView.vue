@@ -206,7 +206,7 @@
             <span v-if="a.approved_by">Согласовал: {{ a.approved_by }}</span>
           </div>
           <div v-if="a.file_name" class="db-card-meta">
-            <a :href="apiBase + '/' + a.file_path + '?download=1&token=' + sessionToken" @click.stop class="psc-file-link psc-download-btn" target="_blank"><BkIcon name="import" size="sm"/> Скачать</a>
+            <a :href="agUrl(a)" @click.stop class="psc-file-link psc-download-btn" target="_blank"><BkIcon name="import" size="sm"/> Скачать</a>
           </div>
           <div v-if="!isViewer" class="db-card-btns">
             <button v-if="a.status === 'draft' && hasFullAccess" class="approve-btn" @click.stop="approveAgreement(a)"><BkIcon name="check" size="sm"/> Согласовать</button>
@@ -411,7 +411,7 @@
         <div class="form-group">
           <label>Файл</label>
           <div v-if="agForm.file_name" style="margin-bottom:6px;font-size:12px;">
-            Текущий: <a :href="apiBase + '/' + agForm.file_path + '?download=1&token=' + sessionToken" target="_blank">{{ agForm.file_name }}</a>
+            Текущий: <a :href="agFormUrl" target="_blank">{{ agForm.file_name }}</a>
           </div>
           <input ref="pscFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" @change="onPscFileSelected" style="display:none;" />
           <button class="file-upload-btn" @click="pscFileInput?.click()" :disabled="uploadingFile">
@@ -677,7 +677,7 @@
 import { ref, computed, defineAsyncComponent, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
-import { db } from '@/lib/apiClient.js';
+import { db, getDownloadUrl } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
 import { getEntityGroup } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -702,7 +702,25 @@ const toast = useToastStore();
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const apiBase = API_BASE;
-const sessionToken = localStorage.getItem('bk_session_token') || '';
+// One-time download URL для файлов протоколов (защита от утечки session_token).
+// Заполняется по мере отображения карточек.
+const agreementUrls = ref({}); // id → URL
+const agFormUrl = ref('');
+function agUrl(a) { return agreementUrls.value[a.id] || ''; }
+async function refreshAgreementUrls() {
+  const map = {};
+  for (const a of agreements.value) {
+    if (!a.file_path) continue;
+    try { map[a.id] = await getDownloadUrl(`${apiBase}/${a.file_path}`, { download: true }); }
+    catch { map[a.id] = ''; }
+  }
+  agreementUrls.value = map;
+}
+async function refreshAgFormUrl() {
+  if (!agForm.value?.file_path) { agFormUrl.value = ''; return; }
+  try { agFormUrl.value = await getDownloadUrl(`${apiBase}/${agForm.value.file_path}`, { download: true }); }
+  catch { agFormUrl.value = ''; }
+}
 
 const isViewer = computed(() => !userStore.hasAccess('pricing', 'edit'));
 const hasFullAccess = computed(() => userStore.hasAccess('pricing', 'full'));
@@ -1042,6 +1060,8 @@ const savingAgreement = ref(false);
 const uploadingFile = ref(false);
 const pscFileInput = ref(null);
 const agForm = ref({ number: '', supplier: '', valid_from: '', valid_to: '', note: '', doc_type: 'psc', file_name: '', file_path: '' });
+watch(agreements, () => { refreshAgreementUrls(); }, { deep: false });
+watch(() => agForm.value?.file_path, () => { refreshAgFormUrl(); });
 const agPriceItems = ref([]); // [{sku, name, selected, price, unit_type}]
 const agProductSearch = ref('');
 const agCurrency = ref('RUB');

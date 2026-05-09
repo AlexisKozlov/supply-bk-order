@@ -177,6 +177,11 @@ async function downloadExcel() {
 
 function printTtn() {
   if (!checkRoutedWarning()) return;
+  // TODO[2026-Q3]: эндпоинт /api/keg-returns/.../print не покрыт одноразовыми
+  // download-токенами (?dl=), там только ?token=session_token. Утечка через
+  // лог nginx маловероятна (печать редко открывается «наружу»), но при
+  // следующей итерации безопасности перевести на отдельный print-token
+  // или на nginx no-log query string для /api/keg-returns/.../print.
   const t = localStorage.getItem('bk_session_token') || '';
   const url = `/api/keg-returns/${props.id}/print?token=${encodeURIComponent(t)}`;
   window.open(url, '_blank');

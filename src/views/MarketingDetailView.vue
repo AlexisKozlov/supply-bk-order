@@ -335,7 +335,7 @@
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { db } from '@/lib/apiClient.js';
+import { db, getDownloadUrl } from '@/lib/apiClient.js';
 import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -1249,10 +1249,19 @@ function closeSearch() {
 // ─── Files ──────────────────────────────────────────────────────────────────
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
-function fileUrl(f) {
-  const token = localStorage.getItem('bk_session_token') || '';
-  return `${API_BASE}/uploads/marketing/${f.file_path}?download=1&token=${token}`;
+// Кэш одноразовых download-URL для файлов активности.
+const fileUrls = ref({}); // f.id → URL
+function fileUrl(f) { return fileUrls.value[f.id] || ''; }
+async function refreshFileUrls() {
+  const map = {};
+  for (const f of activity.value.files || []) {
+    if (!f.file_path) continue;
+    try { map[f.id] = await getDownloadUrl(`${API_BASE}/uploads/marketing/${f.file_path}`, { download: true }); }
+    catch { map[f.id] = ''; }
+  }
+  fileUrls.value = map;
 }
+watch(() => activity.value.files, () => { refreshFileUrls(); }, { deep: true });
 
 async function uploadFile(e) {
   const file = e.target.files?.[0];

@@ -47,8 +47,8 @@
                   <div v-else class="chat-bubble-text" style="opacity:0.6">{{ viewingReport.title }}</div>
                   <div v-if="viewingReport.screenshots?.length" class="chat-bubble-imgs">
                     <img v-for="(s, i) in viewingReport.screenshots" :key="i"
-                      :src="apiBase + '/' + s + '?token=' + getToken()"
-                      @click="previewImage = apiBase + '/' + s + '?token=' + getToken()" />
+                      :src="reportImageUrl(s)"
+                      @click="previewImage = reportImageUrl(s)" />
                   </div>
                 </div>
                 <div class="chat-bubble-time">{{ formatDate(viewingReport.created_at) }}</div>
@@ -61,7 +61,7 @@
                   <template v-for="(part, pi) in parseMsgParts(r.message)" :key="pi">
                     <span v-if="part.type === 'text'" class="chat-bubble-text">{{ part.text }}</span>
                     <div v-else-if="part.type === 'img'" class="chat-bubble-imgs">
-                      <img :src="apiBase + '/' + part.path + '?token=' + getToken()" @click="previewImage = apiBase + '/' + part.path + '?token=' + getToken()" />
+                      <img :src="reportImageUrl(part.path)" @click="previewImage = reportImageUrl(part.path)" />
                     </div>
                   </template>
                 </div>
@@ -197,7 +197,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
-import { db } from '@/lib/apiClient.js';
+import { db, getDownloadUrl } from '@/lib/apiClient.js';
 import { formatDateTimeShort as formatDate } from '@/lib/utils.js';
 
 const route = useRoute();
@@ -206,6 +206,27 @@ const orderStore = useOrderStore();
 
 const apiBase = import.meta.env.VITE_API_URL || '/api';
 function getToken() { return localStorage.getItem('bk_session_token') || ''; }
+
+// Карта одноразовых URL для картинок-скриншотов багрепорта.
+// Ключ — file_path. Заполняется при открытии диалога.
+const reportImageUrls = ref({});
+function reportImageUrl(path) { return reportImageUrls.value[path] || ''; }
+async function refreshReportImageUrls() {
+  const paths = new Set();
+  for (const s of (viewingReport.value?.screenshots || [])) paths.add(s);
+  for (const r of (viewingReplies.value || [])) {
+    for (const part of parseMsgParts(r.message || '')) {
+      if (part.type === 'img' && part.path) paths.add(part.path);
+    }
+  }
+  const map = { ...reportImageUrls.value };
+  for (const p of paths) {
+    if (map[p]) continue;
+    try { map[p] = await getDownloadUrl(`${apiBase}/${p}`); }
+    catch { map[p] = ''; }
+  }
+  reportImageUrls.value = map;
+}
 
 const showForm = ref(false);
 const tab = ref('new');
@@ -399,6 +420,7 @@ const myReports = ref([]);
 const loadingReports = ref(false);
 const viewingReport = ref(null);
 const viewingReplies = ref([]);
+watch([viewingReport, viewingReplies], () => { refreshReportImageUrls(); }, { deep: false });
 const replyText = ref('');
 const sendingReply = ref(false);
 const replyImages = ref([]);

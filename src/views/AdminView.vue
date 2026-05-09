@@ -691,8 +691,8 @@
             <div class="fb-chat-info-body">
               <p v-if="bugDetail.description" style="font-size:13px;color:var(--text-secondary);white-space:pre-wrap;margin:0 0 8px;line-height:1.5;">{{ bugDetail.description }}</p>
               <div v-if="bugDetail.screenshots?.length" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
-                <a v-for="(s, i) in bugDetail.screenshots" :key="i" :href="apiBase + '/' + s + '?token=' + sessionToken" target="_blank">
-                  <img :src="apiBase + '/' + s + '?token=' + sessionToken" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border);" />
+                <a v-for="(s, i) in bugDetail.screenshots" :key="i" :href="bugImageUrl(s)" target="_blank">
+                  <img :src="bugImageUrl(s)" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border);" />
                 </a>
               </div>
               <div v-if="bugDetail.page_url" style="font-size:11px;color:var(--text-muted);word-break:break-all;"><b>Страница:</b> {{ bugDetail.page_url }}</div>
@@ -711,7 +711,7 @@
                 <span :style="r.is_admin ? 'color:#2E7D32' : ''">{{ r.created_by }}{{ r.is_admin ? ' (вы)' : '' }}</span>
                 <span>{{ formatBugDate(r.created_at) }}</span>
               </div>
-              <div class="fb-msg-text" v-html="renderMsgContent(r.message)" @click="onBugMsgClick"></div>
+              <div class="fb-msg-text" v-html="renderMsgContent(r.message, bugImageUrls)" @click="onBugMsgClick" :data-img-rev="Object.keys(bugImageUrls).length"></div>
             </div>
           </div>
 
@@ -1855,6 +1855,36 @@ const bugReplies = ref([]);
 const bugReplyText = ref('');
 const bugReplySending = ref(false);
 
+// Карта одноразовых URL для картинок багрепорта (path → URL).
+// Заполняется при открытии bugDetail и при обновлении ответов.
+const bugImageUrls = ref({});
+function bugImageUrl(path) { return bugImageUrls.value[path] || ''; }
+async function refreshBugImageUrls() {
+  const paths = new Set();
+  for (const s of (bugDetail.value?.screenshots || [])) paths.add(s);
+  for (const r of (bugReplies.value || [])) {
+    const re = /\[img:([^\]]+)\]/g;
+    let m;
+    while ((m = re.exec(r.message || '')) !== null) {
+      const raw = m[1];
+      if (/^uploads\/[a-zA-Z0-9_\-/.]+$/.test(raw) && !raw.includes('..')) paths.add(raw);
+    }
+  }
+  const map = { ...bugImageUrls.value };
+  for (const p of paths) {
+    if (map[p]) continue;
+    try {
+      const { data } = await db.rpc('create_download_token', { file_path: p });
+      if (data?.token) {
+        const sep = p.includes('?') ? '&' : '?';
+        map[p] = `${apiBase}/${p}${sep}dl=${encodeURIComponent(data.token)}`;
+      }
+    } catch { map[p] = ''; }
+  }
+  bugImageUrls.value = map;
+}
+watch([bugDetail, bugReplies], () => { refreshBugImageUrls(); }, { deep: false });
+
 const filteredBugReports = computed(() => {
   if (!bugFilterStatus.value) return bugReports.value;
   return bugReports.value.filter(r => r.status === bugFilterStatus.value);
@@ -1897,7 +1927,10 @@ function onBugMsgClick(e) {
   }
 }
 
-function renderMsgContent(msg) {
+// Второй аргумент urlsMap — { path: url }. Vue ловит изменения через
+// :data-img-rev в template-узле, поэтому рендер пересчитывается при
+// заполнении одноразовых URL картинок.
+function renderMsgContent(msg, urlsMap = bugImageUrls.value) {
   if (!msg) return '';
   // Экранируем всё, включая кавычки — чтобы нельзя было вырваться из src="..."
   const escapeHtml = (s) => s
@@ -1916,7 +1949,9 @@ function renderMsgContent(msg) {
     const raw = m[1] || '';
     // Белый список: только пути uploads/... с безопасными символами
     if (/^uploads\/[a-zA-Z0-9_\-/.]+$/.test(raw) && !raw.includes('..')) {
-      const src = escapeHtml(apiBase + '/' + raw + '?token=' + sessionToken);
+      // URL берём из urlsMap — заполняется заранее в refreshBugImageUrls.
+      const url = (urlsMap || {})[raw] || '';
+      const src = escapeHtml(url);
       result += '<img src="' + src + '" class="fb-msg-img" data-bug-img="1" />';
     }
     lastIdx = m.index + m[0].length;
