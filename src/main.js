@@ -1,5 +1,5 @@
 import { createApp } from 'vue';
-import { createPinia } from 'pinia';
+import { createPinia, setActivePinia } from 'pinia';
 import App from './App.vue';
 import { router } from './router/index.js';
 import { setAuthErrorHandler } from '@/lib/apiClient.js';
@@ -14,6 +14,11 @@ import './assets/compact.css';
 
 const app = createApp(App);
 const pinia = createPinia();
+
+// Активируем pinia до app.mount(), чтобы useUserStore() в restoreSession()
+// возвращал ТОТ ЖЕ store, что используют компоненты (иначе при F5 currentUser
+// ставился в "сиротский" instance, и роутер не видел залогиненного пользователя).
+setActivePinia(pinia);
 
 app.use(pinia);
 app.use(router);
