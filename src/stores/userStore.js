@@ -76,38 +76,65 @@ export const useUserStore = defineStore('user', () => {
   }
 
   let _sessionRestored = false;
-  function restoreSession() {
-    if (_sessionRestored) return;
+  let _restorePromise = null;
+  // Восстановление сессии: НЕ доверяем localStorage до проверки сервера —
+  // иначе подмена role: 'admin' в DevTools пускает в UI админки до того,
+  // как validate_session вернёт реальную роль. Поэтому currentUser ставим
+  // только после успешного ответа сервера. Если сети нет — пускаем по
+  // локальным данным как fallback (офлайн-режим).
+  async function restoreSession() {
+    if (_sessionRestored) return currentUser.value;
+    if (_restorePromise) return _restorePromise;
     _sessionRestored = true;
-    try {
-      const stored = localStorage.getItem('bk_user');
-      if (stored) {
-        const user = JSON.parse(stored);
-        currentUser.value = user;
-        // Асинхронная валидация сессии на сервере
-        validateSession(user);
+    _restorePromise = (async () => {
+      let stored = null;
+      try {
+        const raw = localStorage.getItem('bk_user');
+        if (raw) stored = JSON.parse(raw);
+      } catch (e) { /* битый JSON — игнорируем */ }
+      if (!stored) return null;
+      try {
+        const { data } = await db.rpc('validate_session', {});
+        if (!data?.valid) {
+          logout();
+          return null;
+        }
+        if (data.session_token) setSessionToken(data.session_token);
+        if (data.user) {
+          const updated = { ...stored, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
+          currentUser.value = updated;
+          localStorage.setItem('bk_user', JSON.stringify(updated));
+          return updated;
+        }
+        currentUser.value = stored;
+        return stored;
+      } catch (e) {
+        // Сеть недоступна — оставляем локальную сессию (офлайн-режим).
+        currentUser.value = stored;
+        return stored;
+      } finally {
+        _restorePromise = null;
       }
-    } catch (e) { /* noop */ }
+    })();
+    return _restorePromise;
   }
 
-  async function validateSession(user) {
+  async function validateSession() {
     try {
       const { data } = await db.rpc('validate_session', {});
       if (!data?.valid) {
         logout();
         return null;
       }
-      // Сохранить сессионный токен если сервер выдал (миграция)
       if (data.session_token) setSessionToken(data.session_token);
-      // Обновить роль и настройки из сервера (защита от подмены в localStorage)
-      if (data.user) {
-        const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
+      if (data.user && currentUser.value) {
+        const updated = { ...currentUser.value, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
         currentUser.value = updated;
         localStorage.setItem('bk_user', JSON.stringify(updated));
         return updated;
       }
       return currentUser.value;
-    } catch (e) { /* сеть недоступна — оставляем локальную сессию */ }
+    } catch (e) { /* сеть недоступна */ }
     return currentUser.value;
   }
 
@@ -154,6 +181,17 @@ export const useUserStore = defineStore('user', () => {
     }
     keysToRemove.forEach(k => localStorage.removeItem(k));
     try { sessionStorage.removeItem('bk_just_logged_in'); } catch(e) {}
+    // Чистим PWA-кэши: иначе при следующем входе из другого аккаунта
+    // браузер может отдать кэш предыдущего пользователя в офлайне.
+    if (typeof caches !== 'undefined' && caches?.keys) {
+      caches.keys().then(keys => {
+        for (const k of keys) {
+          if (/^api-/.test(k) || /^workbox-/.test(k)) {
+            caches.delete(k).catch(() => {});
+          }
+        }
+      }).catch(() => {});
+    }
   }
 
   function getHiddenModules() {

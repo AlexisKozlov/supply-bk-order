@@ -42,11 +42,11 @@
         v-for="link in externalSupplierLinks"
         :key="'sb-ext-' + link.id"
         class="sb-item sb-item-link"
-        :href="link.url"
+        :href="safeExternalUrl(link.url)"
         target="_blank"
         rel="noopener noreferrer"
       >
-        <span class="supplier-icon supplier-icon-sm" :class="link.iconClass" v-html="link.iconSvg"></span>
+        <span class="supplier-icon supplier-icon-sm" :class="link.iconClass" v-html="trustedSupplierIcon(link.iconKey)"></span>
         {{ link.name }}
         <span class="sb-ext" v-html="cabIconSvg.external"></span>
       </a>
@@ -364,11 +364,11 @@
           v-for="link in externalSupplierLinks"
           :key="'mob-ext-' + link.id"
           class="ord-tab ord-tab-link"
-          :href="link.url"
+          :href="safeExternalUrl(link.url)"
           target="_blank"
           rel="noopener noreferrer"
         >
-          <span class="supplier-icon supplier-icon-xs" :class="link.iconClass" v-html="link.iconSvg"></span>
+          <span class="supplier-icon supplier-icon-xs" :class="link.iconClass" v-html="trustedSupplierIcon(link.iconKey)"></span>
           {{ link.name }}
           <span class="ord-tab-ext" v-html="cabIconSvg.external"></span>
         </a>
@@ -1698,12 +1698,21 @@ const supplierIconSvg = {
   package: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8l8-4 8 4-8 4-8-4Z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/><path d="M8 6.2 16 10"/></svg>',
 };
 const externalOrderLinks = [
-  { id: 'lidskae', name: 'Лидское пиво', url: 'https://client.lidskae.by/catalog', iconSvg: supplierIconSvg.drinks, iconClass: 'supplier-icon-drinks' },
-  { id: 'salatoria', name: 'Салатория', url: 'http://salatoria.liam.by/my_zakaz/ru_RU', iconSvg: supplierIconSvg.vegetables, iconClass: 'supplier-icon-vegetables' },
+  { id: 'lidskae', name: 'Лидское пиво', url: 'https://client.lidskae.by/catalog', iconKey: 'drinks', iconClass: 'supplier-icon-drinks' },
+  { id: 'salatoria', name: 'Салатория', url: 'http://salatoria.liam.by/my_zakaz/ru_RU', iconKey: 'vegetables', iconClass: 'supplier-icon-vegetables' },
 ];
 const externalSupplierLinks = computed(() => (
   roStore.restaurant?.legal_entity_group === 'BK_VM' ? externalOrderLinks : []
 ));
+// SVG только из локальной карты — защита от XSS, если в будущем кто-то
+// решит брать иконки из API, иконка не отрисуется (вернётся пустая строка).
+function trustedSupplierIcon(key) {
+  return supplierIconSvg[key] || '';
+}
+// Защита от javascript:-ссылок: если url не http(s) — открываем как about:blank.
+function safeExternalUrl(url) {
+  return /^https?:\/\//i.test(String(url || '')) ? url : 'about:blank';
+}
 
 function supplierIcon(name) {
   const n = String(name || '').toLowerCase();

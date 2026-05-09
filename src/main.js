@@ -111,4 +111,9 @@ app.config.errorHandler = (err, instance, info) => {
   } catch (e) { /* store not ready */ }
 };
 
-app.mount('#app');
+// Восстанавливаем сессию ДО монтирования: иначе в первые ~200мс
+// можно подменить role в localStorage и попасть в UI админки.
+const userStore = useUserStore();
+userStore.restoreSession().finally(() => {
+  app.mount('#app');
+});

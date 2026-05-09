@@ -540,7 +540,43 @@ function getSessionUser($pdo) {
     $_sessionUserCache['done'] = true;
 
     $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
-    // $_GET['token'] разрешён только для скачивания файлов
+    // $_GET['dl'] — новый одноразовый download-токен (15 мин, привязан к файлу).
+    // Принимается только для uploads. Легче, чем session-токен, и не утечёт.
+    if (!$token && isset($_GET['dl'])) {
+        global $endpoint;
+        if (($endpoint ?? '') === 'uploads') {
+            $dl = (string)$_GET['dl'];
+            unset($_GET['dl']);
+            header('Cache-Control: no-store, no-cache, must-revalidate');
+            header('Pragma: no-cache');
+            if (preg_match('/^[a-f0-9]{32}$/', $dl)) {
+                $st = $pdo->prepare("SELECT user_name, file_path, used_at FROM download_tokens WHERE token = ? AND expires_at > NOW() LIMIT 1");
+                $st->execute([$dl]);
+                $row = $st->fetch();
+                if ($row) {
+                    // Одноразовость: после первой выдачи помечаем used_at.
+                    // Допускаем повторную выдачу того же файла, чтобы превью
+                    // не ломалось при повторных запросах <img>. Если файл другой —
+                    // сервер всё равно отдаст ошибку 403/404 при проверке пути.
+                    if (!$row['used_at']) {
+                        $pdo->prepare("UPDATE download_tokens SET used_at = NOW(), ip_address = ? WHERE token = ?")
+                            ->execute([$_SERVER['REMOTE_ADDR'] ?? null, $dl]);
+                    }
+                    // Эмулируем сессию для скачивания: имя пользователя есть, остальное
+                    // не нужно (uploads-обработчики не требуют role/legal_entities).
+                    $u = $pdo->prepare("SELECT name, role, display_role, legal_entities, permissions, created_at, telegram_chat_id, hidden_modules FROM users WHERE name = ? LIMIT 1");
+                    $u->execute([$row['user_name']]);
+                    $userRow = $u->fetch();
+                    if ($userRow) {
+                        $_sessionUserCache['result'] = $userRow;
+                        return $userRow;
+                    }
+                }
+            }
+        }
+    }
+    // [DEPRECATED] $_GET['token'] = session_token. Оставлен для совместимости
+    // со старым фронтом (~10 мест), будет удалён после полного перехода на ?dl=.
     if (!$token && isset($_GET['token'])) {
         global $endpoint;
         if (($endpoint ?? '') === 'uploads') {

@@ -75,9 +75,15 @@ async function api(path, opts = {}) {
   return data;
 }
 
+function safeParseJson(raw, fallback = null) {
+  if (raw == null || raw === '' || raw === 'null' || raw === 'undefined') return fallback;
+  try { return JSON.parse(raw); } catch { return fallback; }
+}
+
 export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   // === Состояние ресторана ===
-  const restaurant = ref(JSON.parse(localStorage.getItem(REST_KEY) || 'null'));
+  // Битый JSON в localStorage не должен ронять весь стор и интерфейс.
+  const restaurant = ref(safeParseJson(localStorage.getItem(REST_KEY), null));
   const isAuthenticated = computed(() => !!restaurant.value && !!getToken());
 
   const sessionInfo = ref(null);

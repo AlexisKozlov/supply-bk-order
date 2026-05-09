@@ -153,7 +153,7 @@
         <h3>Файлы <span class="mpd-count">({{ files.length }})</span></h3>
         <div v-if="files.length" class="mpd-files">
           <div v-for="f in files" :key="f.id" class="mpd-file">
-            <a :href="'/api/uploads/protocols/' + f.file_path + '?token=' + sessionToken" target="_blank" class="mpd-file-name">{{ f.file_name }}</a>
+            <a :href="fileUrl(f)" target="_blank" class="mpd-file-name">{{ f.file_name }}</a>
             <span class="mpd-file-meta">{{ f.uploaded_by }}</span>
             <button v-if="canEdit" class="mpd-row-del" @click="deleteFile(f)" title="Удалить файл">&times;</button>
           </div>
@@ -182,7 +182,7 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch, nextTick, inject } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { db } from '@/lib/apiClient.js';
+import { db, getDownloadUrl } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -206,7 +206,20 @@ const carryoverTasks = ref([]);
 const questionsRef = ref(null);
 const notesRef = ref(null);
 const uploading = ref(false);
-const sessionToken = computed(() => localStorage.getItem('bk_session_token') || '');
+// Карта одноразовых download-токенов: file_path → URL.
+// Заполняется асинхронно в watch на files.
+const downloadUrls = ref({});
+function fileUrl(f) { return downloadUrls.value[f.id] || ''; }
+async function refreshDownloadUrls() {
+  const map = {};
+  for (const f of files.value) {
+    try {
+      map[f.id] = await getDownloadUrl('/api/uploads/protocols/' + f.file_path);
+    } catch { map[f.id] = ''; }
+  }
+  downloadUrls.value = map;
+}
+watch(files, () => { refreshDownloadUrls(); }, { immediate: false });
 const allUsers = ref([]);
 const seriesList = ref([]);
 const { confirmModal, confirm, onConfirm, onCancel } = useConfirm();

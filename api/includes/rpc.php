@@ -38,6 +38,8 @@ if ($endpoint === 'rpc') {
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success'=>false,'error'=>'invalid_email'], 400);
         if (!$acceptedDataRules) respond(['success'=>false,'error'=>'data_rules_required'], 400);
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
+        // Account-level rate-limit: защита от distributed brute-force одного аккаунта.
+        if (!checkAccountRateLimit($pdo, $email, 5, 10)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,permissions,created_at,telegram_chat_id,hidden_modules FROM users WHERE email=?");
         $s->execute([$email]); $u = $s->fetch();
         if (!$u) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
@@ -478,8 +480,8 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Укажите токен и новый пароль'], 400);
         }
 
-        if (mb_strlen($newPassword) < 6) {
-            respond(['error' => 'Пароль должен быть не менее 6 символов'], 400);
+        if (mb_strlen($newPassword) < 8) {
+            respond(['error' => 'Пароль должен быть не менее 8 символов'], 400);
         }
 
         // Токен должен быть валидным и не старше 30 минут с момента активации.
@@ -567,6 +569,25 @@ if ($endpoint === 'rpc') {
             'role_templates' => $ROLE_TEMPLATES,
             'access_levels' => $ACCESS_LEVELS,
         ]);
+    }
+
+    // Одноразовый download-токен для скачивания файла. Заменяет
+    // session_token в ?token=. Живёт 15 минут, пишется в download_tokens,
+    // принимается uploads-обработчиками через ?dl=. Принимает file_path
+    // (относительно api/uploads/) для аудита; реальная авторизация на
+    // конкретный файл всё равно делается uploads.php.
+    if ($fn === 'create_download_token') {
+        if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
+        $filePath = trim((string)($body['file_path'] ?? ''));
+        if ($filePath === '' || mb_strlen($filePath) > 512) respond(['error' => 'invalid file_path'], 400);
+        if (strpos($filePath, '..') !== false || strpos($filePath, "\0") !== false) respond(['error' => 'invalid file_path'], 400);
+        // Ленивая чистка устаревших токенов: вместо отдельного cron-а удаляем
+        // протухшие записи при каждом запросе. Дешёвая операция (индекс по expires_at).
+        try { $pdo->prepare("DELETE FROM download_tokens WHERE expires_at < NOW() - INTERVAL 1 DAY")->execute(); } catch (Throwable $e) {}
+        $token = bin2hex(random_bytes(16));
+        $pdo->prepare("INSERT INTO download_tokens (token, user_name, file_path, expires_at) VALUES (?, ?, ?, NOW() + INTERVAL 15 MINUTE)")
+            ->execute([$token, $authUserName, $filePath]);
+        respond(['token' => $token, 'expires_in' => 15 * 60]);
     }
 
     // Сводка реализации ресторанов для трендов в заказе и планировании.

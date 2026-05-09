@@ -572,7 +572,13 @@ watch(() => route.name, (newRoute) => {
 // панель не «прыгала» при загрузке. Источник истины — сервер (users.preferences),
 // благодаря чему список синхронизируется между устройствами и не пропадает
 // при чистке кеша браузера.
-const pinnedModules = ref(JSON.parse(localStorage.getItem('bk_pinned_modules') || '[]'));
+function safeParsePins() {
+  try {
+    const v = JSON.parse(localStorage.getItem('bk_pinned_modules') || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+const pinnedModules = ref(safeParsePins());
 let savePinsTimer = null;
 async function loadPinsFromServer() {
   try {

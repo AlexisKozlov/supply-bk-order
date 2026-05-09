@@ -91,7 +91,9 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
-            urlPattern: /\/api\/(products|suppliers)\?/,
+            // Справочники — кэшируем для офлайн-работы. Не содержат личных
+            // данных пользователя, поэтому остаются после logout без риска.
+            urlPattern: /\/api\/(products|suppliers|restaurants|settings|delivery_schedule|cards)(\?|$)/,
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-reference-data',
@@ -99,13 +101,11 @@ export default defineConfig({
             },
           },
           {
+            // Все остальные API — НЕ кэшируем. Иначе после logout в браузере
+            // остаются чужие заказы, чаты, юзеры, оплаты и т.п. Это перекрывает
+            // утечку данных при смене аккаунта на одном устройстве и при выходе.
             urlPattern: /\/api\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 200, maxAgeSeconds: 600 },
-              networkTimeoutSeconds: 5,
-            },
+            handler: 'NetworkOnly',
           },
           {
             urlPattern: /\.(?:png|svg|otf|woff|woff2)$/,

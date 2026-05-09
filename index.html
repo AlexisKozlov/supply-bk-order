@@ -10,7 +10,16 @@
     <title>Портал закупок</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <!-- Заглушка-спиннер до mount Vue (~200-500мс пока идёт validate_session). -->
+      <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#f6f1eb;color:#502314;font-family:system-ui,-apple-system,sans-serif;font-size:14px;">
+        <div style="text-align:center;">
+          <div style="width:40px;height:40px;border:3px solid #e2d5c4;border-top-color:#502314;border-radius:50%;margin:0 auto 12px;animation:bk-spin 0.9s linear infinite;"></div>
+          Загрузка…
+        </div>
+      </div>
+      <style>@keyframes bk-spin{to{transform:rotate(360deg)}}</style>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

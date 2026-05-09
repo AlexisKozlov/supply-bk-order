@@ -239,6 +239,34 @@ export const db = {
 export function setSessionToken(t) { localStorage.setItem('bk_session_token', t); }
 
 /**
+ * Получает одноразовый download-токен для ссылки на файл (TTL 15 мин).
+ * Заменяет небезопасную передачу session_token в ?token=. Кэширует токен
+ * на 14 минут, чтобы не дёргать бэкенд при каждом ререндере списка файлов.
+ *
+ * Usage:
+ *   const url = await getDownloadUrl('/api/uploads/protocols/abc.pdf');
+ *   <a :href="url">скачать</a>
+ */
+const _downloadTokenCache = new Map(); // filePath → { token, expires }
+export async function getDownloadUrl(filePath, opts = {}) {
+  const path = String(filePath || '').replace(/^\/+api\/+/, '/api/');
+  if (!path) return '';
+  const cleanPath = path.replace(/^\/api\//, '');
+  const cached = _downloadTokenCache.get(cleanPath);
+  const now = Date.now();
+  let token = cached && cached.expires > now ? cached.token : null;
+  if (!token) {
+    const { data } = await rpc('create_download_token', { file_path: cleanPath });
+    if (!data?.token) return path; // fallback на старый URL без токена
+    token = data.token;
+    _downloadTokenCache.set(cleanPath, { token, expires: now + 14 * 60 * 1000 });
+  }
+  const sep = path.includes('?') ? '&' : '?';
+  const dl = `${path}${sep}dl=${encodeURIComponent(token)}`;
+  return opts.download ? `${dl}&download=1` : dl;
+}
+
+/**
  * Экранирует значение для использования в or()-условиях.
  * Запятые, скобки и обратные слэши в значении экранируются,
  * чтобы бэкенд не разбил строку в неправильном месте.
