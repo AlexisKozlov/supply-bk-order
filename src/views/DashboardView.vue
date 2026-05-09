@@ -2,8 +2,11 @@
   <div class="dash">
     <div class="dash-header">
       <h1 class="page-title">Дашборд</h1>
-      <!-- freshness badge removed -->
       <div class="dash-controls">
+        <span v-if="lastLoadedAt" class="data-freshness">Обновлено в {{ freshnessLabel }}</span>
+        <button class="dash-refresh" :disabled="loading" @click="load" title="Обновить данные">
+          <span :class="{ spin: loading }">↻</span>
+        </button>
         <select v-model="entityFilter" class="dash-select" @change="load">
           <option value="">Все юрлица</option>
           <option v-for="le in entities" :key="le" :value="le">{{ le }}</option>
@@ -21,7 +24,13 @@
     <template v-else>
       <!-- KPI Row 1 -->
       <div class="dash-kpis">
-        <div class="dash-kpi" v-for="kpi in topKpis" :key="kpi.label">
+        <component
+          :is="kpi.link ? 'router-link' : 'div'"
+          v-for="kpi in topKpis" :key="kpi.label"
+          :to="kpi.link"
+          class="dash-kpi"
+          :class="{ 'dash-kpi-link': kpi.link }"
+        >
           <div class="dash-kpi-top">
             <span class="dash-kpi-icon">{{ kpi.icon }}</span>
             <span v-if="kpi.delta" class="dash-kpi-delta" :class="kpi.delta > 0 ? 'up' : 'down'">
@@ -30,7 +39,7 @@
           </div>
           <div class="dash-kpi-val">{{ kpi.value }}</div>
           <div class="dash-kpi-label">{{ kpi.label }}</div>
-        </div>
+        </component>
       </div>
 
       <div class="dash-cols">
@@ -93,7 +102,7 @@
       </div>
 
       <!-- Блок руководителя -->
-      <div class="dash-cols" style="margin-top:16px;">
+      <div class="dash-cols dash-cols--manager">
         <!-- Критичные запасы -->
         <div class="dash-col">
           <div class="dash-card">
@@ -171,10 +180,15 @@ const topKpis = computed(() => {
     { icon: '📦', value: d.ordersCount || 0, label: 'Заказов', delta: d.ordersDelta },
     ...(showPricing ? [{ icon: '💰', value: fmtK(d.totalAmount), label: 'Сумма закупок (BYN)', delta: d.amountDelta }] : []),
     { icon: '🚚', value: (d.deliveredPct || 0) + '%', label: 'Выполнение поставок', delta: null },
-    { icon: '⚠️', value: d.overdueCount || 0, label: 'Просроченные', delta: null },
-    { icon: '📉', value: d.lowStockCount || 0, label: 'Низкий запас', delta: null },
-    { icon: '💳', value: d.paymentsUpcoming || 0, label: 'Оплаты', delta: null },
+    { icon: '⚠️', value: d.overdueCount || 0, label: 'Просроченные', delta: null, link: '/plan-fact' },
+    { icon: '📉', value: d.lowStockCount || 0, label: 'Низкий запас', delta: null, link: '/analysis' },
+    { icon: '💳', value: d.paymentsUpcoming || 0, label: 'Оплаты', delta: null, link: '/payments' },
   ]
+})
+
+const freshnessLabel = computed(() => {
+  if (!lastLoadedAt.value) return ''
+  return lastLoadedAt.value.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 })
 
 async function load() {
@@ -264,7 +278,12 @@ onMounted(load)
 <style scoped>
 .dash { padding: 20px 28px; }
 .dash-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 8px; }
-.dash-controls { display: flex; gap: 8px; }
+.dash-controls { display: flex; gap: 8px; align-items: center; }
+.dash-refresh { background: none; border: 1px solid var(--border); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center; transition: background 0.15s; }
+.dash-refresh:hover:not(:disabled) { background: var(--bk-cream); }
+.dash-refresh:disabled { opacity: 0.5; cursor: default; }
+.dash-refresh .spin { display: inline-block; animation: dash-spin 0.9s linear infinite; }
+@keyframes dash-spin { to { transform: rotate(360deg); } }
 .dash-select { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
 .dash-loading { text-align: center; padding: 60px; color: var(--text-muted); }
 
@@ -273,7 +292,9 @@ onMounted(load)
 @media (max-width: 1200px) { .dash-kpis { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 700px) { .dash-kpis { grid-template-columns: repeat(2, 1fr); } }
 
-.dash-kpi { background: var(--card); border: 1px solid var(--border-light); border-radius: 12px; padding: 16px; }
+.dash-kpi { background: var(--card); border: 1px solid var(--border-light); border-radius: 12px; padding: 16px; text-decoration: none; color: inherit; display: block; }
+.dash-kpi-link { cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
+.dash-kpi-link:hover { border-color: var(--bk-brown); transform: translateY(-1px); }
 .dash-kpi-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .dash-kpi-icon { font-size: 20px; }
 .dash-kpi-delta { font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 8px; }
@@ -284,6 +305,7 @@ onMounted(load)
 
 /* Two column layout */
 .dash-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.dash-cols--manager { margin-top: 16px; }
 @media (max-width: 900px) { .dash-cols { grid-template-columns: 1fr; } }
 .dash-col { display: flex; flex-direction: column; gap: 16px; }
 
