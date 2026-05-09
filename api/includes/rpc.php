@@ -3599,6 +3599,45 @@ if ($endpoint === 'rpc') {
         respond(['count' => $count, 'new_count' => $newCount]);
     }
 
+    // Снэпшот цены закупки в позиции заказа. Берёт актуальную цену из
+    // product_prices на момент сохранения и проставляет в каждую позицию.
+    // Это нужно, чтобы исторические суммы заказов в дашборде/отчётах не
+    // «ехали» при последующем изменении прайса.
+    if (!function_exists('enrichItemsWithPrices')) {
+        function enrichItemsWithPrices(PDO $pdo, array $items, string $supplier, string $legalEntity): array {
+            $skus = array_values(array_filter(array_map(fn($i) => $i['sku'] ?? null, $items)));
+            if (empty($skus) || !$supplier || !$legalEntity) return $items;
+            $skus = array_values(array_unique($skus));
+            $ph = implode(',', array_fill(0, count($skus), '?'));
+            // Сначала пробуем точное совпадение supplier+legal_entity, затем
+            // fallback на ту же legal_entity без supplier (если в прайсе записано
+            // только по юрлицу). Берём самую свежую запись.
+            $stmt = $pdo->prepare("
+                SELECT sku, price, vat_rate, unit_type, currency
+                FROM product_prices
+                WHERE legal_entity = ? AND price_type = 'purchase' AND sku IN ($ph)
+                ORDER BY (supplier = ?) DESC, updated_at DESC
+            ");
+            $stmt->execute(array_merge([$legalEntity], $skus, [$supplier]));
+            $priceMap = [];
+            foreach ($stmt->fetchAll() as $row) {
+                if (!isset($priceMap[$row['sku']])) $priceMap[$row['sku']] = $row;
+            }
+            foreach ($items as &$item) {
+                $sku = $item['sku'] ?? null;
+                if ($sku && isset($priceMap[$sku])) {
+                    $p = $priceMap[$sku];
+                    $item['price']     = $p['price'];
+                    $item['vat_rate']  = $p['vat_rate'];
+                    $item['unit_type'] = $p['unit_type'];
+                    $item['currency']  = $p['currency'];
+                }
+            }
+            unset($item);
+            return $items;
+        }
+    }
+
     // Нормализация числовых полей позиции заказа: защита от NaN/Infinity/
     // отрицательных значений и нелепо больших чисел. Раньше клиент мог
     // прислать qty_boxes=-5 или 1e308 — MySQL падал, либо сохранялся мусор.
@@ -3623,6 +3662,9 @@ if ($endpoint === 'rpc') {
             if (array_key_exists('transit', $item))            $item['transit']            = $clip($item['transit'], 0, 9_999_999, false);
             if (array_key_exists('final_order', $item))        $item['final_order']        = $clip($item['final_order'], 0, 9_999_999, false);
             if (array_key_exists('received_qty', $item))       $item['received_qty']       = $clip($item['received_qty'], 0, 9_999_999, false);
+            // Снэпшот цены — защита от поддельных значений с фронта.
+            if (array_key_exists('price', $item))               $item['price']              = $clip($item['price'], 0, 9_999_999, false);
+            if (array_key_exists('vat_rate', $item))            $item['vat_rate']           = $clip($item['vat_rate'], 0, 100, false);
             return $item;
         }
     }
@@ -3647,8 +3689,11 @@ if ($endpoint === 'rpc') {
         $order['id'] = uuid();
         $order['created_at'] = date('Y-m-d H:i:s');
         $order['created_by'] = $caller['name'];
-        // Белый список полей позиции
-        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','analog_group','category','sort_order'];
+        // Белый список полей позиции (price* — снэпшот цены на момент сохранения)
+        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','analog_group','category','sort_order','price','vat_rate','unit_type','currency'];
+        // Снэпшотим цену закупки до начала транзакции — чтение прайса
+        // не должно держать lock на orders.
+        $items = enrichItemsWithPrices($pdo, $items, $order['supplier'] ?? '', $order['legal_entity'] ?? '');
         $pdo->beginTransaction();
         try {
             // Вставляем заказ
@@ -3707,8 +3752,8 @@ if ($endpoint === 'rpc') {
         $orderWhitelist = ['supplier','delivery_date','delivery_date_2','unit','note','details','cda_mode','safety_coef','today_date','safety_days','period_days','has_transit','show_stock_column'];
         $order = array_intersect_key($order, array_flip($orderWhitelist));
         $order['updated_at'] = date('Y-m-d H:i:s');
-        // Белый список полей позиции
-        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category','sort_order'];
+        // Белый список полей позиции (price* — снэпшот цены на момент сохранения)
+        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category','sort_order','price','vat_rate','unit_type','currency'];
         $pdo->beginTransaction();
         try {
             // Блокируем строку и проверяем конкурентное редактирование внутри транзакции
@@ -3733,7 +3778,10 @@ if ($endpoint === 'rpc') {
                 $sp[] = $orderId;
                 $pdo->prepare("UPDATE `orders` SET " . implode(',', $set) . " WHERE id=?")->execute($sp);
             }
-            // Заменяем позиции
+            // Заменяем позиции — сначала обогащаем актуальной ценой,
+            // потом записываем. supplier для lookup берём из обновлённых
+            // данных (если не пришёл — из текущего заказа).
+            $items = enrichItemsWithPrices($pdo, $items, $order['supplier'] ?? ($orderRow['supplier'] ?? ''), $orderRow['legal_entity'] ?? '');
             $pdo->prepare("DELETE FROM `order_items` WHERE `order_id`=?")->execute([$orderId]);
             foreach ($items as $item) {
                 $item = array_intersect_key($item, array_flip($itemWhitelist));
@@ -4425,7 +4473,7 @@ if ($endpoint === 'rpc') {
 
         // Получаем заказ и поставщика
         $order = $pdo->prepare("SELECT o.id, o.supplier, o.legal_entity, o.created_by, o.delivery_date,
-            (SELECT SUM(oi.qty_boxes * COALESCE(pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' WHERE oi.order_id = o.id) as total_amount
+            (SELECT SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' WHERE oi.order_id = o.id) as total_amount
             FROM orders o WHERE o.id = ?");
         $order->execute([$orderId]);
         $o = $order->fetch();
@@ -4559,14 +4607,14 @@ if ($endpoint === 'rpc') {
         $ordersDelta = $prevCount > 0 ? round(($ordersCount - $prevCount) / $prevCount * 100) : 0;
 
         // Сумма (из order_items * product_prices)
-        $amtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0) as total
+        $amtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)), 0) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
             LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ?" . $leAndAlias);
         $amtSt->execute(array_merge([$from], $leArgs));
         $totalAmount = floatval($amtSt->fetchColumn());
 
-        $prevAmtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0)
+        $prevAmtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)), 0)
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
             LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ? AND o.created_at_new < ?" . $leAndAlias);
@@ -4604,7 +4652,7 @@ if ($endpoint === 'rpc') {
         $paymentsUp = $paymentsUpSt->fetchColumn();
 
         // Топ поставщиков
-        $topSt = $pdo->prepare("SELECT o.supplier, SUM(oi.qty_boxes * COALESCE(pp.price, 0)) as total
+        $topSt = $pdo->prepare("SELECT o.supplier, SUM(oi.qty_boxes * COALESCE(oi.price, pp.price, 0)) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
             LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ?" . $leAndAlias . "
