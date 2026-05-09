@@ -171,7 +171,7 @@
     </td>
   </tr>
   <Teleport to="body">
-    <div v-if="tipVisible && tooltipHtml" class="calc-tip-portal" :style="tipStyle" v-html="tooltipHtml"></div>
+    <div v-if="tipVisible && tipHtml" class="calc-tip-portal" :style="tipStyle" v-html="tipHtml"></div>
   </Teleport>
 </template>
 
@@ -254,6 +254,10 @@ const inputOrderBoxes  = ref(null);
 const tipVisible = ref(false);
 const tipX = ref(0);
 const tipY = ref(0);
+// HTML-контент тултипа собираем лениво при наведении мыши, а не computed-ом
+// для каждой строки таблицы (раньше это пересчитывалось для всех 500 строк
+// заказа на любое изменение settings — заметная задержка ввода).
+const tipHtml = ref('');
 const tipStyle = computed(() => ({
   position: 'fixed',
   left: tipX.value + 'px',
@@ -271,6 +275,7 @@ const colRefs = computed(() => [
 ]);
 
 function showCalcTip(e) {
+  tipHtml.value = buildTooltipHtml();
   tipVisible.value = true;
   placeTip(e.currentTarget);
 }
@@ -384,7 +389,7 @@ function escHtml(str) {
 
 const hasTooltipData = computed(() => !!props.settings.deliveryDate && !!props.settings.today);
 
-const tooltipHtml = computed(() => {
+function buildTooltipHtml() {
   const s = props.settings;
   if (!s.deliveryDate || !s.today) return '';
   const inputUnit = escHtml(s.unit === 'boxes' ? 'кор' : (props.item.unitOfMeasure || 'шт'));
@@ -441,7 +446,7 @@ const tooltipHtml = computed(() => {
     <div class="calc-tip-row"><span class="calc-tip-lbl">Итого к заказу:</span><span class="calc-tip-val">${calcDisplayText.value}</span></div>
     ${trendBlock}
   `;
-});
+}
 
 // ─── Буфер CDA ────────────────────────────────────────────────────────────────
 function bufferSegWidth(zone) {

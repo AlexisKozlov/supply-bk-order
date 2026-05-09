@@ -4628,7 +4628,7 @@ if (strpos($roAction, 'admin') === 0) {
                        {$orderGroupExpr} AS legal_entity_group,
                        r.city, r.address
                 FROM ro_orders o
-                LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
+                LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = o.legal_entity_group
                 WHERE " . implode(' AND ', $where) . "
                 ORDER BY o.delivery_date, o.restaurant_number";
         $s = $pdo->prepare($sql);
@@ -4709,7 +4709,7 @@ if (strpos($roAction, 'admin') === 0) {
                    r.region, r.city, r.address,
                    ds.delivery_time
             FROM ro_orders o
-            LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
+            LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = o.legal_entity_group
             LEFT JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ?
             WHERE o.delivery_date = ? AND o.status != 'draft'
               AND o.legal_entity_group = ?
@@ -4734,10 +4734,10 @@ if (strpos($roAction, 'admin') === 0) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
             $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
                        (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.price_type = 'deposit'
-                          AND ((o.legal_entity LIKE '%Пицца%' AND pp.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND pp.legal_entity NOT LIKE '%Пицца%'))
+                          AND pp.legal_entity_group = o.legal_entity_group
                           ORDER BY (pp.legal_entity = o.legal_entity) DESC, pp.updated_at DESC LIMIT 1) AS deposit_price,
                        (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.price_type = 'purchase'
-                          AND ((o.legal_entity LIKE '%Пицца%' AND pp.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND pp.legal_entity NOT LIKE '%Пицца%'))
+                          AND pp.legal_entity_group = o.legal_entity_group
                           ORDER BY (pp.legal_entity = o.legal_entity) DESC, pp.updated_at DESC LIMIT 1) AS purchase_price
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
@@ -4746,7 +4746,7 @@ if (strpos($roAction, 'admin') === 0) {
                     WHERE t2.sku = oi.sku
                       AND t2.category = oi.category
                       AND t2.is_active = 1
-                      AND ((o.legal_entity LIKE '%Пицца%' AND t2.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND t2.legal_entity NOT LIKE '%Пицца%'))
+                      AND t2.legal_entity_group = o.legal_entity_group
                     ORDER BY (t2.legal_entity = o.legal_entity) DESC
                     LIMIT 1
                 )
@@ -4754,7 +4754,7 @@ if (strpos($roAction, 'admin') === 0) {
                     SELECT p2.id
                     FROM products p2
                     WHERE p2.sku = oi.sku
-                      AND ((o.legal_entity LIKE '%Пицца%' AND p2.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND p2.legal_entity NOT LIKE '%Пицца%'))
+                      AND p2.legal_entity_group = o.legal_entity_group
                     ORDER BY (p2.legal_entity = o.legal_entity) DESC, p2.is_active DESC, p2.id ASC
                     LIMIT 1
                 )

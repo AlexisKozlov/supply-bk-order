@@ -123,7 +123,7 @@ function tlGetOrdersForDate($pdo, $date) {
     // "последнюю активную" сессию нельзя — иначе модуль перестаёт видеть часть заказов.
     $s = $pdo->prepare("
         SELECT o.id as order_id, o.restaurant_number, o.status, o.legal_entity,
-               CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END AS legal_entity_group,
+               o.legal_entity_group,
                r.city, r.address, r.region
         FROM ro_orders o
         INNER JOIN ro_sessions rs
@@ -134,7 +134,7 @@ function tlGetOrdersForDate($pdo, $date) {
         LEFT JOIN restaurants r
             ON r.number = o.restaurant_number
             AND r.active = 1
-            AND r.legal_entity_group = CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END
+            AND r.legal_entity_group = o.legal_entity_group
         WHERE o.delivery_date = ? AND o.status != 'draft'
         ORDER BY FIELD(o.legal_entity, 'ООО \"Бургер БК\"', 'ООО \"Воглия Матта\"', 'ООО \"Пицца Стар\"'), o.restaurant_number
     ");

@@ -1620,7 +1620,10 @@ watch(activeTab, (tab) => {
     loadOnlineUsers();
     loadSessions();
     if (onlineTimer) clearInterval(onlineTimer);
-    onlineTimer = setInterval(loadOnlineUsers, 15000);
+    // Не дёргаем сервер на скрытой вкладке — экономит трафик и нагрузку.
+    onlineTimer = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') loadOnlineUsers();
+    }, 15000);
   } else {
     if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
   }
@@ -2071,6 +2074,7 @@ function formatBugDate(str) {
 
 async function bugPoll() {
   if (activeTab.value !== 'feedback') return;
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
   try {
     const { data } = await db.rpc('get_bug_reports', {});
     if (data?.reports) {

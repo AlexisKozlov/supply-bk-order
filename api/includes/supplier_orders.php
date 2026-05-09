@@ -1447,7 +1447,7 @@ if ($soAction === 'admin') {
             LEFT JOIN restaurants r
               ON r.number = o.restaurant_number
              AND r.active = 1
-             AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)
+             AND r.legal_entity_group = o.legal_entity_group
             WHERE {$where}
             ORDER BY o.submitted_at DESC, o.restaurant_number
         ");
@@ -1469,7 +1469,7 @@ if ($soAction === 'admin') {
             LEFT JOIN restaurants r
               ON r.number = o.restaurant_number
              AND r.active = 1
-             AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)
+             AND r.legal_entity_group = o.legal_entity_group
             WHERE o.id = ?
         ");
         $s->execute([$adminParam]);
@@ -1547,7 +1547,7 @@ if ($soAction === 'admin') {
             LEFT JOIN restaurants r
               ON r.number = o.restaurant_number
              AND r.active = 1
-             AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
+             AND r.legal_entity_group = o.legal_entity_group
             WHERE o.id = ?
         ");
         $oi->execute([$orderId]);
@@ -1647,7 +1647,7 @@ if ($soAction === 'admin') {
                 LEFT JOIN restaurants r
                   ON r.number = o.restaurant_number
                  AND r.active = 1
-                 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
+                 AND r.legal_entity_group = o.legal_entity_group
                 WHERE oi.id = ?
             ");
             $cur->execute([$itemId]);
