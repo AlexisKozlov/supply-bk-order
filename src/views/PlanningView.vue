@@ -2050,7 +2050,10 @@ function _restorePeriodValue(pv, freq, count) {
 }
 function onConsumptionPeriodChange() {
   _validationCache = null;
-  items.value.forEach(i => { i.plan = []; });
+  // НЕ обнуляем item.plan — иначе теряются заблокированные пользователем
+  // (locked) ячейки и сохранённые тренды (trendPct). recalcItem сам
+  // пересчитает need/deficit/orderBoxes для не-locked, и сохранит
+  // как есть для locked.
   recalcAll(); triggerValidation(); _savePlanDraft();
 }
 

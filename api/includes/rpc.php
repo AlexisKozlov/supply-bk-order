@@ -4464,7 +4464,13 @@ if ($endpoint === 'rpc') {
     // ═══ Оплаты поставщиков ═══
 
     if ($fn === 'create_payment_if_needed') {
-        requireModuleAccess($authUser, 'plan-fact', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        // Раньше тут был жёсткий plan-fact:edit. Из-за этого пользователь
+        // с правами order:edit, но без plan-fact:edit, при приёмке заказа
+        // получал тихий 403 (фронт ловит .catch и не показывает) — платёж
+        // молча не создавался. Теперь достаточно order:edit: создание
+        // платежа — это побочный эффект приёмки заказа, не требует
+        // отдельных прав на сам модуль оплат.
+        requireModuleAccess($authUser, 'order', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $orderId = $body['order_id'] ?? '';
         // Опорная дата для отсрочки — теперь дата поставки. Принимаем delivery_date,
         // оставляем чтение ttn_date для совместимости со старыми клиентами.
