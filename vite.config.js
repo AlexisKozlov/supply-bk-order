@@ -29,10 +29,14 @@ export default defineConfig({
     vue(),
     cleanupCopiedLegacyPublicAssets(),
     VitePWA({
-      // 'prompt': плагин НЕ перезагружает страницу автоматически, мы сами
-      // показываем баннер «Обновить» через UpdatePrompt.vue. С 'autoUpdate'
-      // совместно с clientsClaim происходила нежеланная авто-перезагрузка.
-      registerType: 'prompt',
+      // 'autoUpdate': новый SW моментально захватывает старые вкладки.
+      // Если старый JS попытается загрузить чанк, которого больше нет, —
+      // main.js ловит «Failed to fetch dynamically imported module» и
+      // показывает баннер «Доступна новая версия» через UpdatePrompt.
+      // Это страхует UX, но при этом обычные пользователи без действий
+      // получают свежую версию сразу (а не висят на старом index.html
+      // из SW-кэша, как было в режиме 'prompt').
+      registerType: 'autoUpdate',
       manifest: {
         name: 'Supply Department — Отдел закупок',
         short_name: 'Закупки',
@@ -48,13 +52,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // skipWaiting/clientsClaim НЕЛЬЗЯ включать в режиме 'prompt': иначе новый SW
-        // моментально захватывает старые открытые вкладки, а старый index.html
-        // ссылается на чанки, которых уже нет — кнопки и сохранения «зависают»
-        // до перезагрузки. Активация нового SW происходит только после нажатия
-        // «Обновить» (UpdatePrompt.vue делает unregister + clear caches + reload).
-        skipWaiting: false,
-        clientsClaim: false,
+        // skipWaiting + clientsClaim: новый SW активируется сразу при
+        // обнаружении обновления и захватывает уже открытые вкладки.
+        // Защита от поломки старых вкладок — обработчик ошибок чанков
+        // в main.js, который поднимает UpdatePrompt-баннер.
+        skipWaiting: true,
+        clientsClaim: true,
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,otf,woff,woff2}'],
         globIgnores: [
