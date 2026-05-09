@@ -112,6 +112,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { db } from '@/lib/apiClient.js';
 
 function authHeaders(extra = {}) {
   const t = localStorage.getItem('bk_session_token') || '';
@@ -175,16 +176,24 @@ async function downloadExcel() {
   }
 }
 
-function printTtn() {
+async function printTtn() {
   if (!checkRoutedWarning()) return;
-  // TODO[2026-Q3]: эндпоинт /api/keg-returns/.../print не покрыт одноразовыми
-  // download-токенами (?dl=), там только ?token=session_token. Утечка через
-  // лог nginx маловероятна (печать редко открывается «наружу»), но при
-  // следующей итерации безопасности перевести на отдельный print-token
-  // или на nginx no-log query string для /api/keg-returns/.../print.
+  // window.open вызываем синхронно, иначе всплывают попап-блокеры.
+  // Заполняем сначала about:blank, потом меняем location на ссылку с
+  // одноразовым download-токеном (?dl=). Если токен не получили —
+  // fallback на старый ?token=session_token.
+  const win = window.open('about:blank', '_blank');
+  try {
+    const { data } = await db.rpc('create_download_token', { file_path: `keg-returns/${props.id}/print` });
+    if (data?.token) {
+      const url = `/api/keg-returns/${props.id}/print?dl=${encodeURIComponent(data.token)}`;
+      if (win) win.location = url; else window.open(url, '_blank');
+      return;
+    }
+  } catch (e) { /* fallback ниже */ }
   const t = localStorage.getItem('bk_session_token') || '';
   const url = `/api/keg-returns/${props.id}/print?token=${encodeURIComponent(t)}`;
-  window.open(url, '_blank');
+  if (win) win.location = url; else window.open(url, '_blank');
 }
 
 async function deleteRequest() {

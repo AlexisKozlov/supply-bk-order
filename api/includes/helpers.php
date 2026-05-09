@@ -540,11 +540,16 @@ function getSessionUser($pdo) {
     $_sessionUserCache['done'] = true;
 
     $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
-    // $_GET['dl'] — новый одноразовый download-токен (15 мин, привязан к файлу).
-    // Принимается только для uploads. Легче, чем session-токен, и не утечёт.
+    // $_GET['dl'] — одноразовый download-токен (15 мин, привязан к пути).
+    // Принимается для uploads и для печатных эндпоинтов keg-returns
+    // (print/excel/import-template) — тех, что открываются через window.open
+    // и не могут передать заголовок X-Session-Token.
     if (!$token && isset($_GET['dl'])) {
-        global $endpoint;
-        if (($endpoint ?? '') === 'uploads') {
+        global $endpoint, $parts;
+        $allowedDl = ($endpoint === 'uploads')
+            || ($endpoint === 'keg-returns' && in_array(($parts[2] ?? ''), ['print', 'excel'], true))
+            || ($endpoint === 'keg-returns' && in_array(($parts[1] ?? ''), ['import-template', 'import-template.xlsx'], true));
+        if ($allowedDl) {
             $dl = (string)$_GET['dl'];
             unset($_GET['dl']);
             header('Cache-Control: no-store, no-cache, must-revalidate');
@@ -554,22 +559,29 @@ function getSessionUser($pdo) {
                 $st->execute([$dl]);
                 $row = $st->fetch();
                 if ($row) {
-                    // Одноразовость: после первой выдачи помечаем used_at.
-                    // Допускаем повторную выдачу того же файла, чтобы превью
-                    // не ломалось при повторных запросах <img>. Если файл другой —
-                    // сервер всё равно отдаст ошибку 403/404 при проверке пути.
-                    if (!$row['used_at']) {
-                        $pdo->prepare("UPDATE download_tokens SET used_at = NOW(), ip_address = ? WHERE token = ?")
-                            ->execute([$_SERVER['REMOTE_ADDR'] ?? null, $dl]);
+                    // Для keg-returns дополнительно проверяем соответствие пути,
+                    // чтобы токен на одну заявку нельзя было использовать для другой.
+                    // Для uploads — uploads.php проверяет path через свой ACL, поэтому
+                    // строгое сравнение с file_path не нужно.
+                    $pathOk = true;
+                    if ($endpoint === 'keg-returns') {
+                        $expected = 'keg-returns/' . ($parts[1] ?? '') . (isset($parts[2]) ? '/' . $parts[2] : '');
+                        $pathOk = ($row['file_path'] === $expected);
                     }
-                    // Эмулируем сессию для скачивания: имя пользователя есть, остальное
-                    // не нужно (uploads-обработчики не требуют role/legal_entities).
-                    $u = $pdo->prepare("SELECT name, role, display_role, legal_entities, permissions, created_at, telegram_chat_id, hidden_modules FROM users WHERE name = ? LIMIT 1");
-                    $u->execute([$row['user_name']]);
-                    $userRow = $u->fetch();
-                    if ($userRow) {
-                        $_sessionUserCache['result'] = $userRow;
-                        return $userRow;
+                    if ($pathOk) {
+                        if (!$row['used_at']) {
+                            $pdo->prepare("UPDATE download_tokens SET used_at = NOW(), ip_address = ? WHERE token = ?")
+                                ->execute([$_SERVER['REMOTE_ADDR'] ?? null, $dl]);
+                        }
+                        // Эмулируем сессию для скачивания: имя пользователя есть, остальное
+                        // не нужно (uploads-обработчики не требуют role/legal_entities).
+                        $u = $pdo->prepare("SELECT name, role, display_role, legal_entities, permissions, created_at, telegram_chat_id, hidden_modules FROM users WHERE name = ? LIMIT 1");
+                        $u->execute([$row['user_name']]);
+                        $userRow = $u->fetch();
+                        if ($userRow) {
+                            $_sessionUserCache['result'] = $userRow;
+                            return $userRow;
+                        }
                     }
                 }
             }
