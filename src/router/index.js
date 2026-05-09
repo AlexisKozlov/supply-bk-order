@@ -211,11 +211,13 @@ router.afterEach((to) => {
 
 const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks'];
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const userStore = useUserStore();
-  if (!userStore.currentUser) {
-    userStore.restoreSession();
-  }
+  // Ждём первое восстановление сессии. Это надёжнее, чем гонка между
+  // main.js и app.mount: useUserStore() здесь гарантированно использует
+  // правильный pinia (injected через app.use), и await блокирует
+  // навигацию до завершения validate_session.
+  await userStore.restoreSession();
   // Защита кабинета ресторана: пути /restaurant/* (кроме /restaurant/login)
   // требуют ro_token. Без него интерфейс не должен рендериться вообще.
   // Серверная валидация токена остаётся в RestaurantCabinetView.onMounted.

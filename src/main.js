@@ -1,5 +1,5 @@
 import { createApp } from 'vue';
-import { createPinia, setActivePinia } from 'pinia';
+import { createPinia } from 'pinia';
 import App from './App.vue';
 import { router } from './router/index.js';
 import { setAuthErrorHandler } from '@/lib/apiClient.js';
@@ -14,11 +14,6 @@ import './assets/compact.css';
 
 const app = createApp(App);
 const pinia = createPinia();
-
-// Активируем pinia до app.mount(), чтобы useUserStore() в restoreSession()
-// возвращал ТОТ ЖЕ store, что используют компоненты (иначе при F5 currentUser
-// ставился в "сиротский" instance, и роутер не видел залогиненного пользователя).
-setActivePinia(pinia);
 
 app.use(pinia);
 app.use(router);
@@ -116,9 +111,6 @@ app.config.errorHandler = (err, instance, info) => {
   } catch (e) { /* store not ready */ }
 };
 
-// Восстанавливаем сессию ДО монтирования: иначе в первые ~200мс
-// можно подменить role в localStorage и попасть в UI админки.
-const userStore = useUserStore();
-userStore.restoreSession().finally(() => {
-  app.mount('#app');
-});
+// Восстановление сессии запускается из router.beforeEach (async/await).
+// Там pinia точно injected правильно, гонок нет.
+app.mount('#app');
