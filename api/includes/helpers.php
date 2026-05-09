@@ -351,11 +351,13 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
 }
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
+// dashboard — отдельный модуль для руководителя (admin/manager).
+// pallet-storage — паллетовка склада (отдельная от pallet-calc).
 $ROLE_TEMPLATES = [
-    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full','protocols'=>'full','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'full','tasks'=>'full'],
-    'manager' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'none','pallet-calc'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full','protocols'=>'full','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'full','tasks'=>'full'],
-    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','cards'=>'view','corrections'=>'edit','chat'=>'edit','marketing'=>'edit','protocols'=>'edit','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'edit','tasks'=>'full'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','cards'=>'view','corrections'=>'view','chat'=>'view','marketing'=>'view','protocols'=>'view','restaurant-orders'=>'view','supplier-orders'=>'view','truck-loading'=>'view','surveys'=>'view','tasks'=>'view'],
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','pallet-storage'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full','protocols'=>'full','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'full','tasks'=>'full','dashboard'=>'full'],
+    'manager' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'none','pallet-calc'=>'full','pallet-storage'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full','protocols'=>'full','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'full','tasks'=>'full','dashboard'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','pallet-storage'=>'none','cards'=>'view','corrections'=>'edit','chat'=>'edit','marketing'=>'edit','protocols'=>'edit','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'edit','tasks'=>'full','dashboard'=>'none'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','pallet-storage'=>'none','cards'=>'view','corrections'=>'view','chat'=>'view','marketing'=>'view','protocols'=>'view','restaurant-orders'=>'view','supplier-orders'=>'view','truck-loading'=>'view','surveys'=>'view','tasks'=>'view','dashboard'=>'none'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
@@ -373,6 +375,7 @@ $TABLE_TO_MODULE = [
     'tenders'=>'tenders','tender_items'=>'tenders','tender_offers'=>'tenders','tender_offer_prices'=>'tenders','tender_files'=>'tenders',
     'dist_sessions'=>'distribution','dist_session_products'=>'distribution','dist_entries'=>'distribution','dist_notes'=>'distribution',
     'plt_products'=>'pallet-calc','plt_deliveries'=>'pallet-calc','plt_delivery_items'=>'pallet-calc','plt_daily_stock'=>'pallet-calc','plt_summary'=>'pallet-calc',
+    'pallet_reference'=>'pallet-storage',
     'order_corrections'=>'corrections',
     'chat_conversations'=>'chat','chat_messages'=>'chat',
     'ro_sessions'=>'restaurant-orders','ro_orders'=>'restaurant-orders','ro_order_items'=>'restaurant-orders','ro_templates'=>'restaurant-orders','ro_users'=>'restaurant-orders','ro_deadline_overrides'=>'restaurant-orders','ro_corrections'=>'restaurant-orders',
@@ -407,7 +410,8 @@ function auditLog($pdo, $action, $entityType, $entityId, $userName, $details = n
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
 // Таблицы с колонкой legal_entity — для автоматической фильтрации по юрлицу
 // order_items и item_order НЕ включены: у них нет legal_entity, доступ контролируется через родительскую таблицу orders
-$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports','plt_deliveries','plt_daily_stock','plt_summary','marketing_activities'];
+// marketing_activities, order_corrections, chat_conversations — общие для группы BK+VM by design (см. shared_tables_bk_vm), фильтр по юрлицу не применяем.
+$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports','plt_deliveries','plt_daily_stock','plt_summary'];
 
 function resolvePermissions($role, $permissionsJson, $templates) {
     $base = $templates[$role] ?? $templates['user'];
@@ -427,6 +431,16 @@ function requireModuleAccess($sessionUser, $module, $minLevel, $roleTemplates, $
     $required = $accessLevels[$minLevel] ?? 0;
     if ($actual < $required) {
         respond(['error' => 'Недостаточно прав'], 403);
+    }
+}
+
+// Короткий хелпер для admin-only RPC. Бросает 401/403 и завершает запрос.
+function requireAdmin($sessionUser) {
+    if (!$sessionUser) {
+        respond(['error' => 'Требуется авторизация'], 401);
+    }
+    if (($sessionUser['role'] ?? '') !== 'admin') {
+        respond(['error' => 'Только для администратора'], 403);
     }
 }
 

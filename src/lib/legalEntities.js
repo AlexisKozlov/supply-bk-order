@@ -11,6 +11,19 @@ export const LEGAL_ENTITIES = [
 
 export const DEFAULT_ENTITY = LEGAL_ENTITIES[0];
 
+/**
+ * Таблицы, которые НАМЕРЕННО общие для группы BK+VM (не делятся по юрлицам).
+ * Для них фильтрация идёт по группе через .or()/applyEntityFilter, а не по одному
+ * юрлицу. Любое добавление в этот список должно дублироваться в helpers.php
+ * (обратное также: убирай из $ENTITY_TABLES на бэке).
+ */
+export const SHARED_BK_VM_TABLES = [
+  'order_corrections',
+  'chat_conversations',
+  'chat_messages',
+  'marketing_activities',
+];
+
 export const ENTITY_SHORT_NAMES = {
   'ООО "Бургер БК"': 'БК',
   'ООО "Воглия Матта"': 'ВМ',

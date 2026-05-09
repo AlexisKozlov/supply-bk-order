@@ -449,7 +449,7 @@ const sidebarSections = [
 
 const toolsGroups = [
   { title: 'Аналитика', items: [
-    { module: 'analytics', route: 'dashboard', icon: 'home', label: 'Дашборд' },
+    { module: 'dashboard', route: 'dashboard', icon: 'home', label: 'Дашборд' },
     { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
     { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
     { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },

@@ -56,26 +56,6 @@ if ($endpoint === 'rpc') {
         $hiddenMods = ($u['hidden_modules'] && is_string($u['hidden_modules'])) ? (json_decode($u['hidden_modules'], true) ?? []) : [];
         respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'permissions'=>$permsDecoded,'created_at'=>$u['created_at'] ?? null,'telegram_connected'=>!empty($u['telegram_chat_id']),'hidden_modules'=>$hiddenMods],'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
     }
-    if ($fn === 'check_legacy_password') {
-        $pwd = $body['pwd'] ?? '';
-        if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
-        $s = $pdo->prepare("SELECT value FROM settings WHERE `key`='order_calculator_password'"); $s->execute();
-        $stored = $s->fetchColumn();
-        if ($stored) {
-            $isLegacyPlain = strncmp($stored, '$2', 2) !== 0;
-            $ok = password_verify($pwd, $stored) || ($isLegacyPlain && hash_equals($stored, $pwd));
-            if ($ok) {
-                if ($isLegacyPlain) {
-                    $hash = password_hash($pwd, PASSWORD_BCRYPT);
-                    $pdo->prepare("UPDATE settings SET value=? WHERE `key`='order_calculator_password'")->execute([$hash]);
-                    error_log("Legacy password migrated to bcrypt for setting: order_calculator_password");
-                }
-                respond(['success'=>true]);
-            }
-            recordFailedLogin($pdo, $clientIp, '_legacy');
-        }
-        respond(['success'=>false]);
-    }
     if ($fn === 'health_check') {
         $status = 'ok';
         $checks = [];
@@ -228,358 +208,6 @@ if ($endpoint === 'rpc') {
         respond(['error' => 'Старый модуль Планеты Ресторанов отключён. Используйте раздел «Заявки поставщикам».'], 410);
     }
 
-    // ═══ VEG ORDER: публичные RPC (заказ овощей — форма ресторанов) ═══
-
-    // Хелпер: dual-auth — работает через veg_token ИЛИ через ro_token (кабинет ресторанов)
-    function vegResolveAuth($pdo, $body) {
-        // Путь 1: токен-ссылка (старый способ)
-        $tokenVal = $body['token_value'] ?? '';
-        if ($tokenVal && preg_match('/^[a-f0-9]{64}$/', $tokenVal)) {
-            $s = $pdo->prepare("SELECT t.session_id, t.expires_at, s.name as session_name, s.status, s.date_from, s.date_to
-                FROM veg_tokens t JOIN veg_sessions s ON s.id = t.session_id WHERE t.token = ?");
-            $s->execute([$tokenVal]);
-            $row = $s->fetch();
-            if (!$row) return ['error' => 'not_found', 'expired' => true];
-            if (strtotime($row['expires_at']) < time()) return ['error' => 'expired', 'expired' => true];
-            if ($row['status'] === 'closed') return ['error' => 'closed', 'expired' => true];
-            return ['session_id' => $row['session_id'], 'session_name' => $row['session_name'],
-                    'date_from' => $row['date_from'], 'date_to' => $row['date_to'], 'auth' => 'token'];
-        }
-        // Путь 2: ro_token (кабинет ресторана)
-        $roToken = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
-        if ($roToken) {
-            $s = $pdo->prepare("SELECT ru.restaurant_number, ru.session_active_until
-                FROM ro_users ru WHERE ru.session_token = ? AND ru.is_active = 1");
-            $s->execute([$roToken]);
-            $user = $s->fetch();
-            if (!$user) return ['error' => 'invalid_token'];
-            if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) return ['error' => 'expired'];
-            // Находим активную veg-сессию
-            $vs = $pdo->query("SELECT id, name, status, date_from, date_to FROM veg_sessions WHERE status = 'active' ORDER BY id DESC LIMIT 1");
-            $sess = $vs->fetch();
-            if (!$sess) return ['error' => 'no_active_session'];
-            return ['session_id' => $sess['id'], 'session_name' => $sess['name'],
-                    'date_from' => $sess['date_from'], 'date_to' => $sess['date_to'],
-                    'restaurant_number' => $user['restaurant_number'], 'auth' => 'ro_token'];
-        }
-        return ['error' => 'no_auth'];
-    }
-
-    if ($fn === 'veg_validate_token') {
-        $auth = vegResolveAuth($pdo, $body);
-        if (isset($auth['error'])) respond($auth);
-        // Товары сессии
-        $s2 = $pdo->prepare("SELECT id, product_name, unit, multiplicity, sort_order FROM veg_session_products WHERE session_id = ? ORDER BY sort_order");
-        $s2->execute([$auth['session_id']]);
-        $products = $s2->fetchAll();
-        $result = ['session_id' => $auth['session_id'], 'session_name' => $auth['session_name'], 'products' => $products];
-        if (isset($auth['restaurant_number'])) $result['restaurant_number'] = $auth['restaurant_number'];
-        respond($result);
-    }
-    if ($fn === 'veg_get_restaurants') {
-        // Если передан tg_chat_id — возвращаем только рестораны, на которые подписан этот чат
-        $tgChatId = isset($body['tg_chat_id']) ? trim((string)$body['tg_chat_id']) : '';
-        if ($tgChatId !== '' && preg_match('/^-?\d+$/', $tgChatId)) {
-            $subs = $pdo->prepare("SELECT DISTINCT restaurant_number FROM ro_telegram_subs WHERE chat_id = ?");
-            $subs->execute([$tgChatId]);
-            $allowedNums = array_column($subs->fetchAll(), 'restaurant_number');
-            if (empty($allowedNums)) {
-                respond([]);
-            }
-            $ph = implode(',', array_fill(0, count($allowedNums), '?'));
-            $s = $pdo->prepare("SELECT id, number, address, city, region, legal_entity_group
-                FROM restaurants WHERE active = 1 AND number IN ({$ph})
-                ORDER BY legal_entity_group = 'BK_VM' DESC, sort_order, number");
-            $s->execute($allowedNums);
-            $rows = $s->fetchAll();
-            // Убираем дубли по number (один номер может быть в нескольких юрлицах)
-            $seen = [];
-            $unique = [];
-            foreach ($rows as $r) {
-                if (!isset($seen[$r['number']])) {
-                    $seen[$r['number']] = true;
-                    $unique[] = $r;
-                }
-            }
-            usort($unique, function($a, $b) { return intval($a['number']) - intval($b['number']); });
-            respond($unique);
-        }
-
-        // Все активные рестораны (без фильтра по юрлицу — овощи для всех)
-        // GROUP BY number — убираем дубли (один ресторан может быть в нескольких юрлицах)
-        // Приоритет BK_VM (основная запись с полным адресом)
-        $s = $pdo->prepare("SELECT id, number, address, city, region, legal_entity_group
-            FROM restaurants WHERE active = 1 AND legal_entity_group = 'BK_VM'
-            ORDER BY sort_order, number");
-        $s->execute();
-        $rows = $s->fetchAll();
-        // Добавляем PS-рестораны, которых нет в BK_VM
-        $existingNums = array_flip(array_column($rows, 'number'));
-        $s2 = $pdo->prepare("SELECT id, number, address, city, region, legal_entity_group
-            FROM restaurants WHERE active = 1 AND legal_entity_group != 'BK_VM'
-            ORDER BY sort_order, number");
-        $s2->execute();
-        foreach ($s2->fetchAll() as $r) {
-            if (!isset($existingNums[$r['number']])) $rows[] = $r;
-        }
-        usort($rows, function($a, $b) { return intval($a['number']) - intval($b['number']); });
-        respond($rows);
-    }
-    if ($fn === 'veg_get_schedule') {
-        $restNum = $body['restaurant_number'] ?? '';
-        $tokenVal = $body['token_value'] ?? '';
-
-        // Dual-auth: определяем сессию и ресторан
-        $auth = vegResolveAuth($pdo, $body);
-        if (isset($auth['error'])) respond($auth);
-        // При ro_token ресторан берём из авторизации
-        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
-
-        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
-        $s = $pdo->prepare("SELECT day_of_week FROM veg_delivery_days WHERE restaurant_number = ? ORDER BY day_of_week");
-        $s->execute([$restNum]);
-        $days = array_column($s->fetchAll(), 'day_of_week');
-        // Дедлайны из БД
-        $dlRows = $pdo->query("SELECT delivery_dow, deadline_dow, deadline_time FROM veg_deadline_rules")->fetchAll();
-        $deadlineRules = [];
-        foreach ($dlRows as $r) $deadlineRules[(int)$r['delivery_dow']] = $r;
-
-        $tz = new DateTimeZone('Europe/Minsk');
-        $now = new DateTime('now', $tz);
-
-        // Диапазон дат из сессии (через auth)
-        $dateFrom = $auth['date_from'] ?? null;
-        $dateTo = $auth['date_to'] ?? null;
-
-        // Проверяем per-session конфиг дней (veg_session_day_config)
-        $sessionId = $auth['session_id'];
-        $dayConfig = []; // date → [restNums]
-        $hasConfig = false;
-        if ($sessionId) {
-            $cfgSt = $pdo->prepare("SELECT delivery_date, restaurant_number FROM veg_session_day_config WHERE session_id = ?");
-            $cfgSt->execute([$sessionId]);
-            foreach ($cfgSt->fetchAll() as $c) {
-                $dayConfig[$c['delivery_date']][] = $c['restaurant_number'];
-            }
-            $hasConfig = !empty($dayConfig);
-        }
-
-        // Функция расчёта дедлайна
-        $calcDeadline = function($dateObj, $dow) use ($deadlineRules, $now) {
-            $deadline = null; $deadlineStr = null; $expired = false;
-            if (isset($deadlineRules[$dow])) {
-                $rule = $deadlineRules[$dow];
-                $deadline = clone $dateObj;
-                $diff = $dow - (int)$rule['deadline_dow'];
-                if ($diff <= 0) $diff += 7;
-                $deadline->modify("-{$diff} days");
-                $tp = explode(':', $rule['deadline_time']);
-                $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0), 0);
-                $deadlineStr = $deadline->format('Y-m-d H:i:s');
-            }
-            $expired = $deadline && $now >= $deadline;
-            return [$deadlineStr, $expired];
-        };
-
-        $deliveries = [];
-        if ($dateFrom && $dateTo) {
-            $cursor = new DateTime($dateFrom, $tz);
-            $end = new DateTime($dateTo, $tz);
-            while ($cursor <= $end) {
-                $dow = (int)$cursor->format('N');
-                $dateStr = $cursor->format('Y-m-d');
-                // Определяем доступ: per-session конфиг или глобальное расписание
-                $canOrder = isset($dayConfig[$dateStr])
-                    ? in_array($restNum, $dayConfig[$dateStr])
-                    : in_array($dow, $days);
-                if ($canOrder) {
-                    [$deadlineStr, $expired] = $calcDeadline($cursor, $dow);
-                    $deliveries[] = ['date' => $dateStr, 'day_of_week' => $dow, 'deadline' => $deadlineStr, 'expired' => $expired];
-                }
-                $cursor->modify('+1 day');
-            }
-        } elseif (!empty($days)) {
-            // Обратная совместимость: без диапазона дат
-            $currentDow = (int)$now->format('N');
-            $daysUntilSaturday = max(0, 6 - $currentDow);
-            for ($offset = 0; $offset <= $daysUntilSaturday && count($deliveries) < 2; $offset++) {
-                $date = clone $now;
-                $date->modify("+{$offset} days");
-                $dow = (int)$date->format('N');
-                if (in_array($dow, $days)) {
-                    [$deadlineStr, $expired] = $calcDeadline($date, $dow);
-                    if ($offset === 0 && $expired) continue;
-                    $deliveries[] = ['date' => $date->format('Y-m-d'), 'day_of_week' => $dow, 'deadline' => $deadlineStr, 'expired' => $expired];
-                }
-            }
-        }
-        respond(['days' => array_map('intval', $days), 'deliveries' => $deliveries]);
-    }
-    if ($fn === 'veg_get_previous_orders') {
-        $restNum = $body['restaurant_number'] ?? '';
-        $auth = vegResolveAuth($pdo, $body);
-        if (isset($auth['error'])) respond($auth);
-        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
-        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
-        $tok = ['session_id' => $auth['session_id']];
-        // Найти предыдущую сессию с заказами этого ресторана (проверяем до 5 сессий назад)
-        $prev = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 5");
-        $prev->execute([$tok['session_id']]);
-        $prevSessions = $prev->fetchAll();
-        $orders = [];
-        foreach ($prevSessions as $ps) {
-            $st = $pdo->prepare("
-                SELECT sp.product_name, o.delivery_date, o.quantity, o.admin_qty
-                FROM veg_orders o
-                JOIN veg_session_products sp ON sp.id = o.product_id
-                WHERE o.session_id = ? AND o.restaurant_number = ?
-            ");
-            $st->execute([$ps['id'], $restNum]);
-            $orders = $st->fetchAll();
-            if ($orders) break; // нашли сессию с заказами — используем её
-        }
-        respond(['orders' => $orders]);
-    }
-    if ($fn === 'veg_get_existing_orders') {
-        $restNum = $body['restaurant_number'] ?? '';
-        $auth = vegResolveAuth($pdo, $body);
-        if (isset($auth['error'])) respond($auth);
-        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
-        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
-        $tok = ['session_id' => $auth['session_id']];
-        $st = $pdo->prepare("SELECT product_id, delivery_date, quantity, admin_qty FROM veg_orders WHERE session_id = ? AND restaurant_number = ?");
-        $st->execute([$tok['session_id'], $restNum]);
-        respond(['orders' => $st->fetchAll()]);
-    }
-    if ($fn === 'veg_submit_order') {
-        $restNum = $body['restaurant_number'] ?? '';
-        $items = $body['items'] ?? []; // [{product_id, delivery_date, quantity}]
-        $auth = vegResolveAuth($pdo, $body);
-        if (isset($auth['error'])) respond($auth);
-        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
-        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
-        if (!checkRateLimit($pdo, $clientIp, 60, 5)) respond(['error' => 'too_many_attempts'], 429);
-        $sessId = $auth['session_id'];
-        // Проверяем что сессия активна
-        $sc = $pdo->prepare("SELECT status FROM veg_sessions WHERE id = ?");
-        $sc->execute([$sessId]);
-        $sess = $sc->fetch();
-        if (!$sess || $sess['status'] !== 'active') respond(['error' => 'session_closed']);
-        // Допустимые product_id
-        $validPids = $pdo->prepare("SELECT id FROM veg_session_products WHERE session_id = ?");
-        $validPids->execute([$sessId]);
-        $allowedSet = array_flip(array_column($validPids->fetchAll(), 'id'));
-        // Проверка дедлайнов (серверная) — правила из БД
-        $tz = new DateTimeZone('Europe/Minsk');
-        $now = new DateTime('now', $tz);
-        $dlRows = $pdo->query("SELECT delivery_dow, deadline_dow, deadline_time FROM veg_deadline_rules")->fetchAll();
-        $deadlineRules = [];
-        foreach ($dlRows as $r) $deadlineRules[(int)$r['delivery_dow']] = $r;
-
-        $ins = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, submitted_at)
-            VALUES (?, ?, ?, ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), admin_qty = NULL, submitted_at = NOW()");
-        $pdo->beginTransaction();
-        try {
-            // Даты, по которым ресторан отправляет форму (включая полностью пустые дни)
-            $submittedDates = $body['submitted_dates'] ?? [];
-            $clearDates = [];
-            foreach ($submittedDates as $sd) {
-                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd)) continue;
-                $delDt = new DateTime($sd, $tz);
-                $dow = (int)$delDt->format('N');
-                if (isset($deadlineRules[$dow])) {
-                    $rule = $deadlineRules[$dow];
-                    $deadlineDow = (int)$rule['deadline_dow'];
-                    $deadline = clone $delDt;
-                    $diff = $dow - $deadlineDow;
-                    if ($diff <= 0) $diff += 7;
-                    $deadline->modify("-{$diff} days");
-                    $timeParts = explode(':', $rule['deadline_time']);
-                    $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
-                    if ($now >= $deadline) continue;
-                }
-                $clearDates[$sd] = true;
-            }
-
-            // Удаляем старые записи без admin_qty для всех дат, по которым ресторан отправил форму
-            // (если поле стёрто — запись удалится; если заполнено — перезапишется ниже)
-            if ($clearDates) {
-                $datePlaceholders = implode(',', array_fill(0, count($clearDates), '?'));
-                $del = $pdo->prepare("DELETE FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date IN ({$datePlaceholders}) AND (admin_qty IS NULL)");
-                $del->execute(array_merge([$sessId, $restNum], array_keys($clearDates)));
-            }
-
-            foreach ($items as $item) {
-                $pid = intval($item['product_id'] ?? 0);
-                $delDate = $item['delivery_date'] ?? '';
-                $qty = floatval($item['quantity'] ?? 0);
-                if ($qty < 0 || $qty > 999999) continue;
-                if ($pid <= 0 || !isset($allowedSet[$pid])) continue;
-                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $delDate)) continue;
-                if (!isset($clearDates[$delDate])) continue;
-                $ins->execute([$sessId, $pid, $restNum, $delDate, $qty]);
-            }
-            $pdo->commit();
-
-            // Уведомление подписчикам в Telegram
-            try {
-                $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
-                if ($botToken && $restNum) {
-                    $subs = $pdo->prepare("SELECT chat_id FROM ro_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
-                    $subs->execute([$restNum]);
-                    $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
-                    if ($chatIds) {
-                        // Собираем текст заявки
-                        $pn = $pdo->prepare("SELECT id, product_name FROM veg_session_products WHERE session_id=?");
-                        $pn->execute([$sessId]);
-                        $prodNames = [];
-                        foreach ($pn->fetchAll() as $vp) $prodNames[$vp['id']] = $vp['product_name'];
-                        $lines = [];
-                        foreach ($items as $it) {
-                            $pid = intval($it['product_id'] ?? 0);
-                            $qty = floatval($it['quantity'] ?? 0);
-                            if (!isset($prodNames[$pid])) continue;
-                            $dd = $it['delivery_date'] ?? '';
-                            if ($qty > 0) {
-                                $lines[] = "  • {$prodNames[$pid]}: {$qty} (доставка {$dd})";
-                            }
-                        }
-                        {
-                            // Получаем адрес ресторана
-                            $ra = $pdo->prepare("SELECT address FROM restaurants WHERE number=? AND legal_entity_group='BK_VM' LIMIT 1");
-                            $ra->execute([$restNum]);
-                            $addr = $ra->fetchColumn() ?: $restNum;
-                            $msgText = "✅ <b>Заявка на овощи отправлена</b>\n\n";
-                            $msgText .= "🏪 Ресторан <b>{$restNum}</b> — {$addr}\n\n";
-                            if ($lines) {
-                                $msgText .= implode("\n", $lines);
-                            } else {
-                                $msgText .= "<i>Все товары: 0 (ничего не нужно)</i>";
-                            }
-                            // Логируем что уведомление отправлено
-                            $pdo->prepare("INSERT IGNORE INTO veg_reminder_log (session_id, restaurant_number, delivery_date, reminder_type) VALUES (?, ?, CURDATE(), 'submitted')")
-                                ->execute([$sessId, $restNum]);
-                            foreach ($chatIds as $cid) {
-                                $payload = json_encode(['chat_id' => $cid, 'text' => $msgText, 'parse_mode' => 'HTML']);
-                                $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-                                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                                curl_exec($ch); curl_close($ch);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception $e) {
-                error_log('veg_submit_order telegram notify error: ' . $e->getMessage());
-            }
-
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            error_log('veg_submit_order error: ' . $e->getMessage());
-            respond(['error' => 'save_failed'], 500);
-        }
-        respond(['success' => true]);
-    }
 
     // Логирование ошибок фронтенда (публичный, без авторизации)
     if ($fn === 'log_frontend_error') {
@@ -1421,7 +1049,7 @@ if ($endpoint === 'rpc') {
         if (!$name) respond(['success' => false, 'error' => 'Не указано имя'], 400);
         if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success' => false, 'error' => 'Неверный формат email'], 400);
         if (!$password || mb_strlen($password) < 8) respond(['success' => false, 'error' => 'Пароль обязателен (минимум 8 символов)'], 400);
-        if (!in_array($role, ['admin', 'user', 'viewer'])) $role = 'user';
+        if (!in_array($role, ['admin', 'manager', 'user', 'viewer'])) $role = 'user';
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $permJson = ($permissions && is_array($permissions) && count($permissions) > 0) ? json_encode($permissions, JSON_UNESCAPED_UNICODE) : null;
         $id = uuid();
@@ -1447,7 +1075,7 @@ if ($endpoint === 'rpc') {
             if ($emailVal && !filter_var($emailVal, FILTER_VALIDATE_EMAIL)) respond(['success' => false, 'error' => 'Неверный формат email'], 400);
             $sets[] = "email=?"; $params[] = $emailVal ?: null;
         }
-        if (isset($body['role']) && in_array($body['role'], ['admin', 'user', 'viewer'])) { $sets[] = "role=?"; $params[] = $body['role']; }
+        if (isset($body['role']) && in_array($body['role'], ['admin', 'manager', 'user', 'viewer'])) { $sets[] = "role=?"; $params[] = $body['role']; }
         if (array_key_exists('display_role', $body)) { $sets[] = "display_role=?"; $params[] = $body['display_role']; }
         if (array_key_exists('legal_entities', $body)) { $sets[] = "legal_entities=?"; $params[] = is_array($body['legal_entities']) ? json_encode($body['legal_entities'], JSON_UNESCAPED_UNICODE) : $body['legal_entities']; }
         if (array_key_exists('permissions', $body)) {
@@ -1484,8 +1112,13 @@ if ($endpoint === 'rpc') {
         $userId = $body['user_id'] ?? '';
         if (!$userId) respond(['success' => false, 'error' => 'Не указан ID пользователя'], 400);
         // Не позволять удалить себя
-        $s2 = $pdo->prepare("SELECT name FROM users WHERE id=?"); $s2->execute([$userId]); $target = $s2->fetch();
+        $s2 = $pdo->prepare("SELECT name, role FROM users WHERE id=?"); $s2->execute([$userId]); $target = $s2->fetch();
         if ($target && $target['name'] === $callerName) respond(['success' => false, 'error' => 'Нельзя удалить самого себя'], 400);
+        // Защита от удаления последнего администратора: после удаления должен остаться хотя бы один admin
+        if ($target && $target['role'] === 'admin') {
+            $admCnt = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
+            if ((int)$admCnt <= 1) respond(['success' => false, 'error' => 'Нельзя удалить последнего администратора'], 400);
+        }
         // Удаляем активные сессии пользователя, чтобы он не мог продолжать работу
         if ($target) {
             $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$target['name']]);
@@ -1532,6 +1165,7 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'get_online_users') {
+        requireAdmin($authUser);
         $s = $pdo->query("SELECT user_name, page, last_seen FROM user_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE ORDER BY last_seen DESC");
         respond($s->fetchAll());
     }
@@ -1919,8 +1553,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'save_warehouse_cells') {
-        $caller = getSessionUser($pdo);
-        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($authUser, 'shelf-life', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $items = $body['items'] ?? [];
         if (!is_array($items) || empty($items)) respond(['error' => 'Нет данных'], 400);
         try {
@@ -1930,6 +1563,12 @@ if ($endpoint === 'rpc') {
 
             // Для каждого юрлица проверяем: не старше ли загружаемая дата максимальной в базе
             $entities = array_unique(array_column($items, 'legal_entity'));
+            // Не-админ имеет право грузить только в свои юрлица
+            foreach ($entities as $entity) {
+                if (!checkLegalEntityAccess($authUser, $entity)) {
+                    respond(['error' => "Нет доступа к юр. лицу: {$entity}"], 403);
+                }
+            }
             $skippedEntities = [];
             foreach ($entities as $entity) {
                 $maxSt = $pdo->prepare("SELECT MAX(report_date) FROM warehouse_cells WHERE legal_entity = ?");
@@ -1957,10 +1596,12 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'get_warehouse_cells_range') {
+        requireModuleAccess($authUser, 'shelf-life', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $entity = $body['entity'] ?? '';
         $from = $body['date_from'] ?? '';
         $to = $body['date_to'] ?? '';
         if (!$entity || !$from || !$to) respond(['error' => 'Не указаны обязательные параметры'], 400);
+        if (!checkLegalEntityAccess($authUser, $entity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         // Расширяем диапазон на +3 дня чтобы захватить понедельник для последних выходных месяца
         $st = $pdo->prepare("SELECT report_date, stock_type, cell_count, is_manual FROM warehouse_cells WHERE legal_entity=? AND report_date >= ? AND report_date <= DATE_ADD(?, INTERVAL 3 DAY) AND stock_type IN ('cold','frozen') ORDER BY report_date, stock_type");
         $st->execute([$entity, $from, $to]);
@@ -1971,6 +1612,7 @@ if ($endpoint === 'rpc') {
     // Возвращает дневные данные за выбранный период, фронт сам агрегирует
     // по неделям/месяцам в зависимости от выбранной гранулярности.
     if ($fn === 'cell_analytics_get') {
+        requireModuleAccess($authUser, 'shelf-life', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $start = trim((string)($body['start'] ?? ''));
         $end   = trim((string)($body['end'] ?? ''));
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $start) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $end)) {
@@ -1983,19 +1625,32 @@ if ($endpoint === 'rpc') {
         if ($diff < 0) respond(['error' => 'Конец периода раньше начала'], 400);
         if ($diff > $maxDays) respond(['error' => 'Слишком большой период (максимум 12 месяцев)'], 400);
 
+        // Не-админу отдаём только его юрлица.
+        $leWhere = '';
+        $leArgs = [];
+        if (($authUser['role'] ?? '') !== 'admin') {
+            $userEntities = $authUser['legal_entities'] ?? '';
+            if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
+            if (!is_array($userEntities) || empty($userEntities)) respond(['rows' => [], 'start' => $start, 'end' => $end]);
+            $phLE = implode(',', array_fill(0, count($userEntities), '?'));
+            $leWhere = " AND legal_entity IN ($phLE)";
+            $leArgs = array_values($userEntities);
+        }
+
         $st = $pdo->prepare("
             SELECT report_date, legal_entity, stock_type, cell_count, is_manual
             FROM warehouse_cells
-            WHERE report_date >= ? AND report_date <= ?
+            WHERE report_date >= ? AND report_date <= ?{$leWhere}
             ORDER BY report_date, legal_entity, stock_type
         ");
-        $st->execute([$start, $end]);
+        $st->execute(array_merge([$start, $end], $leArgs));
         $rows = $st->fetchAll();
         respond(['rows' => $rows, 'start' => $start, 'end' => $end]);
     }
 
     // ─── Аннотации событий на графике аналитики ячеек ───
     if ($fn === 'cell_annotations_list') {
+        requireModuleAccess($authUser, 'shelf-life', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $start = trim((string)($body['start'] ?? ''));
         $end   = trim((string)($body['end'] ?? ''));
         $sql = "SELECT id, event_date, label, color, created_by, created_at FROM cell_chart_annotations";
@@ -2011,6 +1666,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'cell_annotation_save') {
+        requireModuleAccess($authUser, 'shelf-life', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         if (!$authUserName) respond(['error' => 'Нет авторизации'], 401);
         $id = (int)($body['id'] ?? 0);
         $date = trim((string)($body['event_date'] ?? ''));
@@ -2037,6 +1693,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'cell_annotation_delete') {
+        requireModuleAccess($authUser, 'shelf-life', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         if (!$authUserName) respond(['error' => 'Нет авторизации'], 401);
         $id = (int)($body['id'] ?? 0);
         if ($id <= 0) respond(['error' => 'id обязателен'], 400);
@@ -2050,10 +1707,22 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'get_warehouse_cells') {
+        requireModuleAccess($authUser, 'shelf-life', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $days = intval($body['days'] ?? 90);
         if ($days > 365) $days = 365;
-        $st = $pdo->prepare("SELECT report_date, legal_entity, stock_type, cell_count, is_manual FROM warehouse_cells WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY) ORDER BY report_date DESC, legal_entity, stock_type");
-        $st->execute([$days]);
+        // Не-админу отдаём только его юрлица.
+        $leWhere = '';
+        $leArgs = [];
+        if (($authUser['role'] ?? '') !== 'admin') {
+            $userEntities = $authUser['legal_entities'] ?? '';
+            if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
+            if (!is_array($userEntities) || empty($userEntities)) respond([]);
+            $phLE = implode(',', array_fill(0, count($userEntities), '?'));
+            $leWhere = " AND legal_entity IN ($phLE)";
+            $leArgs = array_values($userEntities);
+        }
+        $st = $pdo->prepare("SELECT report_date, legal_entity, stock_type, cell_count, is_manual FROM warehouse_cells WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY){$leWhere} ORDER BY report_date DESC, legal_entity, stock_type");
+        $st->execute(array_merge([$days], $leArgs));
         respond($st->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -3512,12 +3181,12 @@ if ($endpoint === 'rpc') {
 
     // ═══ Паллетовка: импорт справочника ═══
     if ($fn === 'import_pallet_reference') {
-        $caller = getSessionUser($pdo);
-        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($authUser, 'pallet-storage', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $items = $body['items'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
         if (empty($items)) respond(['error' => 'Нет данных'], 400);
         if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($authUser, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $group = getEntityGroup($legalEntity);
         $pdo->beginTransaction();
         try {
@@ -3567,9 +3236,9 @@ if ($endpoint === 'rpc') {
 
     // ═══ Паллетовка: загрузка справочника ═══
     if ($fn === 'get_pallet_reference') {
-        $caller = getSessionUser($pdo);
-        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($authUser, 'pallet-storage', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        if ($legalEntity && !checkLegalEntityAccess($authUser, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
         $st = $pdo->prepare("SELECT * FROM pallet_reference WHERE legal_entity_group = ? ORDER BY storage_category, name");
         $st->execute([$group]);
@@ -3578,8 +3247,7 @@ if ($endpoint === 'rpc') {
 
     // ═══ Паллетовка: обновить поле (частота, кол-во коробок) ═══
     if ($fn === 'update_pallet_field') {
-        $caller = getSessionUser($pdo);
-        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($authUser, 'pallet-storage', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         $field = $body['field'] ?? '';
         $value = $body['value'] ?? null;
@@ -3592,9 +3260,9 @@ if ($endpoint === 'rpc') {
 
     // ═══ Паллетовка: расчёт заполненности ═══
     if ($fn === 'calc_pallet_occupancy') {
-        $caller = getSessionUser($pdo);
-        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($authUser, 'pallet-storage', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        if ($legalEntity && !checkLegalEntityAccess($authUser, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
         // Справочник — только выбранного юрлица
         $s = $pdo->prepare("SELECT * FROM pallet_reference WHERE legal_entity_group = ? ORDER BY storage_category, name");
@@ -4010,487 +3678,13 @@ if ($endpoint === 'rpc') {
         }
     }
 
-    // ═══ VEG ORDER: приватные RPC ═══
-    if ($fn === 'veg_create_session') {
-        $name = mb_substr($body['name'] ?? '', 0, 255);
-        $products = $body['products'] ?? []; // [{name, unit}]
-        $dayConfig = $body['day_config'] ?? []; // [{date, restaurants: [nums]}]
-        $uname = $authUserName ?: ($body['user_name'] ?? '');
-        $dateFrom = $body['date_from'] ?? null;
-        $dateTo = $body['date_to'] ?? null;
-        $legalEntity = $body['legal_entity'] ?? null;
-        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
-        if (!$name || empty($products)) respond(['error' => 'Не все параметры указаны'], 400);
-        if (count($products) > 200) respond(['error' => 'Слишком много товаров (макс. 200)'], 400);
-        // Валидация дат
-        if ($dateFrom && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) $dateFrom = null;
-        if ($dateTo && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) $dateTo = null;
-        $pdo->beginTransaction();
-        try {
-            $s = $pdo->prepare("INSERT INTO veg_sessions (name, date_from, date_to, legal_entity_group, created_by) VALUES (?, ?, ?, ?, ?)");
-            $s->execute([$name, $dateFrom, $dateTo, $entityGroup, $uname]);
-            $sessId = $pdo->lastInsertId();
-            $ins = $pdo->prepare("INSERT INTO veg_session_products (session_id, product_name, unit, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?)");
-            foreach ($products as $i => $p) {
-                $pname = mb_substr($p['name'] ?? '', 0, 255);
-                $punit = in_array($p['unit'] ?? '', ['kg', 'pcs']) ? $p['unit'] : 'kg';
-                $pmult = isset($p['multiplicity']) && $p['multiplicity'] !== '' && $p['multiplicity'] !== null ? floatval($p['multiplicity']) : null;
-                $ins->execute([$sessId, $pname, $punit, $pmult, $i]);
-            }
-            // Per-session конфиг дней (какие рестораны на какие дни)
-            if (!empty($dayConfig)) {
-                $dcIns = $pdo->prepare("INSERT INTO veg_session_day_config (session_id, delivery_date, restaurant_number) VALUES (?, ?, ?)");
-                foreach ($dayConfig as $dc) {
-                    $dcDate = $dc['date'] ?? '';
-                    $dcRests = $dc['restaurants'] ?? [];
-                    if (!$dcDate || empty($dcRests)) continue;
-                    foreach ($dcRests as $rn) {
-                        $dcIns->execute([$sessId, $dcDate, $rn]);
-                    }
-                }
-            }
-
-            $pdo->commit();
-
-            // Автоматически создать токен со сроком до конца периода
-            $autoToken = bin2hex(random_bytes(32));
-            $tokenExpires = $dateTo ? ($dateTo . ' 23:59:59') : date('Y-m-d H:i:s', strtotime('+14 days'));
-            $pdo->prepare("INSERT INTO veg_tokens (session_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)")
-                ->execute([$sessId, $autoToken, $uname, $tokenExpires]);
-
-            // Уведомление подписчикам в Telegram с кнопками
-            try {
-                $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
-                $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
-                if ($botToken) {
-                    $allSubs = $pdo->query("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE notify_so_sessions = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))")->fetchAll(PDO::FETCH_COLUMN);
-                    if ($allSubs) {
-                        $dateRange = '';
-                        if ($dateFrom && $dateTo) {
-                            $df = date('d.m', strtotime($dateFrom));
-                            $dt = date('d.m', strtotime($dateTo));
-                            $dateRange = "\n📅 Период: <b>{$df} — {$dt}</b>";
-                        }
-                        $prodList = [];
-                        foreach ($products as $p) {
-                            $pname = $p['name'] ?? '';
-                            if ($pname) $prodList[] = $pname;
-                        }
-                        $prodLine = $prodList ? "\n📦 Товары: " . implode(', ', $prodList) : '';
-                        $webLink = "{$siteUrl}/restaurant/order/{$autoToken}";
-                        $msgText = "📢 <b>Открыт сбор заявок на овощи</b>\n\n";
-                        $msgText .= "🗂 Сессия: <b>" . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "</b>";
-                        $msgText .= $dateRange;
-                        $msgText .= $prodLine;
-                        $msgText .= "\n\n👇 Подайте заявку:";
-
-                        $keyboard = json_encode(['inline_keyboard' => [
-                            [['text' => '📝 Заполнить на сайте', 'url' => $webLink]],
-                            [['text' => '🤖 Заполнить в боте', 'callback_data' => 'veg_order_' . $sessId . '_' . $autoToken]],
-                        ]]);
-
-                        foreach ($allSubs as $cid) {
-                            $payload = json_encode([
-                                'chat_id' => $cid,
-                                'text' => $msgText,
-                                'parse_mode' => 'HTML',
-                                'reply_markup' => json_decode($keyboard),
-                            ]);
-                            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-                            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                            curl_exec($ch); curl_close($ch);
-                        }
-                    }
-                }
-            } catch (Exception $e) {
-                error_log('veg_create_session telegram notify error: ' . $e->getMessage());
-            }
-
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            error_log('veg_create_session error: ' . $e->getMessage());
-            respond(['error' => 'Ошибка создания сессии'], 500);
-        }
-        auditLog($pdo, 'veg_session_created', 'veg', $sessId, $uname, ['name' => $name, 'products_count' => count($products)]);
-        respond(['id' => $sessId, 'token' => $autoToken]);
-    }
-    if ($fn === 'veg_create_token') {
-        $sessId = intval($body['session_id'] ?? 0);
-        $uname = $authUserName ?: ($body['user_name'] ?? '');
-        if (!$sessId) respond(['error' => 'Не все параметры указаны'], 400);
-        $sc = $pdo->prepare("SELECT id FROM veg_sessions WHERE id = ?");
-        $sc->execute([$sessId]);
-        if (!$sc->fetch()) respond(['error' => 'Сессия не найдена'], 404);
-        $token = bin2hex(random_bytes(32));
-        $expiresDate = $body['expires_date'] ?? '';
-        if ($expiresDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiresDate)) {
-            $expires = $expiresDate . ' 23:59:59';
-        } else {
-            $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
-        }
-        $s = $pdo->prepare("INSERT INTO veg_tokens (session_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)");
-        $s->execute([$sessId, $token, $uname, $expires]);
-        respond(['token' => $token, 'token_id' => $pdo->lastInsertId(), 'expires_at' => $expires]);
-    }
-    if ($fn === 'veg_close_session') {
-        $sessId = intval($body['session_id'] ?? 0);
-        if (!$sessId) respond(['error' => 'Не все параметры указаны'], 400);
-        $pdo->prepare("UPDATE veg_sessions SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$sessId]);
-        respond(['success' => true]);
-    }
-    if ($fn === 'veg_reopen_session') {
-        $sessId = intval($body['session_id'] ?? 0);
-        if (!$sessId) respond(['error' => 'Не все параметры указаны'], 400);
-        $pdo->prepare("UPDATE veg_sessions SET status = 'active', closed_at = NULL WHERE id = ?")->execute([$sessId]);
-        respond(['success' => true]);
-    }
-    if ($fn === 'veg_get_session_data') {
-        $sessId = intval($body['session_id'] ?? 0);
-        if (!$sessId) respond(['error' => 'Не все параметры указаны'], 400);
-        // Даты сессии
-        $sessMeta = $pdo->prepare("SELECT date_from, date_to FROM veg_sessions WHERE id = ?");
-        $sessMeta->execute([$sessId]);
-        $sessRow = $sessMeta->fetch();
-        $dateFrom = $sessRow['date_from'] ?? null;
-        $dateTo = $sessRow['date_to'] ?? null;
-        // Товары
-        $s = $pdo->prepare("SELECT id, product_name, unit, multiplicity, sort_order FROM veg_session_products WHERE session_id = ? ORDER BY sort_order");
-        $s->execute([$sessId]);
-        $products = $s->fetchAll();
-        // Заявки
-        $s2 = $pdo->prepare("SELECT id, product_id, restaurant_number, delivery_date, quantity, admin_note, admin_qty, submitted_at, source FROM veg_orders WHERE session_id = ? ORDER BY restaurant_number, delivery_date");
-        $s2->execute([$sessId]);
-        $orders = $s2->fetchAll();
-        // Пометки по ресторанам
-        $s3 = $pdo->prepare("SELECT restaurant_number, note FROM veg_restaurant_notes WHERE session_id = ?");
-        $s3->execute([$sessId]);
-        $notes = $s3->fetchAll();
-        // Рестораны (все активные, без дублей, по номеру)
-        $s4 = $pdo->prepare("SELECT id, number, address, city, region, legal_entity_group FROM restaurants WHERE active = 1 AND legal_entity_group = 'BK_VM' ORDER BY number");
-        $s4->execute();
-        $restaurants = $s4->fetchAll();
-        $existNums = array_flip(array_column($restaurants, 'number'));
-        $s4b = $pdo->prepare("SELECT id, number, address, city, region, legal_entity_group FROM restaurants WHERE active = 1 AND legal_entity_group != 'BK_VM' ORDER BY number");
-        $s4b->execute();
-        foreach ($s4b->fetchAll() as $r) {
-            if (!isset($existNums[$r['number']])) $restaurants[] = $r;
-        }
-        usort($restaurants, function($a, $b) { return intval($a['number']) - intval($b['number']); });
-        // Токены
-        $s5 = $pdo->prepare("SELECT token, created_by, expires_at, created_at FROM veg_tokens WHERE session_id = ? ORDER BY created_at DESC");
-        $s5->execute([$sessId]);
-        $tokens = $s5->fetchAll();
-        // Расписание доставки
-        $s6 = $pdo->query("SELECT restaurant_number, day_of_week FROM veg_delivery_days ORDER BY restaurant_number");
-        $schedRaw = $s6->fetchAll();
-        $schedMap = [];
-        foreach ($schedRaw as $r) {
-            $rn = $r['restaurant_number'];
-            if (!isset($schedMap[$rn])) $schedMap[$rn] = [];
-            $schedMap[$rn][] = intval($r['day_of_week']);
-        }
-        // Предыдущая сессия — заказы (для не ответивших)
-        $prevSess = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 1");
-        $prevSess->execute([$sessId]);
-        $prevS = $prevSess->fetch();
-        $prevOrders = [];
-        if ($prevS) {
-            $sp = $pdo->prepare("SELECT o.restaurant_number, sp.product_name, sp.unit, o.delivery_date, o.quantity, o.admin_qty FROM veg_orders o JOIN veg_session_products sp ON sp.id = o.product_id WHERE o.session_id = ? ORDER BY o.restaurant_number, o.delivery_date");
-            $sp->execute([$prevS['id']]);
-            $prevOrders = $sp->fetchAll();
-        }
-        respond(['products' => $products, 'orders' => $orders, 'notes' => $notes, 'restaurants' => $restaurants, 'tokens' => $tokens, 'schedule' => $schedMap, 'prev_orders' => $prevOrders, 'date_from' => $dateFrom, 'date_to' => $dateTo]);
-    }
-    if ($fn === 'veg_get_stats') {
-        // Статистика по ресторанам: участие в сессиях, пропуски дедлайнов
-        $limitSessions = intval($body['limit'] ?? 10);
-        if ($limitSessions < 1) $limitSessions = 10;
-        if ($limitSessions > 50) $limitSessions = 50;
-
-        // Последние N сессий
-        $sessStmt = $pdo->prepare("SELECT id, name, date_from, date_to, created_at FROM veg_sessions ORDER BY id DESC LIMIT " . $limitSessions);
-        $sessStmt->execute();
-        $recentSessions = $sessStmt->fetchAll();
-        $sessIds = array_column($recentSessions, 'id');
-        if (!$sessIds) respond(['sessions' => [], 'stats' => []]);
-
-        $placeholders = implode(',', array_fill(0, count($sessIds), '?'));
-
-        // Все рестораны с расписанием доставки (активные)
-        $restStmt = $pdo->prepare("SELECT number, address, city, region FROM restaurants WHERE active = 1 AND legal_entity_group = 'BK_VM' ORDER BY number");
-        $restStmt->execute();
-        $allRests = $restStmt->fetchAll();
-
-        // Расписание доставки
-        $schedStmt = $pdo->query("SELECT restaurant_number, day_of_week FROM veg_delivery_days");
-        $restWithSchedule = [];
-        foreach ($schedStmt->fetchAll() as $r) {
-            $restWithSchedule[$r['restaurant_number']] = true;
-        }
-
-        // Заказы по сессиям и ресторанам
-        // self = ресторан подал сам (quantity > 0), admin = админ внёс (quantity = 0, admin_qty IS NOT NULL)
-        $ordStmt = $pdo->prepare("SELECT session_id, restaurant_number, MAX(CASE WHEN quantity > 0 THEN 1 ELSE 0 END) as has_self FROM veg_orders WHERE session_id IN ({$placeholders}) GROUP BY session_id, restaurant_number");
-        $ordStmt->execute($sessIds);
-        $orderMap = []; // key => 'self' | 'admin'
-        foreach ($ordStmt->fetchAll() as $r) {
-            $key = $r['session_id'] . '_' . $r['restaurant_number'];
-            $orderMap[$key] = $r['has_self'] ? 'self' : 'admin';
-        }
-
-        // Собираем статистику
-        $stats = [];
-        foreach ($allRests as $rest) {
-            $num = $rest['number'];
-            if (!isset($restWithSchedule[$num])) continue; // нет расписания — не участвует
-            $participated = 0;
-            $missed = 0;
-            foreach ($sessIds as $sid) {
-                $key = $sid . '_' . $num;
-                if (isset($orderMap[$key]) && $orderMap[$key] === 'self') {
-                    $participated++;
-                } else {
-                    $missed++; // пропуск = нет заявки ИЛИ внёс админ
-                }
-            }
-            $total = count($sessIds);
-            $stats[] = [
-                'number' => $num,
-                'address' => $rest['address'],
-                'city' => $rest['city'],
-                'region' => $rest['region'],
-                'total' => $total,
-                'participated' => $participated,
-                'missed' => $missed,
-                'rate' => $total > 0 ? round($participated / $total * 100) : 0,
-            ];
-        }
-
-        respond(['sessions_count' => count($sessIds), 'stats' => $stats]);
-    }
-    if ($fn === 'veg_update_order') {
-        $orderId = intval($body['order_id'] ?? 0);
-        $sessId = intval($body['session_id'] ?? 0);
-        $restNum = $body['restaurant_number'] ?? '';
-        $prodId = intval($body['product_id'] ?? 0);
-        $delDate = $body['delivery_date'] ?? '';
-        $adminQty = isset($body['admin_qty']) ? (is_null($body['admin_qty']) ? null : floatval($body['admin_qty'])) : 'skip';
-        $adminNote = $body['admin_note'] ?? 'skip';
-
-        if ($orderId) {
-            // Получаем данные заказа до изменения (для уведомления)
-            $oldOrder = $pdo->prepare("SELECT vo.restaurant_number, vo.delivery_date, vo.quantity, vo.admin_qty,
-                sp.product_name, sp.unit
-                FROM veg_orders vo
-                JOIN veg_session_products sp ON sp.id = vo.product_id AND sp.session_id = vo.session_id
-                WHERE vo.id = ?");
-            $oldOrder->execute([$orderId]);
-            $oldData = $oldOrder->fetch();
-
-            // Обновление существующей записи
-            $sets = []; $params = [];
-            if ($adminQty !== 'skip') { $sets[] = 'admin_qty = ?'; $params[] = $adminQty; }
-            if ($adminNote !== 'skip') { $sets[] = 'admin_note = ?'; $params[] = ($adminNote === null || $adminNote === '') ? null : mb_substr($adminNote, 0, 500); }
-            if (empty($sets)) respond(['error' => 'Нет данных'], 400);
-            $params[] = $orderId;
-            $pdo->prepare("UPDATE veg_orders SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
-
-            auditLog($pdo, 'veg_order_updated', 'veg', $orderId, $authUserName, ['restaurant' => $oldData['restaurant_number'] ?? '', 'product' => $oldData['product_name'] ?? '', 'admin_qty' => $adminQty]);
-
-            // Уведомление в Telegram при изменении количества
-            if ($oldData && $adminQty !== 'skip') {
-                $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
-                if ($botToken && $oldData['restaurant_number']) {
-                    $rn = $oldData['restaurant_number'];
-                    $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
-                    $subs->execute([$rn]);
-                    $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
-                    if ($chatIds) {
-                        $oldVal = $oldData['admin_qty'] !== null ? $oldData['admin_qty'] : $oldData['quantity'];
-                        $newVal = $adminQty !== null ? $adminQty : $oldData['quantity'];
-                        $dateFmt = (new DateTime($oldData['delivery_date']))->format('d.m');
-                        $tgText = "📝 <b>Изменение заявки</b>\n\n";
-                        $tgText .= "🏪 Ресторан <b>{$rn}</b>\n";
-                        $tgText .= "📅 Доставка: {$dateFmt}\n";
-                        $tgText .= "🥬 {$oldData['product_name']}: <b>{$oldVal}</b> → <b>{$newVal}</b> {$oldData['unit']}\n\n";
-                        $tgText .= "<i>Изменено отделом закупок</i>";
-                        foreach ($chatIds as $cid) {
-                            $d = json_encode(['chat_id' => $cid, 'text' => $tgText, 'parse_mode' => 'HTML']);
-                            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-                            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $d, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                            curl_exec($ch); curl_close($ch);
-                        }
-                    }
-                }
-            }
-
-            respond(['success' => true]);
-        } elseif ($sessId && $restNum && $prodId && $delDate) {
-            // Создание новой записи (админ добавляет вручную)
-            $qty = ($adminQty !== 'skip' && $adminQty !== null) ? $adminQty : 0;
-            $s = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, admin_qty, submitted_at)
-                VALUES (?, ?, ?, ?, 0, ?, NOW())
-                ON DUPLICATE KEY UPDATE admin_qty = VALUES(admin_qty)");
-            $s->execute([$sessId, $prodId, $restNum, $delDate, $qty]);
-
-            // Уведомление в Telegram о добавлении позиции
-            $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
-            if ($botToken && $restNum) {
-                $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
-                $subs->execute([$restNum]);
-                $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
-                if ($chatIds) {
-                    $prodName = $pdo->prepare("SELECT product_name FROM veg_session_products WHERE id=? AND session_id=?");
-                    $prodName->execute([$prodId, $sessId]);
-                    $pn = $prodName->fetchColumn() ?: 'Товар';
-                    $dateFmt = (new DateTime($delDate))->format('d.m');
-                    $tgText = "📝 <b>Добавлена позиция в заявку</b>\n\n";
-                    $tgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
-                    $tgText .= "📅 Доставка: {$dateFmt}\n";
-                    $tgText .= "🥬 {$pn}: <b>{$qty}</b>\n\n";
-                    $tgText .= "<i>Добавлено отделом закупок</i>";
-                    foreach ($chatIds as $cid) {
-                        $d = json_encode(['chat_id' => $cid, 'text' => $tgText, 'parse_mode' => 'HTML']);
-                        $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-                        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $d, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                        curl_exec($ch); curl_close($ch);
-                    }
-                }
-            }
-
-            respond(['success' => true, 'id' => $pdo->lastInsertId()]);
-        } else {
-            respond(['error' => 'Не все параметры указаны'], 400);
-        }
-    }
-    if ($fn === 'veg_delete_restaurant_orders') {
-        $sessId = intval($body['session_id'] ?? 0);
-        $restNum = $body['restaurant_number'] ?? '';
-        $delDate = $body['delivery_date'] ?? null;
-        if (!$sessId || !$restNum) respond(['error' => 'Не все параметры указаны'], 400);
-        if ($delDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', $delDate)) {
-            // Удалить заявку на конкретную дату
-            $s = $pdo->prepare("DELETE FROM veg_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-            $s->execute([$sessId, $restNum, $delDate]);
-        } else {
-            // Удалить все заявки ресторана
-            $s = $pdo->prepare("DELETE FROM veg_orders WHERE session_id = ? AND restaurant_number = ?");
-            $s->execute([$sessId, $restNum]);
-            $s2 = $pdo->prepare("DELETE FROM veg_restaurant_notes WHERE session_id = ? AND restaurant_number = ?");
-            $s2->execute([$sessId, $restNum]);
-        }
-        respond(['success' => true, 'deleted' => $s->rowCount()]);
-    }
-    if ($fn === 'veg_save_note') {
-        $sessId = intval($body['session_id'] ?? 0);
-        $restNum = $body['restaurant_number'] ?? '';
-        $note = mb_substr($body['note'] ?? '', 0, 500);
-        if (!$sessId || !$restNum) respond(['error' => 'Не все параметры указаны'], 400);
-        $pdo->prepare("INSERT INTO veg_restaurant_notes (session_id, restaurant_number, note) VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE note = VALUES(note)")
-            ->execute([$sessId, $restNum, $note ?: null]);
-        respond(['success' => true]);
-    }
-    if ($fn === 'veg_save_schedule') {
-        $schedule = $body['schedule'] ?? []; // [{restaurant_number, days: [1,3,5]}]
-        if (empty($schedule)) respond(['error' => 'Пустые данные'], 400);
-        $pdo->beginTransaction();
-        try {
-            $del = $pdo->prepare("DELETE FROM veg_delivery_days WHERE restaurant_number = ?");
-            $ins = $pdo->prepare("INSERT INTO veg_delivery_days (restaurant_number, day_of_week) VALUES (?, ?)");
-            foreach ($schedule as $item) {
-                $rn = $item['restaurant_number'] ?? '';
-                $days = $item['days'] ?? [];
-                if (!$rn || !preg_match('/^\d{1,5}$/', $rn)) continue;
-                $del->execute([$rn]);
-                foreach ($days as $d) {
-                    $d = intval($d);
-                    if ($d >= 1 && $d <= 7) {
-                        $ins->execute([$rn, $d]);
-                    }
-                }
-            }
-            $pdo->commit();
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            error_log('veg_save_schedule error: ' . $e->getMessage());
-            respond(['error' => 'Ошибка сохранения'], 500);
-        }
-        respond(['success' => true]);
-    }
-    if ($fn === 'veg_get_deadlines') {
-        $rows = $pdo->query("SELECT delivery_dow, deadline_dow, deadline_time FROM veg_deadline_rules ORDER BY delivery_dow")->fetchAll();
-        respond($rows);
-    }
-    if ($fn === 'veg_save_deadlines') {
-        $rules = $body['rules'] ?? []; // [{delivery_dow, deadline_dow, deadline_time}]
-        if (empty($rules)) respond(['error' => 'Пустые данные'], 400);
-        $pdo->beginTransaction();
-        try {
-            $pdo->exec("DELETE FROM veg_deadline_rules");
-            $ins = $pdo->prepare("INSERT INTO veg_deadline_rules (delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?)");
-            foreach ($rules as $r) {
-                $delDow = intval($r['delivery_dow'] ?? 0);
-                $dlDow = intval($r['deadline_dow'] ?? 0);
-                $dlTime = $r['deadline_time'] ?? '12:00';
-                if ($delDow < 1 || $delDow > 7 || $dlDow < 1 || $dlDow > 7) continue;
-                if (!preg_match('/^\d{1,2}:\d{2}(:\d{2})?$/', $dlTime)) $dlTime = '12:00:00';
-                if (strlen($dlTime) === 5) $dlTime .= ':00';
-                $ins->execute([$delDow, $dlDow, $dlTime]);
-            }
-            $pdo->commit();
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            respond(['error' => 'Ошибка сохранения'], 500);
-        }
-        respond(['success' => true]);
-    }
-    if ($fn === 'veg_get_summary_subscribers') {
-        $s = $pdo->query("
-            SELECT u.name, u.telegram_chat_id, COALESCE(ts.veg_deadline_summary, 0) AS subscribed
-            FROM users u
-            LEFT JOIN telegram_settings ts ON ts.user_name = u.name
-            WHERE u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id > 0
-            ORDER BY u.name
-        ");
-        $rows = $s->fetchAll();
-        foreach ($rows as &$r) { $r['subscribed'] = (int)$r['subscribed']; }
-        respond($rows);
-    }
-    if ($fn === 'veg_set_summary_subscriber') {
-        $name = trim($body['name'] ?? '');
-        $on = !empty($body['subscribed']) ? 1 : 0;
-        if ($name === '') respond(['error' => 'Не указано имя'], 400);
-        try {
-            $upd = $pdo->prepare("UPDATE telegram_settings SET veg_deadline_summary = ? WHERE user_name = ?");
-            $upd->execute([$on, $name]);
-            if ($upd->rowCount() === 0) {
-                $ins = $pdo->prepare("INSERT INTO telegram_settings (user_name, veg_deadline_summary) VALUES (?, ?)");
-                $ins->execute([$name, $on]);
-            }
-            respond(['success' => true]);
-        } catch (Exception $e) {
-            respond(['error' => 'Ошибка сохранения'], 500);
-        }
-    }
-    if ($fn === 'veg_get_schedule_all') {
-        $s = $pdo->prepare("SELECT restaurant_number, day_of_week FROM veg_delivery_days ORDER BY restaurant_number, day_of_week");
-        $s->execute();
-        $rows = $s->fetchAll();
-        // Группируем по ресторану
-        $result = [];
-        foreach ($rows as $r) {
-            $rn = $r['restaurant_number'];
-            if (!isset($result[$rn])) $result[$rn] = [];
-            $result[$rn][] = intval($r['day_of_week']);
-        }
-        respond($result);
-    }
 
     // ═══ Распределение новинок (dist_*) ═══
 
     if ($fn === 'dist_get_sessions') {
+        requireModuleAccess($authUser, 'distribution', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        if ($legalEntity && !checkLegalEntityAccess($authUser, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
         $s = $pdo->prepare("SELECT * FROM dist_sessions WHERE legal_entity_group = ? ORDER BY created_at DESC");
         $s->execute([$group]);
@@ -4498,12 +3692,14 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_create_session') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $name = trim($body['name'] ?? '');
         $products = $body['products'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
         if (!$name) respond(['error' => 'Название обязательно'], 400);
         if (empty($products)) respond(['error' => 'Добавьте хотя бы один товар'], 400);
         if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($authUser, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $group = getEntityGroup($legalEntity);
         $caller = getSessionUser($pdo);
         $s = $pdo->prepare("INSERT INTO dist_sessions (name, legal_entity_group, created_by) VALUES (?, ?, ?)");
@@ -4520,6 +3716,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_delete_session') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
         // CASCADE удалит session_products и entries
@@ -4528,6 +3725,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_close_session') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
         $pdo->prepare("UPDATE dist_sessions SET status='closed', closed_at=NOW() WHERE id=?")->execute([$id]);
@@ -4535,6 +3733,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_reopen_session') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
         $pdo->prepare("UPDATE dist_sessions SET status='active', closed_at=NULL WHERE id=?")->execute([$id]);
@@ -4542,6 +3741,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_get_session_data') {
+        requireModuleAccess($authUser, 'distribution', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
         // Сессия
@@ -4602,6 +3802,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_toggle_shipped') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         $restNum = $body['restaurant_number'] ?? '';
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
@@ -4615,6 +3816,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_update_qty') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         $restNum = $body['restaurant_number'] ?? '';
         $qty = $body['qty'] ?? null;
@@ -4628,6 +3830,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_add_products') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $sessionId = intval($body['session_id'] ?? 0);
         $products = $body['products'] ?? [];
         if (!$sessionId || empty($products)) respond(['error' => 'Нет данных'], 400);
@@ -4646,6 +3849,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_remove_product') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         if (!$spId) respond(['error' => 'Не указан товар'], 400);
         $pdo->prepare("DELETE FROM dist_session_products WHERE id=?")->execute([$spId]);
@@ -4653,6 +3857,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_save_note') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $sessionId = intval($body['session_id'] ?? 0);
         $restNum = $body['restaurant_number'] ?? '';
         $note = trim($body['note'] ?? '');
@@ -4665,6 +3870,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dist_bulk_toggle') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         $restaurantNumbers = $body['restaurant_numbers'] ?? [];
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
@@ -4679,8 +3885,10 @@ if ($endpoint === 'rpc') {
     }
 
     // ═══ Telegram Bot Admin ═══
+    // Все tg_admin_* — только для роли admin: рассылки, webhook, отвязки, статистика.
 
     if ($fn === 'tg_admin_bot_info') {
+        requireAdmin($authUser);
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
 
@@ -4696,6 +3904,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_set_webhook') {
+        requireAdmin($authUser);
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
         $url = trim($body['url'] ?? '');
@@ -4715,6 +3924,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_delete_webhook') {
+        requireAdmin($authUser);
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
         $res = json_decode(@file_get_contents("https://api.telegram.org/bot{$botToken}/deleteWebhook"), true);
@@ -4722,6 +3932,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_recent_questions') {
+        requireAdmin($authUser);
         $rows = $pdo->query("SELECT user_name, question AS last_question, answer, asked_at AS last_question_at, legal_entity AS last_entity
             FROM tg_question_log
             ORDER BY asked_at DESC LIMIT 50")->fetchAll();
@@ -4729,6 +3940,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_stats') {
+        requireAdmin($authUser);
         // Все пользователи с привязанным Telegram
         $linked = $pdo->query("SELECT u.name, u.email, u.role, u.display_role, u.telegram_chat_id, u.legal_entities,
             ts.daily_summary, ts.psc_expiry, ts.price_changed, ts.overdue_delivery,
@@ -4795,6 +4007,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_send_message') {
+        requireAdmin($authUser);
         $chatIds = $body['chat_ids'] ?? [];
         $message = trim($body['message'] ?? '');
         if (!$message || empty($chatIds)) respond(['error' => 'Нужен текст и получатели'], 400);
@@ -4821,11 +4034,13 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_broadcast_history') {
+        requireAdmin($authUser);
         $rows = $pdo->query("SELECT id, sender, message, recipient_count, sent_at FROM tg_broadcast_log ORDER BY sent_at DESC LIMIT 50")->fetchAll();
         respond(['broadcasts' => $rows]);
     }
 
     if ($fn === 'tg_admin_send_restaurant_reminder') {
+        requireAdmin($authUser);
         $restNumber = $body['restaurant_number'] ?? '';
         $message = trim($body['message'] ?? '');
         if (!$restNumber || !$message) respond(['error' => 'Укажите ресторан и текст'], 400);
@@ -4853,6 +4068,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_toggle_setting') {
+        requireAdmin($authUser);
         $userName = $body['user_name'] ?? '';
         $field = $body['field'] ?? '';
         $allowed = ['daily_summary', 'psc_expiry', 'price_changed', 'overdue_delivery', 'data_updates', 'expiring_items', 'restaurant_sales', 'low_stock', 'correction_notifications', 'chat_notifications', 'so_deadline_summary'];
@@ -4865,6 +4081,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_toggle_rest_notif') {
+        requireAdmin($authUser);
         $chatId = $body['chat_id'] ?? '';
         $field = $body['field'] ?? '';
         $allowed = ['notify_so_reminders', 'notify_so_sessions', 'notify_confirmations', 'notify_stock_reminders', 'notify_stock_sessions'];
@@ -4877,6 +4094,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_unlink_user') {
+        requireAdmin($authUser);
         $userName = $body['user_name'] ?? '';
         if (!$userName) respond(['error' => 'Не указан пользователь'], 400);
         $pdo->prepare("UPDATE users SET telegram_chat_id = NULL WHERE name = ?")->execute([$userName]);
@@ -4886,6 +4104,7 @@ if ($endpoint === 'rpc') {
     // Массовая отвязка просроченных подписок ресторанов: удаляем только те
     // строки, у которых дедлайн перепривязки уже прошёл и подтверждения нет.
     if ($fn === 'tg_admin_unlink_expired') {
+        requireAdmin($authUser);
         $confirm = !empty($body['confirm']);
         $countSt = $pdo->query("
             SELECT COUNT(*) c
@@ -4917,6 +4136,7 @@ if ($endpoint === 'rpc') {
     // ═══ Корректировки заказов ═══
 
     if ($fn === 'correction_review') {
+        requireModuleAccess($authUser, 'corrections', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         $action = $body['action'] ?? '';
         $comment = trim($body['comment'] ?? '');
@@ -4997,6 +4217,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'correction_review_batch') {
+        requireModuleAccess($authUser, 'corrections', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $ids = $body['ids'] ?? [];
         $action = $body['action'] ?? '';
         $comment = trim($body['comment'] ?? '');
@@ -5103,6 +4324,7 @@ if ($endpoint === 'rpc') {
     // ═══ Оплаты поставщиков ═══
 
     if ($fn === 'create_payment_if_needed') {
+        requireModuleAccess($authUser, 'plan-fact', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $orderId = $body['order_id'] ?? '';
         // Опорная дата для отсрочки — теперь дата поставки. Принимаем delivery_date,
         // оставляем чтение ttn_date для совместимости со старыми клиентами.
@@ -5172,6 +4394,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'update_payment') {
+        requireModuleAccess($authUser, 'plan-fact', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
         $allowed = ['amount', 'status', 'note', 'payment_date', 'delivery_date', 'request_deadline'];
@@ -5197,15 +4420,33 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dashboard_kpi') {
+        requireModuleAccess($authUser, 'dashboard', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $period = $body['period'] ?? 'week';
         $le = $body['legal_entity'] ?? null;
         $days = ['week' => 7, 'month' => 30, 'quarter' => 90][$period] ?? 7;
         $from = date('Y-m-d', strtotime("-{$days} days"));
         $prevFrom = date('Y-m-d', strtotime("-" . ($days * 2) . " days"));
-        // Если фронт прислал юрлицо — фильтруем все KPI по нему. Иначе — по всем юрлицам.
-        $leAnd = $le ? " AND legal_entity = ?" : '';
-        $leAndAlias = $le ? " AND o.legal_entity = ?" : '';
-        $leArgs = $le ? [$le] : [];
+        // Если фронт прислал юрлицо — проверяем доступ и фильтруем по нему.
+        // Если не передал и не admin — фильтруем по всем юрлицам пользователя.
+        // Admin без юрлица видит всё.
+        if ($le) {
+            if (!checkLegalEntityAccess($authUser, $le)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+            $leAnd = " AND legal_entity = ?";
+            $leAndAlias = " AND o.legal_entity = ?";
+            $leArgs = [$le];
+        } elseif (($authUser['role'] ?? '') !== 'admin') {
+            $userEntities = $authUser['legal_entities'] ?? '';
+            if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
+            if (!is_array($userEntities) || empty($userEntities)) respond(['error' => 'У пользователя нет привязанных юрлиц'], 403);
+            $phLE = implode(',', array_fill(0, count($userEntities), '?'));
+            $leAnd = " AND legal_entity IN ($phLE)";
+            $leAndAlias = " AND o.legal_entity IN ($phLE)";
+            $leArgs = array_values($userEntities);
+        } else {
+            $leAnd = '';
+            $leAndAlias = '';
+            $leArgs = [];
+        }
 
         $curOrders = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE created_at_new >= ?" . $leAnd);
         $curOrders->execute(array_merge([$from], $leArgs));
@@ -5274,9 +4515,8 @@ if ($endpoint === 'rpc') {
         // Просроченные заказы (детали)
         $overdueSql = "SELECT id, supplier, delivery_date, DATEDIFF(CURDATE(), delivery_date) as days_overdue
             FROM orders
-            WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= ?";
-        $overdueArgs = [$from];
-        if ($le) { $overdueSql .= " AND legal_entity = ?"; $overdueArgs[] = $le; }
+            WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= ?" . $leAnd;
+        $overdueArgs = array_merge([$from], $leArgs);
         $overdueSql .= " ORDER BY delivery_date LIMIT 10";
         $overdueSt = $pdo->prepare($overdueSql);
         $overdueSt->execute($overdueArgs);
@@ -5310,13 +4550,30 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'dashboard_critical_stock') {
+        requireModuleAccess($authUser, 'dashboard', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $le = $body['legal_entity'] ?? null;
-        $leWhere = $le ? " AND a.legal_entity = " . $pdo->quote($le) : '';
-        $st = $pdo->query("SELECT a.sku, p.analog_group, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1)), 1) as days_of_stock
+        // Сборка фильтра: явное юрлицо → одно; не-admin без юрлица → его список;
+        // admin без юрлица → без ограничения.
+        $leWhere = '';
+        $leArgs = [];
+        if ($le) {
+            if (!checkLegalEntityAccess($authUser, $le)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+            $leWhere = " AND a.legal_entity = ?";
+            $leArgs = [$le];
+        } elseif (($authUser['role'] ?? '') !== 'admin') {
+            $userEntities = $authUser['legal_entities'] ?? '';
+            if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
+            if (!is_array($userEntities) || empty($userEntities)) respond(['error' => 'У пользователя нет привязанных юрлиц'], 403);
+            $phLE = implode(',', array_fill(0, count($userEntities), '?'));
+            $leWhere = " AND a.legal_entity IN ($phLE)";
+            $leArgs = array_values($userEntities);
+        }
+        $st = $pdo->prepare("SELECT a.sku, p.analog_group, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1)), 1) as days_of_stock
             FROM analysis_data a
             JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.consumption > 0 AND a.stock > 0 AND a.stock / (a.consumption / GREATEST(a.period_days, 1)) <= 5 {$leWhere}
             ORDER BY days_of_stock ASC LIMIT 30");
+        $st->execute($leArgs);
         $rows = $st->fetchAll();
         // Группируем по analog_group, берём минимум
         $groups = [];
@@ -5333,18 +4590,35 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'get_pending_tasks_all') {
-        $st = $pdo->query("SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, p.topic, p.meeting_date
+        requireModuleAccess($authUser, 'protocols', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        // Не-админу — только задачи протоколов из его юрлиц.
+        $leWhere = '';
+        $leArgs = [];
+        if (($authUser['role'] ?? '') !== 'admin') {
+            $userEntities = $authUser['legal_entities'] ?? '';
+            if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
+            if (!is_array($userEntities) || empty($userEntities)) respond([]);
+            $phLE = implode(',', array_fill(0, count($userEntities), '?'));
+            $leWhere = " AND p.legal_entity IN ($phLE)";
+            $leArgs = array_values($userEntities);
+        }
+        $st = $pdo->prepare("SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, p.topic, p.meeting_date
             FROM protocol_decisions d
             JOIN meeting_protocols p ON p.id = d.protocol_id
-            WHERE d.status IN ('pending', 'overdue')
+            WHERE d.status IN ('pending', 'overdue'){$leWhere}
             ORDER BY CASE WHEN d.deadline IS NULL THEN 1 ELSE 0 END, d.deadline ASC
             LIMIT 20");
+        $st->execute($leArgs);
         respond($st->fetchAll());
     }
 
     if ($fn === 'get_user_tg_settings') {
         $userName = $body['user_name'] ?? '';
         if (!$userName) respond(['error' => 'user_name required'], 400);
+        // Свои настройки видит сам пользователь, чужие — только admin.
+        if (($authUser['role'] ?? '') !== 'admin' && $userName !== $authUserName) {
+            respond(['error' => 'Нет доступа к настройкам другого пользователя'], 403);
+        }
         $st = $pdo->prepare("SELECT daily_summary, psc_expiry, price_changed, overdue_delivery, data_updates, expiring_items, restaurant_sales, low_stock, correction_notifications, chat_notifications FROM telegram_settings WHERE user_name = ?");
         $st->execute([$userName]);
         $row = $st->fetch(PDO::FETCH_ASSOC);
@@ -5354,6 +4628,7 @@ if ($endpoint === 'rpc') {
     // ═══ Чат с ресторанами ═══
 
     if ($fn === 'chat_get_conversations') {
+        requireModuleAccess($authUser, 'chat', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $status = $body['status'] ?? 'open';
         $legalEntity = $body['legal_entity'] ?? null;
         $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
@@ -5375,6 +4650,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'chat_get_messages') {
+        requireModuleAccess($authUser, 'chat', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $convId = intval($body['conversation_id'] ?? 0);
         if (!$convId) respond(['error' => 'conversation_id required'], 400);
         // Помечаем как прочитанные
@@ -5385,6 +4661,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'chat_send_message') {
+        requireModuleAccess($authUser, 'chat', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $convId = intval($body['conversation_id'] ?? 0);
         $text = trim($body['message_text'] ?? '');
         if (!$convId || !$text) respond(['error' => 'conversation_id and message_text required'], 400);
@@ -5418,6 +4695,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'chat_close_conversation') {
+        requireModuleAccess($authUser, 'chat', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $convId = intval($body['conversation_id'] ?? 0);
         if (!$convId) respond(['error' => 'conversation_id required'], 400);
         $caller = getSessionUser($pdo);
@@ -5427,6 +4705,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'chat_reopen_conversation') {
+        requireModuleAccess($authUser, 'chat', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $convId = intval($body['conversation_id'] ?? 0);
         if (!$convId) respond(['error' => 'conversation_id required'], 400);
         $pdo->prepare("UPDATE chat_conversations SET status = 'open', closed_by = NULL, closed_at = NULL WHERE id = ?")->execute([$convId]);
@@ -5434,11 +4713,13 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'chat_unread_total') {
+        requireModuleAccess($authUser, 'chat', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $cnt = $pdo->query("SELECT COUNT(*) FROM chat_messages cm JOIN chat_conversations cc ON cc.id = cm.conversation_id WHERE cm.is_read = 0 AND cm.direction = 'from_restaurant' AND cc.status = 'open'")->fetchColumn();
         respond(['count' => intval($cnt)]);
     }
 
     if ($fn === 'chat_send_photo') {
+        requireModuleAccess($authUser, 'chat', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $convId = intval($_POST['conversation_id'] ?? $body['conversation_id'] ?? 0);
         if (!$convId) respond(['error' => 'conversation_id required'], 400);
         if (empty($_FILES['photo'])) respond(['error' => 'Файл не выбран'], 400);
@@ -5481,6 +4762,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'chat_get_photo') {
+        requireModuleAccess($authUser, 'chat', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $fileId = $body['file_id'] ?? ($_GET['file_id'] ?? '');
         if (!$fileId) respond(['error' => 'file_id required'], 400);
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';

@@ -731,17 +731,14 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         }
     }
 
-    // Проверяем: есть ли уже заявка?
-    $group = getEntityGroup($rest['legal_entity'] ?? '');
-    $entities = getEntitiesInGroup($group);
-    $ph = implode(',', array_fill(0, count($entities), '?'));
-    $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity IN ({$ph})");
-    $existing->execute(array_merge([$supplierId, $rest['restaurant_number'], $deliveryDate], $entities));
-    $existingOrder = $existing->fetch();
-
-    // legal_entity всегда берём из единого источника истины roGetLegalEntity
-    // (правильно обрабатывает ресторан 3 = Воглия Матта), а не из ro_users.legal_entity.
+    // legal_entity ресторана — единый источник истины (restaurants.legal_entity).
+    // Один ресторан = одно юрлицо, поэтому ищем существующую заявку строго в этом юрлице.
     $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
+
+    // Проверяем: есть ли уже заявка под этим юрлицом?
+    $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+    $existing->execute([$supplierId, $rest['restaurant_number'], $deliveryDate, $le]);
+    $existingOrder = $existing->fetch();
 
     $pdo->beginTransaction();
     try {
@@ -755,9 +752,8 @@ if ($soAction === 'submit-order' && $method === 'POST') {
                 $preservedAdminQty[$row['sku']] = $row['admin_qty'];
             }
             $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
-            // Обновляем и legal_entity — ресторан мог сменить юрлицо в рамках группы.
-            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), legal_entity = ? WHERE id = ?")
-                ->execute([$le, $orderId]);
+            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
+                ->execute([$orderId]);
         } else {
             $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
                 ->execute([$rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);

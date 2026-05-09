@@ -1331,7 +1331,6 @@ const sysSettingsLoading = ref(false);
 
 const SETTINGS_CATEGORIES = {
   'maintenance_mode': 'Система', 'maintenance_message': 'Система', 'maintenance_end_time': 'Система',
-  'order_calculator_password': 'Безопасность',
   'last_update': 'Данные',
 };
 

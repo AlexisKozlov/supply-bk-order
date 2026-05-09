@@ -3068,13 +3068,14 @@ if ($roAction === 'all-history' && $method === 'GET') {
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
     $rn = $rest['restaurant_number'];
     $group = $rest['legal_entity_group'] ?? 'BK_VM';
-    $entities = getEntitiesInGroup($group);
-    $entityPh = implode(',', array_fill(0, count($entities), '?'));
+    // Один ресторан = одно юрлицо. История показывается только по своему юрлицу.
+    $restEntity = $rest['legal_entity'] ?? '';
+    if (!$restEntity) roRespond(['error' => 'У ресторана не задано юр. лицо'], 400);
     $limit = min((int)($_GET['limit'] ?? 30), 100);
     $allOrders = [];
 
     // 1. Основная поставка (ro_orders) — показываем в истории только если модуль включён
-    if (roRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $group)) {
+    if (roRestaurantOrdersEnabled($pdo, $restEntity, $group)) {
         $s1 = $pdo->prepare("
             SELECT o.id, o.delivery_date, o.status, o.submitted_at,
                    (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
@@ -3083,10 +3084,10 @@ if ($roAction === 'all-history' && $method === 'GET') {
                       FROM ro_order_items oi
                       LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit'
                       WHERE oi.order_id = o.id) as total_deposit
-            FROM ro_orders o WHERE o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
+            FROM ro_orders o WHERE o.restaurant_number = ? AND o.legal_entity = ?
             ORDER BY o.delivery_date DESC LIMIT {$limit}
         ");
-        $s1->execute(array_merge([$rn], $entities));
+        $s1->execute([$rn, $restEntity]);
         foreach ($s1->fetchAll() as $r) {
             $r['source'] = 'delivery';
             $r['source_name'] = 'Основная поставка';
@@ -3102,10 +3103,10 @@ if ($roAction === 'all-history' && $method === 'GET') {
                (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
         FROM so_orders o
         LEFT JOIN suppliers s ON s.id = o.supplier_id
-        WHERE o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
+        WHERE o.restaurant_number = ? AND o.legal_entity = ?
         ORDER BY o.delivery_date DESC LIMIT {$limit}
     ");
-    $s2->execute(array_merge([$rn], $entities));
+    $s2->execute([$rn, $restEntity]);
     foreach ($s2->fetchAll() as $r) {
         $r['source'] = 'supplier';
         $r['source_name'] = $r['supplier_name'] ?: 'Поставщик';
@@ -3131,19 +3132,19 @@ if ($roAction === 'history-order' && $method === 'GET') {
     if ($source === '' || $id === '') roRespond(['error' => 'Не указан заказ'], 400);
 
     $group = $rest['legal_entity_group'] ?? 'BK_VM';
-    $entities = getEntitiesInGroup($group);
-    $entityPh = implode(',', array_fill(0, count($entities), '?'));
+    // Один ресторан = одно юрлицо. Доступ только к заказам своего юрлица.
+    $restEntity = $rest['legal_entity'] ?? '';
+    if (!$restEntity) roRespond(['error' => 'У ресторана не задано юр. лицо'], 400);
 
     if ($source === 'delivery') {
-        roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $group);
-        $params = array_merge([(int)$id, $rest['restaurant_number']], $entities);
+        roRequireRestaurantOrdersEnabled($pdo, $restEntity, $group);
         $s = $pdo->prepare("
             SELECT id, delivery_date, status, submitted_at, updated_at, updated_by, comment, legal_entity
             FROM ro_orders
-            WHERE id = ? AND restaurant_number = ? AND legal_entity IN ({$entityPh})
+            WHERE id = ? AND restaurant_number = ? AND legal_entity = ?
             LIMIT 1
         ");
-        $s->execute($params);
+        $s->execute([(int)$id, $rest['restaurant_number'], $restEntity]);
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
 
@@ -3170,16 +3171,15 @@ if ($roAction === 'history-order' && $method === 'GET') {
     }
 
     if ($source === 'supplier') {
-        $params = array_merge([(int)$id, $rest['restaurant_number']], $entities);
         $s = $pdo->prepare("
             SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.updated_at, o.supplier_id,
                    s.short_name AS supplier_name
             FROM so_orders o
             LEFT JOIN suppliers s ON s.id = o.supplier_id
-            WHERE o.id = ? AND o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
+            WHERE o.id = ? AND o.restaurant_number = ? AND o.legal_entity = ?
             LIMIT 1
         ");
-        $s->execute($params);
+        $s->execute([(int)$id, $rest['restaurant_number'], $restEntity]);
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
 
