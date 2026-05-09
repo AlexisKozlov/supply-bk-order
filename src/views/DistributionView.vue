@@ -527,6 +527,8 @@ async function openSession(s) {
 function startAutoRefresh() {
   stopAutoRefresh();
   refreshInterval = setInterval(() => {
+    // Не дёргаем сервер на скрытой вкладке.
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
     if (activeSession.value && !editingQty.value && !editingNote.value) {
       loadSessionData(activeSession.value.id);
     }

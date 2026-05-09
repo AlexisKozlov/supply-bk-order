@@ -891,10 +891,15 @@ onMounted(() => {
 function handleVisibilityChange() {
   if (document.hidden) {
     // Вкладка скрыта — останавливаем таймеры
+    if (badgeTimer) { clearInterval(badgeTimer); badgeTimer = null; }
     if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
     if (maintenanceTimer) { clearInterval(maintenanceTimer); maintenanceTimer = null; }
   } else {
     // Вкладка снова видна — запускаем сразу и ставим интервалы
+    loadBadges();
+    if (badgeTimer) clearInterval(badgeTimer);
+    badgeTimer = setInterval(loadBadges, 30000);
+
     sendHeartbeat();
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = setInterval(sendHeartbeat, 30000);

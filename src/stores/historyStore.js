@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, shallowRef } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 import { useOrderStore } from './orderStore.js';
@@ -7,8 +7,12 @@ import { useOrderStore } from './orderStore.js';
 const PAGE_SIZE = 50;
 
 export const useHistoryStore = defineStore('history', () => {
-  const orders  = ref([]);
-  const plans   = ref([]);
+  // shallowRef для больших readonly-списков: Vue реагирует только на замену
+  // самой коллекции, не отслеживает каждое поле каждого заказа. На 1000+
+  // заказах с вложенными order_items это заметно экономит ререндер при
+  // загрузке. Все потребители (HistoryView) используют только find/filter/map.
+  const orders  = shallowRef([]);
+  const plans   = shallowRef([]);
   const loading = ref(false);
   const loadingMore = ref(false);
   const error   = ref(null);
@@ -49,7 +53,8 @@ export const useHistoryStore = defineStore('history', () => {
       if (reset) {
         listRef.value = fetched;
       } else {
-        listRef.value.push(...fetched);
+        // shallowRef не реагирует на push — используем замену массивом.
+        listRef.value = [...listRef.value, ...fetched];
       }
       return listRef.value;
     } catch (e) {

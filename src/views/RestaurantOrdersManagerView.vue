@@ -1542,6 +1542,7 @@ watch([pageTab, auditAutoRefresh], ([tab, auto]) => {
   clearInterval(auditRefreshTimer);
   if (tab === 'audit' && auto) {
     auditRefreshTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       // Сбрасываем offset и перезагружаем с начала
       loadAuditLog();
     }, 30000);
@@ -1984,6 +1985,7 @@ function closeTplAddModal() {
 function startAutoRefresh() {
   stopAutoRefresh();
   refreshInterval = setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
     if (pageTab.value === 'orders' && !showOrderModal.value) {
       loadStatus();
     }
