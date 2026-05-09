@@ -21,7 +21,7 @@ function normalizeAnalogGroup($s) {
 // Скачать файл из Telegram по file_id
 function botDownloadFile($fileId) {
     global $BOT_TOKEN;
-    $resp = json_decode(@file_get_contents("https://api.telegram.org/bot{$BOT_TOKEN}/getFile?" . http_build_query(['file_id' => $fileId])), true);
+    $resp = json_decode(tgHttpGet("https://api.telegram.org/bot{$BOT_TOKEN}/getFile?" . http_build_query(['file_id' => $fileId])), true);
     $path = $resp['result']['file_path'] ?? null;
     if (!$path) return null;
     $url = "https://api.telegram.org/file/bot{$BOT_TOKEN}/{$path}";

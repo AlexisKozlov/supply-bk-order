@@ -299,7 +299,9 @@ if ($method === 'GET') {
             $sql .= " ORDER BY `{$op[0]}` " . (($op[1]??'asc')==='desc'?'DESC':'ASC');
         }
     }
-    $maxLimit = ($table === 'restaurant_sales') ? 500000 : 5000;
+    // restaurant_sales — 50000 (раньше было 500000 = 25МБ JSON, перегружало браузер).
+    // Если нужны агрегаты за длинный период — есть rpc get_restaurant_sales_summary.
+    $maxLimit = ($table === 'restaurant_sales') ? 50000 : 5000;
     $limit = isset($_GET['limit']) ? max(1, min(intval($_GET['limit']), $maxLimit)) : 1000;
     $sql .= " LIMIT " . $limit;
     if (isset($_GET['offset'])) {

@@ -6,6 +6,26 @@
 require_once __DIR__ . '/legal_entities.php';
 
 // ═══ Telegram уведомления ═══
+
+/**
+ * GET-запрос к Telegram API через curl с явными таймаутами.
+ * Замена @file_get_contents — без таймаутов default socket-timeout 60 сек,
+ * процесс PHP-FPM висит до минуты при медленном ответе Telegram.
+ *
+ * @return string|null  Тело ответа или null при ошибке.
+ */
+function tgHttpGet($url, $timeout = 5) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_CONNECTTIMEOUT => 2,
+    ]);
+    $res = curl_exec($ch);
+    curl_close($ch);
+    return $res === false ? null : $res;
+}
+
 function sendTelegramMessage($botToken, $chatId, $text, $parseMode = 'HTML') {
     if (!$botToken || !$chatId) return false;
     $payload = json_encode([
@@ -432,6 +452,27 @@ function requireModuleAccess($sessionUser, $module, $minLevel, $roleTemplates, $
     if ($actual < $required) {
         respond(['error' => 'Недостаточно прав'], 403);
     }
+}
+
+/**
+ * Простой файловый кэш для тяжёлых аналитических запросов.
+ * Используется для dashboard_kpi — серверу не приходится повторять 14 запросов
+ * для каждого пользователя на дашборде, если те же параметры запрошены недавно.
+ * APCu в проде не установлен, поэтому /tmp.
+ */
+function cacheGet($key, $ttl) {
+    $file = sys_get_temp_dir() . '/bkcalc_' . sha1($key) . '.cache';
+    if (!file_exists($file)) return null;
+    $mtime = @filemtime($file);
+    if (!$mtime || ($mtime + $ttl) < time()) return null;
+    $raw = @file_get_contents($file);
+    if (!$raw) return null;
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : null;
+}
+function cacheSet($key, $value) {
+    $file = sys_get_temp_dir() . '/bkcalc_' . sha1($key) . '.cache';
+    @file_put_contents($file, json_encode($value, JSON_UNESCAPED_UNICODE), LOCK_EX);
 }
 
 // Короткий хелпер для admin-only RPC. Бросает 401/403 и завершает запрос.

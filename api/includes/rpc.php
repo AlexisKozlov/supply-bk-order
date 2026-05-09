@@ -3914,9 +3914,9 @@ if ($endpoint === 'rpc') {
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
 
         // getMe
-        $me = json_decode(@file_get_contents("https://api.telegram.org/bot{$botToken}/getMe"), true);
+        $me = json_decode(tgHttpGet("https://api.telegram.org/bot{$botToken}/getMe"), true);
         // getWebhookInfo
-        $wh = json_decode(@file_get_contents("https://api.telegram.org/bot{$botToken}/getWebhookInfo"), true);
+        $wh = json_decode(tgHttpGet("https://api.telegram.org/bot{$botToken}/getWebhookInfo"), true);
 
         respond([
             'bot' => $me['result'] ?? null,
@@ -3948,7 +3948,7 @@ if ($endpoint === 'rpc') {
         requireAdmin($authUser);
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
-        $res = json_decode(@file_get_contents("https://api.telegram.org/bot{$botToken}/deleteWebhook"), true);
+        $res = json_decode(tgHttpGet("https://api.telegram.org/bot{$botToken}/deleteWebhook"), true);
         respond($res ?? ['error' => 'Нет ответа от Telegram']);
     }
 
@@ -4444,6 +4444,14 @@ if ($endpoint === 'rpc') {
         requireModuleAccess($authUser, 'dashboard', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $period = $body['period'] ?? 'week';
         $le = $body['legal_entity'] ?? null;
+        // Кэш на 30 секунд по ключу (period + legal_entity + actor).
+        // Дашборд делает 14 запросов к большим таблицам — без кэша при каждом
+        // открытии страницы серверу больно. 30 сек хватает чтобы цифры
+        // не были устаревшими на глаз, но при перезагрузке страницы или
+        // переходе между табами выдаёт мгновенно.
+        $cacheKey = 'dashboard_kpi_' . $period . '_' . ($le ?: '*') . '_' . ($authUserName ?: '_');
+        $cached = cacheGet($cacheKey, 30);
+        if ($cached !== null) respond($cached);
         $days = ['week' => 7, 'month' => 30, 'quarter' => 90][$period] ?? 7;
         $from = date('Y-m-d', strtotime("-{$days} days"));
         $prevFrom = date('Y-m-d', strtotime("-" . ($days * 2) . " days"));
@@ -4558,7 +4566,7 @@ if ($endpoint === 'rpc') {
         $collSt->execute($leArgs);
         $activeCollections = intval($collSt->fetchColumn());
 
-        respond([
+        $result = [
             'ordersCount' => $ordersCount, 'ordersDelta' => $ordersDelta,
             'totalAmount' => round($totalAmount, 0), 'amountDelta' => $amountDelta,
             'deliveredPct' => $deliveredPct, 'overdueCount' => intval($overdue),
@@ -4567,7 +4575,9 @@ if ($endpoint === 'rpc') {
             'topSuppliers' => $topSuppliers,
             'overdueOrders' => $overdueOrders, 'upcomingPayments' => $upcomingPayments,
             'activeTenders' => $activeTenders, 'activeCollections' => $activeCollections,
-        ]);
+        ];
+        cacheSet($cacheKey, $result);
+        respond($result);
     }
 
     if ($fn === 'dashboard_critical_stock') {
@@ -4787,7 +4797,7 @@ if ($endpoint === 'rpc') {
         $fileId = $body['file_id'] ?? ($_GET['file_id'] ?? '');
         if (!$fileId) respond(['error' => 'file_id required'], 400);
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
-        $resp = @file_get_contents("https://api.telegram.org/bot{$botToken}/getFile?" . http_build_query(['file_id' => $fileId]));
+        $resp = tgHttpGet("https://api.telegram.org/bot{$botToken}/getFile?" . http_build_query(['file_id' => $fileId]));
         $data = json_decode($resp, true);
         $filePath = $data['result']['file_path'] ?? null;
         if (!$filePath) respond(['error' => 'File not found'], 404);
@@ -4802,7 +4812,21 @@ if ($endpoint === 'rpc') {
         $legalEntity = $body['legal_entity'] ?? $_GET['legal_entity'] ?? null;
         if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
         if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
-        $s = $pdo->prepare("SELECT p.*, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id) as decisions_count, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id AND d.status = 'done') as decisions_done, s.name as series_name FROM meeting_protocols p LEFT JOIN meeting_protocol_series s ON s.id = p.series_id WHERE p.legal_entity = ? ORDER BY p.meeting_date DESC, p.created_at DESC LIMIT 500");
+        // Один JOIN с агрегатами вместо двух коррелированных подзапросов на каждую строку.
+        // На 500 протоколах раньше было 1000 подзапросов к protocol_decisions.
+        $s = $pdo->prepare("SELECT p.*,
+                COALESCE(d.cnt, 0) AS decisions_count,
+                COALESCE(d.done_cnt, 0) AS decisions_done,
+                s.name as series_name
+            FROM meeting_protocols p
+            LEFT JOIN meeting_protocol_series s ON s.id = p.series_id
+            LEFT JOIN (
+                SELECT protocol_id, COUNT(*) AS cnt, SUM(status = 'done') AS done_cnt
+                FROM protocol_decisions
+                GROUP BY protocol_id
+            ) d ON d.protocol_id = p.id
+            WHERE p.legal_entity = ?
+            ORDER BY p.meeting_date DESC, p.created_at DESC LIMIT 500");
         $s->execute([$legalEntity]);
         respond($s->fetchAll());
     }

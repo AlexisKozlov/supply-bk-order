@@ -80,7 +80,7 @@ function answerCallback($callbackId, $text = '', $showAlert = false) {
     global $BOT_TOKEN;
     $params = ['callback_query_id' => $callbackId, 'text' => $text];
     if ($showAlert) $params['show_alert'] = true;
-    file_get_contents("https://api.telegram.org/bot{$BOT_TOKEN}/answerCallbackQuery?" . http_build_query($params));
+    tgHttpGet("https://api.telegram.org/bot{$BOT_TOKEN}/answerCallbackQuery?" . http_build_query($params));
 }
 
 function sendMessageAndGetId($chatId, $text) {
@@ -98,12 +98,12 @@ function sendMessageAndGetId($chatId, $text) {
 
 function deleteMessage($chatId, $messageId) {
     global $BOT_TOKEN;
-    @file_get_contents("https://api.telegram.org/bot{$BOT_TOKEN}/deleteMessage?" . http_build_query(['chat_id' => $chatId, 'message_id' => $messageId]));
+    tgHttpGet("https://api.telegram.org/bot{$BOT_TOKEN}/deleteMessage?" . http_build_query(['chat_id' => $chatId, 'message_id' => $messageId]));
 }
 
 function sendTyping($chatId) {
     global $BOT_TOKEN;
-    @file_get_contents("https://api.telegram.org/bot{$BOT_TOKEN}/sendChatAction?" . http_build_query(['chat_id' => $chatId, 'action' => 'typing']));
+    tgHttpGet("https://api.telegram.org/bot{$BOT_TOKEN}/sendChatAction?" . http_build_query(['chat_id' => $chatId, 'action' => 'typing']));
 }
 
 function sendDocument($chatId, $filename, $content, $caption = '') {
