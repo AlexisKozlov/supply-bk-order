@@ -326,7 +326,7 @@ const showFullOrder = ref(false);
 const summaryItems = computed(() => {
   if (!viewSummaryOrder.value) return [];
   const items = viewSummaryOrder.value.order_items || [];
-  const periodDays = parseInt(viewSummaryOrder.value.period_days) || 30;
+  const periodDays = parseInt(viewSummaryOrder.value.period_days, 10) || 30;
   const unit = viewSummaryOrder.value.unit || 'pieces';
   return items
     .filter(i => (parseFloat(i.qty_boxes) || 0) > 0)

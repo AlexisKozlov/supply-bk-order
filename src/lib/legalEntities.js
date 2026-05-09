@@ -11,6 +11,10 @@ export const LEGAL_ENTITIES = [
 
 export const DEFAULT_ENTITY = LEGAL_ENTITIES[0];
 
+// Коды групп юрлиц для колонки legal_entity_group в таблицах restaurants/products/suppliers.
+export const ENTITY_GROUP_BK_VM = 'BK_VM';
+export const ENTITY_GROUP_PS = 'PS';
+
 /**
  * Таблицы, которые НАМЕРЕННО общие для группы BK+VM (не делятся по юрлицам).
  * Для них фильтрация идёт по группе через .or()/applyEntityFilter, а не по одному

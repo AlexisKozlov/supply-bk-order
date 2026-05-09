@@ -740,7 +740,7 @@ async function sendToOcr(file) {
 }
 
 function parseOcrText(text) {
-  console.log('[PalletCalc] OCR raw text:', text);
+  if (typeof window !== 'undefined' && window.BK_DEBUG) console.log('[PalletCalc] OCR raw text:', text);
   // Normalize: remove non-breaking spaces, fix common OCR artifacts
   // Replace look-alike characters: ‚ (U+201A) and similar → comma, trailing dots
   const normalized = text.replace(/\u00A0/g, ' ').replace(/[|]/g, '').replace(/[‚„]/g, ',').replace(/\.$/gm, '');

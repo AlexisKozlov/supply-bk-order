@@ -223,7 +223,7 @@ async function loadRestaurants() {
       headers: { 'X-Session-Token': token, 'X-API-Key': token },
     });
     const data = await res.json();
-    restaurants.value = (data.data || data || []).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+    restaurants.value = (data.data || data || []).sort((a, b) => parseInt(a.number, 10) - parseInt(b.number, 10));
     for (const r of restaurants.value) if (!scheduleGrid[r.id]) scheduleGrid[r.id] = {};
   } catch { toast.error('Ошибка загрузки ресторанов'); }
   finally { loadingRests.value = false; }
@@ -372,7 +372,7 @@ async function submit() {
         if (scheduleGrid[rId]?.[d]) {
           const rule = deadlineRulesMap[d];
           const orderDay = rule?.active ? rule.deadline_dow : (d > 1 ? d - 1 : 7);
-          schedules.push({ restaurant_id: parseInt(rId), order_day: orderDay, delivery_day: d });
+          schedules.push({ restaurant_id: parseInt(rId, 10), order_day: orderDay, delivery_day: d });
         }
       }
     }
@@ -392,7 +392,7 @@ async function submit() {
     for (const [dow, rule] of Object.entries(deadlineRulesMap)) {
       if (!rule.active) continue;
       deadlineRules.push({
-        delivery_dow: parseInt(dow),
+        delivery_dow: parseInt(dow, 10),
         deadline_dow: rule.deadline_dow,
         deadline_time: rule.deadline_time.length === 5 ? rule.deadline_time + ':00' : rule.deadline_time,
       });

@@ -1022,7 +1022,7 @@ const filteredRows = computed(() => {
     }
     // Sort by product column
     if (key.startsWith('prod_')) {
-      const prodId = parseInt(key.slice(5));
+      const prodId = parseInt(key.slice(5), 10);
       const va = parseFloat(a.cells[prodId]?.total) || 0;
       const vb = parseFloat(b.cells[prodId]?.total) || 0;
       return dir * (va - vb);

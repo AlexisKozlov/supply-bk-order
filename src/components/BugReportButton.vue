@@ -267,7 +267,8 @@ onMounted(() => {
   checkNewReplies();
 });
 
-// Polling: обновлять чат каждые 5 сек, пока открыто окно
+// Polling: обновлять чат каждые 20 сек (раньше было 5 сек — лишний трафик
+// для мобильных, особенно когда модал просто оставлен открытым).
 let chatPollTimer = null;
 
 function startChatPoll() {
@@ -292,7 +293,7 @@ function startChatPoll() {
         if (data?.reports) myReports.value = data.reports;
       } catch {}
     }
-  }, 5000);
+  }, 20000);
 }
 
 function stopChatPoll() {

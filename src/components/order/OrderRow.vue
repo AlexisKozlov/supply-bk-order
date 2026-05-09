@@ -292,7 +292,7 @@ function placeTip(el) {
 }
 
 function handleExcelNav(e) {
-  const col = parseInt(e.target.dataset.col ?? '-1');
+  const col = parseInt(e.target.dataset.col ?? '-1', 10);
   if (e.key === 'Enter' || e.key === 'ArrowDown') {
     e.preventDefault();
     emit('nav', { row: props.rowIndex + 1, col });

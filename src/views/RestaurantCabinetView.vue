@@ -1623,7 +1623,7 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
@@ -1702,7 +1702,7 @@ const externalOrderLinks = [
   { id: 'salatoria', name: 'Салатория', url: 'http://salatoria.liam.by/my_zakaz/ru_RU', iconKey: 'vegetables', iconClass: 'supplier-icon-vegetables' },
 ];
 const externalSupplierLinks = computed(() => (
-  roStore.restaurant?.legal_entity_group === 'BK_VM' ? externalOrderLinks : []
+  roStore.restaurant?.legal_entity_group === ENTITY_GROUP_BK_VM ? externalOrderLinks : []
 ));
 // SVG только из локальной карты — защита от XSS, если в будущем кто-то
 // решит брать иконки из API, иконка не отрисуется (вернётся пустая строка).

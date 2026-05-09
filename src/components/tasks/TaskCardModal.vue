@@ -415,7 +415,7 @@ async function patch(payload) {
 }
 
 async function onColumnChange(e) {
-  const newCol = parseInt(e.target.value);
+  const newCol = parseInt(e.target.value, 10);
   if (!newCol || newCol === full.value.card.column_id) return;
   await store.moveCard(props.cardId, newCol, 0);
   await load();

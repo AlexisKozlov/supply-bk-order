@@ -274,8 +274,8 @@ export const useOrderStore = defineStore('order', () => {
     settings.supplier = order.supplier || '';
     settings.today = order.today_date ? new Date(order.today_date + 'T00:00:00') : new Date();
     settings.deliveryDate = order.delivery_date ? new Date(order.delivery_date + 'T00:00:00') : null;
-    settings.safetyDays = parseInt(order.safety_days) || 0;
-    settings.periodDays = parseInt(order.period_days) || 30;
+    settings.safetyDays = parseInt(order.safety_days, 10) || 0;
+    settings.periodDays = parseInt(order.period_days, 10) || 30;
     settings.unit = order.unit || 'pieces';
     settings.hasTransit = order.has_transit === true || order.has_transit === 'true' || order.has_transit === '1' || order.has_transit === 1;
     settings.showStockColumn = true; // всегда показываем запас при просмотре

@@ -799,7 +799,7 @@ function calcDeadlineMs(isoDate) {
 }
 
 const availableDates = computed(() => {
-  const mask = parseInt(form.value?.restaurant_pickup_weekdays || 0);
+  const mask = parseInt(form.value?.restaurant_pickup_weekdays || 0, 10);
   const out = [];
   if (mask) {
     const today = new Date();

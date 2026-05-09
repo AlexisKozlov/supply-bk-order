@@ -19,8 +19,13 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
+
+// Таймер и слушатель сохраняем, чтобы корректно убрать при размонтировании
+// (HMR в dev, тесты, или если когда-нибудь UpdatePrompt окажется не в App.vue).
+let _updateCheckTimer = null;
+let _visibilityHandler = null;
 
 // Проверять обновление раз в 5 минут
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
@@ -55,10 +60,11 @@ const { needRefresh } = useRegisterSW({
       } catch (e) { /* offline / 404 во время сборки — ок */ }
     }
     checkForUpdate();
-    setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') checkForUpdate();
-    });
+    if (_updateCheckTimer) clearInterval(_updateCheckTimer);
+    _updateCheckTimer = setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL);
+    if (_visibilityHandler) document.removeEventListener('visibilitychange', _visibilityHandler);
+    _visibilityHandler = () => { if (document.visibilityState === 'visible') checkForUpdate(); };
+    document.addEventListener('visibilitychange', _visibilityHandler);
 
     // Автохил: если на момент регистрации в скоупе уже есть waiting SW —
     // активируем его разово, чтобы не показывать пользователю лишний баннер.
@@ -111,6 +117,11 @@ async function doUpdate() {
 function later() {
   needRefresh.value = false;
 }
+
+onUnmounted(() => {
+  if (_updateCheckTimer) { clearInterval(_updateCheckTimer); _updateCheckTimer = null; }
+  if (_visibilityHandler) { document.removeEventListener('visibilitychange', _visibilityHandler); _visibilityHandler = null; }
+});
 </script>
 
 <style scoped>
