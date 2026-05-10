@@ -648,6 +648,32 @@ function roNotifyRestaurant($pdo, $restaurantNumber, $message, $legalEntityGroup
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
 
+    // ── Rate-limit: не более 10 уведомлений на ресторан за 1 минуту ──────────
+    // Считаем количество уже отправленных уведомлений этому ресторану за последнюю минуту.
+    $rateLimitMax = 10;
+    $rateLimitWindow = 60; // секунд
+    try {
+        $rlCheck = $pdo->prepare(
+            "SELECT COUNT(*) FROM tg_notification_log
+             WHERE notification_type = 'ro_notify'
+               AND legal_entity = ?
+               AND sent_at > NOW() - INTERVAL ? SECOND"
+        );
+        $rlCheck->execute([(string)(int)$restaurantNumber, $rateLimitWindow]);
+        $rlCount = (int)$rlCheck->fetchColumn();
+        if ($rlCount >= $rateLimitMax) {
+            error_log("Rate-limit exceeded for restaurant_number={$restaurantNumber}: skipped");
+            return false;
+        }
+        // Записываем маркер до отправки — чтобы параллельные запросы тоже видели счётчик.
+        $pdo->prepare(
+            "INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id) VALUES ('ro_notify', ?, 0)"
+        )->execute([(string)(int)$restaurantNumber]);
+    } catch (Exception $e) {
+        // Ошибка rate-limit не должна блокировать уведомление — продолжаем без проверки.
+        error_log("roNotifyRestaurant rate-limit check failed: " . $e->getMessage());
+    }
+
     // Источник правды о подписках ресторана — ro_telegram_subs.
     // ro_users.telegram_chat_id больше не используется (см. миграцию verified_*).
     // Фильтр по legal_entity_group обязателен: номера ресторанов BK_VM и PS

@@ -41,6 +41,9 @@ $pdo->exec("SET SESSION max_statement_time = 30");
 require_once __DIR__ . '/includes/legal_entities.php';
 require_once __DIR__ . '/includes/so_deadline.php';
 
+// TTL одноразовых токенов входа в кабинет ресторана (синхронизировано с helpers.php).
+if (!defined('RO_AUTH_TOKEN_TTL_MINUTES')) define('RO_AUTH_TOKEN_TTL_MINUTES', 10);
+
 // Тихие часы: 22:00–09:00 по Минску — никакие уведомления не отправляем.
 // Выходим до всех проверок, чтобы дедуп не пометил неотправленные сообщения как доставленные.
 $__nowHour = (int)(new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H');
@@ -861,7 +864,7 @@ try {
             $text .= "Дедлайн: {$timeLeft}.\n\n";
 
             $token = bin2hex(random_bytes(32));
-            $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
+            $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL " . RO_AUTH_TOKEN_TTL_MINUTES . " MINUTE), 0)")
                 ->execute([$token, $m['telegram_chat_id'], $m['restaurant_number'], $m['legal_entity_group'] ?: $sessGroup]);
             $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
 
@@ -1052,7 +1055,7 @@ try {
             $redirect = "/restaurant/orders/supplier/{$supId}";
 
             // Рассылаем каждому подписчику ресторана (свой токен на каждый chat_id)
-            $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE), 0)");
+            $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL " . RO_AUTH_TOKEN_TTL_MINUTES . " MINUTE), 0)");
             $logStmt = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)");
             foreach ($chatIds as $chatId) {
                 $token = bin2hex(random_bytes(32));

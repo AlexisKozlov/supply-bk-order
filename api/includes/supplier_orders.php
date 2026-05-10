@@ -100,6 +100,13 @@ function soAutoLockOrders($pdo, $supplierId, $deliveryDate) {
     ")->execute([$supplierId, $deliveryDate]);
 }
 
+/**
+ * Сохраняет список получателей итоговой сводки для поставщика.
+ *
+ * @throws InvalidArgumentException  Если переданы имена, которых нет в активных пользователях.
+ *                                   Сообщение содержит список не найденных имён.
+ *                                   Сохранение НЕ выполняется — либо все, либо ошибка.
+ */
 function soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers) {
     $names = [];
     if (is_array($notifyUsers)) {
@@ -112,18 +119,25 @@ function soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers) {
     }
     $names = array_keys($names);
 
-    $pdo->prepare("DELETE FROM so_supplier_summary_subscribers WHERE supplier_id = ?")->execute([$supplierId]);
     if (empty($names)) {
+        $pdo->prepare("DELETE FROM so_supplier_summary_subscribers WHERE supplier_id = ?")->execute([$supplierId]);
         return [];
     }
 
+    // Валидация: все имена должны быть активными пользователями.
     $ph = implode(',', array_fill(0, count($names), '?'));
-    $validStmt = $pdo->prepare("SELECT name FROM users WHERE name IN ({$ph})");
+    $validStmt = $pdo->prepare("SELECT name FROM users WHERE name IN ({$ph}) AND active = 1");
     $validStmt->execute($names);
     $validNames = $validStmt->fetchAll(PDO::FETCH_COLUMN);
-    if (empty($validNames)) {
-        return [];
+
+    $notFound = array_values(array_diff($names, $validNames));
+    if (!empty($notFound)) {
+        throw new InvalidArgumentException(
+            'Не найдены пользователи: ' . implode(', ', $notFound)
+        );
     }
+
+    $pdo->prepare("DELETE FROM so_supplier_summary_subscribers WHERE supplier_id = ?")->execute([$supplierId]);
 
     $createdBy = $GLOBALS['sessionUser']['name'] ?? 'system';
     $ins = $pdo->prepare("
@@ -750,6 +764,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     try {
         // Сохраняем правки отдела закупок по SKU, чтобы повторная подача рестораном их не затёрла.
         $preservedAdminQty = [];
+        $prevStatus = $existingOrder['status'] ?? null;
         if ($existingOrder) {
             $orderId = $existingOrder['id'];
             $existingItems = $pdo->prepare("SELECT sku, admin_qty FROM so_order_items WHERE order_id = ? AND admin_qty IS NOT NULL");
@@ -758,8 +773,11 @@ if ($soAction === 'submit-order' && $method === 'POST') {
                 $preservedAdminQty[$row['sku']] = $row['admin_qty'];
             }
             $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
-            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
-                ->execute([$orderId]);
+            // Если заявка ранее была отредактирована закупщиком (status='edited'),
+            // оставляем этот статус: факт правки не должен теряться при повторной подаче рестораном.
+            $newStatus = ($prevStatus === 'edited') ? 'edited' : 'submitted';
+            $pdo->prepare("UPDATE so_orders SET status = ?, submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
+                ->execute([$newStatus, $orderId]);
         } else {
             $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
                 ->execute([$rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
@@ -809,83 +827,101 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         soRespond(['error' => 'Ошибка сохранения заявки'], 500);
     }
 
-    // Уведомление в Telegram о принятой/обновлённой заявке
-    try {
-        $isNew = !$existingOrder;
-        $deliveryDateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+    // ── Подготовка уведомления (до отправки ответа клиенту) ──────────────────
+    // Формируем сообщение здесь, пока $aggregated, $skipDelivery, $totalItems доступны.
+    $isNew = !$existingOrder;
+    $deliveryDateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
 
-        // Название поставщика
-        $sn = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
-        $sn->execute([$supplierId]);
-        $supplierName = $sn->fetchColumn() ?: 'поставщику';
+    // Название поставщика
+    $sn = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+    $sn->execute([$supplierId]);
+    $supplierName = $sn->fetchColumn() ?: 'поставщику';
 
-        $fmtQty = function($q) {
-            $s = number_format((float)$q, 1, '.', '');
-            return rtrim(rtrim($s, '0'), '.');
-        };
-        $esc = function($s) {
-            return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        };
+    $fmtQty = function($q) {
+        $s = number_format((float)$q, 1, '.', '');
+        return rtrim(rtrim($s, '0'), '.');
+    };
+    $esc = function($s) {
+        return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    };
 
-        // Подтягиваем единицы измерения из products по sku (используем агрегированные позиции)
-        $skus = [];
-        foreach ($aggregated as $it) {
-            $sk = trim((string)($it['sku'] ?? ''));
-            if ($sk !== '') $skus[$sk] = true;
+    // Подтягиваем единицы измерения из products по sku (используем агрегированные позиции)
+    $skus = [];
+    foreach ($aggregated as $it) {
+        $sk = trim((string)($it['sku'] ?? ''));
+        if ($sk !== '') $skus[$sk] = true;
+    }
+    $unitBySku = [];
+    if (!empty($skus)) {
+        $skuList = array_keys($skus);
+        $ph = implode(',', array_fill(0, count($skuList), '?'));
+        $us = $pdo->prepare("SELECT sku, unit_of_measure FROM products WHERE sku IN ($ph)");
+        $us->execute($skuList);
+        foreach ($us->fetchAll() as $up) {
+            $unitBySku[$up['sku']] = $up['unit_of_measure'] ?: '';
         }
-        $unitBySku = [];
-        if (!empty($skus)) {
-            $skuList = array_keys($skus);
-            $ph = implode(',', array_fill(0, count($skuList), '?'));
-            $us = $pdo->prepare("SELECT sku, unit_of_measure FROM products WHERE sku IN ($ph)");
-            $us->execute($skuList);
-            foreach ($us->fetchAll() as $up) {
-                $unitBySku[$up['sku']] = $up['unit_of_measure'] ?: '';
-            }
-        }
+    }
 
-        $isSkip = $skipDelivery && $totalItems === 0;
-        if ($isSkip) {
-            $title = $isNew ? '🚫 <b>Поставка не нужна</b>' : '🚫 <b>Поставка отменена</b>';
-        } else {
-            $title = $isNew ? '✅ <b>Заявка отправлена</b>' : '✏️ <b>Заявка обновлена</b>';
-        }
-        $lines = [];
-        $lines[] = $title;
+    $isSkip = $skipDelivery && $totalItems === 0;
+    if ($isSkip) {
+        $title = $isNew ? '🚫 <b>Поставка не нужна</b>' : '🚫 <b>Поставка отменена</b>';
+    } else {
+        $title = $isNew ? '✅ <b>Заявка отправлена</b>' : '✏️ <b>Заявка обновлена</b>';
+    }
+    $lines = [];
+    $lines[] = $title;
+    $lines[] = '';
+    $restaurantLabel = roFormatRestaurantTelegramLabel(
+        $rest['restaurant_number'],
+        $rest['city'] ?? '',
+        $rest['address'] ?? '',
+        $rest['legal_entity_group'] ?? null
+    );
+    $lines[] = "🏪 <b>Ресторан:</b> " . $esc($restaurantLabel);
+    $lines[] = "🏪 <b>Поставщик:</b> " . $esc($supplierName);
+    $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
+    if (!$isSkip) {
+        $lines[] = "📋 <b>Позиций:</b> {$totalItems}";
         $lines[] = '';
-        $restaurantLabel = roFormatRestaurantTelegramLabel(
-            $rest['restaurant_number'],
-            $rest['city'] ?? '',
-            $rest['address'] ?? '',
-            $rest['legal_entity_group'] ?? null
-        );
-        $lines[] = "🏪 <b>Ресторан:</b> " . $esc($restaurantLabel);
-        $lines[] = "🏪 <b>Поставщик:</b> " . $esc($supplierName);
-        $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
-        if (!$isSkip) {
-            $lines[] = "📋 <b>Позиций:</b> {$totalItems}";
-            $lines[] = '';
-            $lines[] = '<b>Состав:</b>';
-            foreach ($aggregated as $it) {
-                $q = floatval($it['quantity'] ?? 0);
-                if ($q <= 0) continue;
-                $sku = $esc($it['sku'] ?? '');
-                $name = $esc($it['product_name'] ?? '');
-                $unit = $esc($unitBySku[$it['sku'] ?? ''] ?? '');
-                $unitStr = $unit !== '' ? " {$unit}" : '';
-                $lines[] = "• <code>{$sku}</code> {$name} — <b>" . $fmtQty($q) . $unitStr . "</b>";
-            }
-        } else {
-            $lines[] = '';
-            $lines[] = '<i>Ресторан отметил, что поставка на эту дату не требуется.</i>';
+        $lines[] = '<b>Состав:</b>';
+        foreach ($aggregated as $it) {
+            $q = floatval($it['quantity'] ?? 0);
+            if ($q <= 0) continue;
+            $sku = $esc($it['sku'] ?? '');
+            $name = $esc($it['product_name'] ?? '');
+            $unit = $esc($unitBySku[$it['sku'] ?? ''] ?? '');
+            $unitStr = $unit !== '' ? " {$unit}" : '';
+            $lines[] = "• <code>{$sku}</code> {$name} — <b>" . $fmtQty($q) . $unitStr . "</b>";
         }
+    } else {
+        $lines[] = '';
+        $lines[] = '<i>Ресторан отметил, что поставка на эту дату не требуется.</i>';
+    }
 
-        $msg = implode("\n", $lines);
-        if (mb_strlen($msg) > 3900) {
-            $msg = mb_substr($msg, 0, 3900) . "\n\n…(сообщение обрезано)";
-        }
+    $tgMsg = implode("\n", $lines);
+    if (mb_strlen($tgMsg) > 3900) {
+        $tgMsg = mb_substr($tgMsg, 0, 3900) . "\n\n…(сообщение обрезано)";
+    }
 
-        roNotifyRestaurant($pdo, $rest['restaurant_number'], $msg, $rest['legal_entity_group'] ?? 'BK_VM');
+    // ── Отправляем ответ клиенту, затем — уведомления в Telegram ────────────
+    // На PHP-FPM fastcgi_finish_request() закрывает соединение с клиентом,
+    // позволяя продолжить выполнение (отправку TG-сообщений) уже без блокировки HTTP.
+    // На Apache/mod_php функция отсутствует — уведомления отправляются синхронно как раньше.
+    http_response_code(200);
+    echo json_encode([
+        'success' => true,
+        'order_id' => (int)$orderId,
+        'total_items' => $totalItems,
+        'total_qty' => $totalQty,
+    ], JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
+
+    // ── Уведомление в Telegram (после отдачи ответа клиенту) ────────────────
+    try {
+        roNotifyRestaurant($pdo, $rest['restaurant_number'], $tgMsg, $rest['legal_entity_group'] ?? 'BK_VM');
     } catch (Exception $e) {
         // Уведомление не критично — игнорируем ошибку
     }
@@ -910,12 +946,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         );
     } catch (Exception $e) { /* не критично */ }
 
-    soRespond([
-        'success' => true,
-        'order_id' => (int)$orderId,
-        'total_items' => $totalItems,
-        'total_qty' => $totalQty,
-    ]);
+    exit;
 }
 
 // ═══════════════════════════════════════════════
@@ -1134,6 +1165,9 @@ if ($soAction === 'admin') {
 
             $pdo->commit();
             soRespond(['success' => true, 'supplier' => $supplier]);
+        } catch (InvalidArgumentException $e) {
+            $pdo->rollBack();
+            soRespond(['error' => $e->getMessage()], 400);
         } catch (Exception $e) {
             $pdo->rollBack();
             error_log('register-supplier error: ' . $e->getMessage());
@@ -1193,7 +1227,11 @@ if ($soAction === 'admin') {
             ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $defaultDl, $pauseMsg, $updatedBy]);
 
         if ($notifyUsers !== null) {
-            soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers);
+            try {
+                soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers);
+            } catch (InvalidArgumentException $e) {
+                soRespond(['error' => $e->getMessage()], 400);
+            }
         }
 
         soRespond([
@@ -1931,7 +1969,11 @@ if ($soAction === 'admin') {
         // Также подгружаем правила дедлайнов
         $dr = $pdo->prepare("SELECT delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? ORDER BY delivery_dow");
         $dr->execute([$supplierId]);
-        soRespond(['schedules' => $schedules, 'temporary_schedule' => $temporarySchedule, 'deadline_rules' => $dr->fetchAll()]);
+        // lockVersion — MAX(updated_at) по расписанию поставщика; используется для оптимистической блокировки в POST.
+        $lvStmt = $pdo->prepare("SELECT MAX(updated_at) FROM so_supplier_schedules WHERE supplier_id = ?");
+        $lvStmt->execute([$supplierId]);
+        $lockVersion = $lvStmt->fetchColumn() ?: null;
+        soRespond(['schedules' => $schedules, 'temporary_schedule' => $temporarySchedule, 'deadline_rules' => $dr->fetchAll(), 'lockVersion' => $lockVersion]);
     }
 
     // --- Сохранение графиков ---
@@ -1941,6 +1983,18 @@ if ($soAction === 'admin') {
         $temporarySchedule = $body['temporary_schedule'] ?? null;
 
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+
+        // Оптимистическая блокировка: если фронт прислал lockVersion — сверяем с текущим MAX(updated_at).
+        // Это защита от ситуации, когда двое одновременно открыли расписание и последний затёр первого.
+        $clientLockVersion = array_key_exists('lockVersion', $body) ? ($body['lockVersion'] ?? null) : false;
+        if ($clientLockVersion !== false && $clientLockVersion !== null) {
+            $lvNow = $pdo->prepare("SELECT MAX(updated_at) FROM so_supplier_schedules WHERE supplier_id = ?");
+            $lvNow->execute([$supplierId]);
+            $currentLockVersion = $lvNow->fetchColumn() ?: null;
+            if ($currentLockVersion !== null && $clientLockVersion !== $currentLockVersion) {
+                soRespond(['error' => 'Расписание изменено другим пользователем. Перезагрузите страницу.'], 409);
+            }
+        }
 
         $updatedBy = resolveActorName($pdo, $sessionUser);
 

@@ -196,7 +196,7 @@ function botOpenRestaurantCabinet($chatId, $msgId, $restNum) {
     }
 
     $token = bin2hex(random_bytes(32));
-    $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
+    $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL " . RO_AUTH_TOKEN_TTL_MINUTES . " MINUTE), 0)")
         ->execute([$token, $chatId, $restNum, $restGroup]);
 
     $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
