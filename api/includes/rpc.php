@@ -5207,15 +5207,52 @@ if ($endpoint === 'rpc') {
         $proto = $s->fetch();
         if (!$proto) respond(['error' => 'Протокол не найден'], 404);
         if (!checkLegalEntityAccess($caller, $proto['legal_entity'] ?? null)) respond(['error' => 'Нет доступа'], 403);
-        // Решения
+        // Решения + последний комментарий из чата привязанной карточки.
         $d = $pdo->prepare("SELECT * FROM protocol_decisions WHERE protocol_id = ? ORDER BY id");
         $d->execute([$id]);
         $proto['decisions'] = $d->fetchAll();
+        pdAttachLastComment($pdo, $proto['decisions']);
         // Файлы
         $f = $pdo->prepare("SELECT id, file_name, file_path, uploaded_by, uploaded_at FROM meeting_protocol_files WHERE protocol_id = ? ORDER BY uploaded_at");
         $f->execute([$id]);
         $proto['files'] = $f->fetchAll();
         respond($proto);
+    }
+
+    // Подтянуть последний комментарий из чата привязанной карточки задачника
+    // ко всем решениям, у которых проставлен tasks_card_id.
+    function pdAttachLastComment($pdo, &$decisions) {
+        if (!is_array($decisions) || !$decisions) return;
+        $cardIds = [];
+        foreach ($decisions as $d) {
+            $cid = isset($d['tasks_card_id']) ? (int)$d['tasks_card_id'] : 0;
+            if ($cid) $cardIds[$cid] = true;
+        }
+        if (!$cardIds) {
+            foreach ($decisions as &$d) $d['last_comment'] = null;
+            unset($d);
+            return;
+        }
+        $ids = array_keys($cardIds);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $s = $pdo->prepare("
+            SELECT c.card_id, c.author_name, c.body, c.created_at
+            FROM tasks_comments c
+            INNER JOIN (
+                SELECT card_id, MAX(id) AS max_id
+                FROM tasks_comments
+                WHERE card_id IN ($ph)
+                GROUP BY card_id
+            ) latest ON latest.card_id = c.card_id AND latest.max_id = c.id
+        ");
+        $s->execute($ids);
+        $byCard = [];
+        foreach ($s->fetchAll() as $r) $byCard[(int)$r['card_id']] = $r;
+        foreach ($decisions as &$d) {
+            $cid = isset($d['tasks_card_id']) ? (int)$d['tasks_card_id'] : 0;
+            $d['last_comment'] = ($cid && isset($byCard[$cid])) ? $byCard[$cid] : null;
+        }
+        unset($d);
     }
 
     function pdResponsibleToUsers($pdo, $responsiblePerson) {
@@ -5535,17 +5572,45 @@ if ($endpoint === 'rpc') {
         $sLe = $sLeStmt->fetchColumn();
         if ($sLe === false) respond([]);
         if ($sLe && !checkLegalEntityAccess($caller, $sLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
-        // Находим незакрытые задачи из всех протоколов этой серии
-        $sql = "SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, d.protocol_id, p.meeting_date, p.topic
-                FROM protocol_decisions d
-                JOIN meeting_protocols p ON p.id = d.protocol_id
-                WHERE p.series_id = ? AND d.status IN ('pending','overdue')";
-        $params = [$seriesId];
-        if ($excludeProtocolId) { $sql .= " AND d.protocol_id != ?"; $params[] = $excludeProtocolId; }
-        $sql .= " ORDER BY p.meeting_date DESC, d.id";
-        $s = $pdo->prepare($sql);
-        $s->execute($params);
-        respond($s->fetchAll());
+
+        // Берём ровно один предыдущий протокол серии: с ближайшей более
+        // ранней датой (при равных — с меньшим id), чтобы порядок «свежесть»
+        // совпадал с UI-сортировкой. Возвращаем ВСЕ его задачи независимо
+        // от статуса — пользователь сам решит, что закрывать/переносить.
+        $prevSql = "SELECT id FROM meeting_protocols WHERE series_id = ?";
+        $prevParams = [$seriesId];
+        if ($excludeProtocolId) {
+            $cur = $pdo->prepare("SELECT meeting_date FROM meeting_protocols WHERE id = ?");
+            $cur->execute([$excludeProtocolId]);
+            $curDate = $cur->fetchColumn();
+            if ($curDate !== false) {
+                $prevSql .= " AND (meeting_date < ? OR (meeting_date = ? AND id < ?))";
+                $prevParams[] = $curDate;
+                $prevParams[] = $curDate;
+                $prevParams[] = $excludeProtocolId;
+            } else {
+                $prevSql .= " AND id != ?";
+                $prevParams[] = $excludeProtocolId;
+            }
+        }
+        $prevSql .= " ORDER BY meeting_date DESC, id DESC LIMIT 1";
+        $ps = $pdo->prepare($prevSql);
+        $ps->execute($prevParams);
+        $prevProtoId = $ps->fetchColumn();
+        if (!$prevProtoId) respond([]);
+
+        $s = $pdo->prepare("
+            SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, d.protocol_id, d.tasks_card_id,
+                   p.meeting_date, p.topic
+            FROM protocol_decisions d
+            JOIN meeting_protocols p ON p.id = d.protocol_id
+            WHERE d.protocol_id = ?
+            ORDER BY d.id
+        ");
+        $s->execute([$prevProtoId]);
+        $decisions = $s->fetchAll();
+        pdAttachLastComment($pdo, $decisions);
+        respond($decisions);
     }
 
     if ($fn === 'get_protocol_series') {

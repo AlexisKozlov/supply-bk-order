@@ -73,12 +73,13 @@
 
       <!-- Перенесённые задачи из предыдущих протоколов -->
       <div v-if="carryoverTasks.length" class="mpd-section mpd-section-carryover">
-        <h3 class="mpd-carryover-title">Незакрытые задачи из предыдущих совещаний <span class="mpd-count">({{ carryoverTasks.length }})</span></h3>
+        <h3 class="mpd-carryover-title">Задачи из прошлого протокола серии <span class="mpd-count">({{ carryoverTasks.length }})</span></h3>
         <table class="mpd-tasks-table">
           <thead>
             <tr>
               <th class="mpd-th-num">№</th>
               <th>Задача</th>
+              <th class="mpd-th-comment">Комментарий</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
               <th class="mpd-th-status">Статус</th>
@@ -89,6 +90,10 @@
             <tr v-for="(t, i) in carryoverTasks" :key="'co-' + t.id" :class="['mpd-tr-' + t.status, { 'mpd-tr-mine': isMyTask(t) }]">
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td class="mpd-td-text">{{ t.text }}</td>
+              <td class="mpd-td-comment">
+                <span v-if="t.last_comment" :title="formatCommentTitle(t.last_comment)">{{ t.last_comment.body }}</span>
+                <span v-else class="mpd-empty-cell">—</span>
+              </td>
               <td>{{ formatResponsible(t.responsible_person) }}</td>
               <td><input type="date" v-model="t.deadline" @change="onCarryoverDeadlineChange(t)" class="mpd-date-input" /></td>
               <td><select v-model="t.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + t.status" @change="onCarryoverStatusChange(t)">
@@ -110,6 +115,7 @@
             <tr>
               <th class="mpd-th-num">№</th>
               <th>Задача</th>
+              <th class="mpd-th-comment">Комментарий</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
               <th class="mpd-th-status">Статус</th>
@@ -120,6 +126,10 @@
             <tr v-for="(dec, i) in protocol.decisions" :key="dec.id || ('new-' + i)" :class="['mpd-tr-' + dec.status, { 'mpd-tr-mine': isMyTask(dec) }]">
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td><textarea v-model="dec.text" :disabled="!canEdit" class="mpd-cell-input mpd-cell-text" rows="1" placeholder="Текст задачи" @input="autoResize($event)"></textarea></td>
+              <td class="mpd-td-comment">
+                <span v-if="dec.last_comment" :title="formatCommentTitle(dec.last_comment)">{{ dec.last_comment.body }}</span>
+                <span v-else class="mpd-empty-cell">—</span>
+              </td>
               <td class="mpd-td-resp">
                 <div class="mpd-multi-select" v-if="canEdit">
                   <div class="mpd-multi-tags" @click="toggleResponsiblePicker(dec)">
@@ -279,6 +289,13 @@ function fmtShortDate(d) {
   if (!d) return '';
   const dt = new Date(d + 'T00:00:00');
   return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+
+function formatCommentTitle(c) {
+  if (!c) return '';
+  const dt = c.created_at ? new Date(c.created_at.replace(' ', 'T')) : null;
+  const when = dt && !isNaN(dt) ? dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  return [c.author_name, when, c.body].filter(Boolean).join(' • ');
 }
 
 async function loadCarryoverTasks() {
@@ -611,6 +628,14 @@ onBeforeUnmount(() => {
 .mpd-td-text { font-size: 13px; padding: 5px 8px; }
 .mpd-td-source { font-size: 11px; color: #999; white-space: nowrap; }
 .mpd-th-source { width: 90px; }
+.mpd-th-comment { width: 220px; }
+.mpd-td-comment {
+  font-size: 12px; color: #555;
+  max-width: 240px;
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mpd-empty-cell { color: #bbb; }
 .mpd-date-input {
   padding: 3px 6px;
   border: 1.5px solid var(--border, #ddd);
