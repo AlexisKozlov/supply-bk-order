@@ -666,7 +666,10 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
     $isExternal = ((int)$card['board_id'] !== (int)$toCol['board_id']);
     if ($isExternal) {
         if ($toBoard['owner_name'] !== $tUserName) tRespond(['error' => 'Между чужими досками двигать нельзя'], 403);
-        $a = $pdo->prepare("SELECT 1 FROM tasks_assignees WHERE card_id = ? AND user_name = ? AND is_done = 0");
+        // Ассайни — независимо от is_done. Если уже закрыл, может вытащить
+        // карточку из своей архив-колонки обратно в работу — это сбросит
+        // is_done и галочку «выполнил» у автора.
+        $a = $pdo->prepare("SELECT 1 FROM tasks_assignees WHERE card_id = ? AND user_name = ?");
         $a->execute([$cardId, $tUserName]);
         if (!$a->fetchColumn()) tRespond(['error' => 'Нет прав на эту карточку'], 403);
     } else {
@@ -684,12 +687,13 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
             $pdo->prepare("SELECT card_id FROM tasks_assignees WHERE user_name = ? AND column_id = ? FOR UPDATE")
                 ->execute([$tUserName, $toColumnId]);
 
-            // Собираем порядок: свои карточки + мои внешние в этой колонке.
+            // Собираем порядок: свои карточки + мои внешние в этой колонке
+            // (включая закрытые в архиве — они тоже видны на доске).
             $items = []; // [['cid'=>id, 'sort'=>n, 'src'=>'own'|'ext'], ...]
             $s = $pdo->prepare("SELECT id, sort_order FROM tasks_cards WHERE column_id = ? AND id <> ?");
             $s->execute([$toColumnId, $cardId]);
             foreach ($s->fetchAll() as $r) $items[] = ['cid' => (int)$r['id'], 'sort' => (int)$r['sort_order'], 'src' => 'own'];
-            $s = $pdo->prepare("SELECT card_id, sort_order FROM tasks_assignees WHERE user_name = ? AND column_id = ? AND is_done = 0 AND card_id <> ?");
+            $s = $pdo->prepare("SELECT card_id, sort_order FROM tasks_assignees WHERE user_name = ? AND column_id = ? AND card_id <> ?");
             $s->execute([$tUserName, $toColumnId, $cardId]);
             foreach ($s->fetchAll() as $r) $items[] = ['cid' => (int)$r['card_id'], 'sort' => (int)$r['sort_order'], 'src' => 'ext'];
             usort($items, fn($a, $b) => ($a['sort'] - $b['sort']) ?: ($a['cid'] - $b['cid']));
@@ -708,6 +712,9 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
                     ->execute([$cardId, $tUserName]);
                 tHistory($pdo, $cardId, $tUserName, 'assignee_done', ['user' => $tUserName]);
             } else {
+                // Возврат из архива в работу: сбрасываем «выполнил».
+                $pdo->prepare("UPDATE tasks_assignees SET is_done = 0, done_at = NULL WHERE card_id = ? AND user_name = ? AND is_done = 1")
+                    ->execute([$cardId, $tUserName]);
                 tHistory($pdo, $cardId, $tUserName, 'assignee_moved', ['user' => $tUserName, 'to_column' => $toColumnId]);
             }
 
