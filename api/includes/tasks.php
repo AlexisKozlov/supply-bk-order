@@ -402,7 +402,11 @@ if ($action === 'board' && $id && $method === 'GET') {
     // на МОЕЙ доске — fallback: незакрытые → первая обычная, закрытые →
     // моя архив-колонка. is_done/is_archived подменяем на assignee.is_done,
     // чтобы фронт видел статус моей части (а не оригинала автора).
-    // Архивные оригиналы (автор удалил/архивировал) не показываем.
+    // c.is_archived НЕ фильтруем: если автор отправил свой оригинал
+    // в архив, моё назначение остаётся в силе и должно быть видно у меня.
+    // Если автор удалил карточку — каскад из FK в tasks_assignees уберёт
+    // её и у меня. Архив доски (b.is_archived=1) — отдельная история,
+    // её всё-таки прячем, иначе ассайни висят на «выключенной» доске.
     $firstNormalColId = null;
     $archiveColId     = null;
     foreach ($columns as $col) {
@@ -422,7 +426,6 @@ if ($action === 'board' && $id && $method === 'GET') {
             JOIN tasks_assignees ta ON ta.card_id = c.id
             JOIN tasks_boards b     ON b.id = c.board_id
             WHERE ta.user_name = ?
-              AND c.is_archived = 0
               AND c.board_id != ?
               AND c.parent_card_id IS NULL
               AND b.is_archived = 0
