@@ -1,10 +1,10 @@
 {
   "name": "bk-calc",
-  "version": "2.0.0",
+  "version": "2.0.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "rm -rf dist && vite build && mkdir -p dist/api && cp -r api/*.php api/includes api/migrations dist/api/",
+    "build": "bash scripts/build.sh",
     "preview": "vite preview"
   },
   "dependencies": {
