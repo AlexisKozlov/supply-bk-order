@@ -150,7 +150,7 @@ async function loadMessages() {
 async function loadPhoto(fileId) {
   try {
     const { data } = await db.rpc('chat_get_photo', { file_id: fileId })
-    if (data?.url) photoUrls.value[fileId] = data.url
+    if (data?.data_url) photoUrls.value[fileId] = data.data_url
   } catch {}
 }
 

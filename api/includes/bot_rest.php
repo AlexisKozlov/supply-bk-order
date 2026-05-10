@@ -1840,6 +1840,42 @@ function corrGetNextDeliveries($pdo, $restNum, $limit = 3) {
 function corrFmtQty($v) { return rtrim(rtrim(number_format(floatval($v), 2, '.', ''), '0'), '.'); }
 function corrEsc($s) { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 
+// Проверка прав на работу с корректировкой через telegram-callback.
+// Возвращает массив пользователя при успехе или false при отказе.
+// Если $cbId передан — отвечает на callback с причиной отказа.
+function corrCheckBotAccess($pdo, $chatId, $corrIds, $cbId = null) {
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+    $st = $pdo->prepare("SELECT id, name, role, permissions FROM users WHERE telegram_chat_id = ?");
+    $st->execute([$chatId]);
+    $user = $st->fetch();
+    if (!$user) {
+        if ($cbId) answerCallback($cbId, "⛔ Аккаунт не привязан", true);
+        return false;
+    }
+    $perms = resolvePermissions($user['role'] ?? 'user', $user['permissions'] ?? null, $ROLE_TEMPLATES);
+    $level = $ACCESS_LEVELS[$perms['corrections'] ?? 'none'] ?? 0;
+    if ($level < $ACCESS_LEVELS['edit']) {
+        if ($cbId) answerCallback($cbId, "⛔ Нет прав на корректировки", true);
+        return false;
+    }
+    $ids = is_array($corrIds) ? $corrIds : [$corrIds];
+    $ids = array_values(array_filter(array_map('intval', $ids)));
+    if ($ids) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $gs = $pdo->prepare("SELECT DISTINCT legal_entity_group FROM order_corrections WHERE id IN ($ph)");
+        $gs->execute($ids);
+        foreach ($gs->fetchAll() as $row) {
+            $g = $row['legal_entity_group'];
+            if (!$g) continue;
+            if (!checkLegalEntityGroupAccess($user, $g)) {
+                if ($cbId) answerCallback($cbId, "⛔ Нет доступа к этой группе юр. лиц", true);
+                return false;
+            }
+        }
+    }
+    return $user;
+}
+
 // Получить все pending ID батча по одному ID записи
 function corrGetBatchPendingIds($pdo, $oneId) {
     $c = $pdo->prepare("SELECT restaurant_number, delivery_date, restaurant_chat_id, notify_messages FROM order_corrections WHERE id = ?");
@@ -2554,12 +2590,14 @@ function corrReview($pdo, $chatId, $msgId, $corrIds, $action, $comment = null) {
 
     $newStatus = $action === 'approve' ? 'approved' : 'rejected';
     $batchIds = [];
+    $reviewedIds = [];
 
     foreach ($corrIds as $corrId) {
         // Атомарный UPDATE — только если ещё pending
         $upd = $pdo->prepare("UPDATE order_corrections SET status = ?, reviewer_chat_id = ?, reviewer_name = ?, review_comment = ?, reviewed_at = NOW() WHERE id = ? AND status IN ('pending', 'in_progress')");
         $upd->execute([$newStatus, $chatId, $user['name'], $comment, $corrId]);
         if ($upd->rowCount() === 0) continue; // уже обработано другим
+        $reviewedIds[] = (int)$corrId;
 
         $corr = $pdo->prepare("SELECT * FROM order_corrections WHERE id = ?");
         $corr->execute([$corrId]);
@@ -2571,6 +2609,16 @@ function corrReview($pdo, $chatId, $msgId, $corrIds, $action, $comment = null) {
             $nm = json_decode($c['notify_messages'] ?? '{}', true);
             $batchIds = $nm['batch_ids'] ?? [$corrId];
         }
+    }
+
+    if ($reviewedIds) {
+        auditLog($pdo, "correction_{$newStatus}_bot", 'order_corrections', $reviewedIds[0], $user['name'], [
+            'ids' => $reviewedIds,
+            'count' => count($reviewedIds),
+            'action' => $action,
+            'comment' => $comment,
+            'source' => 'telegram',
+        ]);
     }
 
     if (empty($batchIds)) {

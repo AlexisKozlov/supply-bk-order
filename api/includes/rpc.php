@@ -2556,15 +2556,18 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
-        if (($ACCESS_LEVELS[$perms['tenders'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+        $tendersLevel = $ACCESS_LEVELS[$perms['tenders'] ?? 'none'] ?? 0;
+        if ($tendersLevel < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
 
         $tenderId = intval($body['id'] ?? 0);
         $name = trim($body['name'] ?? '');
         $description = $body['description'] ?? null;
         $le = $body['legal_entity'] ?? '';
-        $status = $body['status'] ?? 'draft';
+        $statusInput = $body['status'] ?? 'draft';
+        $allowedStatuses = ['draft', 'in_progress', 'completed', 'cancelled'];
+        if (!in_array($statusInput, $allowedStatuses, true)) respond(['error' => 'Недопустимый статус'], 400);
         $deadline = $body['deadline'] ?? null;
-        $winnerSupplier = $body['winner_supplier'] ?? null;
+        $winnerSupplierInput = $body['winner_supplier'] ?? null;
         $summary = $body['summary'] ?? null;
         $note = $body['note'] ?? null;
         $items = $body['items'] ?? [];
@@ -2573,6 +2576,26 @@ if ($endpoint === 'rpc') {
         if (!$name) respond(['error' => 'Укажите название тендера'], 400);
         if (!$le) respond(['error' => 'Не указано юрлицо'], 400);
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+
+        // Закрытие тендера и выбор/смена победителя — только full (admin/manager)
+        $oldStatus = null;
+        $oldWinner = null;
+        if ($tenderId) {
+            $cur = $pdo->prepare("SELECT status, winner_supplier FROM tenders WHERE id=? AND legal_entity=?");
+            $cur->execute([$tenderId, $le]);
+            $curRow = $cur->fetch();
+            if (!$curRow) respond(['error' => 'Тендер не найден'], 404);
+            $oldStatus = $curRow['status'];
+            $oldWinner = $curRow['winner_supplier'];
+        }
+        $isClosing = $statusInput === 'completed' && $oldStatus !== 'completed';
+        $winnerChanged = ($winnerSupplierInput ?? '') !== ($oldWinner ?? '');
+        if (($isClosing || $winnerChanged) && $tendersLevel < $ACCESS_LEVELS['full']) {
+            respond(['error' => 'Закрытие тендера и выбор победителя — только для администратора/менеджера'], 403);
+        }
+        // При создании тендер всегда стартует как draft, без победителя
+        $status = $tenderId ? $statusInput : 'draft';
+        $winnerSupplier = $tenderId ? $winnerSupplierInput : null;
 
         $pdo->beginTransaction();
         try {
@@ -2615,7 +2638,12 @@ if ($endpoint === 'rpc') {
 
             $pdo->commit();
             $isNew = !intval($body['id'] ?? 0);
-            auditLog($pdo, $isNew ? 'tender_created' : 'tender_updated', 'tender', $tenderId, $caller['name'], ['name' => $name, 'legal_entity' => $le, 'status' => $status]);
+            $auditDetails = ['name' => $name, 'legal_entity' => $le, 'status' => $status];
+            if (!$isNew) {
+                if ($oldStatus !== $status) $auditDetails['status_change'] = ['from' => $oldStatus, 'to' => $status];
+                if (($oldWinner ?? '') !== ($winnerSupplier ?? '')) $auditDetails['winner_change'] = ['from' => $oldWinner, 'to' => $winnerSupplier];
+            }
+            auditLog($pdo, $isNew ? 'tender_created' : 'tender_updated', 'tender', $tenderId, $caller['name'], $auditDetails);
             respond(['success' => true, 'id' => intval($tenderId)]);
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -5117,11 +5145,27 @@ if ($endpoint === 'rpc') {
         $fileId = $body['file_id'] ?? ($_GET['file_id'] ?? '');
         if (!$fileId) respond(['error' => 'file_id required'], 400);
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if (!$botToken) respond(['error' => 'Bot не настроен'], 500);
         $resp = tgHttpGet("https://api.telegram.org/bot{$botToken}/getFile?" . http_build_query(['file_id' => $fileId]));
         $data = json_decode($resp, true);
         $filePath = $data['result']['file_path'] ?? null;
         if (!$filePath) respond(['error' => 'File not found'], 404);
-        respond(['url' => "https://api.telegram.org/file/bot{$botToken}/{$filePath}"]);
+        // Скачиваем файл серверно — токен бота не уходит клиенту.
+        $ch = curl_init("https://api.telegram.org/file/bot{$botToken}/" . $filePath);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15, CURLOPT_FOLLOWLOCATION => false]);
+        $bytes = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($bytes === false || $httpCode !== 200) respond(['error' => 'Не удалось загрузить фото'], 502);
+        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+        $mime = match ($ext) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            default => 'application/octet-stream',
+        };
+        respond(['data_url' => 'data:' . $mime . ';base64,' . base64_encode($bytes)]);
     }
 
     // ═══ ПРОТОКОЛЫ СОВЕЩАНИЙ ═══

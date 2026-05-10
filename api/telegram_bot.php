@@ -2171,8 +2171,8 @@ if (isset($input['callback_query'])) {
     // Взять в работу
     if (str_starts_with($data, 'corr_take_')) {
         $oneId = intval(substr($data, 10));
-        $user = getUser($chatId);
-        if (!$user) { editMessage($chatId, $msgId, "Нужен привязанный аккаунт."); exit; }
+        $user = corrCheckBotAccess($pdo, $chatId, $oneId, $cb['id']);
+        if (!$user) exit;
         // Проверяем, не взял ли уже кто-то другой
         $chk = $pdo->prepare("SELECT reviewer_name, reviewer_chat_id, status FROM order_corrections WHERE id = ?");
         $chk->execute([$oneId]);
@@ -2224,6 +2224,7 @@ if (isset($input['callback_query'])) {
     // Отдел закупок: принять одну позицию (corr_a_{id})
     if (str_starts_with($data, 'corr_a_')) {
         $corrId = intval(substr($data, 7));
+        if (!corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id'])) exit;
         if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
         corrReview($pdo, $chatId, $msgId, [$corrId], 'approve');
@@ -2232,6 +2233,7 @@ if (isset($input['callback_query'])) {
     // Отдел закупок: отклонить одну позицию (corr_r_{id})
     if (str_starts_with($data, 'corr_r_')) {
         $corrId = intval(substr($data, 7));
+        if (!corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id'])) exit;
         if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
         corrReview($pdo, $chatId, $msgId, [$corrId], 'reject');
@@ -2240,6 +2242,7 @@ if (isset($input['callback_query'])) {
     // Принять все pending в батче (по одному ID)
     if (str_starts_with($data, 'corr_aa_')) {
         $corrId = intval(substr($data, 8));
+        if (!corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id'])) exit;
         if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
         $ids = corrGetBatchPendingIds($pdo, $corrId);
@@ -2249,6 +2252,7 @@ if (isset($input['callback_query'])) {
     // Отклонить все pending в батче
     if (str_starts_with($data, 'corr_ra_')) {
         $corrId = intval(substr($data, 8));
+        if (!corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id'])) exit;
         if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
         $ids = corrGetBatchPendingIds($pdo, $corrId);
@@ -2257,8 +2261,10 @@ if (isset($input['callback_query'])) {
     }
     // Комментарий ко всем pending в батче
     if (str_starts_with($data, 'corr_cm_')) {
+        $corrId = intval(substr($data, 8));
+        if (!corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id'])) exit;
         answerCallback($cb['id']);
-        $ids = corrGetBatchPendingIds($pdo, intval(substr($data, 8)));
+        $ids = corrGetBatchPendingIds($pdo, $corrId);
         if (empty($ids)) { editMessage($chatId, $msgId, "⚠️ Все позиции уже обработаны."); exit; }
         $state = ['step' => 'review_comment', 'corr_ids' => $ids, 'msg_id' => $msgId];
         @file_put_contents(sys_get_temp_dir() . "/corr_{$chatId}.txt", "corr_review");
@@ -2270,19 +2276,21 @@ if (isset($input['callback_query'])) {
     }
     // Отправить результат ресторану
     if (str_starts_with($data, 'corr_send_')) {
-        answerCallback($cb['id']);
         $corrId = intval(substr($data, 10));
+        $user = corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id']);
+        if (!$user) exit;
+        if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
+        answerCallback($cb['id']);
         $batchIds = corrGetBatchAllIds($pdo, $corrId);
-        $user = $pdo->prepare("SELECT name FROM users WHERE telegram_chat_id = ?");
-        $user->execute([$chatId]);
-        $u = $user->fetch();
-        if ($batchIds && $u) corrSendResultToRestaurant($pdo, $batchIds, $u['name']);
+        if ($batchIds) corrSendResultToRestaurant($pdo, $batchIds, $user['name']);
         exit;
     }
     // Итоговый комментарий после обработки всех позиций
     if (str_starts_with($data, 'corr_fc_')) {
-        answerCallback($cb['id']);
         $corrId = intval(substr($data, 8));
+        if (!corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id'])) exit;
+        if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
+        answerCallback($cb['id']);
         $batchIds = corrGetBatchAllIds($pdo, $corrId);
         if (empty($batchIds)) { editMessage($chatId, $msgId, "⚠️ Заявка не найдена."); exit; }
         $state = ['step' => 'final_comment', 'batch_ids' => $batchIds, 'msg_id' => $msgId];
@@ -2295,37 +2303,41 @@ if (isset($input['callback_query'])) {
     }
     // Отправить с итоговым комментарием
     if ($data === 'corr_fc_send') {
-        answerCallback($cb['id']);
         $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
         $state = json_decode(@file_get_contents($dataFile), true);
         $comment = $state['final_comment'] ?? '';
         $batchIds = $state['batch_ids'] ?? [];
+        $user = corrCheckBotAccess($pdo, $chatId, $batchIds, $cb['id']);
+        if (!$user) exit;
+        if ($batchIds && !corrCheckReviewer($pdo, $batchIds[0], $chatId, $cb['id'])) exit;
         @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt"); @unlink($dataFile);
-        $user = $pdo->prepare("SELECT name FROM users WHERE telegram_chat_id = ?");
-        $user->execute([$chatId]);
-        $u = $user->fetch();
-        if ($batchIds && $u) corrSendResultToRestaurant($pdo, $batchIds, $u['name'], $comment);
+        answerCallback($cb['id']);
+        if ($batchIds) corrSendResultToRestaurant($pdo, $batchIds, $user['name'], $comment);
         exit;
     }
     // Принять с комментарием (IDs и комментарий в state)
     if ($data === 'corr_cappr_go') {
-        answerCallback($cb['id']);
         $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
         $state = json_decode(@file_get_contents($dataFile), true);
         $comment = $state['review_comment'] ?? null;
         $ids = $state['corr_ids'] ?? [];
+        if (!corrCheckBotAccess($pdo, $chatId, $ids, $cb['id'])) exit;
+        if ($ids && !corrCheckReviewer($pdo, $ids[0], $chatId, $cb['id'])) exit;
         @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt"); @unlink($dataFile);
+        answerCallback($cb['id']);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'approve', $comment);
         exit;
     }
     // Отклонить с комментарием
     if ($data === 'corr_crej_go') {
-        answerCallback($cb['id']);
         $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
         $state = json_decode(@file_get_contents($dataFile), true);
         $comment = $state['review_comment'] ?? null;
         $ids = $state['corr_ids'] ?? [];
+        if (!corrCheckBotAccess($pdo, $chatId, $ids, $cb['id'])) exit;
+        if ($ids && !corrCheckReviewer($pdo, $ids[0], $chatId, $cb['id'])) exit;
         @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt"); @unlink($dataFile);
+        answerCallback($cb['id']);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'reject', $comment);
         exit;
     }
