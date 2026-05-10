@@ -583,7 +583,7 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
     $supplierId = $soParam1;
     $deliveryDate = $soParam2;
 
-    $le = $rest['legal_entity'];
+    $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
     $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
     $s->execute([$supplierId, $rest['restaurant_number'], $deliveryDate, $le]);
     $order = $s->fetch();
@@ -641,8 +641,9 @@ if ($soAction === 'my-orders' && $method === 'GET') {
     $supplierId = $_GET['supplier_id'] ?? '';
     $limit = min((int)($_GET['limit'] ?? 20), 50);
 
+    $myOrdersLe = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
     $where = "o.restaurant_number = ? AND o.legal_entity = ?";
-    $params = [$rest['restaurant_number'], $rest['legal_entity']];
+    $params = [$rest['restaurant_number'], $myOrdersLe];
     if ($supplierId) {
         $where .= " AND o.supplier_id = ?";
         $params[] = $supplierId;
@@ -1850,13 +1851,17 @@ if ($soAction === 'admin') {
     if ($adminAction === 'order' && $method === 'DELETE' && $adminParam) {
         $orderId = (int)$adminParam;
         // Сохраняем инфо до удаления
-        $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, o.legal_entity, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
+        $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, o.legal_entity, o.status, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
         $oi->execute([$orderId]);
         $orderInfo = $oi->fetch();
         if (!$orderInfo) soRespond(['error' => 'Заявка не найдена'], 404);
         // Проверка доступа к юр. лицу заявки
         if ($sessionUser && !checkLegalEntityAccess($sessionUser, $orderInfo['legal_entity'] ?? '')) {
             soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
+        // Нельзя удалить заблокированную заявку
+        if (($orderInfo['status'] ?? '') === 'locked') {
+            soRespond(['error' => 'Заблокированную заявку удалить нельзя. Сначала снимите блокировку.'], 403);
         }
 
         $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
@@ -2172,7 +2177,8 @@ if ($soAction === 'admin') {
     // --- Шаблоны товаров ---
     if ($adminAction === 'templates' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
-        $le = $_GET['legal_entity'] ?? 'ООО "Бургер БК"';
+        $le = $_GET['legal_entity'] ?? '';
+        if (!$le) soRespond(['error' => 'Не указано юрлицо'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         soRequireAdminEntityGroupAccess($sessionUser, $le);
 
@@ -2190,7 +2196,8 @@ if ($soAction === 'admin') {
     // --- Сохранение шаблона ---
     if ($adminAction === 'templates' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
-        $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
+        $le = $body['legal_entity'] ?? '';
+        if (!$le) soRespond(['error' => 'Не указано юрлицо'], 400);
         $items = $body['items'] ?? [];
 
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
@@ -2479,7 +2486,10 @@ if ($soAction === 'admin') {
         if (!$supplierId || !$date) soRespond(['error' => 'Не указан поставщик или дата'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
-        // Все заявки на эту дату (без session_id)
+        // Все заявки на эту дату (без session_id), только доступные юрлица
+        $exportWhere = ['o.supplier_id = ?', 'o.delivery_date = ?'];
+        $exportParams = [$supplierId, $date];
+        soAppendAllowedOrderEntityFilter($sessionUser, $exportWhere, $exportParams, 'o.legal_entity');
         $s = $pdo->prepare("
             SELECT o.restaurant_number, o.status, o.submitted_at,
                    r.region, r.address,
@@ -2493,10 +2503,10 @@ if ($soAction === 'admin') {
             JOIN so_order_items oi ON oi.order_id = o.id
             LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
             LEFT JOIN so_orders src ON src.id = asl.source_order_id
-            WHERE o.supplier_id = ? AND o.delivery_date = ?
+            WHERE " . implode(' AND ', $exportWhere) . "
             ORDER BY r.region, r.number, oi.product_name
         ");
-        $s->execute([$supplierId, $date]);
+        $s->execute($exportParams);
         $rows = $s->fetchAll();
 
         // Сводка по товарам (используем admin_qty если есть)

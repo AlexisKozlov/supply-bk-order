@@ -226,7 +226,7 @@ function executeTool($toolName, $input, $entity, $user = null) {
         case 'get_psc':
             return toolPsc($input['supplier'] ?? null, $input['status'] ?? 'active', $entity);
         case 'get_sales':
-            return toolSales($input['query'] ?? null);
+            return toolSales($input['query'] ?? null, $entity);
         case 'search_card':
             return toolSearchCard($input['query'] ?? '');
         case 'get_tenders':
@@ -498,8 +498,8 @@ function toolPsc($supplier, $status, $entity) {
     return $result;
 }
 
-function toolSales($query) {
-    $result = lookupSales("реализация" . ($query ? " {$query}" : ''), null);
+function toolSales($query, $entity = null) {
+    $result = lookupSales("реализация" . ($query ? " {$query}" : ''), $entity);
     return $result ?: "Данные по реализации не найдены.";
 }
 

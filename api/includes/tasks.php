@@ -1003,6 +1003,15 @@ if ($action === 'cards' && $id && $action2 === 'relations' && $method === 'POST'
                 if (!in_array($type, $allowedTypes)) continue;
                 $eid = (string)($r['entity_id'] ?? '');
                 if ($eid === '') continue;
+                // Для связи card-card проверяем, что карточка существует
+                if ($type === 'card') {
+                    $chk = $pdo->prepare("SELECT id FROM tasks_cards WHERE id = ? LIMIT 1");
+                    $chk->execute([(int)$eid]);
+                    if (!$chk->fetch()) {
+                        $pdo->rollBack();
+                        tRespond(['error' => 'Карточка не найдена: ' . $eid], 400);
+                    }
+                }
                 $label = isset($r['entity_label']) ? mb_substr((string)$r['entity_label'], 0, 255) : null;
                 $ins->execute([$cardId, $type, mb_substr($eid, 0, 64), $label]);
             }

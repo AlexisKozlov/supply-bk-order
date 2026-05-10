@@ -1868,13 +1868,21 @@ if (isset($input['callback_query'])) {
         answerCallback($cb['id']);
         $field = substr($data, 7);
         $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary', 'data_updates', 'expiring_items', 'restaurant_sales', 'correction_notifications', 'chat_notifications', 'so_deadline_summary'];
+        // Поля, доступные только менеджерам и администраторам
+        $managerOnly = ['daily_summary', 'psc_expiry', 'correction_notifications', 'chat_notifications', 'so_deadline_summary'];
         if (in_array($field, $allowed)) {
-            $u = $pdo->prepare("SELECT name FROM users WHERE telegram_chat_id = ?");
+            $u = $pdo->prepare("SELECT name, role FROM users WHERE telegram_chat_id = ?");
             $u->execute([$chatId]);
-            $user = $u->fetchColumn();
+            $userRow = $u->fetch();
+            $user = $userRow['name'] ?? null;
             if ($user) {
-                $pdo->prepare("UPDATE telegram_settings SET `$field` = NOT `$field` WHERE user_name = ?")->execute([$user]);
-                showSettings($chatId, $msgId, $user);
+                $userRole = $userRow['role'] ?? 'user';
+                if (in_array($field, $managerOnly) && !in_array($userRole, ['admin', 'manager'])) {
+                    sendMessage($chatId, "⛔ Эта настройка доступна только менеджерам и администраторам.");
+                } else {
+                    $pdo->prepare("UPDATE telegram_settings SET `$field` = NOT `$field` WHERE user_name = ?")->execute([$user]);
+                    showSettings($chatId, $msgId, $user);
+                }
             }
         }
         exit;

@@ -85,13 +85,20 @@ if ($tlAction === 'vehicles' && $method === 'POST') {
     if (!$name) tlRespond(['error' => 'Не указано название машины'], 400);
 
     $id = $body['id'] ?? null;
-    if ($id) {
-        $s = $pdo->prepare("UPDATE tl_vehicles SET name = ?, capacity_pallets = ?, capacity_kg = ?, sort_order = ? WHERE id = ?");
-        $s->execute([$name, $capacityPallets, $capacityKg, $sortOrder, $id]);
-    } else {
-        $s = $pdo->prepare("INSERT INTO tl_vehicles (name, capacity_pallets, capacity_kg, sort_order) VALUES (?, ?, ?, ?)");
-        $s->execute([$name, $capacityPallets, $capacityKg, $sortOrder]);
-        $id = $pdo->lastInsertId();
+    $pdo->beginTransaction();
+    try {
+        if ($id) {
+            $s = $pdo->prepare("UPDATE tl_vehicles SET name = ?, capacity_pallets = ?, capacity_kg = ?, sort_order = ? WHERE id = ?");
+            $s->execute([$name, $capacityPallets, $capacityKg, $sortOrder, $id]);
+        } else {
+            $s = $pdo->prepare("INSERT INTO tl_vehicles (name, capacity_pallets, capacity_kg, sort_order) VALUES (?, ?, ?, ?)");
+            $s->execute([$name, $capacityPallets, $capacityKg, $sortOrder]);
+            $id = $pdo->lastInsertId();
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        tlRespond(['error' => 'Ошибка сохранения машины: ' . $e->getMessage()], 500);
     }
 
     tlRespond(['success' => true, 'id' => (int)$id]);
@@ -113,7 +120,14 @@ if ($tlAction === 'vehicles' && $method === 'DELETE' && $tlParam1) {
     }
 
     $vehicleId = intval($tlParam1);
-    $pdo->prepare("UPDATE tl_vehicles SET is_active = 0 WHERE id = ?")->execute([$vehicleId]);
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("UPDATE tl_vehicles SET is_active = 0 WHERE id = ?")->execute([$vehicleId]);
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        tlRespond(['error' => 'Ошибка удаления машины: ' . $e->getMessage()], 500);
+    }
     tlRespond(['success' => true]);
 }
 
@@ -361,7 +375,7 @@ if ($tlAction === 'plan' && $method === 'POST') {
     $allowMixed = $body['allow_mixed_modes'] ?? false;
     $note = $body['note'] ?? '';
     $trucks = $body['trucks'] ?? [];
-    $createdBy = $sessionUser['name'] ?? 'api';
+    $createdBy = resolveActorName($pdo, $sessionUser, 'api');
 
     try {
         $pdo->beginTransaction();

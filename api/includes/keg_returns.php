@@ -1304,6 +1304,19 @@ function krFillTemplate(array $row): \PhpOffice\PhpSpreadsheet\Spreadsheet {
 }
 
 /**
+ * Рекурсивно удаляет директорию и всё её содержимое.
+ */
+function krRmDirRec($dir) {
+    if (!is_dir($dir)) return;
+    foreach (scandir($dir) as $f) {
+        if ($f === '.' || $f === '..') continue;
+        $p = $dir . '/' . $f;
+        is_dir($p) ? krRmDirRec($p) : @unlink($p);
+    }
+    @rmdir($dir);
+}
+
+/**
  * Генерирует PDF из заявки через LibreOffice.
  * Возвращает содержимое PDF-файла в виде строки, или false при ошибке.
  */
@@ -1312,22 +1325,25 @@ function krGeneratePdf(array $row) {
     $tmpDir  = sys_get_temp_dir() . '/kegprint_' . uniqid();
     @mkdir($tmpDir);
     $xlsxPath = $tmpDir . '/ttn.xlsx';
-    $writer   = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-    $writer->save($xlsxPath);
+    $content = false;
+    try {
+        $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save($xlsxPath);
 
-    $cmd = 'export HOME=' . escapeshellarg($tmpDir)
-        . ' && libreoffice --headless --convert-to pdf --outdir '
-        . escapeshellarg($tmpDir) . ' ' . escapeshellarg($xlsxPath) . ' 2>&1';
-    $out     = shell_exec($cmd);
-    $pdfPath = $tmpDir . '/ttn.pdf';
+        $cmd = 'export HOME=' . escapeshellarg($tmpDir)
+            . ' && timeout 30 libreoffice --headless --convert-to pdf --outdir '
+            . escapeshellarg($tmpDir) . ' ' . escapeshellarg($xlsxPath) . ' 2>&1';
+        $out     = shell_exec($cmd);
+        $pdfPath = $tmpDir . '/ttn.pdf';
 
-    if (!file_exists($pdfPath)) {
-        error_log('krGeneratePdf failed: ' . $out);
-        @unlink($xlsxPath); @rmdir($tmpDir);
-        return false;
+        if (!file_exists($pdfPath)) {
+            error_log('krGeneratePdf failed: ' . $out);
+        } else {
+            $content = file_get_contents($pdfPath);
+        }
+    } finally {
+        krRmDirRec($tmpDir);
     }
-    $content = file_get_contents($pdfPath);
-    @unlink($pdfPath); @unlink($xlsxPath); @rmdir($tmpDir);
     return $content;
 }
 
