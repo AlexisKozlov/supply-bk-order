@@ -1628,13 +1628,20 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     $restNum = $tgAuth['restaurant_number'] ?? null;
     if (!$restNum) {
         // Иначе берём первую подписку этого чата
-        $s = $pdo->prepare("SELECT restaurant_number FROM ro_telegram_subs WHERE chat_id = ? LIMIT 1");
+        $s = $pdo->prepare("SELECT restaurant_number FROM ro_telegram_subs WHERE chat_id = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW())) LIMIT 1");
         $s->execute([$tgAuth['telegram_chat_id']]);
         $sub = $s->fetch();
         if (!$sub) {
             roRespond(['success' => false, 'error' => 'Вы не подписаны ни на один ресторан в боте']);
         }
         $restNum = $sub['restaurant_number'];
+    } else {
+        // Проверяем, что chatId из токена реально подписан на этот ресторан
+        $subCheck = $pdo->prepare("SELECT 1 FROM ro_telegram_subs WHERE chat_id = ? AND restaurant_number = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW())) LIMIT 1");
+        $subCheck->execute([$tgAuth['telegram_chat_id'], $restNum]);
+        if (!$subCheck->fetchColumn()) {
+            roRespond(['success' => false, 'error' => 'У вас нет доступа к этому ресторану'], 403);
+        }
     }
     $restGroup = roNormalizeLegalEntityGroup($tgAuth['legal_entity_group'] ?? null, $restNum);
 

@@ -34,6 +34,10 @@ if (!$sessionUser) {
 if ($sessionUser) {
     global $ROLE_TEMPLATES, $ACCESS_LEVELS;
     $userRole = $sessionUser['role'] ?? 'user';
+    // Доступ к модулю только для admin и manager — защита по роли независимо от прав
+    if ($userRole !== 'admin' && $userRole !== 'manager') {
+        tlRespond(['error' => 'Модуль доступен только администратору и менеджеру'], 403);
+    }
     if ($userRole !== 'admin') {
         $perms = resolvePermissions($userRole, $sessionUser['permissions'] ?? null, $ROLE_TEMPLATES);
         $tlRequired = ($method === 'GET') ? $ACCESS_LEVELS['view'] : $ACCESS_LEVELS['edit'];
@@ -121,6 +125,13 @@ function tlGetOrdersForDate($pdo, $date) {
     // Все заказы на дату из всех подходящих активных сессий.
     // Сессии теперь ведутся отдельно по группам юрлиц, поэтому брать только одну
     // "последнюю активную" сессию нельзя — иначе модуль перестаёт видеть часть заказов.
+
+    // Порядок сортировки юрлиц — единственная точка правки при добавлении нового юрлица
+    $legalEntityOrder = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
+    $legalEntityField = 'FIELD(o.legal_entity, ' . implode(', ', array_map(function($e) {
+        return $pdo->quote($e);
+    }, $legalEntityOrder)) . ')';
+
     $s = $pdo->prepare("
         SELECT o.id as order_id, o.restaurant_number, o.status, o.legal_entity,
                o.legal_entity_group,
@@ -136,7 +147,7 @@ function tlGetOrdersForDate($pdo, $date) {
             AND r.active = 1
             AND r.legal_entity_group = o.legal_entity_group
         WHERE o.delivery_date = ? AND o.status != 'draft'
-        ORDER BY FIELD(o.legal_entity, 'ООО \"Бургер БК\"', 'ООО \"Воглия Матта\"', 'ООО \"Пицца Стар\"'), o.restaurant_number
+        ORDER BY {$legalEntityField}, o.restaurant_number
     ");
     $s->execute([$date, $date, $date]);
     $orders = $s->fetchAll();
@@ -362,6 +373,14 @@ if ($tlAction === 'plan' && $method === 'POST') {
 
         if ($existing) {
             $planId = $existing['id'];
+            // Проверить статус: подтверждённый план нельзя перезаписывать
+            $statusCheck = $pdo->prepare("SELECT status FROM tl_plans WHERE id = ?");
+            $statusCheck->execute([$planId]);
+            $currentStatus = $statusCheck->fetchColumn();
+            if ($currentStatus === 'confirmed') {
+                $pdo->rollBack();
+                tlRespond(['error' => 'План подтверждён, верните в черновик перед изменением'], 409);
+            }
             // Удалить старые машины (CASCADE удалит assignments)
             $pdo->prepare("DELETE FROM tl_trucks WHERE plan_id = ?")->execute([$planId]);
             // Обновить план
@@ -371,6 +390,43 @@ if ($tlAction === 'plan' && $method === 'POST') {
             $pdo->prepare("INSERT INTO tl_plans (delivery_date, allow_mixed_modes, status, note, created_by, created_at, updated_at) VALUES (?, ?, 'draft', ?, ?, NOW(), NOW())")
                 ->execute([$deliveryDate, $allowMixed ? 1 : 0, $note, $createdBy]);
             $planId = $pdo->lastInsertId();
+        }
+
+        // Проверка двойной отгрузки: собрать все order_id из входящих назначений
+        $incomingOrderIds = [];
+        foreach ($trucks as $truck) {
+            foreach ($truck['assignments'] ?? [] as $a) {
+                if (!empty($a['order_id'])) {
+                    $incomingOrderIds[] = intval($a['order_id']);
+                }
+            }
+        }
+        $incomingOrderIds = array_unique($incomingOrderIds);
+
+        if (!empty($incomingOrderIds)) {
+            $phCheck = implode(',', array_fill(0, count($incomingOrderIds), '?'));
+            $dupParams = array_merge($incomingOrderIds, [$planId]);
+            $dupStmt = $pdo->prepare("
+                SELECT a.order_id, p.delivery_date
+                FROM tl_assignments a
+                JOIN tl_trucks t ON t.id = a.truck_id
+                JOIN tl_plans p ON p.id = t.plan_id
+                WHERE p.status = 'confirmed'
+                  AND p.id != ?
+                  AND a.order_id IN ({$phCheck})
+            ");
+            // Параметры: сначала planId, потом order_ids
+            $dupStmtParams = array_merge([$planId], $incomingOrderIds);
+            $dupStmt->execute($dupStmtParams);
+            $dups = $dupStmt->fetchAll();
+            if (!empty($dups)) {
+                $pdo->rollBack();
+                $dupInfo = [];
+                foreach ($dups as $d) {
+                    $dupInfo[] = '#' . $d['order_id'] . ' (план на ' . $d['delivery_date'] . ')';
+                }
+                tlRespond(['error' => 'Заказы уже в подтверждённом плане: ' . implode(', ', array_unique($dupInfo))], 409);
+            }
         }
 
         // Вставить машины и назначения
@@ -439,6 +495,14 @@ if ($tlAction === 'plan' && $method === 'DELETE' && $tlParam1 && !$tlParam2) {
 
     $planId = intval($tlParam1);
 
+    // Нельзя удалить подтверждённый план
+    $statusChk = $pdo->prepare("SELECT status FROM tl_plans WHERE id = ?");
+    $statusChk->execute([$planId]);
+    $planStatus = $statusChk->fetchColumn();
+    if ($planStatus === 'confirmed') {
+        tlRespond(['error' => 'Подтверждённый план удалить нельзя. Сначала верните его в черновик.'], 409);
+    }
+
     try {
         $pdo->beginTransaction();
         // Удалить назначения через машины
@@ -465,8 +529,22 @@ if ($tlAction === 'plan' && $method === 'PATCH' && $tlParam1 && $tlParam2 === 's
     $planId = intval($tlParam1);
     $newStatus = $body['status'] ?? '';
 
+    // Допустимые статусы (по ENUM в tl_plans)
     if (!in_array($newStatus, ['draft', 'confirmed'])) {
-        tlRespond(['error' => 'Некорректный статус (draft/confirmed)'], 400);
+        tlRespond(['error' => 'Некорректный статус (допустимо: draft, confirmed)'], 400);
+    }
+
+    // Подтверждение плана требует уровня full
+    if ($newStatus === 'confirmed' && $sessionUser) {
+        global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+        $userRole = $sessionUser['role'] ?? 'user';
+        if ($userRole !== 'admin') {
+            $perms = resolvePermissions($userRole, $sessionUser['permissions'] ?? null, $ROLE_TEMPLATES);
+            $lvl = $ACCESS_LEVELS[$perms['truck-loading'] ?? 'none'] ?? 0;
+            if ($lvl < $ACCESS_LEVELS['full']) {
+                tlRespond(['error' => 'Подтверждение плана доступно только с правом full'], 403);
+            }
+        }
     }
 
     $pdo->prepare("UPDATE tl_plans SET status = ?, updated_at = NOW() WHERE id = ?")
@@ -553,10 +631,13 @@ if ($tlAction === 'auto-assign' && $method === 'POST') {
         } else {
             // Единица = заказ по категории
             foreach ($order['categories'] as $catName => $catData) {
-                $mode = 'any';
                 if ($catName === 'Сухой') $mode = 'dry';
                 elseif ($catName === 'Холод') $mode = 'cold';
                 elseif ($catName === 'Мороз') $mode = 'frozen';
+                else {
+                    $mode = 'any';
+                    error_log('truck_loading: unknown category mode for ' . $catName);
+                }
 
                 $units[] = [
                     'assign_type' => 'category',

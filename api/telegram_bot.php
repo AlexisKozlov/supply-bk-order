@@ -349,8 +349,8 @@ function cmdOrders($chatId, $user, $editMsgId = null) {
         $date = date('d.m', strtotime($o['created_at']));
         $delivery = $o['delivery_date'] ? date('d.m', strtotime($o['delivery_date'])) : '—';
         $boxes = $o['total_boxes'] ?: 0;
-        $text .= "<b>{$o['supplier']}</b>  {$o['items_count']} поз. · {$boxes} кор.\n";
-        $text .= "  {$date} → {$delivery} · {$o['created_by']}\n";
+        $text .= "<b>" . tgEsc($o['supplier']) . "</b>  {$o['items_count']} поз. · {$boxes} кор.\n";
+        $text .= "  {$date} → {$delivery} · " . tgEsc($o['created_by']) . "\n";
     }
     $btns = [
         [['text' => '📦 Заказы на сайте', 'url' => $SITE_URL . '/orders']],
@@ -521,8 +521,8 @@ function cmdPsc($chatId, $user, $editMsgId = null) {
         $days = $a['days_left'];
         $icon = $days <= 0 ? '🔴' : ($days <= 14 ? '🟡' : '🟢');
         $label = $days <= 0 ? 'истёк' : "{$days} дн.";
-        $text .= "{$icon} <b>{$a['supplier']}</b>\n";
-        $text .= "  №{$a['number']} · до {$to} · {$label}\n";
+        $text .= "{$icon} <b>" . tgEsc($a['supplier']) . "</b>\n";
+        $text .= "  №" . tgEsc($a['number']) . " · до {$to} · {$label}\n";
     }
     botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
 }
@@ -559,8 +559,8 @@ function cmdPlans($chatId, $user, $editMsgId = null) {
     foreach ($plans as $p) {
         $period = ($p['period_count'] ?? 3) . ' ' . ($periodLabels[$p['period_type']] ?? $p['period_type']);
         $updated = $p['updated_at'] ? date('d.m', strtotime($p['updated_at'])) : '—';
-        $text .= "📅 <b>{$p['supplier']}</b> · {$period}\n";
-        if ($p['note']) $text .= "  {$p['note']}\n";
+        $text .= "📅 <b>" . tgEsc($p['supplier']) . "</b> · {$period}\n";
+        if ($p['note']) $text .= "  " . tgEsc($p['note']) . "\n";
     }
     $btns = [
         [['text' => '📅 Планирование', 'url' => $SITE_URL . '/planning']],
@@ -616,10 +616,10 @@ function cmdDeliveries($chatId, $user, $editMsgId = null) {
         $label = $overdue > 0 ? "просроч. {$overdue}д" : ($overdue == 0 ? 'сегодня' : abs($overdue) . 'д');
         $num = $i + 1;
         $boxes = $o['total_boxes'] ?: 0;
-        $text .= "{$icon} <b>{$o['supplier']}</b> · {$delivery} · {$label}\n";
+        $text .= "{$icon} <b>" . tgEsc($o['supplier']) . "</b> · {$delivery} · {$label}\n";
         $text .= "  {$o['items_count']} поз. · {$boxes} кор.\n";
         $orderUrl = "{$SITE_URL}/order?orderId={$o['id']}&mode=view";
-        $row = [['text' => "{$num}. {$o['supplier']}", 'url' => $orderUrl]];
+        $row = [['text' => "{$num}. " . tgEsc($o['supplier']), 'url' => $orderUrl]];
         if ($overdue >= 0) {
             $row[] = ['text' => '✅ Принято', 'callback_data' => 'receive_' . $o['id']];
         }
@@ -1934,12 +1934,22 @@ if (isset($input['callback_query'])) {
     }
     if (str_starts_with($data, 'chat_rest_')) {
         answerCallback($cb['id']);
-        chatInputMode($chatId, $msgId, substr($data, 10));
+        $crRestNum = substr($data, 10);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $crRestNum)) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$crRestNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
+        chatInputMode($chatId, $msgId, $crRestNum);
         exit;
     }
     if (str_starts_with($data, 'chat_history_')) {
         answerCallback($cb['id']);
-        chatShowHistory($chatId, $msgId, substr($data, 13));
+        $chRestNum = substr($data, 13);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $chRestNum)) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$chRestNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
+        chatShowHistory($chatId, $msgId, $chRestNum);
         exit;
     }
     if ($data === 'chat_cancel') {
@@ -1994,7 +2004,12 @@ if (isset($input['callback_query'])) {
 
     if (str_starts_with($data, 'rest_cab:')) {
         answerCallback($cb['id']);
-        botOpenRestaurantCabinet($chatId, $msgId, substr($data, 9));
+        $rcRestNum = substr($data, 9);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $rcRestNum)) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$rcRestNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
+        botOpenRestaurantCabinet($chatId, $msgId, $rcRestNum);
         exit;
     }
 
@@ -2028,16 +2043,28 @@ if (isset($input['callback_query'])) {
     }
     if (preg_match('/^soord_rest_(.+?)_(\d+)$/', $data, $m)) {
         answerCallback($cb['id']);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $m[2])) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
         soOrderSelectDay($chatId, $msgId, $m[1], $m[2]);
         exit;
     }
     if (preg_match('/^soord_day_(.+?)_(\d+)_back$/', $data, $m)) {
         answerCallback($cb['id']);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $m[2])) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
         soOrderSelectDay($chatId, $msgId, $m[1], $m[2]);
         exit;
     }
     if (preg_match('/^soord_day_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
         answerCallback($cb['id']);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $m[2])) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
         soOrderShowProducts($chatId, $msgId, $m[1], $m[2], $m[3]);
         exit;
     }
@@ -2048,6 +2075,10 @@ if (isset($input['callback_query'])) {
     // Поставка не нужна (заявка-отказ)
     if (preg_match('/^soord_skip_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
         answerCallback($cb['id']);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $m[2])) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
         soOrderSkipDelivery($chatId, $msgId, $m[1], $m[2], $m[3]);
         exit;
     }
@@ -2098,13 +2129,25 @@ if (isset($input['callback_query'])) {
     }
     if (str_starts_with($data, 'corr_rest_')) {
         answerCallback($cb['id']);
-        corrShowDelivery($chatId, $msgId, substr($data, 10));
+        $corrRestNum = substr($data, 10);
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $corrRestNum)) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$corrRestNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
+        corrShowDelivery($chatId, $msgId, $corrRestNum);
         exit;
     }
     if (str_starts_with($data, 'corr_date_')) {
         answerCallback($cb['id']);
         $parts = explode('_', substr($data, 10), 2);
-        if (count($parts) === 2) corrStartInput($chatId, $msgId, $parts[0], $parts[1]);
+        if (count($parts) === 2) {
+            $cdRestNum = $parts[0];
+            if (!botIsSubscribedToRestaurant($pdo, $chatId, $cdRestNum)) {
+                editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$cdRestNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+                exit;
+            }
+            corrStartInput($chatId, $msgId, $cdRestNum, $parts[1]);
+        }
         exit;
     }
     if ($data === 'corr_submit') {

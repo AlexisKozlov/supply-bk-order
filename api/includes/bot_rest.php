@@ -865,6 +865,11 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
 // Камако: «Поставка не нужна» — создаём пустую заявку-отказ
 function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
+    // Проверка подписки: нельзя отправить отказ за ресторан, на который не подписан
+    if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) {
+        editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$restNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+        return;
+    }
     $supName = soGetSupplierName($pdo, $supplierId);
     $rest = soGetRestaurantContext($pdo, $restNum);
     if (!$rest) {
@@ -967,6 +972,13 @@ function soOrderProcessInput($chatId, $text) {
         $deliveryDate = $parts[3] ?? '';
     }
     if (!$supplierId || !$restNum || !$deliveryDate) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
+
+    // Проверка подписки: нельзя отправить заявку за ресторан, на который не подписан
+    if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) {
+        sendMessage($chatId, "⛔ У вас нет доступа к ресторану №{$restNum}.");
+        return;
+    }
+
     $supName = soGetSupplierName($pdo, $supplierId);
 
     // Загружаем шаблон (с учётом юрлица)
@@ -2234,6 +2246,14 @@ function corrSubmitBatch($chatId) {
     $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
     $state = json_decode(@file_get_contents($dataFile), true);
     if (!$state || empty($state['items'])) { sendMessage($chatId, "Нет позиций для отправки."); return; }
+
+    // Проверка подписки: нельзя отправить корректировку за ресторан, на который не подписан
+    if (!botIsSubscribedToRestaurant($pdo, $chatId, $state['rest'])) {
+        sendMessage($chatId, "⛔ У вас нет доступа к ресторану №{$state['rest']}.");
+        @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
+        @unlink($dataFile);
+        return;
+    }
 
     // Проверяем дедлайн
     $deliveries = corrGetNextDeliveries($pdo, $state['rest'], 10);

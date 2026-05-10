@@ -182,6 +182,25 @@ function tNotify($pdo, $userName, $title, $message, $cardId) {
 $tUser = tRequireUser($pdo);
 $tUserName = $tUser['name'];
 
+// ─── Проверка доступа к модулю tasks ───
+// Уровни: GET → view, POST/PATCH/PUT → edit, DELETE → full.
+// Админ всегда пропускается без проверки.
+if (($tUser['role'] ?? '') !== 'admin') {
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+    $tPerms = resolvePermissions($tUser['role'] ?? 'user', $tUser['permissions'] ?? null, $ROLE_TEMPLATES);
+    $tActualLevel = $ACCESS_LEVELS[$tPerms['tasks'] ?? 'none'] ?? 0;
+    if ($method === 'DELETE') {
+        $tRequired = $ACCESS_LEVELS['full'];
+    } elseif (in_array($method, ['POST', 'PATCH', 'PUT'], true)) {
+        $tRequired = $ACCESS_LEVELS['edit'];
+    } else {
+        $tRequired = $ACCESS_LEVELS['view'];
+    }
+    if ($tActualLevel < $tRequired) {
+        tRespond(['error' => 'Недостаточно прав для модуля «Задачи»'], 403);
+    }
+}
+
 // ═══════════════════════════════════════════════════════
 // МАРШРУТИЗАЦИЯ
 // ═══════════════════════════════════════════════════════
@@ -192,6 +211,16 @@ $action2 = isset($parts[3]) ? urldecode($parts[3]) : null;
 
 // ─── GET tasks/users — список пользователей для выпадашки исполнителей ───
 if ($method === 'GET' && $action === 'users') {
+    // Требуется право tasks на уровне edit или выше (не только view).
+    // Админ уже пропущен выше.
+    if (($tUser['role'] ?? '') !== 'admin') {
+        global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+        $tPermsU = resolvePermissions($tUser['role'] ?? 'user', $tUser['permissions'] ?? null, $ROLE_TEMPLATES);
+        $tLevelU  = $ACCESS_LEVELS[$tPermsU['tasks'] ?? 'none'] ?? 0;
+        if ($tLevelU < $ACCESS_LEVELS['edit']) {
+            tRespond(['error' => 'Недостаточно прав для просмотра списка пользователей'], 403);
+        }
+    }
     $s = $pdo->query("SELECT name, COALESCE(display_role, role) AS role FROM users WHERE role IN ('admin','manager','user') ORDER BY name");
     tRespond(['users' => $s->fetchAll()]);
 }
@@ -538,13 +567,20 @@ if ($action === 'cards' && !$id) {
         $priority = in_array($body['priority'] ?? '', ['low','medium','high','urgent']) ? $body['priority'] : 'medium';
         $due = !empty($body['due_date']) ? $body['due_date'] : null;
         $desc = isset($body['description']) ? mb_substr((string)$body['description'], 0, 5000) : null;
-        $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id " . ($parentId ? "= ?" : "IS NULL"));
-        $s->execute($parentId ? [$columnId, $parentId] : [$columnId]);
-        $so = (int)$s->fetchColumn();
-        $pdo->prepare("INSERT INTO tasks_cards (board_id, parent_card_id, column_id, title, description, priority, due_date, sort_order, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            ->execute([$boardId, $parentId, $columnId, mb_substr($title, 0, 255), $desc, $priority, $due, $so, $tUserName]);
-        $cardId = (int)$pdo->lastInsertId();
-        tHistory($pdo, $cardId, $tUserName, 'created', ['title' => $title, 'parent_card_id' => $parentId]);
+        $pdo->beginTransaction();
+        try {
+            $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id " . ($parentId ? "= ?" : "IS NULL"));
+            $s->execute($parentId ? [$columnId, $parentId] : [$columnId]);
+            $so = (int)$s->fetchColumn();
+            $pdo->prepare("INSERT INTO tasks_cards (board_id, parent_card_id, column_id, title, description, priority, due_date, sort_order, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                ->execute([$boardId, $parentId, $columnId, mb_substr($title, 0, 255), $desc, $priority, $due, $so, $tUserName]);
+            $cardId = (int)$pdo->lastInsertId();
+            tHistory($pdo, $cardId, $tUserName, 'created', ['title' => $title, 'parent_card_id' => $parentId]);
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            tRespond(['error' => 'Ошибка создания карточки'], 500);
+        }
         tRespond(['id' => $cardId]);
     }
     tRespond(['error' => 'Method not allowed'], 405);
@@ -568,6 +604,16 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         $isToArchive = !empty($toCol['is_archive_column']) ? 1 : 0;
         $newIsDone   = ($isToArchive || !empty($toCol['is_done_column'])) ? 1 : 0;
         $isProto     = tIsProtocolCard($pdo, $cardId);
+
+        // Блокируем все карточки в обеих задействованных колонках, чтобы
+        // параллельный move дождался окончания этой транзакции.
+        if ($fromCol !== $toColumnId) {
+            $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id IN (?, ?) FOR UPDATE")
+                ->execute([$fromCol, $toColumnId]);
+        } else {
+            $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id = ? FOR UPDATE")
+                ->execute([$fromCol]);
+        }
 
         $s = $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id = ? AND id <> ? ORDER BY sort_order, id");
         $s->execute([$toColumnId, $cardId]);
@@ -716,8 +762,9 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
     }
 
     if ($method === 'DELETE') {
-        // Удалять может: владелец доски, admin, или автор карточки
-        $canDelete = tCanEditBoard($tUser, $board) || $card['created_by'] === $tUserName;
+        // Удалять может только владелец доски или admin.
+        // Создание карточки менеджером на чужой доске не даёт права на удаление.
+        $canDelete = tCanEditBoard($tUser, $board);
         if (!$canDelete) tRespond(['error' => 'Нет прав'], 403);
         $pdo->prepare("DELETE FROM tasks_cards WHERE id = ?")->execute([$cardId]);
         tRespond(['success' => true]);

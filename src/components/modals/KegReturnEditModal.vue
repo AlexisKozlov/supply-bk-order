@@ -47,7 +47,7 @@
                   <span class="kr-em-bso-arrow">→</span>
                   <span class="kr-em-bso-new">{{ h.new_series }} {{ h.new_number }}</span>
                   <span class="kr-em-bso-time">{{ fmtDateTime(h.changed_at) }}</span>
-                  <span class="kr-em-bso-by">{{ h.changed_by_user || (h.changed_by_chat_id ? 'ресторан' : '') }}</span>
+                  <span class="kr-em-bso-by">{{ h.changed_by_user || (h.changed_by_ru_user_id ? 'ресторан' : '') }}</span>
                   <div class="kr-em-bso-reason">{{ h.reason }}</div>
                 </li>
               </ul>

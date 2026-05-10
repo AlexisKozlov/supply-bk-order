@@ -3,6 +3,14 @@
 // getQuickReply, saveLastContext, saveQuestionAnswer, getLastContext, isFollowUp,
 // selectRelevantLookups, handleFreeText, buildDirectAnswer
 
+// ═══ HTML-экранирование для Telegram (parse_mode=HTML) ═══
+
+if (!function_exists('tgEsc')) {
+    function tgEsc($s) {
+        return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+}
+
 // ═══ Быстрые ответы на простые фразы ═══
 
 function getQuickReply($text, $user) {
@@ -164,6 +172,21 @@ function handleFreeText($chatId, $text, $user) {
 
     $entity = getUserEntity($user);
 
+    // ── Rate-limit: не более 30 ИИ-запросов в час с одного пользователя ──────
+    try {
+        $rlSt = $GLOBALS['pdo']->prepare(
+            "SELECT COUNT(*) FROM tg_question_log WHERE user_name = ? AND asked_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)"
+        );
+        $rlSt->execute([$user['name']]);
+        $rlCount = (int)$rlSt->fetchColumn();
+        if ($rlCount >= 30) {
+            sendMessage($chatId, "⏳ Слишком много запросов к ИИ за последний час. Попробуйте позже.");
+            return;
+        }
+    } catch (Exception $e) {
+        // не критично — продолжаем
+    }
+
     // Сохраняем контекст для возможных follow-up вопросов
     $questionLogId = saveLastContext($user['name'], $effectiveText, $entity);
 
@@ -176,7 +199,7 @@ function handleFreeText($chatId, $text, $user) {
 
     // === 1. Пробуем Gemini с инструментами (умный режим) ===
     try {
-        $answer = askWithTools($effectiveText, $entity, $user['name']);
+        $answer = askWithTools($effectiveText, $entity, $user['name'], $user);
         if ($answer) {
             error_log("Bot: Gemini Tools OK in " . round(microtime(true) - $aiStart, 1) . "s");
         }
@@ -308,4 +331,21 @@ function botRequireAdmin(?array $user, int $chatId, int $msgId): bool {
         'inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]],
     ]);
     return false;
+}
+
+/**
+ * Проверяет, подписан ли данный chatId на ресторан с номером $restNum.
+ * Учитывает только активные подписки (verified_at или must_reverify_by > NOW()).
+ */
+function botIsSubscribedToRestaurant($pdo, $chatId, $restNum): bool {
+    $s = $pdo->prepare("
+        SELECT 1 FROM ro_telegram_subs
+        WHERE chat_id = ?
+          AND restaurant_number = ?
+          AND (verified_at IS NOT NULL
+               OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+        LIMIT 1
+    ");
+    $s->execute([(int)$chatId, (int)$restNum]);
+    return (bool)$s->fetchColumn();
 }

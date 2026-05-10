@@ -736,9 +736,14 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
 
     // Проверяем: есть ли уже заявка под этим юрлицом?
-    $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+    $existing = $pdo->prepare("SELECT id, status FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
     $existing->execute([$supplierId, $rest['restaurant_number'], $deliveryDate, $le]);
     $existingOrder = $existing->fetch();
+
+    // Если заявка заблокирована — отказываем без перезаписи
+    if ($existingOrder && $existingOrder['status'] === 'locked') {
+        soRespond(['error' => 'Приём закрыт, заявка заблокирована'], 403);
+    }
 
     $pdo->beginTransaction();
     try {
@@ -997,13 +1002,16 @@ if ($soAction === 'admin') {
         } catch (InvalidArgumentException $e) {
             $pdo->rollBack();
             soRespond(['error' => $e->getMessage()], 400);
-        } catch (InvalidArgumentException $e) {
-            $pdo->rollBack();
-            soRespond(['error' => $e->getMessage()], 400);
         } catch (Throwable $e) {
             $pdo->rollBack();
             throw $e;
         }
+        try {
+            $by = resolveActorName($pdo, $sessionUser);
+            auditLog($pdo, 'so_supplier_disconnected', 'supplier', $supplierId, $by, [
+                'supplier_id' => $supplierId,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
         soRespond(['success' => true]);
     }
 
@@ -1079,11 +1087,17 @@ if ($soAction === 'admin') {
                 $drIns = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
                 foreach ($deadlineRules as $rule) {
                     $dow = (int)($rule['delivery_dow'] ?? 0);
-                    if (!$dow) continue;
+                    if (!in_array($dow, [1,2,3,4,5,6,7], true)) continue;
+                    $ddow = (int)($rule['deadline_dow'] ?? $dow);
+                    if (!in_array($ddow, [1,2,3,4,5,6,7], true)) $ddow = $dow;
+                    $dt = $rule['deadline_time'] ?? '14:00:00';
+                    if (preg_match('/^(\d{1,2}):(\d{2})$/', $dt, $m)) {
+                        $dt = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
+                    } elseif (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $dt)) {
+                        $dt = '14:00:00';
+                    }
                     $drIns->execute([
-                        $supplierId, $dow,
-                        (int)($rule['deadline_dow'] ?? $dow),
-                        $rule['deadline_time'] ?? '14:00:00',
+                        $supplierId, $dow, $ddow, $dt,
                     ]);
                 }
             }
@@ -1505,36 +1519,51 @@ if ($soAction === 'admin') {
             }
         }
 
-        if ($items !== null) {
-            // Агрегируем позиции по SKU на случай дублей в payload
-            $aggregated = [];
-            foreach ($items as $item) {
-                $qty = floatval($item['quantity'] ?? 0);
-                if ($qty <= 0) continue;
-                $sku = $item['sku'] ?? '';
-                if ($sku === '') continue;
-                if (!isset($aggregated[$sku])) {
-                    $aggregated[$sku] = [
-                        'product_id' => $item['product_id'] ?? '',
-                        'sku' => $sku,
-                        'product_name' => $item['product_name'] ?? '',
-                        'quantity' => 0,
-                    ];
-                }
-                $aggregated[$sku]['quantity'] += $qty;
-            }
-            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
-            $insert = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
-            foreach ($aggregated as $ag) {
-                $insert->execute([$orderId, $ag['product_id'], $ag['sku'], $ag['product_name'], $ag['quantity']]);
-            }
+        // Валидация статуса
+        $allowedStatuses = ['draft', 'submitted', 'locked', 'edited', 'cancelled'];
+        if ($status !== null && !in_array($status, $allowedStatuses, true)) {
+            soRespond(['error' => 'Недопустимый статус'], 422);
         }
 
         $updatedBy = resolveActorName($pdo, $sessionUser);
-        if ($status) {
-            $pdo->prepare("UPDATE so_orders SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status, $orderId]);
-        } else {
-            $pdo->prepare("UPDATE so_orders SET updated_at = NOW() WHERE id = ?")->execute([$orderId]);
+
+        $pdo->beginTransaction();
+        try {
+            if ($items !== null) {
+                // Агрегируем позиции по SKU на случай дублей в payload
+                $aggregated = [];
+                foreach ($items as $item) {
+                    $qty = floatval($item['quantity'] ?? 0);
+                    if ($qty <= 0) continue;
+                    $sku = $item['sku'] ?? '';
+                    if ($sku === '') continue;
+                    if (!isset($aggregated[$sku])) {
+                        $aggregated[$sku] = [
+                            'product_id' => $item['product_id'] ?? '',
+                            'sku' => $sku,
+                            'product_name' => $item['product_name'] ?? '',
+                            'quantity' => 0,
+                        ];
+                    }
+                    $aggregated[$sku]['quantity'] += $qty;
+                }
+                $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
+                $insert = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
+                foreach ($aggregated as $ag) {
+                    $insert->execute([$orderId, $ag['product_id'], $ag['sku'], $ag['product_name'], $ag['quantity']]);
+                }
+            }
+
+            if ($status !== null) {
+                $pdo->prepare("UPDATE so_orders SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status, $orderId]);
+            } else {
+                $pdo->prepare("UPDATE so_orders SET updated_at = NOW() WHERE id = ?")->execute([$orderId]);
+            }
+
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            soRespond(['error' => 'Ошибка сохранения заявки: ' . $e->getMessage()], 500);
         }
 
         // Уведомляем ресторан в Telegram (с итоговым составом)
@@ -1652,24 +1681,25 @@ if ($soAction === 'admin') {
             ");
             $cur->execute([$itemId]);
             $info = $cur->fetch();
-            if ($info) {
-                soRequireAdminEntityGroupAccess($sessionUser, $info['legal_entity'] ?? '');
-                $oldVal = ($info['admin_qty'] !== null) ? (float)$info['admin_qty'] : (float)$info['quantity'];
-                $orderId = (int)$info['order_id'];
-                $notify = [
-                    'restaurant_number' => $info['restaurant_number'],
-                    'legal_entity' => $info['legal_entity'],
-                    'legal_entity_group' => $info['legal_entity_group'] ?? getEntityGroup($info['legal_entity'] ?? ''),
-                    'city' => $info['city'] ?? '',
-                    'address' => $info['address'] ?? '',
-                    'supplier_name' => $info['supplier_name'],
-                    'delivery_date' => $info['delivery_date'],
-                    'sku' => $info['sku'],
-                    'product_name' => $info['product_name'],
-                    'old_val' => $oldVal,
-                    'new_val' => $val,
-                ];
+            if (!$info) {
+                soRespond(['error' => 'Позиция не найдена'], 404);
             }
+            soRequireAdminEntityGroupAccess($sessionUser, $info['legal_entity'] ?? '');
+            $oldVal = ($info['admin_qty'] !== null) ? (float)$info['admin_qty'] : (float)$info['quantity'];
+            $orderId = (int)$info['order_id'];
+            $notify = [
+                'restaurant_number' => $info['restaurant_number'],
+                'legal_entity' => $info['legal_entity'],
+                'legal_entity_group' => $info['legal_entity_group'] ?? getEntityGroup($info['legal_entity'] ?? ''),
+                'city' => $info['city'] ?? '',
+                'address' => $info['address'] ?? '',
+                'supplier_name' => $info['supplier_name'],
+                'delivery_date' => $info['delivery_date'],
+                'sku' => $info['sku'],
+                'product_name' => $info['product_name'],
+                'old_val' => $oldVal,
+                'new_val' => $val,
+            ];
             $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $itemId]);
             $reload = false;
         } elseif ($restNum && $deliveryDate && $sku && $suppId) {
@@ -1684,15 +1714,18 @@ if ($soAction === 'admin') {
             $pdo->beginTransaction();
             try {
                 if (!$order) {
-                    // Создаём заказ за ресторан
-                    $le = $body['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
+                    // Создаём заказ за ресторан; юрлицо берём только из данных ресторана — не из тела запроса
+                    $le = roGetLegalEntity($pdo, $restNum);
+                    if (!$le) {
+                        soRespond(['error' => 'Не определено юрлицо ресторана'], 400);
+                    }
                     soRequireAdminEntityGroupAccess($sessionUser, $le);
                     $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
                         VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
                         ->execute([$restNum, $suppId, $deliveryDate, $le]);
                     $orderId = $pdo->lastInsertId();
                 } else {
-                    $le = $order['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
+                    $le = $order['legal_entity'] ?: roGetLegalEntity($pdo, $restNum);
                     soRequireAdminEntityGroupAccess($sessionUser, $le);
                     $orderId = $order['id'];
                 }
@@ -2018,13 +2051,39 @@ if ($soAction === 'admin') {
         $supplierId = $body['supplier_id'] ?? '';
         $rules = $body['rules'] ?? [];
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
-        // Очищаем и перезаписываем
-        $pdo->prepare("DELETE FROM so_deadline_rules WHERE supplier_id = ?")->execute([$supplierId]);
-        $ins = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
-        foreach ($rules as $r) {
-            $ins->execute([$supplierId, (int)$r['delivery_dow'], (int)$r['deadline_dow'], $r['deadline_time'] ?? '14:00:00']);
+        $by = resolveActorName($pdo, $sessionUser);
+        // Очищаем и перезаписываем в транзакции
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("DELETE FROM so_deadline_rules WHERE supplier_id = ?")->execute([$supplierId]);
+            $ins = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
+            $inserted = 0;
+            foreach ($rules as $r) {
+                $dow = (int)($r['delivery_dow'] ?? 0);
+                if (!in_array($dow, [1,2,3,4,5,6,7], true)) continue;
+                $ddow = (int)($r['deadline_dow'] ?? $dow);
+                if (!in_array($ddow, [1,2,3,4,5,6,7], true)) $ddow = $dow;
+                $dt = $r['deadline_time'] ?? '14:00:00';
+                if (preg_match('/^(\d{1,2}):(\d{2})$/', $dt, $m)) {
+                    $dt = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
+                } elseif (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $dt)) {
+                    $dt = '14:00:00';
+                }
+                $ins->execute([$supplierId, $dow, $ddow, $dt]);
+                $inserted++;
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            soRespond(['error' => 'Ошибка сохранения правил дедлайнов: ' . $e->getMessage()], 500);
         }
-        soRespond(['success' => true, 'count' => count($rules)]);
+        try {
+            auditLog($pdo, 'so_deadline_rules_updated', 'supplier', $supplierId, $by, [
+                'supplier_id' => $supplierId,
+                'rules_count' => $inserted,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
+        soRespond(['success' => true, 'count' => $inserted]);
     }
 
     // --- Разовое продление дедлайна на конкретную дату доставки ---

@@ -188,7 +188,7 @@ function krGetReturnWithItems($pdo, $id) {
     try {
         $hStmt = $pdo->prepare("
             SELECT id, old_series, old_number, new_series, new_number,
-                   reason, changed_by_chat_id, changed_by_user, changed_at
+                   reason, changed_by_ru_user_id, changed_by_user, changed_at
             FROM keg_return_bso_history
             WHERE request_id = ?
             ORDER BY changed_at, id
@@ -789,11 +789,14 @@ if ($method === 'PATCH' && $krId && $krAction === null) {
         }
     }
 
-    // Автоматически SUBMITTED → ROUTED если vehicle И driver заполнены
+    // Автоматически SUBMITTED → ROUTED если vehicle И driver заполнены.
+    // Флаг $krWillRoute — чтобы после UPDATE проверить rowCount и не слать лишних уведомлений.
+    $krWillRoute = false;
     if (!$isRestaurant && $row['status'] === 'SUBMITTED') {
         $newVehicle = isset($body['vehicle']) ? trim($body['vehicle']) : ($row['vehicle'] ?? '');
         $newDriver  = isset($body['driver'])  ? trim($body['driver'])  : ($row['driver'] ?? '');
         if ($newVehicle !== '' && $newDriver !== '') {
+            $krWillRoute = true;
             $sets[] = "status = ?";
             $vals[] = 'ROUTED';
             $sets[] = "routed_at = NOW()";
@@ -811,10 +814,19 @@ if ($method === 'PATCH' && $krId && $krAction === null) {
         }
     }
 
+    $krActuallyRouted = false;
     if (!empty($sets)) {
+        // Если переходим в ROUTED — дополнительно ограничиваем WHERE status='SUBMITTED',
+        // чтобы защититься от гонки двух параллельных PATCH-запросов.
+        $whereClause = $krWillRoute ? "WHERE id = ? AND status = 'SUBMITTED'" : "WHERE id = ?";
         $vals[] = $krId;
         try {
-            $pdo->prepare("UPDATE keg_returns SET " . implode(', ', $sets) . " WHERE id = ?")->execute($vals);
+            $stmt = $pdo->prepare("UPDATE keg_returns SET " . implode(', ', $sets) . " $whereClause");
+            $stmt->execute($vals);
+            // rowCount = 0 при ROUTED-переходе означает, что кто-то опередил (уже не SUBMITTED).
+            if ($krWillRoute && $stmt->rowCount() > 0) {
+                $krActuallyRouted = true;
+            }
         } catch (PDOException $e) {
             if ($e->getCode() == 23000) krRespond(['error' => 'Заявка с таким БСО уже существует'], 422);
             error_log('keg_returns PATCH: ' . $e->getMessage());
@@ -832,8 +844,9 @@ if ($method === 'PATCH' && $krId && $krAction === null) {
     }
 
     $rowAfter = krGetReturnWithItems($pdo, $krId);
-    // Если статус переключился на ROUTED — шлём ресторану полное уведомление с PDF.
-    if ($rowAfter && $row['status'] !== 'ROUTED' && $rowAfter['status'] === 'ROUTED') {
+    // Шлём уведомление только если именно МЫ переключили статус (rowCount > 0).
+    // $krActuallyRouted=false означает, что кто-то опередил — уведомление уже ушло от него.
+    if ($rowAfter && $krActuallyRouted) {
         krNotifyRouted($pdo, $rowAfter);
     }
     krRespond($rowAfter);
@@ -1006,7 +1019,7 @@ if ($method === 'POST' && $krId && $krAction === 'replace-bso') {
         $pdo->beginTransaction();
         $pdo->prepare("
             INSERT INTO keg_return_bso_history
-                (request_id, old_series, old_number, new_series, new_number, reason, changed_by_chat_id, changed_by_user)
+                (request_id, old_series, old_number, new_series, new_number, reason, changed_by_ru_user_id, changed_by_user)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ")->execute([
             $krId,
@@ -1665,19 +1678,36 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
     $isCommit = ($commitVal === 'true' || $commitVal === true || $commitVal === 1 || $commitVal === '1');
 
     if ($isCommit) {
-        foreach ($commitActions as $action) {
-            $req  = $action['req'];
-            $file = $action['file'];
-            if ($action['warning'] === 'не найден') continue;
-            $pdo->prepare("
-                UPDATE keg_returns SET vehicle = ?, driver = ?, status = 'ROUTED', routed_at = NOW()
-                WHERE id = ? AND status = 'SUBMITTED'
-            ")->execute([
-                $file['vehicle'] ?? '',
-                $file['driver']  ?? '',
-                (int)$req['id'],
-            ]);
-            $routedRow = krGetReturnWithItems($pdo, (int)$req['id']);
+        $pendingNotifications = [];
+        $pdo->beginTransaction();
+        try {
+            foreach ($commitActions as $action) {
+                $req  = $action['req'];
+                $file = $action['file'];
+                if ($action['warning'] === 'не найден') continue;
+                $stmt = $pdo->prepare("
+                    UPDATE keg_returns SET vehicle = ?, driver = ?, status = 'ROUTED', routed_at = NOW()
+                    WHERE id = ? AND status = 'SUBMITTED'
+                ");
+                $stmt->execute([
+                    $file['vehicle'] ?? '',
+                    $file['driver']  ?? '',
+                    (int)$req['id'],
+                ]);
+                // Собираем уведомления только для тех строк, которые реально переключились.
+                if ($stmt->rowCount() > 0) {
+                    $pendingNotifications[] = (int)$req['id'];
+                }
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log('keg_returns import-routing commit: ' . $e->getMessage());
+            krRespond(['error' => 'Ошибка при сохранении маршрутизации'], 500);
+        }
+        // Уведомления отправляем только после успешного commit.
+        foreach ($pendingNotifications as $rid) {
+            $routedRow = krGetReturnWithItems($pdo, $rid);
             if ($routedRow) krNotifyRouted($pdo, $routedRow);
         }
         krRespond(['preview' => $preview, 'committed' => count($commitActions)]);
