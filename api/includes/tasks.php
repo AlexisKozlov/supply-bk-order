@@ -397,25 +397,31 @@ if ($action === 'board' && $id && $method === 'GET') {
     foreach ($cards as &$cc) { $cc['is_external'] = 0; $cc['external_board_owner'] = null; $cc['external_board_id'] = null; }
     unset($cc);
 
-    // Чужие карточки, где владелец доски (= я) состоит в assignees и
-    // ещё не закрыл свою часть. Колонку и порядок берём из tasks_assignees,
-    // но только если column_id принадлежит ЭТОЙ доске; иначе кладём в
-    // первую обычную (не архивную) колонку — пусть исполнитель сам
-    // перетащит. Архивные оригиналы не показываем.
+    // Чужие карточки, где владелец доски (= я) состоит в assignees.
+    // Колонку и порядок берём из tasks_assignees; если column_id невалидна
+    // на МОЕЙ доске — fallback: незакрытые → первая обычная, закрытые →
+    // моя архив-колонка. is_done/is_archived подменяем на assignee.is_done,
+    // чтобы фронт видел статус моей части (а не оригинала автора).
+    // Архивные оригиналы (автор удалил/архивировал) не показываем.
     $firstNormalColId = null;
+    $archiveColId     = null;
     foreach ($columns as $col) {
-        if (empty($col['is_archive_column'])) { $firstNormalColId = (int)$col['id']; break; }
+        if (empty($col['is_archive_column'])) {
+            if ($firstNormalColId === null) $firstNormalColId = (int)$col['id'];
+        } else {
+            if ($archiveColId === null) $archiveColId = (int)$col['id'];
+        }
     }
     $myColIds = array_map(fn($c) => (int)$c['id'], $columns);
     if ($board['owner_name'] === $tUserName && $firstNormalColId !== null) {
         $s = $pdo->prepare("
             SELECT c.*, ta.column_id AS assignee_column_id, ta.sort_order AS assignee_sort_order,
+                   ta.is_done AS assignee_is_done, ta.done_at AS assignee_done_at,
                    b.owner_name AS external_board_owner, b.id AS external_board_id
             FROM tasks_cards c
             JOIN tasks_assignees ta ON ta.card_id = c.id
             JOIN tasks_boards b     ON b.id = c.board_id
             WHERE ta.user_name = ?
-              AND ta.is_done = 0
               AND c.is_archived = 0
               AND c.board_id != ?
               AND c.parent_card_id IS NULL
@@ -424,10 +430,21 @@ if ($action === 'board' && $id && $method === 'GET') {
         $s->execute([$tUserName, $boardId]);
         foreach ($s->fetchAll() as $extCard) {
             $assignedCol = $extCard['assignee_column_id'] !== null ? (int)$extCard['assignee_column_id'] : null;
-            $extCard['column_id']  = ($assignedCol !== null && in_array($assignedCol, $myColIds, true)) ? $assignedCol : $firstNormalColId;
-            $extCard['sort_order'] = (int)($extCard['assignee_sort_order'] ?? 0);
-            $extCard['is_external'] = 1;
-            unset($extCard['assignee_column_id'], $extCard['assignee_sort_order']);
+            $isDoneForMe = (int)$extCard['assignee_is_done'];
+            // Если колонка не валидна на моей доске — кладём по статусу:
+            // закрыл → архив, ещё в работе → первая обычная.
+            if ($assignedCol === null || !in_array($assignedCol, $myColIds, true)) {
+                $assignedCol = ($isDoneForMe && $archiveColId !== null) ? $archiveColId : $firstNormalColId;
+            }
+            $extCard['column_id']    = $assignedCol;
+            $extCard['sort_order']   = (int)($extCard['assignee_sort_order'] ?? 0);
+            $extCard['is_external']  = 1;
+            // Персональный статус: для меня карточка «закрыта», даже если
+            // у автора оригинал ещё открыт. Фронт по этим полям рисует архив.
+            $extCard['is_done']      = $isDoneForMe;
+            $extCard['is_archived']  = $isDoneForMe;
+            $extCard['completed_at'] = $extCard['assignee_done_at'];
+            unset($extCard['assignee_column_id'], $extCard['assignee_sort_order'], $extCard['assignee_is_done'], $extCard['assignee_done_at']);
             $cards[] = $extCard;
         }
     }
