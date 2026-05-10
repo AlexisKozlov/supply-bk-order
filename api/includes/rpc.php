@@ -5170,6 +5170,45 @@ if ($endpoint === 'rpc') {
 
     // ═══ ПРОТОКОЛЫ СОВЕЩАНИЙ ═══
 
+    // Подтянуть последний комментарий из чата привязанной карточки задачника
+    // ко всем решениям, у которых проставлен tasks_card_id. Объявлено ВЫШЕ
+    // обработчиков get_protocol/get_carryover_tasks, потому что в PHP
+    // функции внутри условного блока регистрируются только при достижении
+    // строки объявления — иначе до неё вызов падает 500.
+    function pdAttachLastComment($pdo, &$decisions) {
+        if (!is_array($decisions) || !$decisions) return;
+        $cardIds = [];
+        foreach ($decisions as $d) {
+            $cid = isset($d['tasks_card_id']) ? (int)$d['tasks_card_id'] : 0;
+            if ($cid) $cardIds[$cid] = true;
+        }
+        if (!$cardIds) {
+            foreach ($decisions as &$d) $d['last_comment'] = null;
+            unset($d);
+            return;
+        }
+        $ids = array_keys($cardIds);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $s = $pdo->prepare("
+            SELECT c.card_id, c.author_name, c.body, c.created_at
+            FROM tasks_comments c
+            INNER JOIN (
+                SELECT card_id, MAX(id) AS max_id
+                FROM tasks_comments
+                WHERE card_id IN ($ph)
+                GROUP BY card_id
+            ) latest ON latest.card_id = c.card_id AND latest.max_id = c.id
+        ");
+        $s->execute($ids);
+        $byCard = [];
+        foreach ($s->fetchAll() as $r) $byCard[(int)$r['card_id']] = $r;
+        foreach ($decisions as &$d) {
+            $cid = isset($d['tasks_card_id']) ? (int)$d['tasks_card_id'] : 0;
+            $d['last_comment'] = ($cid && isset($byCard[$cid])) ? $byCard[$cid] : null;
+        }
+        unset($d);
+    }
+
     if ($fn === 'get_protocols') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
@@ -5217,42 +5256,6 @@ if ($endpoint === 'rpc') {
         $f->execute([$id]);
         $proto['files'] = $f->fetchAll();
         respond($proto);
-    }
-
-    // Подтянуть последний комментарий из чата привязанной карточки задачника
-    // ко всем решениям, у которых проставлен tasks_card_id.
-    function pdAttachLastComment($pdo, &$decisions) {
-        if (!is_array($decisions) || !$decisions) return;
-        $cardIds = [];
-        foreach ($decisions as $d) {
-            $cid = isset($d['tasks_card_id']) ? (int)$d['tasks_card_id'] : 0;
-            if ($cid) $cardIds[$cid] = true;
-        }
-        if (!$cardIds) {
-            foreach ($decisions as &$d) $d['last_comment'] = null;
-            unset($d);
-            return;
-        }
-        $ids = array_keys($cardIds);
-        $ph = implode(',', array_fill(0, count($ids), '?'));
-        $s = $pdo->prepare("
-            SELECT c.card_id, c.author_name, c.body, c.created_at
-            FROM tasks_comments c
-            INNER JOIN (
-                SELECT card_id, MAX(id) AS max_id
-                FROM tasks_comments
-                WHERE card_id IN ($ph)
-                GROUP BY card_id
-            ) latest ON latest.card_id = c.card_id AND latest.max_id = c.id
-        ");
-        $s->execute($ids);
-        $byCard = [];
-        foreach ($s->fetchAll() as $r) $byCard[(int)$r['card_id']] = $r;
-        foreach ($decisions as &$d) {
-            $cid = isset($d['tasks_card_id']) ? (int)$d['tasks_card_id'] : 0;
-            $d['last_comment'] = ($cid && isset($byCard[$cid])) ? $byCard[$cid] : null;
-        }
-        unset($d);
     }
 
     function pdResponsibleToUsers($pdo, $responsiblePerson) {
