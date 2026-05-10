@@ -175,9 +175,12 @@
           <section class="ts-section">
             <div class="ts-section-title">Соисполнители</div>
             <div class="ts-assignees">
-              <span v-for="n in full.assignees" :key="n" class="ts-chip">
+              <span v-for="n in full.assignees" :key="n" class="ts-chip"
+                    :class="{ 'ts-chip-done': (full.assignees_done || []).includes(n) }"
+                    :title="(full.assignees_done || []).includes(n) ? 'Выполнил свою часть' : ''">
                 <span class="ts-chip-bubble">{{ initials(n) }}</span>
                 <span class="ts-chip-name">{{ n }}</span>
+                <span v-if="(full.assignees_done || []).includes(n)" class="ts-chip-done-tick" aria-hidden="true">✓</span>
                 <button v-if="canEditStructure" class="ts-icon-btn" @click="removeAssignee(n)">
                   <TaskIcon name="close" :size="12"/>
                 </button>
@@ -1244,6 +1247,18 @@ function historyText(h) {
   margin-left: 2px;
 }
 .ts-chip .ts-icon-btn:hover { background: rgba(0,0,0,0.10); color: var(--tk-text); }
+.ts-chip-done {
+  background: #DDFAE9;
+  border-color: #B6EAC9;
+  color: #1F845A;
+}
+.ts-chip-done .ts-chip-bubble { background: linear-gradient(135deg, #1F845A, #4BCE97); }
+.ts-chip-done-tick {
+  color: #1F845A;
+  font-weight: 900;
+  font-size: 12px;
+  margin-left: 2px;
+}
 
 .ts-assignee-add {
   width: 100%;

@@ -213,12 +213,30 @@ export const useTasksStore = defineStore('tasks', () => {
     const targetCol = columns.value.find(c => c.id === toColumnId);
     const toArchive = !!(targetCol && targetCol.is_archive_column);
     const toDone    = !!(targetCol && targetCol.is_done_column);
+    const isExternal = !!original.is_external;
+
+    // Внешняя карточка в архив-колонку моей доски = «закрыл свою часть»:
+    // у меня она пропадает с доски, у автора оригинал остаётся. Оптимистично
+    // убираем; финальное состояние подтянет reload после ответа сервера.
+    if (isExternal && toArchive) {
+      cards.value = cards.value.filter(c => c.id !== cardId);
+      try {
+        await tasksApi.moveCard({ card_id: cardId, to_column_id: toColumnId, to_index: toIndex });
+      } catch (e) {
+        error.value = e.message;
+      }
+      await reload();
+      return;
+    }
+
     const updated = {
       ...original,
       column_id: toColumnId,
-      is_done:     (toArchive || toDone) ? 1 : 0,
-      is_archived: toArchive ? 1 : 0,
-      completed_at: (toArchive || toDone) ? new Date().toISOString().slice(0,19).replace('T',' ') : null,
+      // Для внешней карточки is_archived/is_done — это поля оригинала автора,
+      // их трогать нельзя. Меняется только моё представление через column_id/sort_order.
+      is_done:     isExternal ? original.is_done     : ((toArchive || toDone) ? 1 : 0),
+      is_archived: isExternal ? original.is_archived : (toArchive ? 1 : 0),
+      completed_at: isExternal ? original.completed_at : ((toArchive || toDone) ? new Date().toISOString().slice(0,19).replace('T',' ') : null),
     };
     // Пересчёт sort_order в целевой колонке
     const inTarget = cards.value

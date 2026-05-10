@@ -394,6 +394,43 @@ if ($action === 'board' && $id && $method === 'GET') {
     $s = $pdo->prepare("SELECT * FROM tasks_cards WHERE board_id = ? AND parent_card_id IS NULL ORDER BY column_id, sort_order, id");
     $s->execute([$boardId]);
     $cards = $s->fetchAll();
+    foreach ($cards as &$cc) { $cc['is_external'] = 0; $cc['external_board_owner'] = null; $cc['external_board_id'] = null; }
+    unset($cc);
+
+    // Чужие карточки, где владелец доски (= я) состоит в assignees и
+    // ещё не закрыл свою часть. Колонку и порядок берём из tasks_assignees,
+    // но только если column_id принадлежит ЭТОЙ доске; иначе кладём в
+    // первую обычную (не архивную) колонку — пусть исполнитель сам
+    // перетащит. Архивные оригиналы не показываем.
+    $firstNormalColId = null;
+    foreach ($columns as $col) {
+        if (empty($col['is_archive_column'])) { $firstNormalColId = (int)$col['id']; break; }
+    }
+    $myColIds = array_map(fn($c) => (int)$c['id'], $columns);
+    if ($board['owner_name'] === $tUserName && $firstNormalColId !== null) {
+        $s = $pdo->prepare("
+            SELECT c.*, ta.column_id AS assignee_column_id, ta.sort_order AS assignee_sort_order,
+                   b.owner_name AS external_board_owner, b.id AS external_board_id
+            FROM tasks_cards c
+            JOIN tasks_assignees ta ON ta.card_id = c.id
+            JOIN tasks_boards b     ON b.id = c.board_id
+            WHERE ta.user_name = ?
+              AND ta.is_done = 0
+              AND c.is_archived = 0
+              AND c.board_id != ?
+              AND c.parent_card_id IS NULL
+              AND b.is_archived = 0
+        ");
+        $s->execute([$tUserName, $boardId]);
+        foreach ($s->fetchAll() as $extCard) {
+            $assignedCol = $extCard['assignee_column_id'] !== null ? (int)$extCard['assignee_column_id'] : null;
+            $extCard['column_id']  = ($assignedCol !== null && in_array($assignedCol, $myColIds, true)) ? $assignedCol : $firstNormalColId;
+            $extCard['sort_order'] = (int)($extCard['assignee_sort_order'] ?? 0);
+            $extCard['is_external'] = 1;
+            unset($extCard['assignee_column_id'], $extCard['assignee_sort_order']);
+            $cards[] = $extCard;
+        }
+    }
 
     $s = $pdo->prepare("SELECT * FROM tasks_labels WHERE board_id = ? ORDER BY sort_order, id");
     $s->execute([$boardId]);
@@ -425,10 +462,15 @@ if ($action === 'board' && $id && $method === 'GET') {
         $attCount = [];
         foreach ($s->fetchAll() as $r) $attCount[(int)$r['card_id']] = (int)$r['cnt'];
 
-        $s = $pdo->prepare("SELECT card_id, user_name FROM tasks_assignees WHERE card_id IN ($ph)");
+        $s = $pdo->prepare("SELECT card_id, user_name, is_done FROM tasks_assignees WHERE card_id IN ($ph)");
         $s->execute($ids);
         $assg = [];
-        foreach ($s->fetchAll() as $r) $assg[(int)$r['card_id']][] = $r['user_name'];
+        $assgDone = [];
+        foreach ($s->fetchAll() as $r) {
+            $cid = (int)$r['card_id'];
+            $assg[$cid][] = $r['user_name'];
+            if ((int)$r['is_done']) $assgDone[$cid][] = $r['user_name'];
+        }
 
         // Подзадачи всех корневых карточек (одним запросом)
         $s = $pdo->prepare("SELECT id, parent_card_id, title, is_done, priority, due_date, sort_order FROM tasks_cards WHERE parent_card_id IN ($ph) ORDER BY parent_card_id, sort_order, id");
@@ -451,6 +493,7 @@ if ($action === 'board' && $id && $method === 'GET') {
             $c['comments']    = $cmtCount[$cid] ?? 0;
             $c['attachments'] = $attCount[$cid] ?? 0;
             $c['assignees']   = $assg[$cid] ?? [];
+            $c['assignees_done'] = $assgDone[$cid] ?? [];
             $c['subtasks']    = $subsByParent[$cid] ?? [];
             $c['subtasks_total'] = $subsCount[$cid] ?? 0;
             $c['subtasks_done']  = $subsDone[$cid] ?? 0;
@@ -593,20 +636,73 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
     if (!$cardId || !$toColumnId) tRespond(['error' => 'card_id и to_column_id обязательны'], 400);
     $card = tGetCard($pdo, $cardId);
     if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
-    $board = tGetBoard($pdo, $card['board_id']);
-    if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
     $toCol = tGetColumn($pdo, $toColumnId);
-    if (!$toCol || (int)$toCol['board_id'] !== (int)$card['board_id']) tRespond(['error' => 'Колонка не относится к этой доске'], 400);
+    if (!$toCol) tRespond(['error' => 'Колонка не найдена'], 400);
+    $toBoard = tGetBoard($pdo, $toCol['board_id']);
+    if (!$toBoard) tRespond(['error' => 'Доска целевой колонки не найдена'], 400);
+
+    // Внешний кейс: карточка лежит на ЧУЖОЙ доске, но целевая колонка
+    // — на МОЕЙ. Я двигаю не саму карточку, а свою запись в tasks_assignees:
+    // меняется только моё представление карточки, у автора оригинал не
+    // двигается. Архив-колонка моей доски → ставлю себе is_done=1, и
+    // карточка пропадает с моей доски (но у автора остаётся).
+    $isExternal = ((int)$card['board_id'] !== (int)$toCol['board_id']);
+    if ($isExternal) {
+        if ($toBoard['owner_name'] !== $tUserName) tRespond(['error' => 'Между чужими досками двигать нельзя'], 403);
+        $a = $pdo->prepare("SELECT 1 FROM tasks_assignees WHERE card_id = ? AND user_name = ? AND is_done = 0");
+        $a->execute([$cardId, $tUserName]);
+        if (!$a->fetchColumn()) tRespond(['error' => 'Нет прав на эту карточку'], 403);
+    } else {
+        $cardBoard = tGetBoard($pdo, $card['board_id']);
+        if (!tCanWorkWithBoard($pdo, $tUser, $cardBoard)) tRespond(['error' => 'Нет прав'], 403);
+    }
 
     $pdo->beginTransaction();
     try {
-        $fromCol     = (int)$card['column_id'];
         $isToArchive = !empty($toCol['is_archive_column']) ? 1 : 0;
+
+        if ($isExternal) {
+            // Локи: свои карточки и свои tasks_assignees-строки в целевой колонке.
+            $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id = ? FOR UPDATE")->execute([$toColumnId]);
+            $pdo->prepare("SELECT card_id FROM tasks_assignees WHERE user_name = ? AND column_id = ? FOR UPDATE")
+                ->execute([$tUserName, $toColumnId]);
+
+            // Собираем порядок: свои карточки + мои внешние в этой колонке.
+            $items = []; // [['cid'=>id, 'sort'=>n, 'src'=>'own'|'ext'], ...]
+            $s = $pdo->prepare("SELECT id, sort_order FROM tasks_cards WHERE column_id = ? AND id <> ?");
+            $s->execute([$toColumnId, $cardId]);
+            foreach ($s->fetchAll() as $r) $items[] = ['cid' => (int)$r['id'], 'sort' => (int)$r['sort_order'], 'src' => 'own'];
+            $s = $pdo->prepare("SELECT card_id, sort_order FROM tasks_assignees WHERE user_name = ? AND column_id = ? AND is_done = 0 AND card_id <> ?");
+            $s->execute([$tUserName, $toColumnId, $cardId]);
+            foreach ($s->fetchAll() as $r) $items[] = ['cid' => (int)$r['card_id'], 'sort' => (int)$r['sort_order'], 'src' => 'ext'];
+            usort($items, fn($a, $b) => ($a['sort'] - $b['sort']) ?: ($a['cid'] - $b['cid']));
+            $toIndex = max(0, min($toIndex, count($items)));
+            array_splice($items, $toIndex, 0, [['cid' => $cardId, 'sort' => 0, 'src' => 'ext']]);
+
+            $updOwn = $pdo->prepare("UPDATE tasks_cards SET sort_order = ? WHERE id = ?");
+            $updExt = $pdo->prepare("UPDATE tasks_assignees SET column_id = ?, sort_order = ? WHERE card_id = ? AND user_name = ?");
+            foreach ($items as $i => $it) {
+                if ($it['src'] === 'own') $updOwn->execute([$i, $it['cid']]);
+                else                       $updExt->execute([$toColumnId, $i, $it['cid'], $tUserName]);
+            }
+
+            if ($isToArchive) {
+                $pdo->prepare("UPDATE tasks_assignees SET is_done = 1, done_at = NOW() WHERE card_id = ? AND user_name = ?")
+                    ->execute([$cardId, $tUserName]);
+                tHistory($pdo, $cardId, $tUserName, 'assignee_done', ['user' => $tUserName]);
+            } else {
+                tHistory($pdo, $cardId, $tUserName, 'assignee_moved', ['user' => $tUserName, 'to_column' => $toColumnId]);
+            }
+
+            $pdo->commit();
+            tRespond(['success' => true]);
+        }
+
+        // Свой кейс: обычное перемещение в той же доске.
+        $fromCol     = (int)$card['column_id'];
         $newIsDone   = ($isToArchive || !empty($toCol['is_done_column'])) ? 1 : 0;
         $isProto     = tIsProtocolCard($pdo, $cardId);
 
-        // Блокируем все карточки в обеих задействованных колонках, чтобы
-        // параллельный move дождался окончания этой транзакции.
         if ($fromCol !== $toColumnId) {
             $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id IN (?, ?) FOR UPDATE")
                 ->execute([$fromCol, $toColumnId]);
@@ -675,9 +771,12 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         $s->execute([$cardId]);
         $labelIds = array_map('intval', array_column($s->fetchAll(), 'label_id'));
 
-        $s = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ? ORDER BY added_at, user_name");
+        $s = $pdo->prepare("SELECT user_name, is_done FROM tasks_assignees WHERE card_id = ? ORDER BY added_at, user_name");
         $s->execute([$cardId]);
-        $assignees = array_column($s->fetchAll(), 'user_name');
+        $assigneeRows = $s->fetchAll();
+        $assignees = array_column($assigneeRows, 'user_name');
+        $assigneesDone = [];
+        foreach ($assigneeRows as $r) if ((int)$r['is_done']) $assigneesDone[] = $r['user_name'];
 
         $s = $pdo->prepare("SELECT id, entity_type, entity_id, entity_label, created_at FROM tasks_relations WHERE card_id = ?");
         $s->execute([$cardId]);
@@ -718,6 +817,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             'history'     => $history,
             'label_ids'   => $labelIds,
             'assignees'   => $assignees,
+            'assignees_done' => $assigneesDone,
             'relations'   => $relations,
             'attachments' => $attachments,
             'subtasks'    => $subtasks,
@@ -964,12 +1064,31 @@ if ($action === 'cards' && $id && $action2 === 'assignees' && $method === 'POST'
         $s = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
         $s->execute([$cardId]);
         $current = array_column($s->fetchAll(), 'user_name');
-        $added = array_diff($names, $current);
+        $added   = array_values(array_diff($names, $current));
+        $removed = array_values(array_diff($current, $names));
 
-        $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ?")->execute([$cardId]);
-        if ($names) {
-            $ins = $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)");
-            foreach ($names as $n) $ins->execute([$cardId, $n]);
+        // Сохраняем уже существующие назначения вместе с их column_id, sort_order
+        // и is_done (иначе при каждом «save assignees» сбрасывался бы статус
+        // и положение чужой карточки на доске исполнителя).
+        if ($removed) {
+            $ph = implode(',', array_fill(0, count($removed), '?'));
+            $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ? AND user_name IN ($ph)")
+                ->execute(array_merge([$cardId], $removed));
+        }
+        // Новых добавляем с column_id = первая обычная колонка их основной
+        // доски — чтобы карточка сразу легла в нужное место. Если своей
+        // доски нет — column_id NULL, бэк при GET положит в первую колонку.
+        if ($added) {
+            $boardSt = $pdo->prepare("SELECT id FROM tasks_boards WHERE owner_name = ? AND is_archived = 0 ORDER BY sort_order, id LIMIT 1");
+            $colSt   = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND (is_archive_column = 0 OR is_archive_column IS NULL) ORDER BY sort_order, id LIMIT 1");
+            $insSt   = $pdo->prepare("INSERT INTO tasks_assignees (card_id, user_name, column_id, sort_order, is_done) VALUES (?, ?, ?, 0, 0)");
+            foreach ($added as $u) {
+                $boardSt->execute([$u]);
+                $bId = $boardSt->fetchColumn();
+                $colId = null;
+                if ($bId) { $colSt->execute([(int)$bId]); $colId = $colSt->fetchColumn() ?: null; }
+                $insSt->execute([$cardId, $u, $colId]);
+            }
         }
         tHistory($pdo, $cardId, $tUserName, 'assignees_changed', ['user_names' => $names]);
         $pdo->commit();

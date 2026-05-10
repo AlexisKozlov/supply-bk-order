@@ -1,12 +1,18 @@
 <template>
   <div
     class="task-card"
-    :class="[priorityClass, dueClass, { 'is-overdue': isOverdue, 'is-done': card.is_done, 'is-dragging': dragging }]"
+    :class="[priorityClass, dueClass, { 'is-overdue': isOverdue, 'is-done': card.is_done, 'is-dragging': dragging, 'is-external': !!card.is_external }]"
     draggable="true"
     @dragstart="onDragStart"
     @dragend="onDragEnd"
     @click="onCardClick"
   >
+    <!-- Маркер чужой карточки: видна на моей доске, потому что я в исполнителях -->
+    <div v-if="card.is_external" class="task-card-external" :title="'Карточка с доски: ' + card.external_board_owner">
+      <TaskIcon name="arrowUpRight" :size="11"/>
+      <span>с доски: {{ card.external_board_owner }}</span>
+    </div>
+
     <!-- Метки сверху (Trello-стиль: тонкие пиллы) -->
     <div v-if="cardLabels.length" class="task-card-labels">
       <span v-for="l in cardLabels" :key="l.id" class="label-pill" :style="{ background: l.color }"
@@ -24,8 +30,8 @@
       <button class="card-menu-item" @click="openCardFromMenu">
         <TaskIcon name="arrowUpRight" :size="14"/> Открыть задачу
       </button>
-      <div class="card-menu-divider"></div>
-      <button class="card-menu-item" @click="duplicateCard">
+      <div v-if="!card.is_external" class="card-menu-divider"></div>
+      <button v-if="!card.is_external" class="card-menu-item" @click="duplicateCard">
         <TaskIcon name="copy" :size="14"/> Дублировать
       </button>
       <button class="card-menu-item submenu-trigger" @click.stop="moveSubmenuOpen = !moveSubmenuOpen">
@@ -46,7 +52,7 @@
         <TaskIcon name="archive" :size="14"/>
         {{ isInArchiveColumn ? 'Восстановить из архива' : 'Архивировать' }}
       </button>
-      <button class="card-menu-item danger" @click="deleteCardFromMenu">
+      <button v-if="!card.is_external" class="card-menu-item danger" @click="deleteCardFromMenu">
         <TaskIcon name="trash" :size="14"/> Удалить карточку
       </button>
     </div>
@@ -104,9 +110,14 @@
         <span>{{ card.comments }}</span>
       </span>
 
-      <!-- Соисполнители (справа) -->
+      <!-- Соисполнители (справа). Галочка на bubble — этот исполнитель закрыл свою часть. -->
       <span v-if="card.assignees?.length" class="meta-assignees">
-        <span v-for="(n, i) in card.assignees.slice(0,3)" :key="i" class="assignee-bubble" :title="n">{{ initials(n) }}</span>
+        <span v-for="(n, i) in card.assignees.slice(0,3)" :key="i" class="assignee-bubble"
+              :class="{ 'assignee-done': (card.assignees_done || []).includes(n) }"
+              :title="n + ((card.assignees_done || []).includes(n) ? ' — выполнил' : '')">
+          {{ initials(n) }}
+          <span v-if="(card.assignees_done || []).includes(n)" class="assignee-done-tick">✓</span>
+        </span>
         <span v-if="card.assignees.length > 3" class="assignee-more">+{{ card.assignees.length - 3 }}</span>
       </span>
     </div>
@@ -471,6 +482,15 @@ const vClickOutsideCard = {
 .task-card.is-dragging { opacity: 0.45; transform: rotate(1deg); }
 .task-card.is-done { opacity: 0.6; }
 .task-card.is-done .task-card-title { text-decoration: line-through; color: var(--tk-text-muted); }
+.task-card.is-external { background: linear-gradient(180deg, #FAF5EE 0%, #FFFFFF 60%); border-color: #E8D9BD; }
+
+.task-card-external {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: #8A6F3D; font-weight: 600;
+  background: #F4E9CF; border-radius: 4px;
+  padding: 2px 6px; margin-bottom: 6px;
+}
+.task-card-external svg { color: #B58A2E; }
 
 /* Левая полоска по приоритету (тоньше и спокойнее, чем раньше) */
 .task-card::before {
@@ -736,6 +756,21 @@ const vClickOutsideCard = {
   margin-left: -6px;
 }
 .assignee-bubble:first-child { margin-left: 0; }
+.assignee-bubble.assignee-done {
+  background: linear-gradient(135deg, #1F845A, #4BCE97);
+  position: relative;
+}
+.assignee-done-tick {
+  position: absolute;
+  right: -4px; bottom: -4px;
+  width: 12px; height: 12px;
+  background: #1F845A;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  font-size: 8px; line-height: 9px;
+  color: #fff; font-weight: 900;
+  display: flex; align-items: center; justify-content: center;
+}
 .assignee-more {
   font-size: var(--tk-fz-xs, 11px);
   color: var(--tk-text-muted, #758195);
