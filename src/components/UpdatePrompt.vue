@@ -38,10 +38,11 @@ const SW_ACTIVATE_DELAY_MS = 800;
 const updating = ref(false);
 const autoHealing = ref(false);
 
-// 'prompt': плагин сам отслеживает появление нового SW в ожидании и
-// выставляет needRefresh. updateServiceWorker оставлен только из API хука,
-// мы его НЕ используем — вместо этого посылаем SKIP_WAITING прямым
-// postMessage и потом релоадим. Так кнопка никогда не висит.
+// Режим 'prompt' (см. vite.config.js): плагин сам отслеживает появление
+// нового SW в ожидании и выставляет needRefresh. updateServiceWorker
+// оставлен только из API хука, мы его НЕ используем — вместо этого
+// посылаем SKIP_WAITING прямым postMessage и потом релоадим. Так кнопка
+// никогда не висит.
 const { needRefresh } = useRegisterSW({
   immediate: true,
   onRegisteredSW(swUrl, registration) {

@@ -29,14 +29,16 @@ export default defineConfig({
     vue(),
     cleanupCopiedLegacyPublicAssets(),
     VitePWA({
-      // 'autoUpdate': новый SW моментально захватывает старые вкладки.
-      // Если старый JS попытается загрузить чанк, которого больше нет, —
-      // main.js ловит «Failed to fetch dynamically imported module» и
-      // показывает баннер «Доступна новая версия» через UpdatePrompt.
-      // Это страхует UX, но при этом обычные пользователи без действий
-      // получают свежую версию сразу (а не висят на старом index.html
-      // из SW-кэша, как было в режиме 'prompt').
-      registerType: 'autoUpdate',
+      // 'prompt': новый SW устанавливается в фоне и встаёт в waiting.
+      // useRegisterSW в UpdatePrompt.vue выставляет needRefresh,
+      // снизу всплывает баннер «Доступна новая версия» с кнопками
+      // «Обновить» / «Позже». Без принудительного релоада — пользователь
+      // не теряет несохранённые данные. Если он откладывает обновление
+      // и потом ловит «Failed to fetch dynamically imported module»
+      // (отсутствующий чанк), main.js поднимает тот же баннер.
+      // Условие корректной работы — заголовки nginx no-cache на
+      // sw.js / index.html / manifest.webmanifest (см. memory/pwa-config).
+      registerType: 'prompt',
       manifest: {
         name: 'Supply Department — Отдел закупок',
         short_name: 'Закупки',
@@ -52,11 +54,13 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // skipWaiting + clientsClaim: новый SW активируется сразу при
-        // обнаружении обновления и захватывает уже открытые вкладки.
-        // Защита от поломки старых вкладок — обработчик ошибок чанков
-        // в main.js, который поднимает UpdatePrompt-баннер.
-        skipWaiting: true,
+        // skipWaiting НЕ включаем — иначе SW активируется сразу и
+        // плагин принудительно перезагружает страницу (теряются данные).
+        // Активацию инициирует пользователь кнопкой «Обновить» в
+        // UpdatePrompt.vue — там вручную шлётся postMessage SKIP_WAITING.
+        // clientsClaim оставлен: после перезагрузки новый SW сразу же
+        // подхватывает уже-перезагруженную вкладку и не отдаёт старый
+        // index.html из кэша.
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,otf,woff,woff2}'],
