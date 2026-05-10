@@ -5170,12 +5170,12 @@ if ($endpoint === 'rpc') {
 
     // ═══ ПРОТОКОЛЫ СОВЕЩАНИЙ ═══
 
-    // Подтянуть последний комментарий из чата привязанной карточки задачника
-    // ко всем решениям, у которых проставлен tasks_card_id. Объявлено ВЫШЕ
-    // обработчиков get_protocol/get_carryover_tasks, потому что в PHP
-    // функции внутри условного блока регистрируются только при достижении
-    // строки объявления — иначе до неё вызов падает 500.
-    function pdAttachLastComment($pdo, &$decisions) {
+    // Подтянуть описание привязанной карточки задачника ко всем решениям,
+    // у которых проставлен tasks_card_id. Объявлено ВЫШЕ обработчиков
+    // get_protocol/get_carryover_tasks, потому что в PHP функции внутри
+    // условного блока регистрируются только при достижении строки
+    // объявления — иначе до неё вызов падает 500.
+    function pdAttachCardDescription($pdo, &$decisions) {
         if (!is_array($decisions) || !$decisions) return;
         $cardIds = [];
         foreach ($decisions as $d) {
@@ -5183,28 +5183,19 @@ if ($endpoint === 'rpc') {
             if ($cid) $cardIds[$cid] = true;
         }
         if (!$cardIds) {
-            foreach ($decisions as &$d) $d['last_comment'] = null;
+            foreach ($decisions as &$d) $d['card_description'] = null;
             unset($d);
             return;
         }
         $ids = array_keys($cardIds);
         $ph = implode(',', array_fill(0, count($ids), '?'));
-        $s = $pdo->prepare("
-            SELECT c.card_id, c.author_name, c.body, c.created_at
-            FROM tasks_comments c
-            INNER JOIN (
-                SELECT card_id, MAX(id) AS max_id
-                FROM tasks_comments
-                WHERE card_id IN ($ph)
-                GROUP BY card_id
-            ) latest ON latest.card_id = c.card_id AND latest.max_id = c.id
-        ");
+        $s = $pdo->prepare("SELECT id, description FROM tasks_cards WHERE id IN ($ph)");
         $s->execute($ids);
         $byCard = [];
-        foreach ($s->fetchAll() as $r) $byCard[(int)$r['card_id']] = $r;
+        foreach ($s->fetchAll() as $r) $byCard[(int)$r['id']] = (string)($r['description'] ?? '');
         foreach ($decisions as &$d) {
             $cid = isset($d['tasks_card_id']) ? (int)$d['tasks_card_id'] : 0;
-            $d['last_comment'] = ($cid && isset($byCard[$cid])) ? $byCard[$cid] : null;
+            $d['card_description'] = ($cid && isset($byCard[$cid]) && $byCard[$cid] !== '') ? $byCard[$cid] : null;
         }
         unset($d);
     }
@@ -5250,7 +5241,7 @@ if ($endpoint === 'rpc') {
         $d = $pdo->prepare("SELECT * FROM protocol_decisions WHERE protocol_id = ? ORDER BY id");
         $d->execute([$id]);
         $proto['decisions'] = $d->fetchAll();
-        pdAttachLastComment($pdo, $proto['decisions']);
+        pdAttachCardDescription($pdo, $proto['decisions']);
         // Файлы
         $f = $pdo->prepare("SELECT id, file_name, file_path, uploaded_by, uploaded_at FROM meeting_protocol_files WHERE protocol_id = ? ORDER BY uploaded_at");
         $f->execute([$id]);
@@ -5612,7 +5603,7 @@ if ($endpoint === 'rpc') {
         ");
         $s->execute([$prevProtoId]);
         $decisions = $s->fetchAll();
-        pdAttachLastComment($pdo, $decisions);
+        pdAttachCardDescription($pdo, $decisions);
         respond($decisions);
     }
 

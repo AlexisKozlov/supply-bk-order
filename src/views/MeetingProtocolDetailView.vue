@@ -79,7 +79,7 @@
             <tr>
               <th class="mpd-th-num">№</th>
               <th>Задача</th>
-              <th class="mpd-th-comment">Комментарий</th>
+              <th class="mpd-th-comment">Описание</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
               <th class="mpd-th-status">Статус</th>
@@ -91,7 +91,7 @@
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td class="mpd-td-text">{{ t.text }}</td>
               <td class="mpd-td-comment">
-                <span v-if="t.last_comment" :title="formatCommentTitle(t.last_comment)">{{ t.last_comment.body }}</span>
+                <span v-if="t.card_description" :title="t.card_description">{{ t.card_description }}</span>
                 <span v-else class="mpd-empty-cell">—</span>
               </td>
               <td>{{ formatResponsible(t.responsible_person) }}</td>
@@ -115,7 +115,7 @@
             <tr>
               <th class="mpd-th-num">№</th>
               <th>Задача</th>
-              <th class="mpd-th-comment">Комментарий</th>
+              <th class="mpd-th-comment">Описание</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
               <th class="mpd-th-status">Статус</th>
@@ -127,7 +127,7 @@
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td><textarea v-model="dec.text" :disabled="!canEdit" class="mpd-cell-input mpd-cell-text" rows="1" placeholder="Текст задачи" @input="autoResize($event)"></textarea></td>
               <td class="mpd-td-comment">
-                <span v-if="dec.last_comment" :title="formatCommentTitle(dec.last_comment)">{{ dec.last_comment.body }}</span>
+                <span v-if="dec.card_description" :title="dec.card_description">{{ dec.card_description }}</span>
                 <span v-else class="mpd-empty-cell">—</span>
               </td>
               <td class="mpd-td-resp">
@@ -289,13 +289,6 @@ function fmtShortDate(d) {
   if (!d) return '';
   const dt = new Date(d + 'T00:00:00');
   return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-}
-
-function formatCommentTitle(c) {
-  if (!c) return '';
-  const dt = c.created_at ? new Date(c.created_at.replace(' ', 'T')) : null;
-  const when = dt && !isNaN(dt) ? dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-  return [c.author_name, when, c.body].filter(Boolean).join(' • ');
 }
 
 async function loadCarryoverTasks() {
