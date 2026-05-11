@@ -107,7 +107,7 @@
                   </div>
                   <div class="ssv-pop-field ssv-pop-field-wide">
                     <label>Времена напоминаний</label>
-                    <ReminderTimesEditor v-model="popover.reminder_times" />
+                    <ReminderTimesEditor v-model="popover.reminder_times" :fallback="defaultReminderTimesFor(activeSupplier, wd)" />
                   </div>
                 </div>
                 <div class="ssv-pop-actions">
@@ -363,6 +363,11 @@ function effectiveDeadline(supplier, row) {
 function defaultDeadlineHint(supplier, deliveryDay) {
   const dflt = defaultsFor(supplier).find(d => Number(d.delivery_dow) === Number(deliveryDay));
   return dflt ? formatTime(dflt.deadline_time) : '';
+}
+
+function defaultReminderTimesFor(supplier, deliveryDay) {
+  const dflt = defaultsFor(supplier).find(d => Number(d.delivery_dow) === Number(deliveryDay));
+  return parseReminderTimes(dflt?.reminder_times);
 }
 
 // ─── Popover для ячейки ───

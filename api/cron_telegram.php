@@ -887,14 +887,16 @@ try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
 
-    // Все активные поставщики с графиком, принимающие заявки
+    // Все активные so_*-поставщики (подключённые через портал) с графиком,
+    // принимающие заявки. Локальных не трогаем — их обрабатывает отдельный
+    // модуль cron_delivery_reminders.php с гибкими временами и ack-кнопкой.
     $suppliers = $pdo->query("
         SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
                COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
         FROM suppliers s
         JOIN supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
         LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
-        WHERE s.is_active = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
+        WHERE s.is_active = 1 AND s.so_enabled = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
     ")->fetchAll();
 
     foreach ($suppliers as $sup) {

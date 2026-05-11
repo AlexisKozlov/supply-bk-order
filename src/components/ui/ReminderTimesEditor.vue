@@ -1,6 +1,13 @@
 <template>
   <div class="rte">
-    <div v-if="!items.length" class="rte-empty">
+    <div v-if="!items.length && fallbackItems.length" class="rte-fallback">
+      <div class="rte-fallback-title">Используются дефолты поставщика:</div>
+      <ul class="rte-fallback-list">
+        <li v-for="(f, i) in fallbackItems" :key="i">{{ fallbackLabel(f) }}</li>
+      </ul>
+      <div class="rte-fallback-hint">Чтобы переопределить только для этой связки — добавьте свои времена ниже.</div>
+    </div>
+    <div v-else-if="!items.length" class="rte-empty">
       Напоминания не настроены — заявка пройдёт без оклика (только финальное за 5 мин до дедлайна).
     </div>
     <div v-for="(it, idx) in items" :key="idx" class="rte-row">
@@ -22,10 +29,11 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
+  fallback: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['update:modelValue']);
 
@@ -64,6 +72,16 @@ function remove(idx) {
   items.value.splice(idx, 1);
   emitNow();
 }
+
+const fallbackItems = computed(() => normalize(props.fallback));
+
+function fallbackLabel(f) {
+  const db = Number(f.days_before) | 0;
+  const t = String(f.time).slice(0, 5);
+  if (db === 0) return `в день подачи в ${t}`;
+  if (db === 1) return `накануне в ${t}`;
+  return `за ${db} дн. в ${t}`;
+}
 </script>
 
 <style scoped>
@@ -77,6 +95,18 @@ function remove(idx) {
   color: #8a6b00;
   line-height: 1.4;
 }
+.rte-fallback {
+  padding: 8px 10px;
+  background: #f0f7ed;
+  border: 1px dashed #c4e6c8;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #2e5e30;
+  line-height: 1.4;
+}
+.rte-fallback-title { font-weight: 600; margin-bottom: 4px; }
+.rte-fallback-list { margin: 0 0 6px 0; padding-left: 18px; }
+.rte-fallback-hint { font-size: 11px; color: #5d735d; }
 .rte-row {
   display: flex;
   align-items: center;

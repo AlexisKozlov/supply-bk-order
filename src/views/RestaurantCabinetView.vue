@@ -17,6 +17,7 @@
         </div>
       </div>
 
+      <div class="cab-sb-scroll">
       <button class="sb-item" :class="{ active: activeTab === 'dashboard' }" @click="switchTab('dashboard')">
         <span class="sb-icon" v-html="cabIconSvg.dashboard"></span>
         Главная
@@ -63,6 +64,7 @@
         @click="switchTab('orders', 'reminders')">
         <span class="sb-icon" v-html="cabIconSvg.reminders"></span>
         Напоминания
+        <span class="sb-beta">BETA</span>
       </button>
 
       <div class="sb-label">Другое</div>
@@ -80,7 +82,8 @@
         <span class="sb-item-ext" title="Откроется в новой вкладке" v-html="cabIconSvg.external"></span>
       </router-link>
 
-      <div class="sb-spacer"></div>
+      </div>
+      <div class="cab-sb-footer">
       <a href="https://t.me/alexiskozlov" target="_blank" rel="noopener noreferrer" class="sb-help">
         <span class="sb-help-icon" v-html="cabIconSvg.help"></span>
         <span>Помощь</span>
@@ -101,6 +104,7 @@
             <line x1="21" y1="12" x2="9" y2="12"/>
           </svg>
         </button>
+      </div>
       </div>
     </aside>
 
@@ -385,6 +389,7 @@
         <button class="ord-tab" :class="{ active: orderSubTab === 'reminders' }" @click="switchTab('orders', 'reminders')">
           <span class="ord-tab-icon" v-html="cabIconSvg.reminders"></span>
           Напоминания
+          <span class="ord-tab-beta">BETA</span>
         </button>
         <button class="ord-tab" :class="{ active: orderSubTab === 'history' }" @click="switchTab('orders', 'history')">
           История
@@ -3907,10 +3912,23 @@ onUnmounted(() => {
 
 /* ═══ Sidebar ═══ */
 .cab-sidebar {
-  width: 220px; min-height: 100vh; background: #502314;
+  width: 220px; height: 100vh; background: #502314;
   display: flex; flex-direction: column; padding: 20px 10px;
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
+  overflow: hidden;
 }
+.cab-sb-scroll {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent;
+  margin: 0 -4px; padding: 0 4px;
+}
+.cab-sb-scroll::-webkit-scrollbar { width: 6px; }
+.cab-sb-scroll::-webkit-scrollbar-track { background: transparent; }
+.cab-sb-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
+.cab-sb-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
+.cab-sb-footer { flex-shrink: 0; padding-top: 6px; }
 .cab.cab-theme-ps .cab-sidebar { background: #6f2a14; }
 .sb-brand { display: flex; align-items: center; gap: 11px; padding: 6px 10px; margin-bottom: 24px; }
 .sb-logo { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; backdrop-filter: blur(4px); }
@@ -3929,7 +3947,6 @@ onUnmounted(() => {
 .sb-badge.alert { background: #dc2626; }
 .sb-badge.pause { background: #9ca3af; font-size: 9px; padding: 0 7px; text-transform: uppercase; letter-spacing: 0.5px; }
 .sb-beta { margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: linear-gradient(90deg, #FFD54F, #F4A261); color: #3d2400; flex-shrink: 0; }
-.sb-spacer { flex: 1; }
 .sb-help {
   display: flex;
   align-items: center;
@@ -4194,6 +4211,8 @@ onUnmounted(() => {
 .ord-tab-ext { width: 15px; height: 15px; color: #b08a70; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .ord-tab-icon { width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .ord-tab-icon svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 2; }
+.ord-tab-beta { font-size: 8px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 5px; border-radius: 4px; background: linear-gradient(90deg, #FFD54F, #F4A261); color: #3d2400; flex-shrink: 0; }
+.ord-tab.active .ord-tab-beta { background: linear-gradient(90deg, #FFE082, #FFB74D); }
 .ord-tab-badge { font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 8px; }
 .ord-tab-badge.warn { background: #f59e0b; color: white; }
 .ord-tab-badge.ok { background: #16a34a; color: white; }
