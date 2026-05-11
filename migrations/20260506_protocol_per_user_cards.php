@@ -103,8 +103,10 @@ foreach ($rows as $r) {
         $pdo->prepare("INSERT INTO protocol_decision_cards (decision_id, card_id, user_name) VALUES (?, ?, ?)")
             ->execute([$decId, $cardId, $userName]);
 
-        $insAss = $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)");
-        foreach ($valid as $u) $insAss->execute([$cardId, $u]);
+        // tasks_assignees НЕ заполняем: у каждого ответственного уже есть своя
+        // карточка на своей доске (см. protocol_decision_cards). Запись о
+        // соисполнителях здесь приводит к дублированию карточек на досках
+        // других ответственных через механизм «внешних» карточек.
 
         $pdo->prepare("INSERT INTO tasks_relations (card_id, entity_type, entity_id, entity_label) VALUES (?, 'protocol', ?, ?)")
             ->execute([$cardId, (string)$r['protocol_id'], $entityLabel]);

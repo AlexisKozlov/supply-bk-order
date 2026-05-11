@@ -29,6 +29,7 @@ const routes = [
       { path: 'restaurant-sales', name: 'restaurant-sales', component: () => import('@/views/RestaurantSalesView.vue'), meta: { title: 'Реализация', module: 'restaurant-sales' } },
       { path: 'database', name: 'database', component: () => import('@/views/DatabaseView.vue'), meta: { title: 'База товаров', module: 'database' } },
       { path: 'delivery-schedule', name: 'delivery-schedule', component: () => import('@/views/DeliveryScheduleView.vue'), meta: { title: 'График доставки', module: 'delivery-schedule' } },
+      { path: 'supplier-schedule', name: 'supplier-schedule', component: () => import('@/views/SupplierScheduleView.vue'), meta: { title: 'График поставок', module: 'supplier-schedule' } },
       { path: 'shelf-life', name: 'shelf-life', component: () => import('@/views/ShelfLifeView.vue'), meta: { title: 'Сроки годности', module: 'shelf-life' } },
       { path: 'shelf-life/analytics', name: 'shelf-life-analytics', component: () => import('@/views/ShelfLifeAnalyticsView.vue'), meta: { title: 'Аналитика ячеек', module: 'shelf-life' } },
       { path: 'pricing', name: 'pricing', component: () => import('@/views/PricingView.vue'), meta: { title: 'Цены и ПСЦ', module: 'pricing' } },
@@ -113,6 +114,7 @@ const routes = [
       { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
       { path: 'keg-returns', name: 'restaurant-keg-returns', component: EmptySlot, meta: { title: 'Возврат кег' } },
+      { path: 'reminders', name: 'restaurant-reminders', component: EmptySlot, meta: { title: 'Напоминания' } },
     ],
   },
   {
@@ -209,7 +211,7 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks'];
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'supplier-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks'];
 
 router.beforeEach(async (to) => {
   const userStore = useUserStore();

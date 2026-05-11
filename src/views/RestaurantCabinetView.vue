@@ -57,6 +57,13 @@
         <span class="sb-icon" v-html="cabIconSvg.history"></span>
         История заказов
       </button>
+      <!-- Напоминания о подаче заявок -->
+      <button class="sb-item"
+        :class="{ active: activeTab === 'orders' && orderSubTab === 'reminders' }"
+        @click="switchTab('orders', 'reminders')">
+        <span class="sb-icon" v-html="cabIconSvg.reminders"></span>
+        Напоминания
+      </button>
 
       <div class="sb-label">Другое</div>
       <template v-for="tab in mainTabs.filter(t => t.id !== 'dashboard' && t.id !== 'orders')" :key="tab.id">
@@ -145,6 +152,9 @@
     <section v-if="activeTab === 'dashboard' && !globalLoading && !globalError" class="cab-section">
       <div class="dash-wrap">
         <div class="dash-col-main">
+          <!-- Напоминания на сегодня -->
+          <RestaurantTodayReminders />
+
           <!-- Срочные карточки -->
           <div v-if="urgentItems.length" class="dash-urgent">
             <div v-for="item in urgentItems" :key="item.key" class="dash-card" :class="'dash-card--' + item.type" @click="item.action">
@@ -674,6 +684,11 @@
           </template>
         </div>
       </template>
+
+      <!-- Напоминания о подаче заявок локальным поставщикам -->
+      <div v-if="orderSubTab === 'reminders'">
+        <RestaurantRemindersTab />
+      </div>
 
       <!-- История в заказах -->
       <div v-if="orderSubTab === 'history'" class="history-list">
@@ -1628,6 +1643,8 @@ import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
 const RestaurantKegReturnsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantKegReturnsTab.vue'));
+const RestaurantRemindersTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantRemindersTab.vue'));
+const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components/restaurant/RestaurantTodayReminders.vue'));
 
 const router = useRouter();
 const route = useRoute();
@@ -1682,6 +1699,8 @@ const cabIconSvg = {
   truck: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
   // Возврат кег: кега + дугообразная стрелка возврата сверху (стиль сайдбара)
   kegReturn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>',
+  // Колокольчик-будильник — для вкладки «Напоминания»
+  reminders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
 };
 
 // Иконки для крупных плиток дашборда — более «жирные» и выразительные.
@@ -1725,6 +1744,7 @@ function supplierIcon(name) {
 function tabIconSvg(tabId) {
   if (tabId === 'warehouse-stock') return cabIconSvg.warehouse;
   if (tabId === 'keg-returns') return cabIconSvg.kegReturn;
+  if (tabId === 'reminders') return cabIconSvg.reminders;
   return cabIconSvg[tabId] || cabIconSvg.profile;
 }
 
@@ -3036,6 +3056,9 @@ function applyRouteToState() {
     activeTab.value = 'profile';
   } else if (name === 'restaurant-keg-returns') {
     activeTab.value = 'keg-returns';
+  } else if (name === 'restaurant-reminders') {
+    activeTab.value = 'orders';
+    orderSubTab.value = 'reminders';
   }
 }
 
@@ -3057,6 +3080,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-profile' };
   } else if (activeTab.value === 'keg-returns') {
     target = { name: 'restaurant-keg-returns' };
+  } else if (activeTab.value === 'orders' && orderSubTab.value === 'reminders') {
+    target = { name: 'restaurant-reminders' };
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
     if (sub === 'delivery' && roStore.restaurantOrdersEnabled) target = { name: 'restaurant-orders-delivery' };

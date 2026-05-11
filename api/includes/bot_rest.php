@@ -239,7 +239,7 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
 
     $sch = $pdo->prepare("
         SELECT order_day, delivery_day
-        FROM so_supplier_schedules
+        FROM supplier_schedules
         WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
         ORDER BY order_day
     ");
@@ -344,7 +344,7 @@ function soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDa
 
     $sch = $pdo->prepare("
         SELECT order_day, delivery_day
-        FROM so_supplier_schedules
+        FROM supplier_schedules
         WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
     ");
     $sch->execute([$supplierId, $rest['id']]);
@@ -531,8 +531,11 @@ function restShowMySubs($chatId, $msgId = null) {
 
         // ── Инструменты ──
         $btns[] = [
-            ['text' => '🔍 Карточки', 'web_app' => ['url' => 'https://supply-department.online/search-cards']],
+            ['text' => '⏰ Напоминания', 'callback_data' => 'rest_reminders'],
             ['text' => '⚙️ Уведомления', 'callback_data' => 'rest_notif_settings'],
+        ];
+        $btns[] = [
+            ['text' => '🔍 Карточки', 'web_app' => ['url' => 'https://supply-department.online/search-cards']],
         ];
 
         if ($orderFile) {
@@ -628,7 +631,7 @@ function restMenuSupplier($chatId, $msgId) {
         return;
     }
     $rIdList = implode(',', array_keys($restMap));
-    $sups = $pdo->query("SELECT DISTINCT s.id, s.short_name FROM so_supplier_schedules ss JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 AND s.so_enabled = 1 WHERE ss.restaurant_id IN ({$rIdList}) AND ss.is_active = 1 ORDER BY s.short_name")->fetchAll();
+    $sups = $pdo->query("SELECT DISTINCT s.id, s.short_name FROM supplier_schedules ss JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 AND s.so_enabled = 1 WHERE ss.restaurant_id IN ({$rIdList}) AND ss.is_active = 1 ORDER BY s.short_name")->fetchAll();
 
     $text = "📦 <b>Заявки поставщикам</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
@@ -649,6 +652,26 @@ function restMenuSupplier($chatId, $msgId) {
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Сколько so-поставщиков доступно текущему чату (по графикам его ресторанов).
+// Используем для решения, куда ведёт кнопка «Назад»: если поставщик один,
+// верхние уровни (restMenuSupplier) автопроваливаются вниз — поэтому возвращать
+// надо сразу в главное меню, а не в «Заявки поставщикам».
+function soBotCountAccessibleSoSuppliers($pdo, $chatId) {
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $restNums = array_column($subs, 'restaurant_number');
+    if (!$restNums) return 0;
+    $placeholders = implode(',', array_map('intval', $restNums));
+    $sql = "
+        SELECT COUNT(DISTINCT s.id)
+        FROM supplier_schedules ss
+        JOIN suppliers s ON s.id = ss.supplier_id
+        JOIN restaurants r ON r.id = ss.restaurant_id
+        WHERE r.number IN ({$placeholders}) AND r.active = 1
+          AND ss.is_active = 1 AND s.is_active = 1 AND s.so_enabled = 1
+    ";
+    return (int)$pdo->query($sql)->fetchColumn();
 }
 
 // Камако: выбор ресторана
@@ -675,7 +698,10 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
         $label = botFormatSubscribedRestaurant($rn, $sub['legal_entity_group']);
         $btns[] = [['text' => $label, 'callback_data' => "soord_rest_{$supplierId}_{$rn}"]];
     }
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
+    // Если у пользователя только один so-поставщик — Назад ведёт в главное меню,
+    // иначе — обратно к выбору поставщика.
+    $backCb = soBotCountAccessibleSoSuppliers($pdo, $chatId) > 1 ? 'rest_menu_supplier' : 'rest_my_subs';
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => $backCb]];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
@@ -739,7 +765,21 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
         $btns[] = [['text' => '🌐 Через сайт', 'web_app' => ['url' => $webUrl]]];
     }
 
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
+    // Куда вести «Назад» — зависит от того, сколько уровней над нами развёрнуто.
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $restCount = count($subs);
+    $supCount = soBotCountAccessibleSoSuppliers($pdo, $chatId);
+    if ($restCount > 1) {
+        // Был промежуточный шаг «выбор ресторана» — возвращаемся туда
+        $backCb = "soord_sup_" . substr($supplierId, 0, 36);
+    } elseif ($supCount > 1) {
+        // Был «выбор поставщика»
+        $backCb = 'rest_menu_supplier';
+    } else {
+        // Сюда попали автопроваливанием — обратно в главное меню
+        $backCb = 'rest_my_subs';
+    }
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => $backCb]];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 

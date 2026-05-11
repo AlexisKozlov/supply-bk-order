@@ -5200,6 +5200,53 @@ if ($endpoint === 'rpc') {
         unset($d);
     }
 
+    function pdAttachAssigneesProgress($pdo, &$decisions) {
+        if (!is_array($decisions) || !$decisions) return;
+        $decIds = [];
+        foreach ($decisions as $d) {
+            $id = isset($d['id']) ? (int)$d['id'] : 0;
+            if ($id) $decIds[$id] = true;
+        }
+        if (!$decIds) {
+            foreach ($decisions as &$d) { $d['assignees_progress'] = []; $d['card_id_for_me'] = null; }
+            unset($d);
+            return;
+        }
+        $ids = array_keys($decIds);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $s = $pdo->prepare("
+            SELECT pdc.decision_id, pdc.user_name, pdc.card_id, c.is_done, c.description
+            FROM protocol_decision_cards pdc
+            JOIN tasks_cards c ON c.id = pdc.card_id
+            WHERE pdc.decision_id IN ($ph)
+            ORDER BY pdc.decision_id, pdc.created_at, pdc.card_id
+        ");
+        $s->execute($ids);
+        $byDec = [];
+        foreach ($s->fetchAll() as $r) {
+            $did = (int)$r['decision_id'];
+            $byDec[$did][] = [
+                'user_name'   => $r['user_name'],
+                'card_id'     => (int)$r['card_id'],
+                'is_done'     => (int)$r['is_done'] === 1,
+                'description' => (string)($r['description'] ?? ''),
+            ];
+        }
+        $me = function_exists('getSessionUser') ? (getSessionUser($pdo)['name'] ?? null) : null;
+        foreach ($decisions as &$d) {
+            $did = isset($d['id']) ? (int)$d['id'] : 0;
+            $list = $byDec[$did] ?? [];
+            $d['assignees_progress'] = $list;
+            $d['card_id_for_me'] = null;
+            if ($me) {
+                foreach ($list as $row) {
+                    if ($row['user_name'] === $me) { $d['card_id_for_me'] = $row['card_id']; break; }
+                }
+            }
+        }
+        unset($d);
+    }
+
     if ($fn === 'get_protocols') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
@@ -5242,6 +5289,7 @@ if ($endpoint === 'rpc') {
         $d->execute([$id]);
         $proto['decisions'] = $d->fetchAll();
         pdAttachCardDescription($pdo, $proto['decisions']);
+        pdAttachAssigneesProgress($pdo, $proto['decisions']);
         // Файлы
         $f = $pdo->prepare("SELECT id, file_name, file_path, uploaded_by, uploaded_at FROM meeting_protocol_files WHERE protocol_id = ? ORDER BY uploaded_at");
         $f->execute([$id]);
@@ -5356,19 +5404,12 @@ if ($endpoint === 'rpc') {
                 $existing[$userName] = $cardId;
             }
             if ($firstCardId === null) $firstCardId = $existing[$userName];
-            $cur = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
-            $cur->execute([$existing[$userName]]);
-            $cardAssignees = array_column($cur->fetchAll(), 'user_name');
-            $toAdd = array_diff($users, $cardAssignees);
-            $toRemove2 = array_diff($cardAssignees, $users);
-            if ($toRemove2) {
-                $ph = implode(',', array_fill(0, count($toRemove2), '?'));
-                $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ? AND user_name IN ($ph)")->execute(array_merge([$existing[$userName]], array_values($toRemove2)));
-            }
-            if ($toAdd) {
-                $ins = $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)");
-                foreach ($toAdd as $u) $ins->execute([$existing[$userName], $u]);
-            }
+            // У протокольной карточки уже есть персональная копия на доске каждого
+            // ответственного (через protocol_decision_cards). Соисполнители в
+            // tasks_assignees тут не нужны: иначе запрос «внешние карточки, где я
+            // соисполнитель» в api/includes/tasks.php подтянет копии с досок коллег
+            // на мою доску — итог: одна задача показывается N раз.
+            $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ?")->execute([$existing[$userName]]);
         }
         if ($firstCardId) {
             $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = ? WHERE id = ?")->execute([$firstCardId, $decId]);
@@ -5604,6 +5645,7 @@ if ($endpoint === 'rpc') {
         $s->execute([$prevProtoId]);
         $decisions = $s->fetchAll();
         pdAttachCardDescription($pdo, $decisions);
+        pdAttachAssigneesProgress($pdo, $decisions);
         respond($decisions);
     }
 
@@ -6141,6 +6183,313 @@ if ($endpoint === 'rpc') {
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
         $pdo->prepare("DELETE FROM surveys WHERE id = ?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
+    // ═══ Модуль "График поставок" (supplier-schedule) ═══
+    // Управление расписанием подачи заявок и доставок:
+    // - supplier_schedules: связка поставщик↔ресторан + дни заказа/доставки
+    // - supplier_schedule_deadlines: точечный дедлайн на (поставщик, ресторан, день)
+    // - supplier_default_deadlines: дефолтные дедлайны на уровне поставщика (read-only здесь,
+    //   редактируется в модуле "Заявки поставщикам" при register-supplier)
+
+    if ($fn === 'list_supplier_schedules') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'supplier-schedule', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        // Группа юр.лица (BK_VM или PS) — обязательный контекст, чтобы не смешивать
+        // данные разных групп (поставщики Пицца Стар не должны попадать к БК и наоборот).
+        $group = trim((string)($body['legal_entity_group'] ?? ''));
+        if (!in_array($group, ['BK_VM', 'PS'], true)) respond(['error' => 'Требуется legal_entity_group (BK_VM или PS)'], 400);
+
+        // Фильтр по юр.лицам пользователя (legal_entities приходит JSON-строкой)
+        $userEntities = $caller['legal_entities'] ?? null;
+        if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
+        $entityWhere = '';
+        $entityParams = [];
+        if (is_array($userEntities) && !empty($userEntities)) {
+            $ph = implode(',', array_fill(0, count($userEntities), '?'));
+            $entityWhere = " AND r.legal_entity IN ($ph) ";
+            $entityParams = $userEntities;
+        }
+
+        $rows = $pdo->prepare("
+            SELECT ss.id AS schedule_id, ss.supplier_id, ss.restaurant_id,
+                   ss.order_day, ss.delivery_day, ss.is_active,
+                   s.short_name AS supplier_name, s.so_enabled,
+                   s.legal_entity_group AS supplier_group,
+                   r.number AS restaurant_number, r.city AS restaurant_city, r.address AS restaurant_address,
+                   r.legal_entity, r.legal_entity_group AS restaurant_group,
+                   sd.deadline_time AS deadline_override
+            FROM supplier_schedules ss
+            JOIN suppliers s ON s.id = ss.supplier_id
+            JOIN restaurants r ON r.id = ss.restaurant_id
+            LEFT JOIN supplier_schedule_deadlines sd
+                   ON sd.supplier_id = ss.supplier_id
+                  AND sd.restaurant_id = ss.restaurant_id
+                  AND sd.order_day = ss.order_day
+            WHERE s.is_active = 1 AND r.active = 1
+              AND s.legal_entity_group = ?
+              AND r.legal_entity_group = ?
+              $entityWhere
+            ORDER BY s.short_name, r.number, ss.order_day
+        ");
+        $rows->execute(array_merge([$group, $group], $entityParams));
+        $schedules = $rows->fetchAll();
+
+        // Дефолтные дедлайны: supplier_default_deadlines
+        $supplierIds = array_values(array_unique(array_column($schedules, 'supplier_id')));
+        $defaults = [];
+        if ($supplierIds) {
+            $ph = implode(',', array_fill(0, count($supplierIds), '?'));
+            $s = $pdo->prepare("
+                SELECT supplier_id, delivery_dow, deadline_dow, deadline_time
+                FROM supplier_default_deadlines
+                WHERE supplier_id IN ($ph)
+                ORDER BY supplier_id, delivery_dow
+            ");
+            $s->execute($supplierIds);
+            foreach ($s->fetchAll() as $r) {
+                $defaults[$r['supplier_id']][] = $r;
+            }
+        }
+
+        // Подписки ресторанов на напоминания + Telegram-подписчики (для индикатора в UI)
+        // Структура: subscriptions[supplier_id][restaurant_id] = { is_enabled, telegram_enabled, tg_names: [..] }
+        $subscriptions = [];
+        if ($supplierIds) {
+            $ph = implode(',', array_fill(0, count($supplierIds), '?'));
+            $subStmt = $pdo->prepare("
+                SELECT sub.id, sub.restaurant_id, sub.supplier_id,
+                       sub.is_enabled, sub.telegram_enabled
+                FROM restaurant_reminder_subscriptions sub
+                WHERE sub.supplier_id IN ($ph)
+            ");
+            $subStmt->execute($supplierIds);
+            $subById = [];
+            foreach ($subStmt->fetchAll() as $r) {
+                $subId = (int)$r['id'];
+                $subById[$subId] = $r;
+                $subscriptions[$r['supplier_id']][(int)$r['restaurant_id']] = [
+                    'is_enabled' => (int)$r['is_enabled'] === 1,
+                    'telegram_enabled' => (int)$r['telegram_enabled'] === 1,
+                    'tg_names' => [],
+                ];
+            }
+            // Имена tg-подписчиков
+            if ($subById) {
+                $sIds = array_keys($subById);
+                $sph = implode(',', array_fill(0, count($sIds), '?'));
+                $tgStmt = $pdo->prepare("
+                    SELECT rrts.subscription_id, rts.first_name, rts.username
+                    FROM restaurant_reminder_tg_subscribers rrts
+                    JOIN ro_telegram_subs rts ON rts.id = rrts.ro_tg_sub_id
+                    WHERE rrts.subscription_id IN ($sph) AND rrts.is_active = 1 AND rts.verified_at IS NOT NULL
+                ");
+                $tgStmt->execute($sIds);
+                foreach ($tgStmt->fetchAll() as $t) {
+                    $subInfo = $subById[(int)$t['subscription_id']];
+                    $name = $t['first_name'] ?: ($t['username'] ? '@' . $t['username'] : 'tg');
+                    $subscriptions[$subInfo['supplier_id']][(int)$subInfo['restaurant_id']]['tg_names'][] = $name;
+                }
+            }
+        }
+
+        respond([
+            'rows' => $schedules,
+            'default_deadlines' => $defaults,
+            'subscriptions' => $subscriptions,
+        ]);
+    }
+
+    if ($fn === 'list_supplier_schedule_directory') {
+        // Справочники для модалки: поставщики и рестораны, доступные пользователю
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'supplier-schedule', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $group = trim((string)($body['legal_entity_group'] ?? ''));
+        if (!in_array($group, ['BK_VM', 'PS'], true)) respond(['error' => 'Требуется legal_entity_group (BK_VM или PS)'], 400);
+
+        $userEntities = $caller['legal_entities'] ?? null;
+        if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
+        $entityWhereR = '';
+        $entityParamsR = [];
+        if (is_array($userEntities) && !empty($userEntities)) {
+            $ph = implode(',', array_fill(0, count($userEntities), '?'));
+            $entityWhereR = " AND legal_entity IN ($ph) ";
+            $entityParamsR = $userEntities;
+        }
+
+        $sup = $pdo->prepare("
+            SELECT id, short_name, so_enabled, legal_entity_group
+            FROM suppliers
+            WHERE is_active = 1 AND legal_entity_group = ?
+            ORDER BY short_name
+        ");
+        $sup->execute([$group]);
+        $sup = $sup->fetchAll();
+
+        $restStmt = $pdo->prepare("
+            SELECT id, number, city, address, legal_entity, legal_entity_group
+            FROM restaurants
+            WHERE active = 1 AND legal_entity_group = ? $entityWhereR
+            ORDER BY number
+        ");
+        $restStmt->execute(array_merge([$group], $entityParamsR));
+        $rests = $restStmt->fetchAll();
+
+        respond([
+            'suppliers' => $sup,
+            'restaurants' => $rests,
+        ]);
+    }
+
+    if ($fn === 'save_supplier_schedule_row') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'supplier-schedule', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $supplierId = trim((string)($body['supplier_id'] ?? ''));
+        $restaurantId = (int)($body['restaurant_id'] ?? 0);
+        $orderDay = (int)($body['order_day'] ?? 0);
+        $deliveryDay = (int)($body['delivery_day'] ?? 0);
+        $isActive = !empty($body['is_active']) ? 1 : 0;
+        $deadlineTime = isset($body['deadline_time']) && $body['deadline_time'] !== '' ? $body['deadline_time'] : null;
+
+        if (!$supplierId || !$restaurantId
+            || !in_array($orderDay, [1,2,3,4,5,6,7], true)
+            || !in_array($deliveryDay, [1,2,3,4,5,6,7], true)) {
+            respond(['error' => 'Некорректные данные'], 400);
+        }
+
+        // Проверка существования поставщика и доступа к юр.лицу ресторана
+        $supStmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
+        $supStmt->execute([$supplierId]);
+        if (!$supStmt->fetchColumn()) respond(['error' => 'Поставщик не найден'], 404);
+
+        $restStmt = $pdo->prepare("SELECT legal_entity FROM restaurants WHERE id = ?");
+        $restStmt->execute([$restaurantId]);
+        $rest = $restStmt->fetch();
+        if (!$rest) respond(['error' => 'Ресторан не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $rest['legal_entity'])) {
+            respond(['error' => 'Нет доступа к юр.лицу ресторана'], 403);
+        }
+
+        if ($deadlineTime !== null) {
+            // Принимаем HH:MM или HH:MM:SS
+            if (!preg_match('/^\d{1,2}:\d{2}(:\d{2})?$/', $deadlineTime)) {
+                respond(['error' => 'Некорректное время дедлайна'], 400);
+            }
+            if (strlen($deadlineTime) === 5) $deadlineTime .= ':00';
+        }
+
+        $updatedBy = resolveActorName($pdo, $caller);
+
+        $pdo->prepare("
+            INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
+            VALUES (?, ?, ?, ?, ?, NOW(), ?)
+            ON DUPLICATE KEY UPDATE
+                delivery_day = VALUES(delivery_day),
+                is_active = VALUES(is_active),
+                updated_at = NOW(),
+                updated_by = VALUES(updated_by)
+        ")->execute([$supplierId, $restaurantId, $orderDay, $deliveryDay, $isActive, $updatedBy]);
+
+        if ($deadlineTime !== null) {
+            $pdo->prepare("
+                INSERT INTO supplier_schedule_deadlines (supplier_id, restaurant_id, order_day, deadline_time, updated_at, updated_by)
+                VALUES (?, ?, ?, ?, NOW(), ?)
+                ON DUPLICATE KEY UPDATE
+                    deadline_time = VALUES(deadline_time),
+                    updated_at = NOW(),
+                    updated_by = VALUES(updated_by)
+            ")->execute([$supplierId, $restaurantId, $orderDay, $deadlineTime, $updatedBy]);
+        } else {
+            $pdo->prepare("DELETE FROM supplier_schedule_deadlines WHERE supplier_id = ? AND restaurant_id = ? AND order_day = ?")
+                ->execute([$supplierId, $restaurantId, $orderDay]);
+        }
+
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'save_supplier_default_deadline') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'supplier-schedule', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $supplierId = trim((string)($body['supplier_id'] ?? ''));
+        $deliveryDow = (int)($body['delivery_dow'] ?? 0);
+        $deadlineDow = (int)($body['deadline_dow'] ?? 0);
+        $deadlineTime = $body['deadline_time'] ?? '';
+
+        if (!$supplierId
+            || !in_array($deliveryDow, [1,2,3,4,5,6,7], true)
+            || !in_array($deadlineDow, [1,2,3,4,5,6,7], true)
+            || !preg_match('/^\d{1,2}:\d{2}(:\d{2})?$/', $deadlineTime)) {
+            respond(['error' => 'Некорректные данные'], 400);
+        }
+        if (strlen($deadlineTime) === 5) $deadlineTime .= ':00';
+
+        $supStmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
+        $supStmt->execute([$supplierId]);
+        if (!$supStmt->fetchColumn()) respond(['error' => 'Поставщик не найден'], 404);
+
+        // Уникальный ключ — (supplier_id, delivery_dow). Перезаписываем правило.
+        $exists = $pdo->prepare("SELECT id FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
+        $exists->execute([$supplierId, $deliveryDow]);
+        $id = $exists->fetchColumn();
+        if ($id) {
+            $pdo->prepare("UPDATE supplier_default_deadlines SET deadline_dow = ?, deadline_time = ? WHERE id = ?")
+                ->execute([$deadlineDow, $deadlineTime, $id]);
+        } else {
+            $pdo->prepare("INSERT INTO supplier_default_deadlines (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)")
+                ->execute([$supplierId, $deliveryDow, $deadlineDow, $deadlineTime]);
+        }
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'delete_supplier_default_deadline') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'supplier-schedule', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $supplierId = trim((string)($body['supplier_id'] ?? ''));
+        $deliveryDow = (int)($body['delivery_dow'] ?? 0);
+        if (!$supplierId || !in_array($deliveryDow, [1,2,3,4,5,6,7], true)) {
+            respond(['error' => 'Некорректные данные'], 400);
+        }
+        $pdo->prepare("DELETE FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?")
+            ->execute([$supplierId, $deliveryDow]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'delete_supplier_schedule_row') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'supplier-schedule', 'full', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $supplierId = trim((string)($body['supplier_id'] ?? ''));
+        $restaurantId = (int)($body['restaurant_id'] ?? 0);
+        $orderDay = (int)($body['order_day'] ?? 0);
+        if (!$supplierId || !$restaurantId || !$orderDay) {
+            respond(['error' => 'Некорректные данные'], 400);
+        }
+
+        // Проверка доступа к юр.лицу ресторана
+        $restStmt = $pdo->prepare("SELECT legal_entity FROM restaurants WHERE id = ?");
+        $restStmt->execute([$restaurantId]);
+        $rest = $restStmt->fetch();
+        if ($rest && !checkLegalEntityAccess($caller, $rest['legal_entity'])) {
+            respond(['error' => 'Нет доступа'], 403);
+        }
+
+        $pdo->prepare("DELETE FROM supplier_schedules WHERE supplier_id = ? AND restaurant_id = ? AND order_day = ?")
+            ->execute([$supplierId, $restaurantId, $orderDay]);
+        $pdo->prepare("DELETE FROM supplier_schedule_deadlines WHERE supplier_id = ? AND restaurant_id = ? AND order_day = ?")
+            ->execute([$supplierId, $restaurantId, $orderDay]);
+
         respond(['success' => true]);
     }
 

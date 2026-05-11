@@ -1,6 +1,6 @@
 <?php
 /**
- * Импорт графика доставок Камако из Excel в so_supplier_schedules
+ * Импорт графика доставок Камако из Excel в supplier_schedules
  * Запуск: php api/import_kamako.php
  */
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
@@ -65,7 +65,7 @@ $skipped = 0;
 $errors = [];
 
 $insert = $pdo->prepare("
-    INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, updated_at, updated_by)
+    INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, updated_at, updated_by)
     VALUES (?, ?, ?, ?, NOW(), 'import_kamako')
     ON DUPLICATE KEY UPDATE delivery_day = VALUES(delivery_day), updated_at = NOW()
 ");

@@ -76,6 +76,113 @@ function editMessage($chatId, $messageId, $text, $replyMarkup = null) {
     @file_get_contents($url, false, stream_context_create($opts));
 }
 
+function editMessageReplyMarkup($chatId, $messageId, $replyMarkup = null) {
+    global $BOT_TOKEN;
+    $data = ['chat_id' => $chatId, 'message_id' => $messageId];
+    if ($replyMarkup !== null) $data['reply_markup'] = json_encode($replyMarkup);
+    else $data['reply_markup'] = json_encode(['inline_keyboard' => []]);
+    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/editMessageReplyMarkup";
+    $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
+    @file_get_contents($url, false, stream_context_create($opts));
+}
+
+/**
+ * Найти ro_telegram_subs запись по chat_id (только верифицированных).
+ * Возвращает массив с id, restaurant_number, legal_entity_group, либо null.
+ */
+function rrFindRoSub($pdo, $chatId) {
+    $s = $pdo->prepare("
+        SELECT id, restaurant_number, legal_entity_group, first_name, username
+        FROM ro_telegram_subs
+        WHERE chat_id = ? AND verified_at IS NOT NULL
+        LIMIT 1
+    ");
+    $s->execute([$chatId]);
+    return $s->fetch() ?: null;
+}
+
+/**
+ * Управление напоминаниями: список ВСЕХ локальных поставщиков ресторана
+ * с возможностью подключить/отключить подписку прямо в боте.
+ *
+ * Каждый поставщик имеет статус для текущего chat_id:
+ *   ✓ — вы получаете → кнопка отключает
+ *   ○ — не получаете  → кнопка подключает (и автоматически создаёт подписку)
+ */
+function rrShowMyReminders($pdo, $chatId, $editMsgId = null) {
+    $tg = rrFindRoSub($pdo, $chatId);
+    if (!$tg) {
+        $msg = "🔒 Эта функция доступна только привязанным сотрудникам ресторана.\n\nНажмите /start чтобы привязать чат к ресторану.";
+        if ($editMsgId) editMessage($chatId, $editMsgId, $msg);
+        else sendMessage($chatId, $msg);
+        return;
+    }
+    // Restaurant id
+    $r = $pdo->prepare("SELECT id, number FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
+    $r->execute([$tg['restaurant_number'], $tg['legal_entity_group']]);
+    $rest = $r->fetch();
+    if (!$rest) {
+        $msg = "Не удалось найти ваш ресторан в базе. Обратитесь в отдел закупок.";
+        if ($editMsgId) editMessage($chatId, $editMsgId, $msg);
+        else sendMessage($chatId, $msg);
+        return;
+    }
+
+    // Список ВСЕХ локальных поставщиков ресторана (по supplier_schedules)
+    $sup = $pdo->prepare("
+        SELECT DISTINCT s.id, s.short_name
+        FROM supplier_schedules ss
+        JOIN suppliers s ON s.id = ss.supplier_id
+        WHERE ss.restaurant_id = ? AND ss.is_active = 1 AND s.is_active = 1 AND s.so_enabled = 0
+        ORDER BY s.short_name
+    ");
+    $sup->execute([(int)$rest['id']]);
+    $suppliers = $sup->fetchAll();
+
+    if (!$suppliers) {
+        $msg = "📭 Для вашего ресторана пока не настроены графики локальных поставщиков.\n\nЕсли нужно — обратитесь в отдел закупок.";
+        if ($editMsgId) editMessage($chatId, $editMsgId, $msg);
+        else sendMessage($chatId, $msg);
+        return;
+    }
+
+    // На какие поставщики этот tg-пользователь сейчас подписан
+    $subscribedIds = [];
+    $stmt = $pdo->prepare("
+        SELECT s.supplier_id
+        FROM restaurant_reminder_tg_subscribers rrts
+        JOIN restaurant_reminder_subscriptions s ON s.id = rrts.subscription_id
+        WHERE rrts.ro_tg_sub_id = ? AND rrts.is_active = 1
+          AND s.restaurant_id = ? AND s.is_enabled = 1
+    ");
+    $stmt->execute([(int)$tg['id'], (int)$rest['id']]);
+    foreach ($stmt->fetchAll() as $r) $subscribedIds[$r['supplier_id']] = true;
+
+    $text = "🔔 <b>Напоминания о подаче заявок</b>\n"
+          . "Ресторан №" . htmlspecialchars((string)$rest['number'], ENT_QUOTES, 'UTF-8') . "\n\n"
+          . "Нажмите на поставщика, чтобы подключить или отключить напоминания.\n"
+          . "<i>Поставщики, которые принимают заявки через портал, уведомляют автоматически — здесь не показаны.</i>";
+
+    $keyboard = [];
+    foreach ($suppliers as $s) {
+        $isOn = !empty($subscribedIds[$s['id']]);
+        $icon = $isOn ? '✅' : '⬜';
+        $name = $s['short_name'];
+        if (mb_strlen($name) > 26) $name = mb_substr($name, 0, 24) . '…';
+        $keyboard[] = [
+            ['text' => $icon . ' ' . $name, 'callback_data' => 'rrtoggle:' . $s['id']],
+        ];
+    }
+    $keyboard[] = [
+        ['text' => '⟳ Обновить', 'callback_data' => 'rrmine'],
+        ['text' => '◂ Меню', 'callback_data' => 'rest_my_subs'],
+    ];
+    $markup = ['inline_keyboard' => $keyboard];
+
+    if ($editMsgId) editMessage($chatId, $editMsgId, $text, $markup);
+    else sendMessage($chatId, $text, $markup);
+}
+
 function answerCallback($callbackId, $text = '', $showAlert = false) {
     global $BOT_TOKEN;
     $params = ['callback_query_id' => $callbackId, 'text' => $text];
@@ -1802,6 +1909,144 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
+    // «Сделал заказ» по напоминанию поставщику (rrack:supplierId:orderDay:date)
+    if (str_starts_with($data, 'rrack:')) {
+        $parts = explode(':', $data, 4);
+        if (count($parts) !== 4) { answerCallback($cb['id'], 'Ошибка данных'); exit; }
+        $supplierId = $parts[1];
+        $orderDay = (int)$parts[2];
+        $targetDate = $parts[3];
+
+        // chat_id → ресторан (через ro_telegram_subs)
+        $s = $pdo->prepare("SELECT restaurant_number, legal_entity_group, first_name, username FROM ro_telegram_subs WHERE chat_id = ? AND verified_at IS NOT NULL LIMIT 1");
+        $s->execute([$chatId]);
+        $tgUser = $s->fetch();
+        if (!$tgUser) { answerCallback($cb['id'], 'Привязка не найдена'); exit; }
+
+        // restaurant_id
+        $r = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
+        $r->execute([$tgUser['restaurant_number'], $tgUser['legal_entity_group']]);
+        $restaurantId = (int)$r->fetchColumn();
+        if (!$restaurantId) { answerCallback($cb['id'], 'Ресторан не найден'); exit; }
+
+        $by = 'tg:' . ($tgUser['first_name'] ?: ($tgUser['username'] ?: $chatId));
+        // Время сохраняем явно в Europe/Minsk, чтобы не зависеть от time_zone сессии MySQL
+        $minskNow = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('Y-m-d H:i:s');
+        $pdo->prepare("
+            INSERT INTO reminder_acknowledgements (restaurant_id, supplier_id, target_date, order_day, acknowledged_by, acknowledged_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, 'telegram')
+            ON DUPLICATE KEY UPDATE
+                acknowledged_by = VALUES(acknowledged_by),
+                acknowledged_at = VALUES(acknowledged_at),
+                source = VALUES(source)
+        ")->execute([$restaurantId, $supplierId, $targetDate, $orderDay, $by, $minskNow]);
+
+        // Убираем inline-кнопку (текст не трогаем, чтобы не сломать HTML)
+        editMessageReplyMarkup($chatId, $msgId, null);
+        // Шлём короткое подтверждение отдельным сообщением (время в Europe/Minsk)
+        $minskTime = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H:i');
+        sendMessage($chatId, "✅ Отмечено как сделано в {$minskTime}");
+        answerCallback($cb['id'], '✓ Отмечено');
+        exit;
+    }
+
+    // Открыть раздел напоминаний из меню ресторана
+    if ($data === 'rest_reminders' || $data === 'rrmine') {
+        answerCallback($cb['id']);
+        rrShowMyReminders($pdo, $chatId, $msgId);
+        exit;
+    }
+
+    // Включить/отключить себя как получателя напоминаний по поставщику
+    if (str_starts_with($data, 'rrtoggle:')) {
+        $supplierId = substr($data, 9);
+        if (!$supplierId) { answerCallback($cb['id'], 'Ошибка'); exit; }
+
+        $tgUser = rrFindRoSub($pdo, $chatId);
+        if (!$tgUser) { answerCallback($cb['id'], 'Привязка не найдена'); exit; }
+        $r = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
+        $r->execute([$tgUser['restaurant_number'], $tgUser['legal_entity_group']]);
+        $restaurantId = (int)$r->fetchColumn();
+        if (!$restaurantId) { answerCallback($cb['id'], 'Ресторан не найден'); exit; }
+
+        // Проверка что у ресторана есть расписание именно с этим (локальным!) поставщиком
+        $check = $pdo->prepare("
+            SELECT 1 FROM supplier_schedules ss
+            JOIN suppliers s ON s.id = ss.supplier_id
+            WHERE ss.restaurant_id = ? AND ss.supplier_id = ? AND ss.is_active = 1
+              AND s.is_active = 1 AND s.so_enabled = 0
+            LIMIT 1
+        ");
+        $check->execute([$restaurantId, $supplierId]);
+        if (!$check->fetchColumn()) { answerCallback($cb['id'], 'Поставщик не доступен'); exit; }
+
+        // Получаем (или создаём) подписку (restaurant_id, supplier_id)
+        $sub = $pdo->prepare("SELECT id FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ?");
+        $sub->execute([$restaurantId, $supplierId]);
+        $subId = $sub->fetchColumn();
+        $by = 'tg:' . ($tgUser['first_name'] ?: ($tgUser['username'] ?: $chatId));
+        if (!$subId) {
+            $pdo->prepare("INSERT INTO restaurant_reminder_subscriptions
+                           (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, updated_by)
+                           VALUES (?, ?, 1, 1, 1, ?)")
+                ->execute([$restaurantId, $supplierId, $by]);
+            $subId = (int)$pdo->lastInsertId();
+        } else {
+            // Убедимся что подписка включена и канал telegram активен
+            $pdo->prepare("UPDATE restaurant_reminder_subscriptions
+                            SET is_enabled = 1, portal_enabled = 1, telegram_enabled = 1, updated_at = NOW()
+                            WHERE id = ?")
+                ->execute([$subId]);
+        }
+
+        // Уже подписан? — отписываем. Не подписан — подписываем.
+        $existing = $pdo->prepare("SELECT id FROM restaurant_reminder_tg_subscribers WHERE subscription_id = ? AND ro_tg_sub_id = ? LIMIT 1");
+        $existing->execute([(int)$subId, (int)$tgUser['id']]);
+        $existingId = $existing->fetchColumn();
+
+        if ($existingId) {
+            $pdo->prepare("DELETE FROM restaurant_reminder_tg_subscribers WHERE id = ?")->execute([(int)$existingId]);
+            answerCallback($cb['id'], 'Отключено');
+        } else {
+            $pdo->prepare("INSERT IGNORE INTO restaurant_reminder_tg_subscribers (subscription_id, ro_tg_sub_id, is_active) VALUES (?, ?, 1)")
+                ->execute([(int)$subId, (int)$tgUser['id']]);
+            answerCallback($cb['id'], 'Подключено ✓');
+        }
+        rrShowMyReminders($pdo, $chatId, $msgId);
+        exit;
+    }
+
+    // Отписаться от напоминаний по конкретной подписке (rrunsub:subscription_id)
+    if (str_starts_with($data, 'rrunsub:')) {
+        $subscriptionId = (int)substr($data, 8);
+        if (!$subscriptionId) { answerCallback($cb['id'], 'Ошибка'); exit; }
+
+        $tgUser = rrFindRoSub($pdo, $chatId);
+        if (!$tgUser) { answerCallback($cb['id'], 'Привязка не найдена'); exit; }
+
+        // Проверка что подписка действительно принадлежит этому ресторану
+        $check = $pdo->prepare("
+            SELECT r.number, r.legal_entity_group, su.short_name
+            FROM restaurant_reminder_subscriptions s
+            JOIN restaurants r ON r.id = s.restaurant_id
+            JOIN suppliers su ON su.id = s.supplier_id
+            WHERE s.id = ? LIMIT 1
+        ");
+        $check->execute([$subscriptionId]);
+        $row = $check->fetch();
+        if (!$row || $row['number'] != $tgUser['restaurant_number'] || $row['legal_entity_group'] !== $tgUser['legal_entity_group']) {
+            answerCallback($cb['id'], 'Подписка не ваша'); exit;
+        }
+
+        // Удаляем только нашего пользователя из подписчиков
+        $pdo->prepare("DELETE FROM restaurant_reminder_tg_subscribers WHERE subscription_id = ? AND ro_tg_sub_id = ?")
+            ->execute([$subscriptionId, (int)$tgUser['id']]);
+
+        answerCallback($cb['id'], "Отключено: " . $row['short_name']);
+        rrShowMyReminders($pdo, $chatId, $msgId);
+        exit;
+    }
+
     // Приёмка поставки
     if (str_starts_with($data, 'receive_')) {
         $user = getUser($chatId);
@@ -2669,6 +2914,12 @@ if ($text === '/help' || $text === '/menu') {
           . "• Что скоро просрочится?\n"
           . "• Когда доставка в ресторан 45?";
     sendMessage($chatId, getMenuText($user) . $tips, ['inline_keyboard' => getMenuButtons($user)]);
+    exit;
+}
+
+// /reminders — список своих подписок на напоминания о подаче заявок поставщикам
+if ($text === '/reminders') {
+    rrShowMyReminders($pdo, $chatId);
     exit;
 }
 

@@ -892,7 +892,7 @@ try {
         SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
                COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
         FROM suppliers s
-        JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+        JOIN supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
         LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
         WHERE s.is_active = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
     ")->fetchAll();
@@ -906,7 +906,7 @@ try {
         $schStmt = $pdo->prepare("
             SELECT ss.restaurant_id, ss.order_day, ss.delivery_day,
                    r.number AS restaurant_number, r.legal_entity_group
-            FROM so_supplier_schedules ss
+            FROM supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             WHERE ss.supplier_id = ? AND ss.is_active = 1
         ");
@@ -963,7 +963,7 @@ try {
                     $ovStmt->execute([$supId, $deliveryDate]);
                     $override = $ovStmt->fetch() ?: null;
 
-                    $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                    $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
                     $rlStmt->execute([$supId, $deliveryDow]);
                     $rule = $rlStmt->fetch() ?: null;
 
@@ -1104,7 +1104,7 @@ try {
         $schStmt = $pdo->prepare("
             SELECT ss.restaurant_id, ss.delivery_day,
                    r.number AS restaurant_number, r.legal_entity_group
-            FROM so_supplier_schedules ss
+            FROM supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             WHERE ss.supplier_id = ? AND ss.is_active = 1
         ");
@@ -1129,7 +1129,7 @@ try {
                 $ovStmt->execute([$supId, $deliveryDate]);
                 $ov = $ovStmt->fetch() ?: null;
 
-                $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
                 $rlStmt->execute([$supId, $deliveryDow]);
                 $rule = $rlStmt->fetch() ?: null;
 
@@ -1295,7 +1295,7 @@ try {
         SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
                COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
         FROM suppliers s
-        JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+        JOIN supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
         LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
         WHERE s.is_active = 1 AND s.so_enabled = 1
           AND COALESCE(sst.is_accepting_orders, 1) = 1
@@ -1325,7 +1325,7 @@ try {
             $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
 
             // Уникальные дни доставки у этого поставщика
-            $dowStmt = $pdo->prepare("SELECT DISTINCT delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1");
+            $dowStmt = $pdo->prepare("SELECT DISTINCT delivery_day FROM supplier_schedules WHERE supplier_id = ? AND is_active = 1");
             $dowStmt->execute([$supId]);
             $deliveryDows = array_map('intval', $dowStmt->fetchAll(PDO::FETCH_COLUMN));
 
@@ -1357,7 +1357,7 @@ try {
                 $ovStmt->execute([$supId, $deliveryDate]);
                 $override = $ovStmt->fetch() ?: null;
 
-                $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
                 $rlStmt->execute([$supId, $deliveryDow]);
                 $rule = $rlStmt->fetch() ?: null;
 
@@ -1379,7 +1379,7 @@ try {
                 // Ожидаемые рестораны (по графику на этот день поставки)
                 $expStmt = $pdo->prepare("
                     SELECT DISTINCT r.number, r.region, r.address, r.city
-                    FROM so_supplier_schedules ss
+                    FROM supplier_schedules ss
                     JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
                     WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
                       AND r.legal_entity_group = ?

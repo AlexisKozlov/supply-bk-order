@@ -709,7 +709,31 @@ function doSearch() {
       logSearch(queryRaw, true, 'article', foundCard.id)
       return
     }
-    // Артикул не найден — продолжаем текстовый поиск (не выходим)
+    // Карточка не найдена. Проверим, есть ли по этому артикулу остаток на складе
+    // (1С может содержать SKU, для которого карточки и аналогов нет).
+    const stockInfo = stockSkus.value[searchedArticle]
+    if (stockInfo) {
+      const stockQty = parseFloat(stockInfo.stock) || 0
+      const qtyFmt = stockQty % 1 === 0 ? stockQty.toFixed(0) : stockQty.toFixed(1)
+      results.value = [{
+        id: searchedArticle,
+        name: stockInfo.name || '(карточка не создана)',
+        analogs: [],
+        reason: 'нет карточки, но есть остаток на складе',
+        stockSku: searchedArticle,
+        stockName: stockInfo.name || '',
+        stockQty: qtyFmt,
+        isSameSku: true,
+        noCard: true,
+      }]
+      logSearch(queryRaw, true, 'stock_only', searchedArticle)
+      return
+    }
+    // Ни карточки, ни остатков. НЕ переходим к текстовому поиску — иначе
+    // по словам «коробка/шт» получим мусор из нерелевантных карточек.
+    results.value = []
+    logSearch(queryRaw, false, 'article', null)
+    return
   }
 
   // --- Текстовый поиск ---

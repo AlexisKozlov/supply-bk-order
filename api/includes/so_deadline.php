@@ -11,7 +11,7 @@
  *      - is_closed = 1 → день принудительно закрыт;
  *      - иначе deadline_date/deadline_time из override;
  *      - если deadline_date не заполнена, дата берётся из правила дня недели.
- *   2) so_deadline_rules по дню недели доставки (указывает deadline_dow + deadline_time).
+ *   2) supplier_default_deadlines по дню недели доставки (указывает deadline_dow + deadline_time).
  *   3) default_deadline_time из so_supplier_settings, дедлайн = (delivery_date − 1 день).
  *
  * Часовой пояс — Europe/Minsk.
@@ -24,7 +24,7 @@ if (!function_exists('soCalculateDeadlineCore')) {
  * и default-время. Возвращает готовый дедлайн или признак закрытого дня.
  *
  * @param array|null  $override              запись so_deadline_overrides или null
- * @param array|null  $rule                  запись so_deadline_rules для нужного delivery_dow или null
+ * @param array|null  $rule                  запись supplier_default_deadlines для нужного delivery_dow или null
  * @param string      $defaultDeadlineTime   fallback, формат HH:MM[:SS]
  * @param string      $deliveryDate          Y-m-d
  * @param DateTimeZone|null $tz              по умолчанию Europe/Minsk
@@ -115,7 +115,7 @@ function soCalculateDeadline($pdo, $supplierId, $deliveryDate) {
     $rule = null;
     if ($supplierId && (!$override || !empty($override['is_closed']) === false)) {
         $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
-        $r = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+        $r = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
         $r->execute([$supplierId, $deliveryDow]);
         $rule = $r->fetch() ?: null;
     }

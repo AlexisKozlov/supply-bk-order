@@ -236,7 +236,7 @@ function soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate = null, $re
         $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
         $joins = " JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1";
     }
-    $sql = "SELECT {$fields} FROM so_supplier_schedules ss{$joins} WHERE ss.supplier_id = ? AND ss.is_active = 1";
+    $sql = "SELECT {$fields} FROM supplier_schedules ss{$joins} WHERE ss.supplier_id = ? AND ss.is_active = 1";
     $params = [$supplierId];
     if ($restaurantId) {
         $sql .= " AND ss.restaurant_id = ?";
@@ -408,7 +408,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     // 1. Все поставщики + их расписание для этого ресторана — один запрос
     $suppStmt = $pdo->prepare("
         SELECT s.id, s.short_name, s.full_name, ss.order_day, ss.delivery_day
-        FROM so_supplier_schedules ss
+        FROM supplier_schedules ss
         JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 AND s.so_enabled = 1
         WHERE ss.restaurant_id = ? AND ss.is_active = 1
           AND (
@@ -445,7 +445,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     }
 
     // 3. Правила дедлайнов — один запрос
-    $rulesRows = $pdo->prepare("SELECT supplier_id, delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id IN ({$ph})");
+    $rulesRows = $pdo->prepare("SELECT supplier_id, delivery_dow, deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id IN ({$ph})");
     $rulesRows->execute($supplierIds);
     $rulesMap = [];
     foreach ($rulesRows->fetchAll() as $r) {
@@ -990,7 +990,7 @@ if ($soAction === 'admin') {
                    COUNT(DISTINCT ss.restaurant_id) as restaurant_count,
                    COALESCE(sst.is_accepting_orders, 1) as is_accepting_orders
             FROM suppliers s
-            LEFT JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+            LEFT JOIN supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
             LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
             WHERE " . implode(' AND ', $where) . "
             GROUP BY s.id
@@ -1020,14 +1020,14 @@ if ($soAction === 'admin') {
 
     // --- Отключение поставщика от SO-модуля (не удаление, просто скрыть) ---
     // Каскадно гасим расписание и шаблоны: без этого крон и бот продолжат
-    // показывать поставщика, т.к. они фильтруют по so_supplier_schedules.is_active.
+    // показывать поставщика, т.к. они фильтруют по supplier_schedules.is_active.
     if ($adminAction === 'disconnect-supplier' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
         $supplier = soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $pdo->beginTransaction();
         try {
             $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
-            $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
+            $pdo->prepare("UPDATE supplier_schedules SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
             $pdo->prepare("DELETE FROM so_supplier_temp_schedule_periods WHERE supplier_id = ?")->execute([$supplierId]);
             $pdo->prepare("UPDATE so_templates SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
             $pdo->commit();
@@ -1088,11 +1088,11 @@ if ($soAction === 'admin') {
             ")->execute([$supplierId, $acceptingFlag, $autoSubmitFlag, $defaultDeadline, $pauseMessage, $updatedBy]);
 
             // 3) Расписание (деактивируем старые, вставляем новые)
-            $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")
+            $pdo->prepare("UPDATE supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")
                 ->execute([$updatedBy, $supplierId]);
             if (!empty($schedules)) {
                 $schUp = $pdo->prepare("
-                    INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
+                    INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
                     VALUES (?, ?, ?, ?, 1, NOW(), ?)
                     ON DUPLICATE KEY UPDATE
                         order_day = VALUES(order_day),
@@ -1114,9 +1114,9 @@ if ($soAction === 'admin') {
             }
 
             // 4) Правила дедлайнов
-            $pdo->prepare("DELETE FROM so_deadline_rules WHERE supplier_id = ?")->execute([$supplierId]);
+            $pdo->prepare("DELETE FROM supplier_default_deadlines WHERE supplier_id = ?")->execute([$supplierId]);
             if (!empty($deadlineRules)) {
-                $drIns = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
+                $drIns = $pdo->prepare("INSERT INTO supplier_default_deadlines (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
                 foreach ($deadlineRules as $rule) {
                     $dow = (int)($rule['delivery_dow'] ?? 0);
                     if (!in_array($dow, [1,2,3,4,5,6,7], true)) continue;
@@ -1941,7 +1941,7 @@ if ($soAction === 'admin') {
         $s = $pdo->prepare("
             SELECT ss.id, ss.order_day, ss.delivery_day, ss.is_active,
                    r.number as restaurant_number, r.region, r.city, r.address
-            FROM so_supplier_schedules ss
+            FROM supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             WHERE ss.supplier_id = ?
             ORDER BY r.region, CAST(r.number AS UNSIGNED), ss.order_day
@@ -1967,10 +1967,10 @@ if ($soAction === 'admin') {
             ];
         }
         // Также подгружаем правила дедлайнов
-        $dr = $pdo->prepare("SELECT delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? ORDER BY delivery_dow");
+        $dr = $pdo->prepare("SELECT delivery_dow, deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? ORDER BY delivery_dow");
         $dr->execute([$supplierId]);
         // lockVersion — MAX(updated_at) по расписанию поставщика; используется для оптимистической блокировки в POST.
-        $lvStmt = $pdo->prepare("SELECT MAX(updated_at) FROM so_supplier_schedules WHERE supplier_id = ?");
+        $lvStmt = $pdo->prepare("SELECT MAX(updated_at) FROM supplier_schedules WHERE supplier_id = ?");
         $lvStmt->execute([$supplierId]);
         $lockVersion = $lvStmt->fetchColumn() ?: null;
         soRespond(['schedules' => $schedules, 'temporary_schedule' => $temporarySchedule, 'deadline_rules' => $dr->fetchAll(), 'lockVersion' => $lockVersion]);
@@ -1988,7 +1988,7 @@ if ($soAction === 'admin') {
         // Это защита от ситуации, когда двое одновременно открыли расписание и последний затёр первого.
         $clientLockVersion = array_key_exists('lockVersion', $body) ? ($body['lockVersion'] ?? null) : false;
         if ($clientLockVersion !== false && $clientLockVersion !== null) {
-            $lvNow = $pdo->prepare("SELECT MAX(updated_at) FROM so_supplier_schedules WHERE supplier_id = ?");
+            $lvNow = $pdo->prepare("SELECT MAX(updated_at) FROM supplier_schedules WHERE supplier_id = ?");
             $lvNow->execute([$supplierId]);
             $currentLockVersion = $lvNow->fetchColumn() ?: null;
             if ($currentLockVersion !== null && $clientLockVersion !== $currentLockVersion) {
@@ -2001,11 +2001,11 @@ if ($soAction === 'admin') {
         $pdo->beginTransaction();
         try {
             // Сначала деактивируем все расписания поставщика, потом активируем присланные
-            $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")->execute([$updatedBy, $supplierId]);
+            $pdo->prepare("UPDATE supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")->execute([$updatedBy, $supplierId]);
 
             // Upsert
             $upsert = $pdo->prepare("
-                INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
+                INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
                 VALUES (?, ?, ?, ?, ?, NOW(), ?)
                 ON DUPLICATE KEY UPDATE
                     order_day = VALUES(order_day),
@@ -2032,7 +2032,7 @@ if ($soAction === 'admin') {
 
             // Физически удаляем записи, не вошедшие в новый набор,
             // чтобы таблица не распухала от soft-off мусора.
-            $pdo->prepare("DELETE FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 0")
+            $pdo->prepare("DELETE FROM supplier_schedules WHERE supplier_id = ? AND is_active = 0")
                 ->execute([$supplierId]);
 
             $tempDateFrom = trim((string)($temporarySchedule['date_from'] ?? ''));
@@ -2101,7 +2101,7 @@ if ($soAction === 'admin') {
     if ($adminAction === 'deadline-rules' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
-        $s = $pdo->prepare("SELECT id, delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? ORDER BY delivery_dow");
+        $s = $pdo->prepare("SELECT id, delivery_dow, deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? ORDER BY delivery_dow");
         $s->execute([$supplierId]);
         soRespond(['rules' => $s->fetchAll()]);
     }
@@ -2114,8 +2114,8 @@ if ($soAction === 'admin') {
         // Очищаем и перезаписываем в транзакции
         $pdo->beginTransaction();
         try {
-            $pdo->prepare("DELETE FROM so_deadline_rules WHERE supplier_id = ?")->execute([$supplierId]);
-            $ins = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
+            $pdo->prepare("DELETE FROM supplier_default_deadlines WHERE supplier_id = ?")->execute([$supplierId]);
+            $ins = $pdo->prepare("INSERT INTO supplier_default_deadlines (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
             $inserted = 0;
             foreach ($rules as $r) {
                 $dow = (int)($r['delivery_dow'] ?? 0);

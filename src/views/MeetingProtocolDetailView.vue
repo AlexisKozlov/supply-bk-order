@@ -77,9 +77,10 @@
         <table class="mpd-tasks-table">
           <thead>
             <tr>
+              <th class="mpd-th-expand"></th>
               <th class="mpd-th-num">№</th>
               <th>Задача</th>
-              <th class="mpd-th-comment">Описание</th>
+              <th class="mpd-th-progress">Прогресс</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
               <th class="mpd-th-status">Статус</th>
@@ -87,22 +88,70 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(t, i) in carryoverTasks" :key="'co-' + t.id" :class="['mpd-tr-' + t.status, { 'mpd-tr-mine': isMyTask(t) }]">
-              <td class="mpd-td-num">{{ i + 1 }}</td>
-              <td class="mpd-td-text">{{ t.text }}</td>
-              <td class="mpd-td-comment">
-                <span v-if="t.card_description" :title="t.card_description">{{ t.card_description }}</span>
-                <span v-else class="mpd-empty-cell">—</span>
-              </td>
-              <td>{{ formatResponsible(t.responsible_person) }}</td>
-              <td><input type="date" v-model="t.deadline" @change="onCarryoverDeadlineChange(t)" class="mpd-date-input" /></td>
-              <td><select v-model="t.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + t.status" @change="onCarryoverStatusChange(t)">
-                <option value="pending">В работе</option>
-                <option value="done">Выполнено</option>
-                <option value="overdue">Просрочено</option>
-              </select></td>
-              <td class="mpd-td-source">{{ fmtShortDate(t.meeting_date) }}</td>
-            </tr>
+            <template v-for="(t, i) in carryoverTasks" :key="'co-' + t.id">
+              <tr :class="rowClass(t)" @click="onRowClick($event, t)">
+                <td class="mpd-td-expand">
+                  <button class="mpd-expand-btn" :class="{ 'is-open': expanded[t.id] }" @click="toggleExpand(t.id)" :aria-expanded="expanded[t.id] ? 'true' : 'false'" title="Подробнее">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                </td>
+                <td class="mpd-td-num">{{ i + 1 }}</td>
+                <td class="mpd-td-text-readonly">{{ t.text }}</td>
+                <td class="mpd-td-progress">
+                  <div class="mpd-progress-cell" v-if="(t.assignees_progress || []).length">
+                    <span class="mpd-progress-num">{{ progressDone(t) }} <span class="mpd-progress-of">из</span> {{ progressTotal(t) }}</span>
+                    <div class="mpd-progress-bar"><span :style="{ width: progressPercent(t) + '%' }"></span></div>
+                  </div>
+                  <span v-else class="mpd-empty-cell">—</span>
+                </td>
+                <td class="mpd-td-resp-readonly">{{ formatResponsible(t.responsible_person) }}</td>
+                <td class="mpd-td-date">
+                  <button class="mpd-chip mpd-chip-date" :class="dueChipClass(t)" @click="openDate($event, t, 'carryover')">
+                    <svg class="mpd-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 9h18"/></svg>
+                    <span>{{ t.deadline ? fmtFullDate(t.deadline) : 'без срока' }}</span>
+                  </button>
+                  <input type="date" v-model="t.deadline" @change="onCarryoverDeadlineChange(t)" class="mpd-hidden-date" />
+                </td>
+                <td class="mpd-td-status">
+                  <div class="mpd-chip-wrap">
+                    <button class="mpd-chip" :class="'mpd-chip-st-' + t.status" @click.stop="toggleStatusPicker(t.id)">
+                      <span class="mpd-chip-dot"></span><span>{{ statusLabel(t.status) }}</span>
+                    </button>
+                    <div v-if="openStatusPicker === t.id" class="mpd-chip-menu" @click.stop>
+                      <div v-for="s in statusOptions" :key="s" class="mpd-chip-menu-item" :class="'mpd-chip-st-' + s" @click="changeCarryoverStatus(t, s)">
+                        <span class="mpd-chip-dot"></span><span>{{ statusLabel(s) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td class="mpd-td-source">{{ fmtShortDate(t.meeting_date) }}</td>
+              </tr>
+              <tr v-if="expanded[t.id]" class="mpd-tr-details">
+                <td colspan="8">
+                  <div class="mpd-details">
+                    <table v-if="(t.assignees_progress || []).length" class="mpd-assignee-table">
+                      <colgroup><col class="mpd-col-name"><col></colgroup>
+                      <tbody>
+                        <tr v-for="a in t.assignees_progress" :key="a.user_name" :class="{ 'is-done': a.is_done }">
+                          <td class="mpd-assignee-td-name">
+                            <span class="mpd-assignee-mark">{{ a.is_done ? '✓' : '○' }}</span>
+                            <span>{{ a.user_name }}</span>
+                          </td>
+                          <td class="mpd-assignee-td-result" @dblclick="startEditDescription(a)">
+                            <textarea v-if="editingDescCardId === a.card_id" v-model="a.description" class="mpd-assignee-edit is-active" rows="1" placeholder="Описание / результат…" @input="autoResize($event)" @blur="saveAssigneeDescription(a)" @click.stop></textarea>
+                            <template v-else>
+                              <span v-if="a.description">{{ a.description }}</span>
+                              <span v-else class="mpd-empty-cell">— двойной клик, чтобы добавить —</span>
+                            </template>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div v-else class="mpd-empty-cell mpd-details-empty">нет ответственных с карточками</div>
+                  </div>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -113,9 +162,10 @@
         <table v-if="protocol.decisions.length" class="mpd-tasks-table">
           <thead>
             <tr>
+              <th class="mpd-th-expand"></th>
               <th class="mpd-th-num">№</th>
               <th>Задача</th>
-              <th class="mpd-th-comment">Описание</th>
+              <th class="mpd-th-progress">Прогресс</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
               <th class="mpd-th-status">Статус</th>
@@ -123,36 +173,91 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(dec, i) in protocol.decisions" :key="dec.id || ('new-' + i)" :class="['mpd-tr-' + dec.status, { 'mpd-tr-mine': isMyTask(dec) }]">
-              <td class="mpd-td-num">{{ i + 1 }}</td>
-              <td><textarea v-model="dec.text" :disabled="!canEdit" class="mpd-cell-input mpd-cell-text" rows="1" placeholder="Текст задачи" @input="autoResize($event)"></textarea></td>
-              <td class="mpd-td-comment">
-                <span v-if="dec.card_description" :title="dec.card_description">{{ dec.card_description }}</span>
-                <span v-else class="mpd-empty-cell">—</span>
-              </td>
-              <td class="mpd-td-resp">
-                <div class="mpd-multi-select" v-if="canEdit">
-                  <div class="mpd-multi-tags" @click="toggleResponsiblePicker(dec)">
-                    <span v-for="name in dec.responsible_person" :key="name" class="mpd-resp-tag">{{ name }} <span class="mpd-resp-tag-x" @click.stop="removeResponsible(dec, name)">&times;</span></span>
-                    <span v-if="!dec.responsible_person.length" class="mpd-resp-placeholder">Выбрать...</span>
+            <template v-for="(dec, i) in protocol.decisions" :key="dec.id || ('new-' + i)">
+              <tr :class="rowClass(dec)" @click="onRowClick($event, dec)">
+                <td class="mpd-td-expand">
+                  <button v-if="dec.id" class="mpd-expand-btn" :class="{ 'is-open': expanded[dec.id] }" @click="toggleExpand(dec.id)" :aria-expanded="expanded[dec.id] ? 'true' : 'false'" title="Подробнее">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                </td>
+                <td class="mpd-td-num">{{ i + 1 }}</td>
+                <td class="mpd-td-text" @dblclick="onTextDblClick($event, dec, i)">
+                  <textarea v-if="isEditing(dec, i)" v-model="dec.text" class="mpd-cell-text-edit is-active" rows="1" placeholder="Текст задачи" @input="autoResize($event)" @blur="stopEdit" @click.stop></textarea>
+                  <div v-else class="mpd-cell-text-view" :class="{ 'is-empty': !dec.text, 'is-editable': canEdit }">{{ dec.text || (canEdit ? 'Двойной клик — добавить текст' : '—') }}</div>
+                </td>
+                <td class="mpd-td-progress">
+                  <div class="mpd-progress-cell" v-if="(dec.assignees_progress || []).length">
+                    <span class="mpd-progress-num">{{ progressDone(dec) }} <span class="mpd-progress-of">из</span> {{ progressTotal(dec) }}</span>
+                    <div class="mpd-progress-bar"><span :style="{ width: progressPercent(dec) + '%' }"></span></div>
                   </div>
-                  <div v-if="openResponsiblePicker === dec" class="mpd-resp-dropdown">
-                    <div v-for="name in protocol.participants" :key="name" class="mpd-resp-option" @click="toggleResponsible(dec, name)">
-                      <span class="mpd-resp-check">{{ dec.responsible_person.includes(name) ? '☑' : '☐' }}</span> {{ name }}
+                  <span v-else class="mpd-empty-cell">—</span>
+                </td>
+                <td class="mpd-td-resp">
+                  <div class="mpd-multi-select" v-if="canEdit">
+                    <div class="mpd-multi-tags" @click="toggleResponsiblePicker(dec)">
+                      <span v-for="name in dec.responsible_person" :key="name" class="mpd-resp-tag">{{ name }} <span class="mpd-resp-tag-x" @click.stop="removeResponsible(dec, name)">&times;</span></span>
+                      <span v-if="!dec.responsible_person.length" class="mpd-resp-placeholder">Выбрать...</span>
                     </div>
-                    <div v-if="!protocol.participants.length" class="mpd-resp-empty">Нет участников</div>
+                    <div v-if="openResponsiblePicker === dec" class="mpd-resp-dropdown">
+                      <div v-for="name in protocol.participants" :key="name" class="mpd-resp-option" @click="toggleResponsible(dec, name)">
+                        <span class="mpd-resp-check">{{ dec.responsible_person.includes(name) ? '☑' : '☐' }}</span> {{ name }}
+                      </div>
+                      <div v-if="!protocol.participants.length" class="mpd-resp-empty">Нет участников</div>
+                    </div>
                   </div>
-                </div>
-                <span v-else>{{ dec.responsible_person.join(', ') }}</span>
-              </td>
-              <td><input type="date" v-model="dec.deadline" :disabled="!canEdit" class="mpd-cell-input"></td>
-              <td><select v-model="dec.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + dec.status" :disabled="!canEdit && !isMyTask(dec)" @change="onDecisionStatusChange(dec)">
-                <option value="pending">В работе</option>
-                <option value="done">Выполнено</option>
-                <option value="overdue">Просрочено</option>
-              </select></td>
-              <td v-if="canEdit" class="mpd-td-del"><button class="mpd-row-del" @click="protocol.decisions.splice(i, 1)">&times;</button></td>
-            </tr>
+                  <span v-else class="mpd-td-resp-readonly">{{ dec.responsible_person.join(', ') }}</span>
+                </td>
+                <td class="mpd-td-date">
+                  <button class="mpd-chip mpd-chip-date" :class="[dueChipClass(dec), { 'is-disabled': !canEdit }]" :disabled="!canEdit" @click="openDate($event, dec, 'decision')">
+                    <svg class="mpd-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 9h18"/></svg>
+                    <span>{{ dec.deadline ? fmtFullDate(dec.deadline) : 'без срока' }}</span>
+                  </button>
+                  <input type="date" v-model="dec.deadline" :disabled="!canEdit" class="mpd-hidden-date" />
+                </td>
+                <td class="mpd-td-status">
+                  <div class="mpd-chip-wrap">
+                    <button class="mpd-chip" :class="['mpd-chip-st-' + dec.status, { 'is-disabled': !canEdit && !isMyTask(dec) }]" :disabled="!canEdit && !isMyTask(dec)" @click.stop="toggleStatusPicker(decKey(dec, i))">
+                      <span class="mpd-chip-dot"></span><span>{{ statusLabel(dec.status) }}</span>
+                    </button>
+                    <div v-if="openStatusPicker === decKey(dec, i)" class="mpd-chip-menu" @click.stop>
+                      <div v-for="s in statusOptions" :key="s" class="mpd-chip-menu-item" :class="'mpd-chip-st-' + s" @click="changeDecisionStatus(dec, s)">
+                        <span class="mpd-chip-dot"></span><span>{{ statusLabel(s) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td v-if="canEdit" class="mpd-td-del">
+                  <button class="mpd-row-del" @click="protocol.decisions.splice(i, 1)" title="Удалить задачу">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="dec.id && expanded[dec.id]" class="mpd-tr-details">
+                <td :colspan="canEdit ? 8 : 7">
+                  <div class="mpd-details">
+                    <table v-if="(dec.assignees_progress || []).length" class="mpd-assignee-table">
+                      <colgroup><col class="mpd-col-name"><col></colgroup>
+                      <tbody>
+                        <tr v-for="a in dec.assignees_progress" :key="a.user_name" :class="{ 'is-done': a.is_done }">
+                          <td class="mpd-assignee-td-name">
+                            <span class="mpd-assignee-mark">{{ a.is_done ? '✓' : '○' }}</span>
+                            <span>{{ a.user_name }}</span>
+                          </td>
+                          <td class="mpd-assignee-td-result" @dblclick="startEditDescription(a)">
+                            <textarea v-if="editingDescCardId === a.card_id" v-model="a.description" class="mpd-assignee-edit is-active" rows="1" placeholder="Описание / результат…" @input="autoResize($event)" @blur="saveAssigneeDescription(a)" @click.stop></textarea>
+                            <template v-else>
+                              <span v-if="a.description">{{ a.description }}</span>
+                              <span v-else class="mpd-empty-cell">— двойной клик, чтобы добавить —</span>
+                            </template>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div v-else class="mpd-empty-cell mpd-details-empty">нет ответственных с карточками</div>
+                  </div>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
         <button v-if="canEdit" class="mpd-btn mpd-btn-add" @click="addDecision">+ Добавить задачу</button>
@@ -289,6 +394,161 @@ function fmtShortDate(d) {
   if (!d) return '';
   const dt = new Date(d + 'T00:00:00');
   return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+
+function fmtFullDate(d) {
+  if (!d) return '';
+  const dt = new Date(d + 'T00:00:00');
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+const expanded = ref({});
+function toggleExpand(id) {
+  if (!id) return;
+  expanded.value = { ...expanded.value, [id]: !expanded.value[id] };
+}
+
+const openStatusPicker = ref(null);
+function toggleStatusPicker(key) {
+  openStatusPicker.value = openStatusPicker.value === key ? null : key;
+}
+function decKey(dec, i) { return dec.id ? 'd-' + dec.id : 'new-' + i; }
+
+const statusOptions = ['pending', 'done', 'overdue'];
+function statusLabel(s) {
+  if (s === 'pending') return 'В работе';
+  if (s === 'done') return 'Выполнено';
+  if (s === 'overdue') return 'Просрочено';
+  return s;
+}
+
+function rowClass(t) {
+  return {
+    'mpd-tr': true,
+    'mpd-tr-mine': isMyTask(t),
+    'mpd-tr-pending': t.status === 'pending',
+    'mpd-tr-overdue': t.status === 'overdue',
+    'mpd-tr-done': t.status === 'done',
+    'mpd-tr-expanded': !!expanded.value[t.id],
+  };
+}
+
+function dueChipClass(t) {
+  if (!t.deadline) return 'mpd-chip-date-none';
+  if (t.status === 'done') return 'mpd-chip-date-done';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = new Date(t.deadline + 'T00:00:00');
+  const diffH = (due - today) / 36e5;
+  if (diffH < 0) return 'mpd-chip-date-overdue';
+  if (diffH <= 24) return 'mpd-chip-date-soon24';
+  if (diffH <= 72) return 'mpd-chip-date-soon72';
+  return '';
+}
+
+function openDate(event, t, kind) {
+  const btn = event.currentTarget;
+  const input = btn?.parentElement?.querySelector('.mpd-hidden-date');
+  if (!input || input.disabled) return;
+  if (typeof input.showPicker === 'function') input.showPicker();
+  else input.click();
+}
+
+function changeCarryoverStatus(t, newStatus) {
+  openStatusPicker.value = null;
+  if (t.status === newStatus) return;
+  t.status = newStatus;
+  onCarryoverStatusChange(t);
+}
+
+function changeDecisionStatus(dec, newStatus) {
+  openStatusPicker.value = null;
+  if (dec.status === newStatus) return;
+  dec.status = newStatus;
+  onDecisionStatusChange(dec);
+}
+
+const editingDescCardId = ref(null);
+const editingDescOriginal = ref('');
+function startEditDescription(a) {
+  if (!a || !a.card_id) return;
+  editingDescOriginal.value = a.description || '';
+  editingDescCardId.value = a.card_id;
+  nextTick(() => {
+    const el = document.querySelector('.mpd-assignee-edit.is-active');
+    if (el) {
+      el.focus();
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+      const v = el.value;
+      el.setSelectionRange(v.length, v.length);
+    }
+  });
+}
+async function saveAssigneeDescription(a) {
+  const cardId = a.card_id;
+  if (!cardId) { editingDescCardId.value = null; return; }
+  const newDesc = a.description || '';
+  const original = editingDescOriginal.value;
+  editingDescCardId.value = null;
+  if (newDesc === original) return;
+  try {
+    const token = localStorage.getItem('bk_session_token') || '';
+    const res = await fetch(`/api/tasks/cards/${cardId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
+      body: JSON.stringify({ description: newDesc }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      a.description = original;
+      toast.error(data.error || 'Не удалось сохранить описание');
+    } else {
+      toast.success('Описание обновлено');
+    }
+  } catch (err) {
+    a.description = original;
+    toast.error('Ошибка сети при сохранении');
+  }
+}
+
+function progressTotal(t) { return (t.assignees_progress || []).length; }
+function progressDone(t) { return (t.assignees_progress || []).filter(a => a.is_done).length; }
+function progressPercent(t) {
+  const tot = progressTotal(t);
+  if (!tot) return 0;
+  return Math.round((progressDone(t) / tot) * 100);
+}
+
+const editingKey = ref(null);
+function decEditKey(dec, i) { return dec.id ? 'd-' + dec.id : 'new-' + i; }
+function isEditing(dec, i) { return editingKey.value === decEditKey(dec, i); }
+function startEdit(dec, i) {
+  if (!canEdit.value) return;
+  editingKey.value = decEditKey(dec, i);
+  nextTick(() => {
+    const el = document.querySelector('.mpd-cell-text-edit.is-active');
+    if (el) {
+      el.focus();
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+      // курсор в конец
+      const v = el.value;
+      el.setSelectionRange(v.length, v.length);
+    }
+  });
+}
+function stopEdit() { editingKey.value = null; }
+
+let rowClickTimer = null;
+function onRowClick(e, t) {
+  if (!t || !t.id) return;
+  if (e.target.closest('.mpd-chip-wrap, .mpd-multi-select, .mpd-row-del, .mpd-expand-btn, .mpd-hidden-date, .mpd-cell-text-edit')) return;
+  if (rowClickTimer) clearTimeout(rowClickTimer);
+  rowClickTimer = setTimeout(() => { toggleExpand(t.id); rowClickTimer = null; }, 220);
+}
+function onTextDblClick(e, dec, i) {
+  if (rowClickTimer) { clearTimeout(rowClickTimer); rowClickTimer = null; }
+  startEdit(dec, i);
 }
 
 async function loadCarryoverTasks() {
@@ -500,6 +760,9 @@ function closePickerOnOutsideClick(e) {
   if (openResponsiblePicker.value && !e.target.closest('.mpd-multi-select')) {
     openResponsiblePicker.value = null;
   }
+  if (openStatusPicker.value && !e.target.closest('.mpd-chip-wrap')) {
+    openStatusPicker.value = null;
+  }
 }
 
 // Нормализация responsible_person: строка → массив (для совместимости со старыми данными)
@@ -572,44 +835,89 @@ onBeforeUnmount(() => {
 .mpd-picker-role { font-size: 11px; color: #999; white-space: nowrap; text-align: right; }
 
 /* Tasks table */
-.mpd-tasks-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-.mpd-tasks-table th { font-size: 11px; color: #888; font-weight: 500; text-align: left; padding: 4px 6px; border-bottom: 2px solid #eee; }
-.mpd-th-num { width: 32px; text-align: center; }
+.mpd-tasks-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 8px; }
+.mpd-tasks-table th { font-size: 10px; color: #8a8a8a; font-weight: 600; text-align: left; padding: 6px 8px; border-bottom: 1px solid #ececec; text-transform: uppercase; letter-spacing: 0.04em; }
+.mpd-th-expand { width: 28px; }
+.mpd-th-num { width: 28px; text-align: center; }
+.mpd-th-progress { width: 130px; }
 .mpd-th-resp { width: 200px; }
-.mpd-th-date { width: 120px; }
-.mpd-th-status { width: 110px; }
-.mpd-th-del { width: 30px; }
-.mpd-tasks-table td { padding: 3px 4px; vertical-align: middle; border-bottom: 1px solid #f0f0f0; }
-.mpd-td-num { text-align: center; font-size: 12px; color: #888; font-weight: 600; }
-.mpd-cell-input { padding: 5px 7px; border: 1px solid transparent; border-radius: 4px; font-size: 12px; width: 100%; box-sizing: border-box; background: transparent; }
-.mpd-cell-input:focus { border-color: #ddd; background: #fff; outline: none; }
-.mpd-cell-input:disabled { color: #555; }
-.mpd-cell-text { font-size: 13px; resize: none; overflow: hidden; min-height: 28px; line-height: 1.4; font-family: inherit; display: block; }
-.mpd-cell-status { font-weight: 500; }
-.mpd-st-pending { color: #e65100; }
-.mpd-st-done { color: #2e7d32; }
-.mpd-st-overdue { color: #c62828; }
-.mpd-tr-pending { background: #fff8e1; }
-.mpd-tr-done { background: #e8f5e9; }
-.mpd-tr-overdue { background: #fce4ec; }
-.mpd-tr-mine { box-shadow: inset 3px 0 0 #E76F51; }
-.mpd-tr-mine.mpd-tr-pending { background: #fff3e0; }
-.mpd-tr-mine.mpd-tr-done { background: #c8e6c9; }
-.mpd-tr-mine.mpd-tr-overdue { background: #f8bbd0; }
+.mpd-th-date { width: 130px; }
+.mpd-th-status { width: 130px; }
+.mpd-th-del { width: 36px; }
+.mpd-tasks-table td { padding: 6px 8px; vertical-align: middle; border-bottom: 1px solid #f2f2f2; background: #fff; }
+.mpd-tasks-table td.mpd-td-text,
+.mpd-tasks-table td.mpd-td-text-readonly { vertical-align: top; padding-top: 8px; }
+.mpd-td-num { text-align: center; font-size: 12px; color: #aaa; font-weight: 600; }
+.mpd-td-text-readonly { font-size: 13px; color: #2b2b2b; line-height: 1.4; white-space: pre-wrap; word-break: break-word; padding: 8px 8px; }
+.mpd-td-resp-readonly { font-size: 12px; color: #555; }
+
+/* Приглушённые фоны строк по статусу */
+.mpd-tr.mpd-tr-pending td { background: #fffbf2; }
+.mpd-tr.mpd-tr-done td { background: #f4faf5; color: #6e8170; }
+.mpd-tr.mpd-tr-overdue td { background: #fdf2f2; }
+
+/* Полоска слева — статус задачи и/или "моя задача" */
+.mpd-tr-mine td:first-child { box-shadow: inset 3px 0 0 #E76F51; }
+.mpd-tr-overdue td:first-child { box-shadow: inset 3px 0 0 #c62828; }
+.mpd-tr-overdue.mpd-tr-mine td:first-child { box-shadow: inset 3px 0 0 #c62828, inset 6px 0 0 #E76F51; }
+
+.mpd-tr-expanded td { border-bottom-color: transparent; }
+.mpd-tr-details td { border-bottom: 1px solid #ececec; padding: 0 0 10px; background: #fafbfc; }
+
+/* Раскрытие */
+.mpd-expand-btn { width: 22px; height: 22px; border: none; background: transparent; color: #999; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: transform 0.15s, color 0.15s, background 0.15s; }
+.mpd-expand-btn:hover { background: #f0f0f0; color: #333; }
+.mpd-expand-btn.is-open { transform: rotate(90deg); color: #E76F51; }
+
+/* Текст задачи: режим просмотра (div) и режим редактирования (textarea) */
+.mpd-cell-text-view { padding: 6px 8px; font-size: 13px; line-height: 1.45; color: #2b2b2b; white-space: pre-wrap; word-break: break-word; border-radius: 5px; min-height: 26px; }
+.mpd-cell-text-view.is-empty { color: #bbb; font-style: italic; }
+.mpd-cell-text-edit { padding: 6px 8px; border: 1px solid #E76F51; border-radius: 5px; font-size: 13px; width: 100%; box-sizing: border-box; background: #fff; resize: none; overflow: hidden; min-height: 30px; line-height: 1.45; font-family: inherit; color: #2b2b2b; }
+.mpd-cell-text-edit:focus { outline: none; box-shadow: 0 0 0 2px rgba(231, 111, 81, 0.18); }
+.mpd-td-text { cursor: text; }
+.mpd-tasks-table tbody tr:not(.mpd-tr-details) { cursor: pointer; }
+
+/* Чипы статуса и срока — общая база */
+.mpd-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; line-height: 1.4; border: 1px solid transparent; background: #f1f3f5; color: #4a4a4a; cursor: pointer; white-space: nowrap; transition: filter 0.12s, transform 0.12s; }
+.mpd-chip:hover:not(:disabled):not(.is-disabled) { filter: brightness(0.96); }
+.mpd-chip:active:not(:disabled) { transform: translateY(1px); }
+.mpd-chip.is-disabled, .mpd-chip:disabled { cursor: default; opacity: 0.75; }
+.mpd-chip-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; opacity: 0.8; }
+.mpd-chip-icon { width: 12px; height: 12px; flex-shrink: 0; }
+
+.mpd-chip-st-pending { background: #fff4e0; color: #b35900; }
+.mpd-chip-st-done { background: #e3f6e6; color: #1b5e20; }
+.mpd-chip-st-overdue { background: #fde2e2; color: #b71c1c; }
+
+.mpd-chip-date { background: #f1f3f5; color: #555; font-weight: 500; }
+.mpd-chip-date-none { color: #aaa; }
+.mpd-chip-date-soon72 { background: #fff8e1; color: #8c6d00; }
+.mpd-chip-date-soon24 { background: #fff0e0; color: #b35900; }
+.mpd-chip-date-overdue { background: #fde2e2; color: #b71c1c; }
+.mpd-chip-date-done { color: #888; }
+
+.mpd-hidden-date { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+
+.mpd-chip-wrap { position: relative; display: inline-block; }
+.mpd-chip-menu { position: absolute; top: calc(100% + 4px); left: 0; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); padding: 4px; min-width: 130px; z-index: 40; display: flex; flex-direction: column; gap: 2px; }
+.mpd-chip-menu-item { display: flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.mpd-chip-menu-item:hover { filter: brightness(0.96); }
+
+/* Удаление */
 .mpd-td-del { text-align: center; }
-.mpd-row-del { border: none; background: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 0 4px; }
-.mpd-row-del:hover { color: #E76F51; }
+.mpd-row-del { border: none; background: transparent; color: #c0c0c0; cursor: pointer; padding: 4px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; }
+.mpd-row-del:hover { color: #c62828; background: #fde2e2; }
 
 /* Multi-select ответственных */
 .mpd-td-resp { position: relative; }
 .mpd-multi-select { position: relative; }
-.mpd-multi-tags { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 5px; min-height: 28px; cursor: pointer; border: 1px solid transparent; border-radius: 4px; align-items: center; }
-.mpd-multi-tags:hover { border-color: #ddd; background: #fafafa; }
-.mpd-resp-tag { display: inline-flex; align-items: center; gap: 2px; background: #e3f2fd; color: #1565c0; font-size: 11px; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.mpd-multi-tags { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 5px; min-height: 28px; cursor: pointer; border: 1px solid transparent; border-radius: 5px; align-items: center; }
+.mpd-multi-tags:hover { border-color: #e2e2e2; background: #fafafa; }
+.mpd-resp-tag { display: inline-flex; align-items: center; gap: 2px; background: #eef2f5; color: #4a5b6a; font-size: 11px; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
 .mpd-resp-tag-x { cursor: pointer; font-size: 13px; color: #90a4ae; margin-left: 2px; }
 .mpd-resp-tag-x:hover { color: #c62828; }
 .mpd-resp-placeholder { font-size: 12px; color: #aaa; }
-.mpd-resp-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); z-index: 30; max-height: 180px; overflow-y: auto; min-width: 180px; }
+.mpd-resp-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); z-index: 30; max-height: 180px; overflow-y: auto; min-width: 180px; }
 .mpd-resp-option { padding: 6px 10px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 6px; }
 .mpd-resp-option:hover { background: #f5f5f5; }
 .mpd-resp-check { font-size: 14px; flex-shrink: 0; }
@@ -617,8 +925,9 @@ onBeforeUnmount(() => {
 
 /* Carryover tasks */
 .mpd-section-carryover { border-color: #ffe0b2; background: #fffaf0; }
+.mpd-section-carryover .mpd-tasks-table td { background: transparent; }
+.mpd-section-carryover .mpd-tr-details td { background: rgba(255, 255, 255, 0.5); }
 .mpd-carryover-title { color: #e65100; }
-.mpd-td-text { font-size: 13px; padding: 5px 8px; }
 .mpd-td-source { font-size: 11px; color: #999; white-space: nowrap; }
 .mpd-th-source { width: 90px; }
 .mpd-th-comment { width: 220px; }
@@ -629,15 +938,30 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .mpd-empty-cell { color: #bbb; }
-.mpd-date-input {
-  padding: 3px 6px;
-  border: 1.5px solid var(--border, #ddd);
-  border-radius: 6px;
-  font-size: 12px;
-  background: var(--card, #fff);
-  color: var(--text, #333);
-  font-family: inherit;
-}
+
+/* Ячейка "Прогресс" в самой строке */
+.mpd-progress-cell { display: flex; flex-direction: column; gap: 3px; }
+.mpd-progress-num { font-size: 12px; font-weight: 600; color: #4a4a4a; }
+.mpd-progress-of { font-weight: 400; color: #999; }
+.mpd-progress-bar { height: 4px; background: #ececec; border-radius: 2px; overflow: hidden; }
+.mpd-progress-bar > span { display: block; height: 100%; background: #4caf50; border-radius: 2px; transition: width 0.2s; }
+
+/* Раскрытая панель: таблица "исполнитель | описание его карточки" */
+.mpd-tr-details td { background: #fff; padding: 0; }
+.mpd-details { padding: 4px 0 10px 0; }
+.mpd-details-empty { padding: 10px 8px; font-size: 13px; }
+.mpd-assignee-table { width: 100%; border-collapse: collapse; background: transparent; table-layout: auto; }
+.mpd-assignee-table tr { border-top: 1px solid #efefef; }
+.mpd-assignee-table tr:first-child { border-top: none; }
+.mpd-assignee-table td { background: transparent; padding: 9px 12px 9px 0; vertical-align: top; font-size: 13px; line-height: 1.5; text-align: left; }
+.mpd-col-name { width: 1%; }
+.mpd-assignee-td-name { color: #2b2b2b; font-weight: 500; white-space: nowrap; padding-left: 8px; padding-right: 18px; }
+.mpd-assignee-td-name .mpd-assignee-mark { display: inline-block; width: 18px; text-align: center; font-weight: 700; font-size: 14px; color: #b8b8b8; margin-right: 6px; }
+.mpd-assignee-table tr.is-done .mpd-assignee-td-name,
+.mpd-assignee-table tr.is-done .mpd-assignee-mark { color: #2e7d32; }
+.mpd-assignee-td-result { color: #444; white-space: pre-wrap; word-break: break-word; text-align: left; cursor: text; }
+.mpd-assignee-edit { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #E76F51; border-radius: 5px; font-size: 13px; line-height: 1.5; font-family: inherit; color: #2b2b2b; background: #fff; resize: none; overflow: hidden; min-height: 30px; }
+.mpd-assignee-edit:focus { outline: none; box-shadow: 0 0 0 2px rgba(231, 111, 81, 0.18); }
 
 /* Buttons */
 .mpd-btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; white-space: nowrap; }

@@ -111,6 +111,17 @@ app.config.errorHandler = (err, instance, info) => {
   } catch (e) { /* store not ready */ }
 };
 
+// Cache-bust параметр `_v` нужен только в момент жёсткого релоада из
+// UpdatePrompt (чтобы браузер не отдал старый index.html). После загрузки он
+// уже бесполезен и засоряет адресную строку — убираем сразу.
+try {
+  const u = new URL(window.location.href);
+  if (u.searchParams.has('_v')) {
+    u.searchParams.delete('_v');
+    window.history.replaceState(window.history.state, '', u.pathname + (u.search ? u.search : '') + u.hash);
+  }
+} catch (_) { /* игнор */ }
+
 // Восстановление сессии запускается из router.beforeEach (async/await).
 // Там pinia точно injected правильно, гонок нет.
 app.mount('#app');
