@@ -105,6 +105,10 @@
                       пусто = дефолт {{ defaultDeadlineHint(activeSupplier, wd) }}
                     </span>
                   </div>
+                  <div class="ssv-pop-field ssv-pop-field-wide">
+                    <label>Времена напоминаний</label>
+                    <ReminderTimesEditor v-model="popover.reminder_times" />
+                  </div>
                 </div>
                 <div class="ssv-pop-actions">
                   <button class="ssv-btn-ghost" @click="closePopover">Отмена</button>
@@ -127,7 +131,7 @@
 
     <!-- Модалка дефолтных дедлайнов поставщика -->
     <div v-if="defaultsModal.show" class="ssv-modal-backdrop" @click.self="closeDefaultsModal">
-      <div class="ssv-modal">
+      <div class="ssv-modal ssv-modal-wide">
         <div class="ssv-modal-header">
           <h3>Дефолтные дедлайны — {{ defaultsModal.supplier_name }}</h3>
           <button class="ssv-modal-close" @click="closeDefaultsModal">×</button>
@@ -143,6 +147,7 @@
                 <th>Доставка в</th>
                 <th>Крайний срок (день)</th>
                 <th>Время</th>
+                <th>Времена напоминаний</th>
                 <th></th>
               </tr>
             </thead>
@@ -159,10 +164,13 @@
                   </select>
                 </td>
                 <td><input type="time" v-model="rule.deadline_time" /></td>
+                <td class="ssv-td-reminders">
+                  <ReminderTimesEditor v-model="rule.reminder_times" />
+                </td>
                 <td><button class="ssv-icon-btn ssv-icon-danger" @click="removeDefaultRule(idx)" title="Удалить правило">×</button></td>
               </tr>
               <tr v-if="!defaultsModal.rules.length">
-                <td colspan="4" class="ssv-defaults-empty">Правил пока нет.</td>
+                <td colspan="5" class="ssv-defaults-empty">Правил пока нет.</td>
               </tr>
             </tbody>
           </table>
@@ -192,6 +200,7 @@ import { useConfirm } from '@/composables/useConfirm.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const ReminderTimesEditor = defineAsyncComponent(() => import('@/components/ui/ReminderTimesEditor.vue'));
 
 const userStore = useUserStore();
 const orderStore = useOrderStore();
@@ -359,7 +368,18 @@ function defaultDeadlineHint(supplier, deliveryDay) {
 // ─── Popover для ячейки ───
 // Ключ ячейки = (ресторан, день поставки). В ячейке редактируется день заказа
 // и дедлайн заявки. День поставки фиксирован выбранной колонкой.
-const popover = ref({ key: null, supplier_id: '', restaurant_id: 0, delivery_day: 0, order_day: 1, original_order_day: null, is_active: true, deadline_time: '', saving: false });
+const popover = ref({ key: null, supplier_id: '', restaurant_id: 0, delivery_day: 0, order_day: 1, original_order_day: null, is_active: true, deadline_time: '', reminder_times: [], saving: false });
+
+function parseReminderTimes(raw) {
+  if (!raw) return [];
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter(x => x && /^\d{1,2}:\d{2}/.test(x.time || ''))
+      .map(x => ({ days_before: Number(x.days_before) | 0, time: String(x.time).slice(0, 5) }));
+  } catch (e) { return []; }
+}
 
 function cellKey(rest, wd) { return `${rest.restaurant_id}-${wd}`; }
 
@@ -379,6 +399,7 @@ function onCellClick(supplier, rest, wd, event) {
     original_order_day: row ? row.order_day : null,
     is_active: row ? !!Number(row.is_active) : true,
     deadline_time: row && row.deadline_override ? formatTime(row.deadline_override) : '',
+    reminder_times: parseReminderTimes(row?.reminder_times_override),
     saving: false,
   };
 }
@@ -434,6 +455,7 @@ async function savePopover(supplier, rest, wd) {
     order_day: popover.value.order_day,
     delivery_day: wd,
     deadline_time: popover.value.deadline_time || null,
+    reminder_times: popover.value.reminder_times || [],
     is_active: 1,
   });
   popover.value.saving = false;
@@ -484,6 +506,7 @@ function openDefaultsModal(supplier) {
       delivery_dow: Number(d.delivery_dow),
       deadline_dow: Number(d.deadline_dow),
       deadline_time: formatTime(d.deadline_time),
+      reminder_times: parseReminderTimes(d.reminder_times),
       _original_dow: Number(d.delivery_dow),
     })),
     original: rules.map(d => Number(d.delivery_dow)),
@@ -494,7 +517,7 @@ function closeDefaultsModal() { defaultsModal.value.show = false; }
 function addDefaultRule() {
   const used = new Set(defaultsModal.value.rules.map(r => r.delivery_dow));
   const free = WEEKDAYS_NUM.find(d => !used.has(d)) || 1;
-  defaultsModal.value.rules.push({ delivery_dow: free, deadline_dow: free, deadline_time: '14:00', _original_dow: null });
+  defaultsModal.value.rules.push({ delivery_dow: free, deadline_dow: free, deadline_time: '14:00', reminder_times: [], _original_dow: null });
 }
 function removeDefaultRule(idx) {
   defaultsModal.value.rules.splice(idx, 1);
@@ -539,6 +562,7 @@ async function saveDefaults() {
       delivery_dow: r.delivery_dow,
       deadline_dow: r.deadline_dow,
       deadline_time: r.deadline_time,
+      reminder_times: r.reminder_times || [],
     });
     if (error) {
       toast.error(error);
@@ -678,6 +702,9 @@ onMounted(loadData);
 .ssv-pop-toggle input { margin: 0; }
 .ssv-pop-body { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
 .ssv-pop-field { display: flex; flex-direction: column; gap: 3px; }
+.ssv-pop-field-wide { grid-column: 1 / -1; }
+.ssv-td-reminders { min-width: 280px; max-width: 340px; }
+.ssv-td-reminders .rte-empty { font-size: 11px; padding: 6px 8px; }
 .ssv-pop-field label { font-size: 10px; color: #888; font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; }
 .ssv-pop-field select, .ssv-pop-field input[type="time"] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px; background: #fff; }
 .ssv-pop-hint { font-size: 10px; color: #999; }
@@ -688,6 +715,7 @@ onMounted(loadData);
 /* Модалки */
 .ssv-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .ssv-modal { background: #fff; border-radius: 10px; max-width: 540px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.2); display: flex; flex-direction: column; max-height: 90vh; }
+.ssv-modal-wide { max-width: 880px; }
 .ssv-modal-header { padding: 14px 18px; border-bottom: 1px solid #ececec; display: flex; align-items: center; justify-content: space-between; }
 .ssv-modal-header h3 { margin: 0; font-size: 16px; }
 .ssv-modal-close { border: none; background: transparent; font-size: 22px; cursor: pointer; color: #999; padding: 0 4px; line-height: 1; }

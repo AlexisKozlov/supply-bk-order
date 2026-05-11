@@ -205,6 +205,73 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     }
   }
 
+  // Сохранение дедлайна подачи заявки на основную поставку.
+  // (orderDay=1..7, orderDeadline="HH:MM" или null чтобы очистить пару).
+  // reminderTimes — массив объектов [{days_before, time}, ...] или null.
+  async function saveScheduleOrderDeadline(restaurantId, dayOfWeek, orderDay, orderDeadline, reminderTimes = undefined) {
+    if (dayOfWeek < 1 || dayOfWeek > 6) throw new Error('Invalid day_of_week');
+    const od = orderDay ? Number(orderDay) : null;
+    if (od !== null && (od < 1 || od > 7)) throw new Error('Invalid order_day');
+    const dl = (orderDeadline || '').trim() || null;
+    if ((od === null) !== (dl === null)) throw new Error('order_day и order_deadline задаются вместе');
+
+    // reminder_times — массив { days_before, time }
+    let rtJson;
+    if (reminderTimes === undefined) {
+      rtJson = undefined; // не трогать
+    } else if (reminderTimes === null) {
+      rtJson = null;
+    } else if (Array.isArray(reminderTimes)) {
+      const cleaned = reminderTimes
+        .filter(rt => rt && /^\d{1,2}:\d{2}$/.test(rt.time))
+        .map(rt => ({ days_before: Number(rt.days_before) | 0, time: rt.time }));
+      rtJson = cleaned.length ? JSON.stringify(cleaned) : null;
+    } else {
+      rtJson = null;
+    }
+
+    const rid = String(restaurantId);
+    const existing = schedule.value.find(s => String(s.restaurant_id) === rid && Number(s.day_of_week) === dayOfWeek);
+    const meta = _meta();
+    const oldDay = existing?.order_day || null;
+    const oldDl  = existing?.order_deadline || null;
+
+    if (existing) {
+      const patch = { order_day: od, order_deadline: dl, ...meta };
+      if (rtJson !== undefined) patch.reminder_times = rtJson;
+      const { error } = await db.from('delivery_schedule').update(patch).eq('id', existing.id);
+      if (error) throw new Error(error);
+      Object.assign(existing, patch);
+    } else if (od !== null) {
+      const insert = {
+        restaurant_id: restaurantId,
+        day_of_week: dayOfWeek,
+        order_day: od,
+        order_deadline: dl,
+        reminder_times: rtJson === undefined ? null : rtJson,
+        ...meta,
+      };
+      const { data, error } = await db.from('delivery_schedule').insert(insert);
+      if (error) throw new Error(error);
+      const record = Array.isArray(data) ? data[0] : data;
+      if (record && record.id) {
+        schedule.value.push(record);
+      } else {
+        const currentGroup = loadedGroup.value;
+        invalidate();
+        await _doLoad(currentGroup, _loadId);
+      }
+    }
+
+    if (String(oldDay || '') !== String(od || '') || String(oldDl || '') !== String(dl || '')) {
+      const rest = restaurants.value.find(r => String(r.id) === rid);
+      const dayLabel = (DAY_NAMES[dayOfWeek] || `День ${dayOfWeek}`) + ' (заявка)';
+      const fmt = (d, t) => d && t ? `${DAY_SHORT[d] || d} до ${t}` : '—';
+      await _auditLog(restaurantId, 'schedule_updated', rest?.number || restaurantId,
+        [{ label: dayLabel, from: fmt(oldDay, oldDl), to: fmt(od, dl) }]);
+    }
+  }
+
   // Только поля таблицы restaurants (без лишних из restaurantsByDay)
   const restaurantFields = ['id', 'number', 'dodo_is_number', 'address', 'city', 'region', 'notes', 'sort_order', 'legal_entity_group', 'pickup_address', 'pickup_weekdays', 'default_vehicle', 'default_driver'];
 
@@ -282,6 +349,6 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   return {
     restaurants, schedule, loading, loaded,
     scheduleByRestaurant, restaurantsByDay, regions, lastUpdate,
-    load, saveScheduleCell, saveRestaurant, saveRestaurantNote, deleteRestaurant, invalidate, entityToGroup,
+    load, saveScheduleCell, saveScheduleOrderDeadline, saveRestaurant, saveRestaurantNote, deleteRestaurant, invalidate, entityToGroup,
   };
 });

@@ -382,6 +382,10 @@
           {{ link.name }}
           <span class="ord-tab-ext" v-html="cabIconSvg.external"></span>
         </a>
+        <button class="ord-tab" :class="{ active: orderSubTab === 'reminders' }" @click="switchTab('orders', 'reminders')">
+          <span class="ord-tab-icon" v-html="cabIconSvg.reminders"></span>
+          Напоминания
+        </button>
         <button class="ord-tab" :class="{ active: orderSubTab === 'history' }" @click="switchTab('orders', 'history')">
           История
         </button>
@@ -4188,6 +4192,8 @@ onUnmounted(() => {
 .ord-tab.active { background: #502314; color: white; border-color: #502314; }
 .ord-tab-link { text-decoration: none; }
 .ord-tab-ext { width: 15px; height: 15px; color: #b08a70; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ord-tab-icon { width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ord-tab-icon svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 2; }
 .ord-tab-badge { font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 8px; }
 .ord-tab-badge.warn { background: #f59e0b; color: white; }
 .ord-tab-badge.ok { background: #16a34a; color: white; }

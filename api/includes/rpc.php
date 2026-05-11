@@ -6221,7 +6221,8 @@ if ($endpoint === 'rpc') {
                    s.legal_entity_group AS supplier_group,
                    r.number AS restaurant_number, r.city AS restaurant_city, r.address AS restaurant_address,
                    r.legal_entity, r.legal_entity_group AS restaurant_group,
-                   sd.deadline_time AS deadline_override
+                   sd.deadline_time AS deadline_override,
+                   sd.reminder_times AS reminder_times_override
             FROM supplier_schedules ss
             JOIN suppliers s ON s.id = ss.supplier_id
             JOIN restaurants r ON r.id = ss.restaurant_id
@@ -6244,7 +6245,7 @@ if ($endpoint === 'rpc') {
         if ($supplierIds) {
             $ph = implode(',', array_fill(0, count($supplierIds), '?'));
             $s = $pdo->prepare("
-                SELECT supplier_id, delivery_dow, deadline_dow, deadline_time
+                SELECT supplier_id, delivery_dow, deadline_dow, deadline_time, reminder_times
                 FROM supplier_default_deadlines
                 WHERE supplier_id IN ($ph)
                 ORDER BY supplier_id, delivery_dow
@@ -6357,11 +6358,28 @@ if ($endpoint === 'rpc') {
         $deliveryDay = (int)($body['delivery_day'] ?? 0);
         $isActive = !empty($body['is_active']) ? 1 : 0;
         $deadlineTime = isset($body['deadline_time']) && $body['deadline_time'] !== '' ? $body['deadline_time'] : null;
+        $reminderTimes = isset($body['reminder_times']) ? $body['reminder_times'] : null;
 
         if (!$supplierId || !$restaurantId
             || !in_array($orderDay, [1,2,3,4,5,6,7], true)
             || !in_array($deliveryDay, [1,2,3,4,5,6,7], true)) {
             respond(['error' => 'Некорректные данные'], 400);
+        }
+
+        // Валидация reminder_times: массив объектов { days_before:0..7, time:'HH:MM' }
+        $reminderTimesJson = null;
+        if ($reminderTimes !== null) {
+            if (!is_array($reminderTimes)) respond(['error' => 'reminder_times должен быть массивом'], 400);
+            $cleaned = [];
+            foreach ($reminderTimes as $rt) {
+                if (!is_array($rt)) continue;
+                $db = (int)($rt['days_before'] ?? -1);
+                $t = $rt['time'] ?? '';
+                if ($db < 0 || $db > 7) respond(['error' => 'days_before должен быть 0..7'], 400);
+                if (!preg_match('/^\d{1,2}:\d{2}$/', $t)) respond(['error' => 'Некорректный формат времени напоминания'], 400);
+                $cleaned[] = ['days_before' => $db, 'time' => $t];
+            }
+            $reminderTimesJson = $cleaned ? json_encode($cleaned, JSON_UNESCAPED_UNICODE) : null;
         }
 
         // Проверка существования поставщика и доступа к юр.лицу ресторана
@@ -6397,15 +6415,16 @@ if ($endpoint === 'rpc') {
                 updated_by = VALUES(updated_by)
         ")->execute([$supplierId, $restaurantId, $orderDay, $deliveryDay, $isActive, $updatedBy]);
 
-        if ($deadlineTime !== null) {
+        if ($deadlineTime !== null || $reminderTimesJson !== null) {
             $pdo->prepare("
-                INSERT INTO supplier_schedule_deadlines (supplier_id, restaurant_id, order_day, deadline_time, updated_at, updated_by)
-                VALUES (?, ?, ?, ?, NOW(), ?)
+                INSERT INTO supplier_schedule_deadlines (supplier_id, restaurant_id, order_day, deadline_time, reminder_times, updated_at, updated_by)
+                VALUES (?, ?, ?, ?, ?, NOW(), ?)
                 ON DUPLICATE KEY UPDATE
                     deadline_time = VALUES(deadline_time),
+                    reminder_times = VALUES(reminder_times),
                     updated_at = NOW(),
                     updated_by = VALUES(updated_by)
-            ")->execute([$supplierId, $restaurantId, $orderDay, $deadlineTime, $updatedBy]);
+            ")->execute([$supplierId, $restaurantId, $orderDay, $deadlineTime, $reminderTimesJson, $updatedBy]);
         } else {
             $pdo->prepare("DELETE FROM supplier_schedule_deadlines WHERE supplier_id = ? AND restaurant_id = ? AND order_day = ?")
                 ->execute([$supplierId, $restaurantId, $orderDay]);
@@ -6423,6 +6442,7 @@ if ($endpoint === 'rpc') {
         $deliveryDow = (int)($body['delivery_dow'] ?? 0);
         $deadlineDow = (int)($body['deadline_dow'] ?? 0);
         $deadlineTime = $body['deadline_time'] ?? '';
+        $reminderTimes = $body['reminder_times'] ?? null;
 
         if (!$supplierId
             || !in_array($deliveryDow, [1,2,3,4,5,6,7], true)
@@ -6431,6 +6451,22 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Некорректные данные'], 400);
         }
         if (strlen($deadlineTime) === 5) $deadlineTime .= ':00';
+
+        // Валидация reminder_times
+        $reminderTimesJson = null;
+        if ($reminderTimes !== null) {
+            if (!is_array($reminderTimes)) respond(['error' => 'reminder_times должен быть массивом'], 400);
+            $cleaned = [];
+            foreach ($reminderTimes as $rt) {
+                if (!is_array($rt)) continue;
+                $db = (int)($rt['days_before'] ?? -1);
+                $t = $rt['time'] ?? '';
+                if ($db < 0 || $db > 7) respond(['error' => 'days_before должен быть 0..7'], 400);
+                if (!preg_match('/^\d{1,2}:\d{2}$/', $t)) respond(['error' => 'Некорректный формат времени'], 400);
+                $cleaned[] = ['days_before' => $db, 'time' => $t];
+            }
+            $reminderTimesJson = $cleaned ? json_encode($cleaned, JSON_UNESCAPED_UNICODE) : null;
+        }
 
         $supStmt = $pdo->prepare("SELECT id FROM suppliers WHERE id = ?");
         $supStmt->execute([$supplierId]);
@@ -6441,11 +6477,11 @@ if ($endpoint === 'rpc') {
         $exists->execute([$supplierId, $deliveryDow]);
         $id = $exists->fetchColumn();
         if ($id) {
-            $pdo->prepare("UPDATE supplier_default_deadlines SET deadline_dow = ?, deadline_time = ? WHERE id = ?")
-                ->execute([$deadlineDow, $deadlineTime, $id]);
+            $pdo->prepare("UPDATE supplier_default_deadlines SET deadline_dow = ?, deadline_time = ?, reminder_times = ? WHERE id = ?")
+                ->execute([$deadlineDow, $deadlineTime, $reminderTimesJson, $id]);
         } else {
-            $pdo->prepare("INSERT INTO supplier_default_deadlines (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)")
-                ->execute([$supplierId, $deliveryDow, $deadlineDow, $deadlineTime]);
+            $pdo->prepare("INSERT INTO supplier_default_deadlines (supplier_id, delivery_dow, deadline_dow, deadline_time, reminder_times) VALUES (?, ?, ?, ?, ?)")
+                ->execute([$supplierId, $deliveryDow, $deadlineDow, $deadlineTime, $reminderTimesJson]);
         }
         respond(['success' => true]);
     }

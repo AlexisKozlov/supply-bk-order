@@ -7,7 +7,10 @@
     <div class="rtr-list">
       <div v-for="it in items" :key="it.supplier_id + '-' + it.order_day" class="rtr-item" :class="itemClass(it)">
         <div class="rtr-info">
-          <div class="rtr-supplier">{{ it.supplier_name }}</div>
+          <div class="rtr-supplier">
+            {{ it.supplier_name }}
+            <span v-if="it.is_main_delivery" class="rtr-tag-main">склад</span>
+          </div>
           <div class="rtr-deadline">
             <template v-if="it.is_acknowledged">
               <span class="rtr-status-done">✓ Заявка подана</span>

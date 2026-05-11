@@ -143,6 +143,17 @@
                     @pointercancel="onPointerUp"
                   >{{ getTime(r, d.num) }}</span>
                   <span v-else class="ds-time-empty">—</span>
+                  <button
+                    v-if="getTime(r, d.num)"
+                    class="ds-deadline-btn"
+                    :class="{ 'ds-deadline-btn-set': getDeadline(r, d.num), 'ds-deadline-btn-empty': isEditing && !getDeadline(r, d.num) }"
+                    :title="getDeadline(r, d.num) ? `Заявка: ${DAY_SHORT_LOCAL[getDeadline(r, d.num).order_day]} до ${getDeadline(r, d.num).order_deadline}` : (isEditing ? 'Задать дедлайн заявки' : 'Дедлайн заявки не задан')"
+                    :disabled="!isEditing"
+                    @click.stop="startDeadlineEdit(r, d.num)"
+                  >
+                    <span v-if="getDeadline(r, d.num)" class="ds-deadline-text">{{ DAY_SHORT_LOCAL[getDeadline(r, d.num).order_day] }} {{ getDeadline(r, d.num).order_deadline }}</span>
+                    <span v-else>+ заявка</span>
+                  </button>
                 </template>
               </td>
               <td
@@ -263,6 +274,49 @@
       <ConfirmModal v-if="showCardConfirm" title="Закрыть без сохранения?" message="Изменённое время не будет сохранено." @confirm="cardEditing = null; showCardConfirm = false" @cancel="showCardConfirm = false" />
     </Teleport>
 
+    <!-- ═══ ORDER DEADLINE MODAL ═══ -->
+    <Teleport to="body">
+      <div v-if="editingDeadline" class="modal" @click.self="cancelDeadlineEdit">
+        <div class="modal-box ds-deadline-modal" style="max-width: 420px;">
+          <div class="modal-header">
+            <h2>Дедлайн заявки на поставку</h2>
+            <button class="modal-close" @click="cancelDeadlineEdit"><BkIcon name="close" size="sm"/></button>
+          </div>
+          <div class="ds-modal-body">
+            <div class="ds-edit-info">
+              <span class="ds-edit-num">{{ editingDeadline.restaurantNumber }}</span>
+              {{ editingDeadline.restaurantAddress }}
+            </div>
+            <div class="ds-edit-day">Поставка: {{ editingDeadline.dayLabel }}</div>
+            <div class="ds-dl-hint">Когда ресторан должен подать заявку через 1С, чтобы заказ попал в эту доставку.</div>
+            <div class="ds-dl-row">
+              <label class="ds-label">
+                <span class="ds-label-text">День подачи</span>
+                <select v-model.number="editingDeadline.orderDay">
+                  <option v-for="i in 7" :key="i" :value="i">{{ DAY_NAMES_FULL_LOCAL[i] }}</option>
+                </select>
+              </label>
+              <label class="ds-label">
+                <span class="ds-label-text">Крайний срок</span>
+                <input v-model="editingDeadline.orderDeadline" type="time" />
+              </label>
+            </div>
+            <div class="ds-dl-reminders">
+              <div class="ds-label-text" style="margin-bottom:6px;">Времена напоминаний</div>
+              <ReminderTimesEditor v-model="editingDeadline.reminderTimes" />
+            </div>
+          </div>
+          <div class="ds-modal-footer">
+            <button v-if="editingDeadline.hadValue" class="btn ds-btn-danger" @click="clearDeadlineEdit">Очистить</button>
+            <div class="ds-modal-footer-right">
+              <button class="btn" @click="cancelDeadlineEdit">Отмена</button>
+              <button class="btn primary" @click="saveDeadlineEdit">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- ═══ RESTAURANT EDIT MODAL ═══ -->
     <Teleport to="body">
       <div v-if="editingRestaurant" class="modal" @click.self="tryCloseRestaurant">
@@ -334,6 +388,7 @@ import { db } from '@/lib/apiClient.js';
 
 const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const ReminderTimesEditor = defineAsyncComponent(() => import('@/components/ui/ReminderTimesEditor.vue'));
 
 const store = useRestaurantStore();
 const orderStore = useOrderStore();
@@ -442,6 +497,15 @@ function getDough(restaurant, day) {
   const s = rSched.get(day);
   return s?.dough_time || '';
 }
+function getDeadline(restaurant, day) {
+  const rSched = store.scheduleByRestaurant.get(String(restaurant.id));
+  if (!rSched) return null;
+  const s = rSched.get(day);
+  if (!s?.order_day || !s?.order_deadline) return null;
+  return { order_day: Number(s.order_day), order_deadline: String(s.order_deadline).slice(0, 5) };
+}
+const DAY_NAMES_FULL_LOCAL = ['', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+const DAY_SHORT_LOCAL = ['', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
 // ПС-группа: показываем колонку «тесто» дополнительно к основной доставке
 const isPSGroup = computed(() => {
   const le = orderStore.settings.legalEntity || '';
@@ -568,6 +632,71 @@ async function saveNoteEdit() {
 
 function cancelNoteEdit() {
   editingNote.value = null;
+}
+
+// ═══ Дедлайн подачи заявки на основную поставку ═══
+const editingDeadline = ref(null);
+let savingDeadline = false;
+
+function startDeadlineEdit(restaurant, day) {
+  if (!isEditing.value) return;
+  const current = getDeadline(restaurant, day);
+  // По умолчанию — день перед доставкой
+  const defaultOrderDay = day > 1 ? day - 1 : 7;
+  const rSched = store.scheduleByRestaurant.get(String(restaurant.id));
+  const rawRt = rSched?.get(day)?.reminder_times;
+  let reminderTimes = [];
+  if (rawRt) {
+    try {
+      const arr = typeof rawRt === 'string' ? JSON.parse(rawRt) : rawRt;
+      if (Array.isArray(arr)) reminderTimes = arr
+        .filter(x => x && /^\d{1,2}:\d{2}/.test(x.time || ''))
+        .map(x => ({ days_before: Number(x.days_before) | 0, time: String(x.time).slice(0, 5) }));
+    } catch (e) { /* ignore */ }
+  }
+  editingDeadline.value = {
+    restaurantId: restaurant.id,
+    restaurantNumber: restaurant.number,
+    restaurantAddress: restaurant.address,
+    deliveryDay: day,
+    dayLabel: DAY_NAMES_FULL_LOCAL[day] || `День ${day}`,
+    orderDay: current?.order_day || defaultOrderDay,
+    orderDeadline: current?.order_deadline || '14:00',
+    reminderTimes,
+    hadValue: !!current,
+  };
+}
+
+async function saveDeadlineEdit() {
+  if (!editingDeadline.value || savingDeadline) return;
+  const { restaurantId, deliveryDay, orderDay, orderDeadline, reminderTimes } = editingDeadline.value;
+  savingDeadline = true;
+  try {
+    await store.saveScheduleOrderDeadline(restaurantId, deliveryDay, orderDay, orderDeadline, reminderTimes || []);
+    editingDeadline.value = null;
+  } catch (e) {
+    toastStore.error('Ошибка сохранения дедлайна');
+  } finally {
+    savingDeadline = false;
+  }
+}
+
+async function clearDeadlineEdit() {
+  if (!editingDeadline.value || savingDeadline) return;
+  const { restaurantId, deliveryDay } = editingDeadline.value;
+  savingDeadline = true;
+  try {
+    await store.saveScheduleOrderDeadline(restaurantId, deliveryDay, null, null, null);
+    editingDeadline.value = null;
+  } catch (e) {
+    toastStore.error('Ошибка очистки дедлайна');
+  } finally {
+    savingDeadline = false;
+  }
+}
+
+function cancelDeadlineEdit() {
+  editingDeadline.value = null;
 }
 
 // ═══ Drag & drop (move delivery between days) ═══
@@ -988,6 +1117,43 @@ function formatLastUpdate(upd) {
   cursor: grabbing;
 }
 .ds-time-empty { color: #D5D0CA; font-size: 10px; }
+
+/* Кнопка дедлайна заявки в ячейке дня */
+.ds-deadline-btn {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.3;
+  border: 1px dashed #cdd5df;
+  background: transparent;
+  color: #8a93a0;
+  border-radius: 8px;
+  cursor: default;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ds-deadline-btn:disabled { display: none; }
+.ds-deadline-btn-empty { cursor: pointer; }
+.ds-deadline-btn-empty:hover { background: #f4f7fb; color: #4a5260; border-color: #b0bdcc; }
+.ds-deadline-btn-set {
+  background: #fff4e0;
+  color: #8a5a00;
+  border: 1px solid #f1d28a;
+  border-style: solid;
+  cursor: pointer;
+}
+.ds-deadline-btn-set:hover { background: #ffe9c3; }
+.ds-deadline-text { font-weight: 600; }
+
+/* Модалка дедлайна — кнопка очистки слева */
+.ds-deadline-modal .ds-modal-footer { justify-content: space-between; }
+.ds-btn-danger { color: #b30000; }
+.ds-btn-danger:hover { background: #ffeaea; }
+.ds-dl-hint { font-size: 12px; color: #777; margin: 4px 0 12px; line-height: 1.4; }
+.ds-dl-row { display: flex; gap: 12px; align-items: stretch; }
+.ds-dl-row .ds-label { flex: 1; }
+.ds-dl-reminders { margin-top: 14px; padding-top: 14px; border-top: 1px dashed #e8e8e8; }
 
 /* ПС: ячейка с двумя чипами (основная доставка + тесто) рядом */
 .ds-td-ps { padding: 4px 3px !important; vertical-align: middle; }

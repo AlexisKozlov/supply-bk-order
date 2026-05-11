@@ -14,6 +14,11 @@
 
 if ($endpoint !== 'restaurant-reminders') return;
 
+// Sentinel supplier_id для записей основной поставки в общих таблицах
+// (reminder_acknowledgements / reminder_runs). Позволяет переиспользовать
+// существующую инфраструктуру без миграций schema.
+const MAIN_DELIVERY_SUPPLIER_ID = '00000000-0000-0000-0000-000000000000';
+
 function rrRespond($data, $code = 200) {
     http_response_code($code);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
@@ -152,6 +157,53 @@ if ($subpoint === 'list' && $method === 'GET') {
     }
     unset($g);
 
+    // ─── Основная поставка ────────────────────────────────────────────────
+    // Расписание из delivery_schedule (только строки, где закупка задала
+    // дедлайн подачи заявки) + подписка ресторана + выбранные TG-получатели.
+    $mainDays = [];
+    $dsStmt = $pdo->prepare("
+        SELECT day_of_week AS delivery_day, order_day, order_deadline, delivery_time
+        FROM delivery_schedule
+        WHERE restaurant_id = ? AND order_day IS NOT NULL AND order_deadline IS NOT NULL
+        ORDER BY day_of_week
+    ");
+    $dsStmt->execute([$rrRestPk]);
+    foreach ($dsStmt->fetchAll() as $r) {
+        $mainDays[] = [
+            'order_day'      => (int)$r['order_day'],
+            'delivery_day'   => (int)$r['delivery_day'],
+            'deadline_time'  => $r['order_deadline'],
+            'delivery_time'  => $r['delivery_time'] ?: null,
+        ];
+    }
+
+    $mainSub = null;
+    $mainSelectedTg = [];
+    $mainSubRow = $pdo->prepare("
+        SELECT id, is_enabled, portal_enabled, telegram_enabled
+        FROM restaurant_main_delivery_subscriptions
+        WHERE restaurant_id = ?
+    ");
+    $mainSubRow->execute([$rrRestPk]);
+    $mainSubData = $mainSubRow->fetch();
+    if ($mainSubData) {
+        $mainSub = [
+            'id'               => (int)$mainSubData['id'],
+            'is_enabled'       => (int)$mainSubData['is_enabled'] === 1,
+            'portal_enabled'   => (int)$mainSubData['portal_enabled'] === 1,
+            'telegram_enabled' => (int)$mainSubData['telegram_enabled'] === 1,
+        ];
+        $mtg = $pdo->prepare("
+            SELECT ro_tg_sub_id
+            FROM restaurant_main_delivery_tg_subscribers
+            WHERE subscription_id = ? AND is_active = 1
+        ");
+        $mtg->execute([(int)$mainSubData['id']]);
+        foreach ($mtg->fetchAll() as $r) {
+            $mainSelectedTg[] = (int)$r['ro_tg_sub_id'];
+        }
+    }
+
     rrRespond([
         'restaurant' => [
             'id'     => $rrRestPk,
@@ -160,6 +212,11 @@ if ($subpoint === 'list' && $method === 'GET') {
         ],
         'available_tg' => $availableTg,
         'groups' => array_values($bySupplier),
+        'main_delivery' => [
+            'days'            => $mainDays,
+            'subscription'    => $mainSub,
+            'selected_tg_ids' => $mainSelectedTg,
+        ],
     ]);
 }
 
@@ -258,6 +315,91 @@ if ($subpoint === 'tg-set' && $method === 'POST') {
     rrRespond(['success' => true]);
 }
 
+if ($subpoint === 'main-set' && $method === 'POST') {
+    // Подписка на напоминания об основной поставке (одна на ресторан).
+    // Принимает: { is_enabled, telegram_enabled }
+    $isEnabled       = isset($body['is_enabled'])       ? (!empty($body['is_enabled'])       ? 1 : 0) : 1;
+    $portalEnabled   = $isEnabled;
+    $telegramEnabled = isset($body['telegram_enabled']) ? (!empty($body['telegram_enabled']) ? 1 : 0) : 0;
+    $updatedBy = 'ro:' . $rrUser['restaurant_number'];
+
+    $pdo->prepare("
+        INSERT INTO restaurant_main_delivery_subscriptions
+            (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_at, updated_by)
+        VALUES (?, ?, ?, ?, NOW(), ?)
+        ON DUPLICATE KEY UPDATE
+            is_enabled = VALUES(is_enabled),
+            portal_enabled = VALUES(portal_enabled),
+            telegram_enabled = VALUES(telegram_enabled),
+            updated_at = NOW(),
+            updated_by = VALUES(updated_by)
+    ")->execute([$rrRestPk, $isEnabled, $portalEnabled, $telegramEnabled, $updatedBy]);
+
+    rrRespond(['success' => true]);
+}
+
+if ($subpoint === 'main-tg-set' && $method === 'POST') {
+    // Выбрать получателей TG-уведомлений для основной поставки.
+    // Принимает: { ro_tg_sub_ids: [int, ...] } — полный новый список.
+    $ids = $body['ro_tg_sub_ids'] ?? [];
+    if (!is_array($ids)) $ids = [];
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+
+    // Проверка: все переданные TG-подписчики принадлежат ресторану и верифицированы
+    if ($ids) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $own = $pdo->prepare("
+            SELECT COUNT(*) FROM ro_telegram_subs
+            WHERE id IN ($ph)
+              AND restaurant_number = ?
+              AND legal_entity_group = ?
+              AND verified_at IS NOT NULL
+        ");
+        $own->execute(array_merge($ids, [$rrUser['restaurant_number'], $rrUser['legal_entity_group'] ?? 'BK_VM']));
+        if ((int)$own->fetchColumn() !== count($ids)) {
+            rrRespond(['error' => 'Один из подписчиков не принадлежит ресторану'], 403);
+        }
+    }
+
+    // Получаем или создаём подписку
+    $sub = $pdo->prepare("SELECT id FROM restaurant_main_delivery_subscriptions WHERE restaurant_id = ?");
+    $sub->execute([$rrRestPk]);
+    $subId = $sub->fetchColumn();
+    if (!$subId) {
+        $pdo->prepare("
+            INSERT INTO restaurant_main_delivery_subscriptions
+                (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_by)
+            VALUES (?, 1, 1, ?, ?)
+        ")->execute([$rrRestPk, $ids ? 1 : 0, 'ro:' . $rrUser['restaurant_number']]);
+        $subId = (int)$pdo->lastInsertId();
+    } else if ($ids) {
+        $pdo->prepare("
+            UPDATE restaurant_main_delivery_subscriptions
+            SET telegram_enabled = 1, updated_at = NOW()
+            WHERE id = ?
+        ")->execute([$subId]);
+    }
+
+    // Полная замена списка получателей
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("DELETE FROM restaurant_main_delivery_tg_subscribers WHERE subscription_id = ?")
+            ->execute([$subId]);
+        if ($ids) {
+            $ins = $pdo->prepare("
+                INSERT INTO restaurant_main_delivery_tg_subscribers (subscription_id, ro_tg_sub_id, is_active)
+                VALUES (?, ?, 1)
+            ");
+            foreach ($ids as $id) $ins->execute([$subId, $id]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        rrRespond(['error' => 'Ошибка сохранения: ' . $e->getMessage()], 500);
+    }
+    rrRespond(['success' => true]);
+}
+
 if ($subpoint === 'today' && $method === 'GET') {
     // Активные напоминания для ресторана на сегодня (для баннера в кабинете).
     // Возвращает строки с дедлайном, который ещё не прошёл и по которому нет
@@ -325,6 +467,44 @@ if ($subpoint === 'today' && $method === 'GET') {
             'is_expired'       => $isExpired,
         ];
     }
+    // ─── Основная поставка ────────────────────────────────────────────────
+    $mainRow = $pdo->prepare("
+        SELECT ds.order_day, ds.day_of_week AS delivery_day, ds.order_deadline,
+               sub.id AS subscription_id, sub.is_enabled, sub.portal_enabled,
+               ack.id AS ack_id, ack.acknowledged_at, ack.acknowledged_by
+        FROM delivery_schedule ds
+        LEFT JOIN restaurant_main_delivery_subscriptions sub ON sub.restaurant_id = ds.restaurant_id
+        LEFT JOIN reminder_acknowledgements ack
+               ON ack.restaurant_id = ds.restaurant_id AND ack.supplier_id = ?
+              AND ack.target_date = ? AND ack.order_day = ds.order_day
+        WHERE ds.restaurant_id = ?
+          AND ds.order_day = ?
+          AND ds.order_deadline IS NOT NULL
+        ORDER BY ds.day_of_week
+    ");
+    $mainRow->execute([MAIN_DELIVERY_SUPPLIER_ID, $today, $rrRestPk, $todayDow]);
+    foreach ($mainRow->fetchAll() as $r) {
+        $deadline = $r['order_deadline'];
+        $isEnabled = (int)$r['is_enabled'] === 1;
+        $isAcked = !empty($r['ack_id']);
+        $deadlineDt = $deadline ? DateTime::createFromFormat('Y-m-d H:i:s', $today . ' ' . $deadline, $tz) : null;
+        $isExpired = $deadlineDt && $now > $deadlineDt;
+        $items[] = [
+            'supplier_id'      => MAIN_DELIVERY_SUPPLIER_ID,
+            'supplier_name'    => 'Основная поставка',
+            'so_enabled'       => false,
+            'is_main_delivery' => true,
+            'order_day'        => (int)$r['order_day'],
+            'delivery_day'     => (int)$r['delivery_day'],
+            'deadline_time'    => $deadline,
+            'is_subscribed'    => $isEnabled,
+            'is_acknowledged'  => $isAcked,
+            'acknowledged_at'  => $r['acknowledged_at'] ?? null,
+            'acknowledged_by'  => $r['acknowledged_by'] ?? null,
+            'is_expired'       => $isExpired,
+        ];
+    }
+
     rrRespond([
         'today' => $today,
         'today_dow' => $todayDow,
@@ -342,8 +522,13 @@ if ($subpoint === 'acknowledge' && $method === 'POST') {
     if (!$orderDay) $orderDay = (int)(new DateTime('now', $tz))->format('N');
 
     // Проверка: у ресторана есть такая связка на этот день
-    $check = $pdo->prepare("SELECT 1 FROM supplier_schedules WHERE restaurant_id = ? AND supplier_id = ? AND order_day = ? LIMIT 1");
-    $check->execute([$rrRestPk, $supplierId, $orderDay]);
+    if ($supplierId === MAIN_DELIVERY_SUPPLIER_ID) {
+        $check = $pdo->prepare("SELECT 1 FROM delivery_schedule WHERE restaurant_id = ? AND order_day = ? AND order_deadline IS NOT NULL LIMIT 1");
+        $check->execute([$rrRestPk, $orderDay]);
+    } else {
+        $check = $pdo->prepare("SELECT 1 FROM supplier_schedules WHERE restaurant_id = ? AND supplier_id = ? AND order_day = ? LIMIT 1");
+        $check->execute([$rrRestPk, $supplierId, $orderDay]);
+    }
     if (!$check->fetchColumn()) rrRespond(['error' => 'Нет расписания на этот день'], 404);
 
     $by = 'ro:' . $rrUser['restaurant_number'];
