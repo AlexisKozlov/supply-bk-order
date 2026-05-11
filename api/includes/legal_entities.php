@@ -109,6 +109,20 @@ function applyEntityGroupFilter($legalEntity, &$where, &$params, $column = 'lega
     $params[] = $group;
 }
 
+// Возвращает массив кодов групп ('BK_VM','PS'), к которым у пользователя есть доступ.
+function userGroupCodes($sessionUser) {
+    if (!$sessionUser) return [];
+    $userEntities = $sessionUser['legal_entities'] ?? '';
+    if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
+    if (!is_array($userEntities) || empty($userEntities)) return [];
+    $groups = [];
+    foreach ($userEntities as $le) {
+        $g = getEntityGroup($le);
+        if ($g) $groups[$g] = true;
+    }
+    return array_keys($groups);
+}
+
 // Проверяет доступ пользователя к группе юрлиц ('BK_VM' | 'PS').
 // Используется для таблиц, где область видимости — группа, а не одно
 // юрлицо (например, stock_collections). Админ видит всё.

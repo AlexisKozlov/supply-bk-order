@@ -116,6 +116,35 @@ if ($sessionUser && in_array($table, $ENTITY_TABLES)) {
     }
 }
 
+// Проверка доступа к группе юрлиц для таблиц из $GROUP_TABLES
+if ($sessionUser && in_array($table, $GROUP_TABLES)) {
+    $userRole = $sessionUser['role'] ?? 'user';
+    $legFilt = $_GET['legal_entity_group'] ?? null;
+    if ($legFilt) {
+        $legVal = (strpos($legFilt, 'eq.') === 0) ? substr($legFilt, 3) : $legFilt;
+        $legVal = urldecode($legVal);
+        if (!checkLegalEntityGroupAccess($sessionUser, $legVal)) {
+            respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+        }
+    } elseif ($method === 'GET' && $userRole !== 'admin') {
+        // Запрос по конкретному ID — проверка доступа будет по полученной строке.
+        $skipFilter = isset($_GET['id']) || (isset($parts[1]) && $parts[1]);
+        if (!$skipFilter) {
+            // Авто-фильтр legal_entity_group IN (...) внедрим в SQL ниже.
+        }
+    }
+    // Для операций записи проверяем legal_entity_group в теле запроса
+    if ($method !== 'GET' && !empty($body)) {
+        $recsToCheck = (isset($body[0]) && is_array($body[0])) ? $body : [$body];
+        foreach ($recsToCheck as $rec) {
+            $bodyGroup = $rec['legal_entity_group'] ?? null;
+            if ($bodyGroup && !checkLegalEntityGroupAccess($sessionUser, $bodyGroup)) {
+                respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+            }
+        }
+    }
+}
+
 // Дочерние таблицы тендеров — проверяем юрлицо через родительский тендер
 $TENDER_CHILD_TABLES = ['tender_items', 'tender_offers', 'tender_offer_prices', 'tender_files'];
 if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $TENDER_CHILD_TABLES)) {
@@ -140,6 +169,22 @@ if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $TENDER
         $tenderLE = $s->fetchColumn();
         if ($tenderLE && !checkLegalEntityAccess($sessionUser, $tenderLE)) {
             respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
+    }
+}
+
+// Дочерние таблицы с проверкой доступа через родителя (PARENT_LE_CHECK)
+if ($sessionUser && $sessionUser['role'] !== 'admin' && isset($PARENT_LE_CHECK[$table])) {
+    $cfg = $PARENT_LE_CHECK[$table];
+    if ($method !== 'GET' && !empty($body)) {
+        $recsToCheck = (isset($body[0]) && is_array($body[0])) ? $body : [$body];
+        foreach ($recsToCheck as $rec) {
+            $fkVal = $rec[$cfg['fk']] ?? null;
+            if ($fkVal !== null) {
+                if (!checkParentAccess($pdo, $sessionUser, $cfg, $fkVal)) {
+                    respond(['error' => 'Нет доступа'], 403);
+                }
+            }
         }
     }
 }
@@ -248,8 +293,15 @@ if ($method === 'GET') {
     if ($subpoint) {
         $s = $pdo->prepare("SELECT * FROM `$table` WHERE id=?"); $s->execute([$subpoint]); $row = $s->fetch();
         // Проверка доступа к юрлицу при запросе по ID
-        if ($row && $sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && isset($row['legal_entity'])) {
-            if (!checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        if ($row && $sessionUser && $sessionUser['role'] !== 'admin') {
+            if (in_array($table, $ENTITY_TABLES) && isset($row['legal_entity'])) {
+                if (!checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (in_array($table, $GROUP_TABLES) && isset($row['legal_entity_group'])) {
+                if (!checkLegalEntityGroupAccess($sessionUser, $row['legal_entity_group'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (isset($PARENT_LE_CHECK[$table])) {
+                $cfg = $PARENT_LE_CHECK[$table];
+                if (!checkParentAccess($pdo, $sessionUser, $cfg, $row[$cfg['fk']] ?? null)) respond(['error' => 'Нет доступа'], 403);
+            }
         }
         if ($row && $table === 'orders') { $s2 = $pdo->prepare("SELECT * FROM order_items WHERE order_id=? ORDER BY sort_order ASC"); $s2->execute([$subpoint]); $row['order_items'] = $s2->fetchAll(); }
         respond($row ?: ['error'=>'not found'], $row ? 200 : 404);
@@ -300,6 +352,59 @@ if ($method === 'GET') {
         } else {
             // У пользователя нет привязки к юрлицам — не показывать ничего
             $where[] = "1=0";
+        }
+    }
+
+    // Авто-фильтр по группе юрлиц для $GROUP_TABLES, если пользователь не админ и фильтр не указан.
+    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $GROUP_TABLES) && !isset($_GET['legal_entity_group'])) {
+        $userGroups = userGroupCodes($sessionUser);
+        if (!empty($userGroups)) {
+            $gph = implode(',', array_fill(0, count($userGroups), '?'));
+            $where[] = "`legal_entity_group` IN($gph)";
+            $params = array_merge($params, $userGroups);
+        } else {
+            $where[] = "1=0";
+        }
+    }
+
+    // Авто-фильтр для дочерних таблиц через родителя (PARENT_LE_CHECK).
+    if ($sessionUser && $sessionUser['role'] !== 'admin' && isset($PARENT_LE_CHECK[$table])) {
+        $cfg = $PARENT_LE_CHECK[$table];
+        $col = ($cfg['mode'] ?? 'entity') === 'group' ? 'legal_entity_group' : 'legal_entity';
+        if (($cfg['mode'] ?? 'entity') === 'group') {
+            $userVals = userGroupCodes($sessionUser);
+        } else {
+            $userVals = $sessionUser['legal_entities'] ?? '';
+            if (is_string($userVals)) $userVals = json_decode($userVals, true);
+            if (!is_array($userVals)) $userVals = [];
+        }
+        if (empty($userVals)) {
+            $where[] = "1=0";
+        } else {
+            $ph = implode(',', array_fill(0, count($userVals), '?'));
+            if (!empty($cfg['grandparent'])) {
+                $where[] = "`{$cfg['fk']}` IN (SELECT p.id FROM `{$cfg['parent']}` p JOIN `{$cfg['grandparent']}` g ON p.`{$cfg['grandparent_fk']}` = g.id WHERE g.`$col` IN ($ph))";
+            } else {
+                $where[] = "`{$cfg['fk']}` IN (SELECT id FROM `{$cfg['parent']}` WHERE `$col` IN ($ph))";
+            }
+            $params = array_merge($params, $userVals);
+        }
+    }
+
+    // Авто-фильтр для дочерних таблиц тендеров, если tender_id не указан.
+    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $TENDER_CHILD_TABLES) && empty($_GET['tender_id'])) {
+        $userEntities2 = $sessionUser['legal_entities'] ?? '';
+        if (is_string($userEntities2)) $userEntities2 = json_decode($userEntities2, true);
+        if (!is_array($userEntities2) || empty($userEntities2)) {
+            $where[] = "1=0";
+        } else {
+            $ph = implode(',', array_fill(0, count($userEntities2), '?'));
+            if ($table === 'tender_offer_prices') {
+                $where[] = "offer_id IN (SELECT o.id FROM tender_offers o JOIN tenders t ON o.tender_id = t.id WHERE t.legal_entity IN ($ph))";
+            } else {
+                $where[] = "tender_id IN (SELECT id FROM tenders WHERE legal_entity IN ($ph))";
+            }
+            $params = array_merge($params, $userEntities2);
         }
     }
 
@@ -426,19 +531,46 @@ if ($method === 'PATCH' || $method === 'PUT') {
     if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields);
     if ($subpoint) {
         $where = ["`id`=?"]; $params = [$subpoint];
-        // Проверка доступа к юрлицу при обновлении по ID
-        if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES)) {
-            $chk = $pdo->prepare("SELECT legal_entity FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
-            if ($row && isset($row['legal_entity']) && !checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        // Проверка доступа к юрлицу/группе/родителю при обновлении по ID
+        if ($sessionUser && $sessionUser['role'] !== 'admin') {
+            if (in_array($table, $ENTITY_TABLES)) {
+                $chk = $pdo->prepare("SELECT legal_entity FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+                if ($row && isset($row['legal_entity']) && !checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (in_array($table, $GROUP_TABLES)) {
+                $chk = $pdo->prepare("SELECT legal_entity_group FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+                if ($row && isset($row['legal_entity_group']) && !checkLegalEntityGroupAccess($sessionUser, $row['legal_entity_group'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (isset($PARENT_LE_CHECK[$table])) {
+                $cfg = $PARENT_LE_CHECK[$table];
+                $chk = $pdo->prepare("SELECT `{$cfg['fk']}` AS fk FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+                if ($row && !checkParentAccess($pdo, $sessionUser, $cfg, $row['fk'])) respond(['error' => 'Нет доступа'], 403);
+            }
         }
     }
     if (!$where) respond(['error'=>'No filters'], 400);
     // Проверка юрлица для PATCH без ID
-    if (!$subpoint && $sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES)) {
-        if (!isset($_GET['legal_entity'])) respond(['error' => 'Требуется фильтр legal_entity'], 400);
-        $leVal = $_GET['legal_entity'];
-        $leClean = preg_replace('/^eq\./', '', $leVal);
-        if (!checkLegalEntityAccess($sessionUser, $leClean)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+    if (!$subpoint && $sessionUser && $sessionUser['role'] !== 'admin') {
+        if (in_array($table, $ENTITY_TABLES)) {
+            if (!isset($_GET['legal_entity'])) respond(['error' => 'Требуется фильтр legal_entity'], 400);
+            $leVal = preg_replace('/^eq\./', '', $_GET['legal_entity']);
+            if (!checkLegalEntityAccess($sessionUser, $leVal)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        } elseif (in_array($table, $GROUP_TABLES)) {
+            if (!isset($_GET['legal_entity_group'])) respond(['error' => 'Требуется фильтр legal_entity_group'], 400);
+            $gVal = preg_replace('/^eq\./', '', $_GET['legal_entity_group']);
+            if (!checkLegalEntityGroupAccess($sessionUser, $gVal)) respond(['error' => 'Нет доступа к группе юр. лиц'], 403);
+        } elseif (isset($PARENT_LE_CHECK[$table])) {
+            $cfg = $PARENT_LE_CHECK[$table];
+            // Если запрос идёт по id — берём FK из текущей записи.
+            if (isset($_GET['id'])) {
+                $idVal = preg_replace('/^eq\./', '', $_GET['id']);
+                $chk = $pdo->prepare("SELECT `{$cfg['fk']}` AS fk FROM `$table` WHERE id=?"); $chk->execute([$idVal]); $row = $chk->fetch();
+                if ($row && !checkParentAccess($pdo, $sessionUser, $cfg, $row['fk'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (isset($_GET[$cfg['fk']])) {
+                $fkVal = preg_replace('/^eq\./', '', $_GET[$cfg['fk']]);
+                if (!checkParentAccess($pdo, $sessionUser, $cfg, $fkVal)) respond(['error' => 'Нет доступа'], 403);
+            } else {
+                respond(['error' => 'Требуется фильтр id или ' . $cfg['fk']], 400);
+            }
+        }
     }
     if (!is_array($body) || count($body) === 0) respond(['error' => 'Пустой запрос'], 400);
     foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($body[$jc]) && is_array($body[$jc])) $body[$jc] = json_encode($body[$jc], JSON_UNESCAPED_UNICODE); }
@@ -493,19 +625,45 @@ if ($method === 'DELETE') {
     $where = []; $params = [];
     if ($subpoint) {
         $where[] = "`id`=?"; $params[] = $subpoint;
-        // Проверка доступа к юрлицу при удалении по ID
-        if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES)) {
-            $chk = $pdo->prepare("SELECT legal_entity FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
-            if ($row && isset($row['legal_entity']) && !checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        // Проверка доступа к юрлицу/группе/родителю при удалении по ID
+        if ($sessionUser && $sessionUser['role'] !== 'admin') {
+            if (in_array($table, $ENTITY_TABLES)) {
+                $chk = $pdo->prepare("SELECT legal_entity FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+                if ($row && isset($row['legal_entity']) && !checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (in_array($table, $GROUP_TABLES)) {
+                $chk = $pdo->prepare("SELECT legal_entity_group FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+                if ($row && isset($row['legal_entity_group']) && !checkLegalEntityGroupAccess($sessionUser, $row['legal_entity_group'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (isset($PARENT_LE_CHECK[$table])) {
+                $cfg = $PARENT_LE_CHECK[$table];
+                $chk = $pdo->prepare("SELECT `{$cfg['fk']}` AS fk FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+                if ($row && !checkParentAccess($pdo, $sessionUser, $cfg, $row['fk'])) respond(['error' => 'Нет доступа'], 403);
+            }
         }
     } else { $allowedFields = $filterWhitelist[$table] ?? []; foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue; parseFilter($k, $v, $where, $params, $pdo, $table); } if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields); }
     if (!$where) respond(['error'=>'No filters'], 400);
     // Проверка юрлица для DELETE без ID
-    if (!$subpoint && $sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES)) {
-        if (!isset($_GET['legal_entity'])) respond(['error' => 'Требуется фильтр legal_entity'], 400);
-        $leVal = $_GET['legal_entity'];
-        $leClean = preg_replace('/^eq\./', '', $leVal);
-        if (!checkLegalEntityAccess($sessionUser, $leClean)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+    if (!$subpoint && $sessionUser && $sessionUser['role'] !== 'admin') {
+        if (in_array($table, $ENTITY_TABLES)) {
+            if (!isset($_GET['legal_entity'])) respond(['error' => 'Требуется фильтр legal_entity'], 400);
+            $leVal = preg_replace('/^eq\./', '', $_GET['legal_entity']);
+            if (!checkLegalEntityAccess($sessionUser, $leVal)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        } elseif (in_array($table, $GROUP_TABLES)) {
+            if (!isset($_GET['legal_entity_group'])) respond(['error' => 'Требуется фильтр legal_entity_group'], 400);
+            $gVal = preg_replace('/^eq\./', '', $_GET['legal_entity_group']);
+            if (!checkLegalEntityGroupAccess($sessionUser, $gVal)) respond(['error' => 'Нет доступа к группе юр. лиц'], 403);
+        } elseif (isset($PARENT_LE_CHECK[$table])) {
+            $cfg = $PARENT_LE_CHECK[$table];
+            if (isset($_GET['id'])) {
+                $idVal = preg_replace('/^eq\./', '', $_GET['id']);
+                $chk = $pdo->prepare("SELECT `{$cfg['fk']}` AS fk FROM `$table` WHERE id=?"); $chk->execute([$idVal]); $row = $chk->fetch();
+                if ($row && !checkParentAccess($pdo, $sessionUser, $cfg, $row['fk'])) respond(['error' => 'Нет доступа'], 403);
+            } elseif (isset($_GET[$cfg['fk']])) {
+                $fkVal = preg_replace('/^eq\./', '', $_GET[$cfg['fk']]);
+                if (!checkParentAccess($pdo, $sessionUser, $cfg, $fkVal)) respond(['error' => 'Нет доступа'], 403);
+            } else {
+                respond(['error' => 'Требуется фильтр id или ' . $cfg['fk']], 400);
+            }
+        }
     }
     // Запоминаем ID удаляемых записей для аудита
     $deletedIds = [];

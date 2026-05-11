@@ -1273,7 +1273,7 @@ async function saveEditProducts() {
 
     for (const id of toDelete) {
       // Delete associated data first
-      await db.from('stock_collection_data').delete().eq('product_id', id);
+      await db.from('stock_collection_data').delete().eq('collection_id', collId).eq('product_id', id);
       await db.from('stock_collection_products').delete().eq('id', id);
     }
 

@@ -453,8 +453,30 @@ function auditLog($pdo, $action, $entityType, $entityId, $userName, $details = n
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
 // Таблицы с колонкой legal_entity — для автоматической фильтрации по юрлицу
 // order_items и item_order НЕ включены: у них нет legal_entity, доступ контролируется через родительскую таблицу orders
-// marketing_activities, order_corrections, chat_conversations — общие для группы BK+VM by design (см. shared_tables_bk_vm), фильтр по юрлицу не применяем.
-$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports','plt_deliveries','plt_daily_stock','plt_summary'];
+// order_corrections, chat_conversations — общие для группы BK+VM by design (см. shared_tables_bk_vm) — фильтруются через $GROUP_TABLES по legal_entity_group.
+$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports','plt_deliveries','plt_daily_stock','plt_summary','marketing_activities'];
+
+// Таблицы с колонкой legal_entity_group — фильтруются по группе юрлиц (BK_VM или PS).
+// Используются для общих между BK+VM сущностей: чаты, корректировки, рецепты, распределение.
+$GROUP_TABLES = ['chat_conversations','order_corrections','dist_sessions','recipes','recipe_groups'];
+
+// Дочерние таблицы без собственного legal_entity — проверка доступа идёт через родителя.
+// mode: 'entity' — родитель имеет legal_entity; 'group' — родитель имеет legal_entity_group.
+// При наличии grandparent доступ проверяется через цепочку из двух родителей.
+$PARENT_LE_CHECK = [
+    'chat_messages'              => ['parent' => 'chat_conversations',     'fk' => 'conversation_id',      'mode' => 'group'],
+    'marketing_activity_items'   => ['parent' => 'marketing_activities',   'fk' => 'activity_id',          'mode' => 'entity'],
+    'marketing_activity_files'   => ['parent' => 'marketing_activities',   'fk' => 'activity_id',          'mode' => 'entity'],
+    'recipe_ingredients'         => ['parent' => 'recipes',                'fk' => 'recipe_id',            'mode' => 'group'],
+    'recipe_group_items'         => ['parent' => 'recipe_groups',          'fk' => 'group_id',             'mode' => 'group'],
+    'dist_session_products'      => ['parent' => 'dist_sessions',          'fk' => 'session_id',           'mode' => 'group'],
+    'dist_notes'                 => ['parent' => 'dist_sessions',          'fk' => 'session_id',           'mode' => 'group'],
+    'dist_entries'               => ['parent' => 'dist_session_products',  'fk' => 'session_product_id',   'mode' => 'group', 'grandparent' => 'dist_sessions', 'grandparent_fk' => 'session_id'],
+    'stock_collection_products'  => ['parent' => 'stock_collections',      'fk' => 'collection_id',        'mode' => 'entity'],
+    'stock_collection_data'      => ['parent' => 'stock_collections',      'fk' => 'collection_id',        'mode' => 'entity'],
+    'deficit_results'            => ['parent' => 'deficit_sessions',       'fk' => 'session_id',           'mode' => 'entity'],
+    'deficit_restaurant_stock'   => ['parent' => 'deficit_tokens',         'fk' => 'token_id',             'mode' => 'entity'],
+];
 
 function resolvePermissions($role, $permissionsJson, $templates) {
     $base = $templates[$role] ?? $templates['user'];
@@ -506,6 +528,34 @@ function requireAdmin($sessionUser) {
     if (($sessionUser['role'] ?? '') !== 'admin') {
         respond(['error' => 'Только для администратора'], 403);
     }
+}
+
+// Проверка доступа дочерней записи через родителя ($PARENT_LE_CHECK).
+// $cfg — запись из $PARENT_LE_CHECK, $fkValue — значение FK (id родителя).
+function checkParentAccess($pdo, $sessionUser, $cfg, $fkValue) {
+    if (!$sessionUser) return false;
+    if (($sessionUser['role'] ?? '') === 'admin') return true;
+    if (!$fkValue) return false;
+    $parent = $cfg['parent'];
+    if (!empty($cfg['grandparent'])) {
+        $col = ($cfg['mode'] ?? 'entity') === 'group' ? 'legal_entity_group' : 'legal_entity';
+        $sql = "SELECT g.`$col` FROM `$parent` p JOIN `{$cfg['grandparent']}` g ON p.`{$cfg['grandparent_fk']}` = g.id WHERE p.id = ?";
+    } else {
+        $col = ($cfg['mode'] ?? 'entity') === 'group' ? 'legal_entity_group' : 'legal_entity';
+        $sql = "SELECT `$col` FROM `$parent` WHERE id = ?";
+    }
+    try {
+        $s = $pdo->prepare($sql);
+        $s->execute([$fkValue]);
+        $val = $s->fetchColumn();
+    } catch (Exception $e) {
+        return false;
+    }
+    if ($val === false || $val === null) return false;
+    if (($cfg['mode'] ?? 'entity') === 'group') {
+        return checkLegalEntityGroupAccess($sessionUser, $val);
+    }
+    return checkLegalEntityAccess($sessionUser, $val);
 }
 
 function checkLegalEntityAccess($sessionUser, $legalEntity) {
