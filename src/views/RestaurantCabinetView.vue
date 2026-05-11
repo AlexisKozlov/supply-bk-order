@@ -140,11 +140,8 @@
         </button>
       </div>
 
-    <!-- ══════ Loading ══════ -->
-    <div v-if="globalLoading" class="cab-loader">
-      <div class="cab-spin"></div>
-    </div>
-    <section v-else-if="globalError" class="cab-section">
+    <!-- ══════ Global error ══════ -->
+    <section v-if="globalError" class="cab-section">
       <div class="cab-empty-card">
         <h2>Не удалось открыть кабинет</h2>
         <p>{{ globalError }}</p>
@@ -153,8 +150,32 @@
     </section>
 
     <!-- ══════ TAB: Дашборд ══════ -->
-    <section v-if="activeTab === 'dashboard' && !globalLoading && !globalError" class="cab-section">
-      <div class="dash-wrap">
+    <section v-if="activeTab === 'dashboard' && !globalError" class="cab-section">
+      <!-- Skeleton, пока первичная загрузка не завершена -->
+      <div v-if="globalLoading" class="dash-wrap dash-skeleton" aria-busy="true">
+        <div class="dash-col-main">
+          <div class="sk-block sk-shimmer sk-h-72"></div>
+          <div class="sk-grid">
+            <div class="sk-block sk-shimmer sk-h-88"></div>
+            <div class="sk-block sk-shimmer sk-h-88"></div>
+          </div>
+          <div class="sk-tiles">
+            <div class="sk-block sk-shimmer sk-h-72"></div>
+            <div class="sk-block sk-shimmer sk-h-72"></div>
+            <div class="sk-block sk-shimmer sk-h-72"></div>
+          </div>
+          <div class="sk-list">
+            <div class="sk-block sk-shimmer sk-h-44"></div>
+            <div class="sk-block sk-shimmer sk-h-44"></div>
+            <div class="sk-block sk-shimmer sk-h-44"></div>
+          </div>
+        </div>
+        <div class="dash-col-side">
+          <div class="sk-block sk-shimmer sk-h-220"></div>
+        </div>
+      </div>
+      <!-- Реальный дашборд (после загрузки) -->
+      <div v-if="!globalLoading" class="dash-wrap">
         <div class="dash-col-main">
           <!-- Напоминания на сегодня -->
           <RestaurantTodayReminders />
@@ -220,6 +241,14 @@
                 </div>
                 <span class="dash-tile-arrow">›</span>
               </button>
+              <button class="dash-tile dash-tile--reminders" @click="switchTab('orders', 'reminders')">
+                <span class="dash-tile-icon" v-html="tileIconSvg.reminders"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Напоминания <span class="dash-tile-beta">BETA</span></div>
+                  <div class="dash-tile-sub">О подаче заявок поставщикам</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
+              </button>
               <a v-if="canUseCardSearch" class="dash-tile dash-tile--cards" href="/search-cards" target="_blank">
                 <span class="dash-tile-icon" v-html="tileIconSvg.search"></span>
                 <div class="dash-tile-text">
@@ -280,84 +309,16 @@
     </section>
 
     <!-- ══════ TAB: Важная информация ══════ -->
-    <section v-if="activeTab === 'info' && !globalLoading && !globalError" class="cab-section info-section">
-      <div v-if="importantLoading && !importantPosts.length" class="cab-empty-card">
-        <BurgerSpinner text="Загрузка..." />
-      </div>
-      <div v-else-if="!importantPosts.length" class="info-empty">
-        <span class="info-empty-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.5V14a2 2 0 0 1-2 2h-7l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12"/><circle cx="20" cy="5" r="3"/></svg>
-        </span>
-        <h3>Пока всё спокойно</h3>
-        <p>Когда отдел закупок опубликует важную информацию, она появится здесь.</p>
-      </div>
-      <template v-else>
-        <!-- Чипы-фильтры (только если постов > 4) -->
-        <div v-if="importantPosts.length > 4" class="info-filter-chips">
-          <button class="info-fchip" :class="{ active: infoFilter === 'all' }" @click="infoFilter = 'all'">
-            Все <span class="info-fchip-count">{{ importantPosts.length }}</span>
-          </button>
-          <button class="info-fchip" :class="{ active: infoFilter === 'unread' }" @click="infoFilter = 'unread'">
-            Непрочитанные <span class="info-fchip-count">{{ importantPostsUnreadCount }}</span>
-          </button>
-        </div>
-
-        <div v-if="!importantPostsFiltered.length" class="info-empty">
-          <span class="info-empty-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg></span>
-          <h3>Всё прочитано</h3>
-          <p>В этой категории больше нет сообщений.</p>
-        </div>
-
-        <div v-else class="info-list">
-          <article
-            v-for="post in importantPostsFiltered"
-            :key="post.id"
-            class="info-card"
-            :class="{ unread: !post.is_read }"
-          >
-            <header class="info-card-head">
-              <div class="info-card-author">
-                <span class="info-card-avatar">{{ infoAvatar(post.created_by) }}</span>
-                <div class="info-card-author-info">
-                  <div class="info-card-author-name">{{ post.created_by || 'Отдел закупок' }}</div>
-                  <time class="info-card-time">{{ fmtDateTime(post.published_at || post.created_at) }}</time>
-                </div>
-              </div>
-              <span v-if="!post.is_read" class="info-card-dot" aria-label="Новое"></span>
-            </header>
-            <h3 v-if="post.title" class="info-card-title">{{ post.title }}</h3>
-            <p class="info-card-message">{{ post.message }}</p>
-
-            <div v-if="post.files?.length" class="info-card-files">
-              <button
-                v-for="file in post.files"
-                :key="file.id"
-                class="info-file"
-                :class="{ image: isImportantImage(file) }"
-                @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
-              >
-                <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" class="info-file-img" />
-                <span v-else class="info-file-ico" v-html="cabIconSvg.file"></span>
-                <span class="info-file-meta">
-                  <span class="info-file-name">{{ file.file_name }}</span>
-                  <span class="info-file-size">{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</span>
-                </span>
-              </button>
-            </div>
-
-            <footer v-if="!post.is_read" class="info-card-foot">
-              <button class="info-read" @click="markImportantRead(post)">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                Отметить прочитанным
-              </button>
-            </footer>
-          </article>
-        </div>
-      </template>
-    </section>
+    <RestaurantInfoTab
+      v-if="activeTab === 'info' && !globalError"
+      :posts="importantPosts"
+      :loading="importantLoading"
+      :preview-urls="importantPreviewUrls"
+      @mark-read="markImportantRead"
+    />
 
     <!-- ══════ TAB: Заказы ══════ -->
-    <section v-if="activeTab === 'orders' && !globalLoading && !globalError" class="cab-section cab-section-orders">
+    <section v-if="activeTab === 'orders' && !globalError" class="cab-section cab-section-orders">
       <div class="ord-tabs mob-order-tabs" aria-label="Разделы заказов">
         <button v-if="roStore.restaurantOrdersEnabled" class="ord-tab" :class="{ active: orderSubTab === 'delivery' }" @click="switchTab('orders', 'delivery')">
           Основная поставка
@@ -700,43 +661,16 @@
       </div>
 
       <!-- История в заказах -->
-      <div v-if="orderSubTab === 'history'" class="history-list">
-        <div v-if="historyLoading" class="mini-loader"><div class="cab-spin"></div></div>
-        <div v-else-if="historyError" class="cab-empty-card"><p>{{ historyError }}</p></div>
-        <div v-else-if="!historyOrders.length" class="cab-empty-card"><h2>Нет заказов</h2></div>
-        <template v-else>
-          <!-- Фильтр по источнику -->
-          <div class="hist-filters">
-            <button class="hist-filter-chip" :class="{ active: historyFilter === 'all' }" @click="historyFilter = 'all'">Все</button>
-            <button v-for="src in historySourceOptions" :key="src.label"
-              class="hist-filter-chip" :class="[{ active: historyFilter === src.label }, 'src-chip-' + src.source]"
-              @click="historyFilter = src.label">
-              {{ src.label }}
-            </button>
-          </div>
-          <div v-if="!filteredHistoryOrders.length" class="cab-empty-card"><p>Нет заказов по этому фильтру</p></div>
-          <div v-else class="hist-cards">
-            <div v-for="order in filteredHistoryOrders" :key="order.id" class="hist-card" :class="'hist-src-' + order.source" @click="openHistoryOrder(order)">
-              <div class="hist-card-left"></div>
-              <div class="hist-card-body">
-                <div class="hist-card-top">
-                  <span class="hist-card-date">{{ fmtDate(order.delivery_date) }}</span>
-                  <span class="hist-badge" :class="'src-' + order.source">{{ order.source_name }}</span>
-                  <span class="hist-badge status-badge" :class="'st-' + order.status">{{ statusLabel(order.status) }}</span>
-                </div>
-                <div class="hist-card-meta">
-                  <span v-if="Number(order.item_count) > 0" class="hist-meta-pill">
-                    {{ order.item_count }} поз. · {{ order.total_qty }} {{ order.source === 'delivery' ? 'кор.' : 'шт.' }}
-                  </span>
-                  <span v-else class="hist-meta-skip">Поставка не нужна</span>
-                  <span v-if="order.submitted_at" class="hist-card-time">{{ fmtDateTime(order.submitted_at) }}</span>
-                </div>
-              </div>
-              <div class="hist-card-arrow">›</div>
-            </div>
-          </div>
-        </template>
-      </div>
+      <RestaurantOrderHistoryTab
+        v-if="orderSubTab === 'history'"
+        :orders="historyOrders"
+        :loading="historyLoading"
+        :error="historyError"
+        :has-more="historyHasMore"
+        :loading-more="historyLoadingMore"
+        @load-more="loadMoreHistory"
+        @open="openHistoryOrder"
+      />
     </section>
 
     <div v-if="historyOrderModal.show" class="modal-overlay" @click.self="closeHistoryOrderModal">
@@ -783,281 +717,16 @@
     </div>
 
     <!-- ══════ TAB: Опросы ══════ -->
-    <section v-if="activeTab === 'surveys' && !globalLoading && !globalError" class="cab-section cab-sv-section">
-      <div v-if="surveyError" class="error-msg" style="margin-bottom:16px">{{ surveyError }}</div>
+    <RestaurantSurveysTab
+      v-if="activeTab === 'surveys' && !globalError"
+      :items="surveyItems"
+      :loading="surveyListLoading"
+      @reload="loadSurveyList"
+    />
 
-      <!-- ─── Начальная загрузка ─── -->
-      <div v-if="surveyListLoading && !surveyItems.length" class="cab-empty-card">
-        <BurgerSpinner text="Загрузка опросов..." />
-      </div>
-
-      <!-- ─── Пусто ─── -->
-      <div v-else-if="!surveyItems.length" class="cab-empty-card">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#D7B79A" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:8px">
-          <rect x="3" y="4" width="18" height="17" rx="2"/>
-          <path d="M8 2v4M16 2v4M3 10h18"/>
-          <path d="M9 15l2 2 4-4"/>
-        </svg>
-        <h2>Пока нет опросов</h2>
-        <p>Когда появится новый опрос, вы увидите его здесь и получите уведомление в боте.</p>
-      </div>
-
-      <!-- ═══ СПИСОК ═══ -->
-      <div v-else-if="surveyMode === 'list'" class="cab-sv-home">
-        <div v-if="pendingSurveys.length" class="cab-sv-group">
-          <div class="cab-sv-group-head">
-            <span class="cab-sv-group-title">Нужно ответить</span>
-            <span class="cab-sv-group-count">{{ pendingSurveys.length }}</span>
-          </div>
-          <button
-            v-for="survey in pendingSurveys"
-            :key="survey.id"
-            class="cab-sv-bigcard pending"
-            @click="openSurveyCard(survey)"
-          >
-            <div class="cab-sv-bigcard-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/><path d="M9 15h6"/></svg>
-            </div>
-            <div class="cab-sv-bigcard-body">
-              <div class="cab-sv-bigcard-title">{{ survey.title }}</div>
-              <div class="cab-sv-bigcard-meta">
-                <span>{{ survey.questions_count }} {{ surveyQuestionPlural(survey.questions_count) }}</span>
-                <span>·</span>
-                <span>{{ fmtDateTime(survey.sent_at || survey.created_at) }}</span>
-              </div>
-            </div>
-            <div class="cab-sv-bigcard-arrow">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            </div>
-          </button>
-        </div>
-
-        <div v-if="answeredSurveys.length" class="cab-sv-group">
-          <div class="cab-sv-group-head">
-            <span class="cab-sv-group-title">Отвеченные</span>
-            <span class="cab-sv-group-count muted">{{ answeredSurveys.length }}</span>
-          </div>
-          <button
-            v-for="survey in answeredSurveys"
-            :key="survey.id"
-            class="cab-sv-bigcard done"
-            @click="openSurveyCard(survey)"
-          >
-            <div class="cab-sv-bigcard-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </div>
-            <div class="cab-sv-bigcard-body">
-              <div class="cab-sv-bigcard-title">{{ survey.title }}</div>
-              <div class="cab-sv-bigcard-meta">
-                <span>Ответ отправлен {{ fmtDateTime(survey.submitted_at) }}</span>
-              </div>
-            </div>
-            <div class="cab-sv-bigcard-arrow">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      <!-- ─── Загрузка деталей ─── -->
-      <div v-else-if="surveyDetailLoading" class="cab-empty-card"><p>Открываю опрос...</p></div>
-
-      <!-- ═══ МАСТЕР (идёт заполнение) ═══ -->
-      <div v-else-if="surveyMode === 'wizard' && surveyDetail" class="cab-sv-wiz">
-        <button class="cab-sv-back" @click="backToList">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          К опросам
-        </button>
-
-        <div class="cab-sv-wiz-card">
-          <div class="cab-sv-wiz-head">
-            <div class="cab-sv-wiz-pretitle">Опрос</div>
-            <h2 class="cab-sv-wiz-title">{{ surveyDetail.title }}</h2>
-            <p v-if="surveyDetail.description" class="cab-sv-wiz-desc">{{ surveyDetail.description }}</p>
-          </div>
-
-          <!-- Прогресс-сегменты -->
-          <div class="cab-sv-chain">
-            <button
-              v-for="(seg, i) in wizardSegments"
-              :key="i"
-              class="cab-sv-chain-seg"
-              :class="{ filled: seg.filled, active: i === wizardStep, locked: !seg.reachable }"
-              :disabled="!seg.reachable"
-              :title="seg.label"
-              @click="gotoStep(i)"
-            />
-          </div>
-          <div class="cab-sv-chain-label">{{ wizardStepLabel }}</div>
-
-          <!-- Контент шага -->
-          <transition :name="wizardSlideName" mode="out-in">
-            <div :key="wizardStep" class="cab-sv-step">
-              <!-- Вопрос -->
-              <div v-if="wizardIsQuestion && currentQuestion" class="cab-sv-step-q">
-                <h3 class="cab-sv-step-title">{{ currentQuestion.text }}</h3>
-                <div v-if="surveyQuestionType(currentQuestion) === 'scale'" class="cab-sv-scale">
-                  <button
-                    v-for="score in 10"
-                    :key="score"
-                    class="cab-sv-scale-btn"
-                    :class="{ selected: Number(surveyAnswers[currentQuestion.id]) === score }"
-                    :disabled="surveySubmitting"
-                    @click="chooseOption(currentQuestion.id, score)"
-                  >
-                    {{ score }}
-                  </button>
-                </div>
-                <textarea
-                  v-else-if="surveyQuestionType(currentQuestion) === 'text'"
-                  v-model="surveyAnswers[currentQuestion.id]"
-                  class="cab-sv-textarea"
-                  rows="5"
-                  placeholder="Ваш ответ..."
-                  :disabled="surveySubmitting"
-                  @keydown.ctrl.enter="wizardCanNext && nextStep()"
-                />
-                <div v-else class="cab-sv-bigopts">
-                  <button
-                    v-for="option in currentQuestion.options || []"
-                    :key="option.id"
-                    class="cab-sv-bigopt"
-                    :class="{ selected: Number(surveyAnswers[currentQuestion.id]) === Number(option.id) }"
-                    :disabled="surveySubmitting"
-                    @click="chooseOption(currentQuestion.id, option.id)"
-                  >
-                    <span class="cab-sv-bigopt-mark">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                    </span>
-                    <span class="cab-sv-bigopt-text">{{ option.text }}</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Комментарий -->
-              <div v-else-if="wizardIsComment" class="cab-sv-step-c">
-                <h3 class="cab-sv-step-title">Комментарий <span class="cab-sv-optional">необязательно</span></h3>
-                <p class="cab-sv-step-hint">Если хотите, добавьте пояснение к своим ответам.</p>
-                <textarea
-                  v-model="surveyComment"
-                  class="cab-sv-textarea"
-                  rows="5"
-                  placeholder="Ваш комментарий..."
-                  :disabled="surveySubmitting"
-                  @keydown.ctrl.enter="wizardCanSubmit && submitSurveyAnswer()"
-                />
-              </div>
-            </div>
-          </transition>
-
-          <!-- Навигация -->
-          <div class="cab-sv-wiz-nav">
-            <button
-              class="cab-sv-nav-btn back"
-              :disabled="wizardStep === 0 || surveySubmitting"
-              @click="prevStep"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-              Назад
-            </button>
-
-            <button
-              v-if="!wizardIsLast"
-              class="cab-sv-nav-btn next"
-              :disabled="!wizardCanNext || surveySubmitting"
-              @click="nextStep"
-            >
-              Далее
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-
-            <button
-              v-else
-              class="cab-sv-nav-btn submit"
-              :disabled="!wizardCanSubmit || surveySubmitting"
-              @click="submitSurveyAnswer"
-            >
-              <span v-if="surveySubmitting" class="cab-spin cab-spin-sm"></span>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-              Отправить ответ
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ READONLY (уже ответил) ═══ -->
-      <div v-else-if="surveyMode === 'readonly' && surveyDetail" class="cab-sv-ro">
-        <button class="cab-sv-back" @click="backToList">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          К опросам
-        </button>
-
-        <div class="cab-sv-ro-card">
-          <div class="cab-sv-ro-head">
-            <div class="cab-sv-ro-badge">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Ответ отправлен
-            </div>
-            <h2 class="cab-sv-ro-title">{{ surveyDetail.title }}</h2>
-            <p v-if="surveyDetail.description" class="cab-sv-ro-desc">{{ surveyDetail.description }}</p>
-            <div v-if="surveyDetail.submitted_at" class="cab-sv-ro-meta">
-              {{ fmtDateTime(surveyDetail.submitted_at) }}
-            </div>
-          </div>
-
-          <div class="cab-sv-ro-body">
-            <div v-for="(q, i) in surveyDetail.questions || []" :key="q.id" class="cab-sv-ro-q">
-              <div class="cab-sv-ro-qhead">
-                <span class="cab-sv-ro-qnum">{{ i + 1 }}</span>
-                <span class="cab-sv-ro-qtext">{{ q.text }}</span>
-              </div>
-              <div class="cab-sv-ro-opts">
-                <div v-if="surveyQuestionType(q) === 'scale'" class="cab-sv-ro-text-answer">
-                  Оценка: {{ surveyAnswers[q.id] || '—' }}
-                </div>
-                <div v-else-if="surveyQuestionType(q) === 'text'" class="cab-sv-ro-text-answer">
-                  {{ surveyAnswers[q.id] || '—' }}
-                </div>
-                <div
-                  v-else
-                  v-for="opt in q.options || []"
-                  :key="opt.id"
-                  class="cab-sv-ro-opt"
-                  :class="{ selected: Number(surveyAnswers[q.id]) === Number(opt.id) }"
-                >
-                  <span class="cab-sv-ro-opt-mark">
-                    <svg v-if="Number(surveyAnswers[q.id]) === Number(opt.id)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                  </span>
-                  <span>{{ opt.text }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="surveyDetail.comment" class="cab-sv-ro-comment">
-              <div class="cab-sv-ro-comment-label">Ваш комментарий</div>
-              <div class="cab-sv-ro-comment-value">{{ surveyDetail.comment }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ УСПЕХ ═══ -->
-      <transition name="cab-sv-fade">
-        <div v-if="surveyMode === 'success'" class="cab-sv-success-screen">
-          <div class="cab-sv-success-ring">
-            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="cab-sv-success-check">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-          </div>
-          <h2 class="cab-sv-success-title">Спасибо!</h2>
-          <p class="cab-sv-success-text">Ваш ответ сохранён</p>
-          <button class="btn btn-primary btn-lg cab-sv-success-btn" @click="backToList">К опросам</button>
-        </div>
-      </transition>
-    </section>
 
     <!-- ══════ TAB: Сбор остатков ══════ -->
-    <section v-if="activeTab === 'stock' && !globalLoading && !globalError" class="cab-section sc-section">
+    <section v-if="activeTab === 'stock' && !globalError" class="cab-section sc-section">
       <div v-if="stockLoading" class="cab-empty-card">
         <BurgerSpinner text="Загрузка..." />
       </div>
@@ -1254,120 +923,28 @@
     </section>
 
     <!-- ══════ TAB: Остатки склада ══════ -->
-    <section v-if="activeTab === 'warehouse-stock' && !globalLoading && !globalError" class="cab-section whs-section">
-      <div class="whs-panel">
-        <div class="whs-head">
-          <div>
-            <h2>Остатки склада</h2>
-            <p>{{ warehouseStockCustomer || 'Ваше юрлицо' }}<template v-if="warehouseStockUploadedAt"> · обновлено {{ fmtDateTime(warehouseStockUploadedAt) }}</template></p>
-          </div>
-          <button class="btn btn-outline" :disabled="warehouseStockLoading || !warehouseFilteredItems.length" @click="exportWarehouseStock">
-            Excel
-          </button>
-        </div>
-
-        <div class="whs-controls">
-          <div class="whs-search">
-            <span v-html="cabIconSvg.search"></span>
-            <input v-model="warehouseSearch" type="search" placeholder="Артикул, товар, GTIN или группа аналогов" />
-          </div>
-        </div>
-
-        <div class="whs-tabs" aria-label="Режимы хранения">
-          <button
-            v-for="tab in warehouseStorageTabs"
-            :key="tab.key"
-            class="whs-tab"
-            :class="{ active: warehouseStorageFilter === tab.key }"
-            @click="warehouseStorageFilter = tab.key"
-          >
-            {{ tab.label }}
-            <span>{{ tab.count }}</span>
-          </button>
-        </div>
-
-        <div v-if="warehouseStockLoading" class="cab-empty-card">
-          <BurgerSpinner text="Загрузка..." />
-        </div>
-        <div v-else-if="warehouseStockError" class="cab-empty-card">
-          <h2>Не удалось загрузить остатки</h2>
-          <p>{{ warehouseStockError }}</p>
-          <button class="btn btn-primary" @click="loadWarehouseStock">Повторить</button>
-        </div>
-        <div v-else-if="!warehouseStockItems.length" class="cab-empty-card">
-          <h2>Нет данных</h2>
-          <p>В модуле «Сроки годности» пока нет остатков для вашего юрлица.</p>
-        </div>
-        <div v-else-if="!warehouseFilteredItems.length" class="cab-empty-card">
-          <h2>Ничего не найдено</h2>
-          <p>Измените поиск или фильтр режима хранения.</p>
-        </div>
-
-        <div v-else class="whs-list">
-          <div class="whs-list-head">
-            <span>Номенклатура</span>
-            <span>Остаток</span>
-            <span>Срок годности</span>
-          </div>
-          <div v-for="item in warehouseFilteredItems" :key="item.key" class="whs-row" :class="{ soon: item.days_left >= 0 && item.days_left <= 7 }">
-            <div class="whs-row-main">
-              <div class="whs-name">
-                <button class="whs-copy whs-sku" type="button" title="Скопировать артикул и товар" @click="copyWarehouseTitle(item)">
-                  {{ item.sku || item.external_code || '—' }}
-                </button>
-                <button class="whs-copy whs-title" type="button" title="Скопировать артикул и товар" @click="copyWarehouseTitle(item)">
-                  {{ item.name }}
-                </button>
-              </div>
-              <div class="whs-meta">
-                <span>{{ item.storage_label }}</span>
-                <span v-if="item.analog_group">Группа: {{ item.analog_group }}</span>
-                <span v-if="item.gtin">GTIN: {{ item.gtin }}</span>
-                <span v-if="warehouseCopiedKey === item.key" class="whs-copied">Скопировано</span>
-              </div>
-            </div>
-            <div class="whs-qty">
-              <strong>{{ formatWarehouseQty(item.quantity) }}</strong>
-            </div>
-            <div class="whs-exp">
-              <span :class="warehouseExpiryClass(item)">{{ warehouseExpiryText(item) }}</span>
-              <button v-if="item.batches?.length > 1" class="whs-batches-btn" @click="toggleWarehouseItem(item.key)">
-                {{ warehouseOpenItems[item.key] ? 'Скрыть' : `Партии ${item.batches.length}` }}
-              </button>
-            </div>
-            <div v-if="warehouseOpenItems[item.key]" class="whs-batches">
-              <div class="whs-batch whs-batch-head">
-                <span>Номенклатура</span>
-                <span>Склад</span>
-                <span>Остаток</span>
-                <span>Срок годности</span>
-                <span>Статус</span>
-              </div>
-              <div v-for="(b, idx) in item.batches" :key="idx" class="whs-batch">
-                <span class="whs-batch-name">{{ warehouseNomenclature(item) }}</span>
-                <span>{{ b.warehouse || item.storage_label }}</span>
-                <b>{{ formatWarehouseQty(b.quantity) }}</b>
-                <span>{{ formatWarehouseDate(b.expiry_date) || '—' }}</span>
-                <span>{{ b.expiry_status || '—' }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+    <RestaurantWarehouseStockTab
+      v-if="activeTab === 'warehouse-stock' && !globalError"
+      :items="warehouseStockItems"
+      :customer="warehouseStockCustomer"
+      :uploaded-at="warehouseStockUploadedAt"
+      :loading="warehouseStockLoading"
+      :error="warehouseStockError"
+      @reload="loadWarehouseStock"
+    />
 
     <!-- ══════ TAB: Сканер товаров (BETA) ══════ -->
-    <section v-if="activeTab === 'scanner' && !globalLoading && !globalError" class="cab-section">
+    <section v-if="activeTab === 'scanner' && !globalError" class="cab-section">
       <ScannerView />
     </section>
 
     <!-- ══════ TAB: Возврат кег ══════ -->
-    <section v-if="activeTab === 'keg-returns' && !globalLoading && !globalError" class="cab-section">
+    <section v-if="activeTab === 'keg-returns' && !globalError" class="cab-section">
       <RestaurantKegReturnsTab />
     </section>
 
     <!-- ══════ TAB: Профиль ══════ -->
-    <section v-if="activeTab === 'profile' && !globalLoading && !globalError" class="cab-section pf-section">
+    <section v-if="activeTab === 'profile' && !globalError" class="cab-section pf-section">
       <!-- Шапка ресторана -->
       <div class="pf-hero">
         <div class="pf-hero-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
@@ -1654,6 +1231,10 @@ const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/Scanne
 const RestaurantKegReturnsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantKegReturnsTab.vue'));
 const RestaurantRemindersTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantRemindersTab.vue'));
 const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components/restaurant/RestaurantTodayReminders.vue'));
+const RestaurantOrderHistoryTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantOrderHistoryTab.vue'));
+const RestaurantSurveysTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSurveysTab.vue'));
+const RestaurantInfoTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantInfoTab.vue'));
+const RestaurantWarehouseStockTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantWarehouseStockTab.vue'));
 
 const router = useRouter();
 const route = useRoute();
@@ -1718,6 +1299,7 @@ const tileIconSvg = {
   warehouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11V8.5L12 4l9 4.5V11"/><path d="M4 11h16v9.5H4z"/><path d="M9 14.5h6"/><path d="M9 17.5h6"/><circle cx="17.5" cy="6.5" r="3" fill="currentColor" opacity="0.18" stroke="none"/><path d="M17.5 5v1.5l1 .8" stroke-width="1.6"/></svg>',
   keg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="13" height="16" rx="2.5"/><path d="M6.5 8h7"/><path d="M6.5 12h5"/><circle cx="17" cy="15.5" r="3.8" fill="currentColor" fill-opacity="0.1"/><path d="M19.7 18.2 22 20.5"/></svg>',
+  reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
 };
 const supplierIconSvg = {
   drinks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h4"/><path d="M9 3v3l-2 2v11a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V8l-2-2V3"/><path d="M7 12h6"/><path d="M16 7h2l1 3v9a2 2 0 0 1-2 2h-1"/><path d="M16 11h3"/></svg>',
@@ -1795,10 +1377,6 @@ const warehouseStockCustomer = ref('');
 const warehouseStockUploadedAt = ref('');
 const warehouseStockLoading = ref(false);
 const warehouseStockError = ref('');
-const warehouseSearch = ref('');
-const warehouseStorageFilter = ref('all');
-const warehouseOpenItems = reactive({});
-const warehouseCopiedKey = ref('');
 const restaurantBroadcasts = ref([]);
 let restaurantBroadcastTimer = null;
 const currentBroadcast = computed(() => restaurantBroadcasts.value[0] || null);
@@ -1808,17 +1386,6 @@ const importantPreviewUrls = reactive({});
 const importantImagePreview = reactive({ show: false, url: '', name: '' });
 const latestImportantPost = computed(() => importantPosts.value[0] || null);
 const currentImportantPost = computed(() => importantPosts.value.find(p => !p.is_read && Number(p.show_popup || 0) === 1) || null);
-const infoFilter = ref('all'); // all | unread
-const importantPostsUnreadCount = computed(() => importantPosts.value.filter(p => !p.is_read).length);
-const importantPostsFiltered = computed(() => {
-  if (infoFilter.value === 'unread') return importantPosts.value.filter(p => !p.is_read);
-  return importantPosts.value;
-});
-function infoAvatar(authorName) {
-  const name = (authorName || 'Отдел закупок').trim();
-  const ch = name.charAt(0).toUpperCase();
-  return ch || 'З';
-}
 let cabinetBackgroundRunId = 0;
 const stockDirty = computed(() => {
   for (const p of stockProducts.value) {
@@ -1884,42 +1451,6 @@ const stockFilteredGrouped = computed(() => {
   return { withExpiry, withoutExpiry };
 });
 
-const warehouseBaseItems = computed(() => {
-  return warehouseStockItems.value.filter(item => !(Number(item.days_left) < 0));
-});
-
-const warehouseStorageTabs = computed(() => {
-  const counts = new Map();
-  for (const item of warehouseBaseItems.value) {
-    const key = item.storage_key || 'other';
-    if (!counts.has(key)) counts.set(key, { key, label: item.storage_label || 'Без режима', count: 0 });
-    counts.get(key).count++;
-  }
-  const preferred = ['dry', 'cold', 'frozen', 'mixed', 'other'];
-  const tabs = [...counts.values()].sort((a, b) => {
-    const ia = preferred.indexOf(a.key);
-    const ib = preferred.indexOf(b.key);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.label.localeCompare(b.label, 'ru');
-  });
-  return [{ key: 'all', label: 'Все', count: warehouseBaseItems.value.length }, ...tabs];
-});
-
-const warehouseFilteredItems = computed(() => {
-  const q = warehouseSearch.value.trim().toLowerCase();
-  return warehouseBaseItems.value.filter(item => {
-    if (warehouseStorageFilter.value !== 'all' && item.storage_key !== warehouseStorageFilter.value) return false;
-    if (!q) return true;
-    return [
-      item.sku,
-      item.external_code,
-      item.gtin,
-      item.name,
-      item.raw_name,
-      item.analog_group,
-      item.category,
-    ].some(v => String(v || '').toLowerCase().includes(q));
-  });
-});
 
 // ═══ Telegram ═══
 const tgLinkCode = ref('');
@@ -1939,7 +1470,6 @@ const pwLoading = ref(false);
 const historyLoading = ref(false);
 const historyOrders = ref([]);
 const historyError = ref('');
-const historyFilter = ref('all');
 const historyOrderModal = reactive({
   show: false,
   loading: false,
@@ -1950,177 +1480,7 @@ const historyOrderModal = reactive({
 // ═══ Surveys ═══
 const surveyItems = ref([]);
 const surveyListLoading = ref(false);
-const surveyDetailLoading = ref(false);
-const surveySubmitting = ref(false);
-const surveyError = ref('');
-const surveySuccess = ref('');
-const surveyDetail = ref(null);
-const selectedSurveyId = ref(null);
-const surveyComment = ref('');
-const surveyAnswers = reactive({});
 const surveyPendingCount = computed(() => surveyItems.value.filter(item => !item.already_answered).length);
-const surveyTotalQuestions = computed(() => (surveyDetail.value?.questions || []).length);
-const surveyAnsweredCount = computed(() => {
-  const qs = surveyDetail.value?.questions || [];
-  let n = 0;
-  for (const q of qs) { if (surveyQuestionAnswered(q)) n++; }
-  return n;
-});
-const surveyProgressPct = computed(() => {
-  const total = surveyTotalQuestions.value;
-  if (!total) return 0;
-  return Math.round(surveyAnsweredCount.value * 100 / total);
-});
-const surveyAllAnswered = computed(() => {
-  return surveyTotalQuestions.value > 0 && surveyAnsweredCount.value === surveyTotalQuestions.value;
-});
-function surveyQuestionPlural(n) {
-  const abs = Math.abs(Number(n) || 0);
-  const mod10 = abs % 10;
-  const mod100 = abs % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'вопрос';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'вопроса';
-  return 'вопросов';
-}
-
-// ═══ Wizard state ═══
-const surveyMode = ref('list'); // 'list' | 'wizard' | 'readonly' | 'success'
-const wizardStep = ref(0);
-const wizardSlideName = ref('cab-sv-slide-forward');
-
-const pendingSurveys = computed(() => surveyItems.value.filter(s => !s.already_answered));
-const answeredSurveys = computed(() => surveyItems.value.filter(s => !!s.already_answered));
-
-const wizardTotalSteps = computed(() => surveyTotalQuestions.value + 1); // questions + comment
-const wizardIsQuestion = computed(() => wizardStep.value < surveyTotalQuestions.value);
-const wizardIsComment = computed(() => wizardStep.value === surveyTotalQuestions.value);
-const wizardIsLast = computed(() => wizardStep.value === wizardTotalSteps.value - 1);
-const currentQuestion = computed(() => {
-  const qs = surveyDetail.value?.questions || [];
-  return wizardIsQuestion.value ? (qs[wizardStep.value] || null) : null;
-});
-const wizardCanNext = computed(() => {
-  if (wizardIsQuestion.value) {
-    const q = currentQuestion.value;
-    return !!q && surveyQuestionAnswered(q);
-  }
-  return true;
-});
-const wizardCanSubmit = computed(() => surveyAllAnswered.value);
-const wizardSegments = computed(() => {
-  const qs = surveyDetail.value?.questions || [];
-  const segs = qs.map((q, i) => ({
-    filled: surveyQuestionAnswered(q),
-    reachable: true,
-    label: `Вопрос ${i + 1}`,
-  }));
-  segs.push({
-    filled: !!surveyComment.value.trim(),
-    reachable: surveyAllAnswered.value,
-    label: 'Комментарий',
-  });
-  return segs;
-});
-const wizardStepLabel = computed(() => {
-  if (wizardIsComment.value) return `Комментарий · шаг ${wizardStep.value + 1} из ${wizardTotalSteps.value}`;
-  return `Вопрос ${wizardStep.value + 1} из ${surveyTotalQuestions.value}`;
-});
-
-function surveyQuestionType(question) {
-  return ['choice', 'scale', 'text'].includes(question?.type) ? question.type : 'choice';
-}
-
-function surveyQuestionAnswered(question) {
-  if (!question?.id) return false;
-  const value = surveyAnswers[question.id];
-  const type = surveyQuestionType(question);
-  if (type === 'text') return String(value || '').trim() !== '';
-  if (type === 'scale') {
-    const n = Number(value);
-    return n >= 1 && n <= 10;
-  }
-  return Number(value) > 0;
-}
-
-function openSurveyCard(survey) {
-  if (!survey?.id) return;
-  selectedSurveyId.value = Number(survey.id);
-  wizardStep.value = 0;
-  wizardSlideName.value = 'cab-sv-slide-forward';
-  openSurvey(survey.id).then(() => {
-    if (!surveyDetail.value) return;
-    surveyMode.value = surveyDetail.value.already_answered ? 'readonly' : 'wizard';
-  });
-}
-
-function backToList() {
-  surveyMode.value = 'list';
-  wizardStep.value = 0;
-  surveyError.value = '';
-}
-
-function gotoStep(i) {
-  const segs = wizardSegments.value;
-  if (i < 0 || i >= segs.length) return;
-  if (!segs[i].reachable) return;
-  wizardSlideName.value = i > wizardStep.value ? 'cab-sv-slide-forward' : 'cab-sv-slide-back';
-  wizardStep.value = i;
-}
-
-function nextStep() {
-  if (wizardStep.value >= wizardTotalSteps.value - 1) return;
-  if (!wizardCanNext.value) return;
-  wizardSlideName.value = 'cab-sv-slide-forward';
-  wizardStep.value += 1;
-}
-
-function prevStep() {
-  if (wizardStep.value === 0) return;
-  wizardSlideName.value = 'cab-sv-slide-back';
-  wizardStep.value -= 1;
-}
-
-function chooseOption(questionId, optionId) {
-  surveyAnswers[questionId] = Number(optionId);
-  // Auto-advance after short delay
-  setTimeout(() => {
-    if (!wizardIsQuestion.value) return;
-    const q = currentQuestion.value;
-    if (!q || Number(surveyAnswers[q.id]) !== Number(optionId)) return;
-    if (wizardStep.value < wizardTotalSteps.value - 1) {
-      wizardSlideName.value = 'cab-sv-slide-forward';
-      wizardStep.value += 1;
-    }
-  }, 260);
-}
-
-// Уникальные источники для фильтра, сгруппированные по названию
-const historySourceOptions = computed(() => {
-  const groups = new Map(); // label -> { keys: Set, source }
-  for (const o of historyOrders.value) {
-    const key = o.source === 'supplier' ? 'sup_' + o.supplier_id : o.source;
-    if (!groups.has(o.source_name)) {
-      groups.set(o.source_name, { keys: new Set(), source: o.source });
-    }
-    groups.get(o.source_name).keys.add(key);
-  }
-  return [...groups.entries()].map(([label, g]) => ({
-    label,
-    keys: [...g.keys],
-    source: g.source,
-  }));
-});
-
-const filteredHistoryOrders = computed(() => {
-  if (historyFilter.value === 'all') return historyOrders.value;
-  const opt = historySourceOptions.value.find(o => o.label === historyFilter.value);
-  if (!opt) return historyOrders.value;
-  return historyOrders.value.filter(o => {
-    const key = o.source === 'supplier' ? 'sup_' + o.supplier_id : o.source;
-    return opt.keys.includes(key);
-  });
-});
-
 // ═══ Dashboard ═══
 const dashOrdersSubmitted = computed(() => {
   let total = roStore.restaurantOrdersEnabled
@@ -2796,6 +2156,19 @@ const supSuccessInfo = ref({});
 const supDeadlineTimeLeft = reactive({}); // { supId: 'HH:MM:SS' } — обратный отсчёт до дедлайна
 let supDeadlineTimerInterval = null;
 
+function supDeadlineTimerNeeded() {
+  return activeTab.value === 'orders' && typeof orderSubTab.value === 'string' && orderSubTab.value.startsWith('sup_');
+}
+function ensureSupDeadlineTimer() {
+  if (!supDeadlineTimerNeeded()) { stopSupDeadlineTimer(); return; }
+  if (supDeadlineTimerInterval) return;
+  supUpdateDeadlineTimers();
+  supDeadlineTimerInterval = setInterval(supUpdateDeadlineTimers, 1000);
+}
+function stopSupDeadlineTimer() {
+  if (supDeadlineTimerInterval) { clearInterval(supDeadlineTimerInterval); supDeadlineTimerInterval = null; }
+}
+
 function supUpdateDeadlineTimers() {
   const nowMs = Date.now();
   for (const sup of suppliers.value || []) {
@@ -3021,6 +2394,7 @@ async function switchTab(tab, subTab) {
   }
   if (tab === 'stock' && stockCollection.active) loadStockInline(stockCollection.selectedId);
   if (tab === 'warehouse-stock' && !warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
+  ensureSupDeadlineTimer();
 }
 // ═══ Синхронизация табов с роутом (URL) ═══
 function applyRouteToState() {
@@ -3069,6 +2443,7 @@ function applyRouteToState() {
     activeTab.value = 'orders';
     orderSubTab.value = 'reminders';
   }
+  ensureSupDeadlineTimer();
 }
 
 function syncStateToRoute() {
@@ -3131,15 +2506,44 @@ function handleLogout() { roStore.logout(); router.replace({ name: 'restaurant-o
 // Format helpers
 // fmtDate, fmtDateShort, fmtDateTime, statusLabel imported from roUtils.js
 
+const HISTORY_PAGE_SIZE = 20;
+const historyHasMore = ref(false);
+const historyLoadingMore = ref(false);
+
 async function loadHistory() {
   historyLoading.value = true;
   historyError.value = '';
-  try { historyOrders.value = await roStore.loadAllHistory(50); }
-  catch (e) {
+  try {
+    const { orders, hasMore } = await roStore.loadAllHistory({ limit: HISTORY_PAGE_SIZE });
+    historyOrders.value = orders;
+    historyHasMore.value = hasMore;
+  } catch (e) {
     historyOrders.value = [];
+    historyHasMore.value = false;
     historyError.value = e.message || 'Не удалось загрузить историю заказов';
   }
   finally { historyLoading.value = false; }
+}
+
+async function loadMoreHistory() {
+  if (historyLoadingMore.value || !historyHasMore.value) return;
+  const last = historyOrders.value[historyOrders.value.length - 1];
+  if (!last?.delivery_date) { historyHasMore.value = false; return; }
+  historyLoadingMore.value = true;
+  try {
+    const { orders, hasMore } = await roStore.loadAllHistory({
+      limit: HISTORY_PAGE_SIZE,
+      beforeDate: last.delivery_date,
+    });
+    // На граничной дате могут прийти заказы с той же датой, что и last —
+    // отфильтруем дубли по (source, id)
+    const seen = new Set(historyOrders.value.map(o => o.source + ':' + o.id));
+    const fresh = orders.filter(o => !seen.has(o.source + ':' + o.id));
+    historyOrders.value = historyOrders.value.concat(fresh);
+    historyHasMore.value = hasMore;
+  } catch (e) {
+    historyError.value = e.message || 'Не удалось подгрузить ещё';
+  } finally { historyLoadingMore.value = false; }
 }
 
 async function openHistoryOrder(order) {
@@ -3164,97 +2568,17 @@ function closeHistoryOrderModal() {
   historyOrderModal.order = null;
 }
 
-function resetSurveyDraft(detail = surveyDetail.value) {
-  for (const key of Object.keys(surveyAnswers)) delete surveyAnswers[key];
-  if (!detail) {
-    surveyComment.value = '';
-    return;
-  }
-  const answers = detail.answers || {};
-  for (const [questionId, answer] of Object.entries(answers)) {
-    if (answer && typeof answer === 'object') {
-      if (answer.type === 'text') surveyAnswers[questionId] = answer.text_value || '';
-      else if (answer.type === 'scale') surveyAnswers[questionId] = Number(answer.numeric_value || 0);
-      else surveyAnswers[questionId] = Number(answer.option_id || 0);
-    } else {
-      surveyAnswers[questionId] = Number(answer);
-    }
-  }
-  surveyComment.value = detail.comment || '';
-}
-
-async function loadSurveyList(preferredId = null) {
+async function loadSurveyList() {
   surveyListLoading.value = true;
-  surveyError.value = '';
   try {
     surveyItems.value = await roStore.loadSurveys();
-    if (preferredId && surveyItems.value.some(item => Number(item.id) === Number(preferredId))) {
-      // После отправки ответа обновляем данные выбранного опроса,
-      // но остаёмся в текущем режиме (успех/readonly/список)
-      await openSurvey(preferredId);
-    } else if (!surveyItems.value.length) {
-      selectedSurveyId.value = null;
-      surveyDetail.value = null;
-      resetSurveyDraft(null);
-      if (activeTab.value === 'surveys') {
-        activeTab.value = 'dashboard';
-      }
+    if (!surveyItems.value.length && activeTab.value === 'surveys') {
+      activeTab.value = 'dashboard';
     }
   } catch (e) {
     surveyItems.value = [];
-    surveyError.value = e.message || 'Не удалось загрузить опросы';
   } finally {
     surveyListLoading.value = false;
-  }
-}
-
-async function openSurvey(surveyId) {
-  if (!surveyId) return;
-  surveyDetailLoading.value = true;
-  surveyError.value = '';
-  selectedSurveyId.value = Number(surveyId);
-  try {
-    surveyDetail.value = await roStore.loadSurvey(surveyId);
-    resetSurveyDraft(surveyDetail.value);
-  } catch (e) {
-    surveyDetail.value = null;
-    resetSurveyDraft(null);
-    surveyError.value = e.message || 'Не удалось открыть опрос';
-  } finally {
-    surveyDetailLoading.value = false;
-  }
-}
-
-async function submitSurveyAnswer() {
-  if (!surveyDetail.value?.id || surveyDetail.value.already_answered) return;
-  surveyError.value = '';
-  surveySuccess.value = '';
-
-  const payload = {};
-  for (const question of (surveyDetail.value.questions || [])) {
-    if (!surveyQuestionAnswered(question)) {
-      surveyError.value = 'Ответьте на все вопросы';
-      return;
-    }
-    const type = surveyQuestionType(question);
-    if (type === 'text') {
-      payload[question.id] = { question_id: Number(question.id), type, text_value: String(surveyAnswers[question.id] || '').trim() };
-    } else if (type === 'scale') {
-      payload[question.id] = { question_id: Number(question.id), type, numeric_value: Number(surveyAnswers[question.id]) };
-    } else {
-      payload[question.id] = Number(surveyAnswers[question.id]);
-    }
-  }
-
-  surveySubmitting.value = true;
-  try {
-    await roStore.submitSurvey(surveyDetail.value.id, payload, surveyComment.value);
-    surveyMode.value = 'success';
-    await loadSurveyList(surveyDetail.value.id);
-  } catch (e) {
-    surveyError.value = e.message || 'Не удалось сохранить ответ';
-  } finally {
-    surveySubmitting.value = false;
   }
 }
 
@@ -3641,9 +2965,6 @@ async function loadWarehouseStock() {
     warehouseStockItems.value = data.items || [];
     warehouseStockCustomer.value = data.customer || data.legal_entity || '';
     warehouseStockUploadedAt.value = data.uploaded_at || '';
-    if (!warehouseStorageTabs.value.some(t => t.key === warehouseStorageFilter.value)) {
-      warehouseStorageFilter.value = 'all';
-    }
   } catch (e) {
     warehouseStockError.value = e.message || 'Ошибка загрузки остатков';
   } finally {
@@ -3651,140 +2972,6 @@ async function loadWarehouseStock() {
   }
 }
 
-function toggleWarehouseItem(key) {
-  warehouseOpenItems[key] = !warehouseOpenItems[key];
-}
-
-function formatWarehouseQty(value) {
-  const n = Number(value || 0);
-  return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
-}
-
-function warehouseNomenclature(item) {
-  const code = item?.sku || item?.external_code || '';
-  return [code, item?.name || item?.raw_name || ''].filter(Boolean).join(' ');
-}
-
-async function copyWarehouseTitle(item) {
-  const text = warehouseNomenclature(item);
-  if (!text) return;
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const el = document.createElement('textarea');
-      el.value = text;
-      el.setAttribute('readonly', '');
-      el.style.position = 'fixed';
-      el.style.left = '-9999px';
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-    }
-    warehouseCopiedKey.value = item.key;
-    setTimeout(() => {
-      if (warehouseCopiedKey.value === item.key) warehouseCopiedKey.value = '';
-    }, 1400);
-  } catch {
-    warehouseCopiedKey.value = '';
-  }
-}
-
-function warehouseExpiryText(item) {
-  if (!item?.nearest_expiry) return 'Срок не указан';
-  const days = Number(item.days_left);
-  const date = formatWarehouseDate(item.nearest_expiry);
-  if (Number.isNaN(days)) return date;
-  if (days === 0) return `${date} · сегодня`;
-  return `${date} · ${days} дн.`;
-}
-
-function formatWarehouseDate(value) {
-  if (!value) return '';
-  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return value;
-  return `${m[3]}.${m[2]}.${m[1]}`;
-}
-
-function warehouseExpiryClass(item) {
-  const days = Number(item?.days_left);
-  if (Number.isNaN(days)) return '';
-  if (days < 0) return 'bad';
-  if (days <= 7) return 'warn';
-  return 'ok';
-}
-
-async function exportWarehouseStock() {
-  const mod = await import('xlsx-js-style');
-  const XLSX = mod.default || mod;
-  const headers = ['Номенклатура', 'Склад', 'Остаток партии', 'Срок годности', 'Статус', 'Режим хранения', 'Группа аналогов', 'GTIN', 'Внешний код'];
-  const rows = [];
-  for (const item of warehouseFilteredItems.value) {
-    const batches = Array.isArray(item.batches) && item.batches.length ? item.batches : [{
-      warehouse: item.storage_label || '',
-      quantity: item.quantity || 0,
-      expiry_date: item.nearest_expiry || '',
-      expiry_status: item.nearest_status || '',
-    }];
-    for (const batch of batches) {
-      rows.push([
-        warehouseNomenclature(item),
-        batch.warehouse || item.storage_label || '',
-        Number(batch.quantity || 0),
-        batch.expiry_date ? formatWarehouseDate(batch.expiry_date) : '',
-        batch.expiry_status || '',
-        item.storage_label || '',
-        item.analog_group || '',
-        item.gtin || '',
-        item.external_code || '',
-      ]);
-    }
-  }
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-  ws['!cols'] = [
-    { wch: 58 },
-    { wch: 24 },
-    { wch: 12 },
-    { wch: 16 },
-    { wch: 18 },
-    { wch: 18 },
-    { wch: 24 },
-    { wch: 18 },
-    { wch: 16 },
-  ];
-  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: headers.length - 1 } }) };
-  const border = {
-    top: { style: 'thin', color: { rgb: 'E7DED4' } },
-    bottom: { style: 'thin', color: { rgb: 'E7DED4' } },
-    left: { style: 'thin', color: { rgb: 'E7DED4' } },
-    right: { style: 'thin', color: { rgb: 'E7DED4' } },
-  };
-  for (let c = 0; c < headers.length; c++) {
-    const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
-    cell.s = {
-      font: { bold: true, color: { rgb: 'FFFFFF' } },
-      fill: { fgColor: { rgb: '502314' } },
-      alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
-      border,
-    };
-  }
-  for (let r = 1; r <= rows.length; r++) {
-    for (let c = 0; c < headers.length; c++) {
-      const addr = XLSX.utils.encode_cell({ r, c });
-      if (!ws[addr]) continue;
-      ws[addr].s = {
-        fill: { fgColor: { rgb: r % 2 ? 'FFF8EF' : 'FFFFFF' } },
-        alignment: { vertical: 'top', horizontal: c === 2 ? 'right' : 'left', wrapText: true },
-        border,
-      };
-      if (c === 2) ws[addr].z = '#,##0.00';
-    }
-  }
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Остатки склада');
-  XLSX.writeFile(wb, `Остатки склада ${warehouseStockCustomer.value || ''}.xlsx`);
-}
 
 function onBeforeUnload(e) {
   if (delHasUnsavedChanges.value || pwOld.value || pwNew.value) {
@@ -3817,22 +3004,34 @@ async function loadCabinetData() {
 
 function startCabinetBackgroundLoading() {
   const runId = ++cabinetBackgroundRunId;
-  const run = async (label, task) => {
-    try {
+  // Очередь приоритетов: сверху — что нужно для дашборда и заметно пользователю,
+  // снизу — что нужно при переключении на отдельную вкладку.
+  const tasks = [
+    ['important-posts', () => importantPosts.value.length ? loadImportantImagePreviews(1) : loadImportantPostsWithOptions({ previewAll: false })],
+    ['previous-orders', () => loadPreviousDeliveryOrders()],
+    ['stock-status',    () => checkStockCollection()],
+    ['broadcasts',      () => loadRestaurantBroadcasts()],
+    ['history',         () => historyOrders.value.length ? null : loadHistory()],
+    ['telegram',        () => loadTgStatus()],
+    ['surveys',         () => surveyItems.value.length ? null : loadSurveyList()],
+  ];
+  // Запускаем 2 параллельно — не спамим сеть, но и не тормозим
+  const CONCURRENCY = 2;
+  let idx = 0;
+  const worker = async () => {
+    while (idx < tasks.length) {
+      const i = idx++;
+      const [label, task] = tasks[i];
       if (runId !== cabinetBackgroundRunId) return;
-      await task();
-    } catch (e) {
-      if (import.meta.env.DEV) console.warn(`[restaurant cabinet] ${label}:`, e);
+      try {
+        await task();
+      } catch (e) {
+        if (import.meta.env.DEV) console.warn(`[restaurant cabinet] ${label}:`, e);
+      }
     }
   };
   setTimeout(() => {
-    run('history', () => historyOrders.value.length ? null : loadHistory());
-    run('surveys', () => surveyItems.value.length ? null : loadSurveyList());
-    run('stock-status', checkStockCollection);
-    run('telegram', loadTgStatus);
-    run('important-posts', () => importantPosts.value.length ? loadImportantImagePreviews(1) : loadImportantPostsWithOptions({ previewAll: false }));
-    run('broadcasts', loadRestaurantBroadcasts);
-    run('previous-orders', loadPreviousDeliveryOrders);
+    for (let i = 0; i < CONCURRENCY; i++) worker();
   }, 0);
 }
 
@@ -3873,8 +3072,7 @@ onMounted(async () => {
     await loadCabinetData();
     loadKegReturnsAvailability();
     startRestaurantBroadcastPolling();
-    supUpdateDeadlineTimers();
-    supDeadlineTimerInterval = setInterval(supUpdateDeadlineTimers, 1000);
+    ensureSupDeadlineTimer();
   } catch (e) {
     globalError.value = e.message || 'Ошибка загрузки кабинета';
   } finally { globalLoading.value = false; }
@@ -3883,7 +3081,7 @@ onMounted(async () => {
 onUnmounted(() => {
   cabinetBackgroundRunId++;
   clearInterval(delEditTimerInterval);
-  clearInterval(supDeadlineTimerInterval);
+  stopSupDeadlineTimer();
   if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
   for (const url of Object.values(importantPreviewUrls)) URL.revokeObjectURL(url);
   window.removeEventListener('beforeunload', onBeforeUnload);
@@ -4039,6 +3237,26 @@ onUnmounted(() => {
 .cab-spin-sm { width: 16px; height: 16px; border-width: 2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .mini-loader { padding: 24px; text-align: center; }
+
+/* ═══ Skeleton ═══ */
+.dash-skeleton .sk-block { background: #ECE5DE; border-radius: 14px; }
+.dash-skeleton .sk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.dash-skeleton .sk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.dash-skeleton .sk-list { display: flex; flex-direction: column; gap: 10px; }
+.dash-skeleton .sk-h-44 { height: 44px; }
+.dash-skeleton .sk-h-72 { height: 72px; }
+.dash-skeleton .sk-h-88 { height: 88px; }
+.dash-skeleton .sk-h-220 { height: 220px; }
+.sk-shimmer {
+  position: relative; overflow: hidden;
+  background: linear-gradient(100deg, #ECE5DE 30%, #F4EFE9 50%, #ECE5DE 70%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes sk-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sk-shimmer { animation: none; }
+}
 
 /* ═══ Dashboard ═══ */
 /* Wrap: контейнер дашборда не растягивается на широких экранах */
@@ -4457,7 +3675,6 @@ tr.del-err { background: #fef2f2; }
   .cab-success-time { font-size: 24px; }
   .cab-success-btns { flex-direction: column; }
   .cab-success-btns .btn { max-width: none; }
-  .hist-card-time { margin-left: 0; }
   .hist-modal-title-block { flex-wrap: wrap; }
 
   /* Item list — узкие экраны */
@@ -4505,27 +3722,6 @@ tr.del-err { background: #fef2f2; }
 .veg-success-skip { color: #d97706; font-size: 11px; padding: 2px 0; font-style: italic; }
 
 /* History */
-.history-list { padding: 0; }
-
-.hist-filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0 12px; }
-.hist-filter-chip { padding: 6px 14px; border-radius: 20px; border: 1.5px solid #e0d5c8; background: white; font-size: 12px; font-weight: 600; color: #6b4f3a; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-.hist-filter-chip:hover { border-color: #502314; color: #502314; }
-.hist-filter-chip.active { background: #502314; color: white; border-color: #502314; }
-.hist-filter-chip.src-chip-delivery.active { background: #E76F51; border-color: #E76F51; }
-.hist-filter-chip.src-chip-supplier.active { background: #2563eb; border-color: #2563eb; }
-.hist-filter-chip.src-chip-planeta.active { background: #16a34a; border-color: #16a34a; }
-
-.hist-cards { display: flex; flex-direction: column; gap: 8px; }
-.hist-card { display: flex; align-items: stretch; background: white; border-radius: 14px; border: 1px solid #EDE8E3; overflow: hidden; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s; }
-.hist-card:hover { box-shadow: 0 2px 12px rgba(80,35,20,0.10); border-color: #d5c8bc; }
-.hist-card-left { width: 5px; flex-shrink: 0; background: #e0d5c8; }
-.hist-src-delivery .hist-card-left { background: #E76F51; }
-.hist-src-supplier .hist-card-left { background: #2563eb; }
-.hist-src-planeta .hist-card-left { background: #16a34a; }
-.hist-card-body { flex: 1; padding: 12px 14px; min-width: 0; }
-.hist-card-arrow { display: flex; align-items: center; padding: 0 12px 0 4px; font-size: 20px; color: #c5b8aa; }
-.hist-card-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 6px; }
-.hist-card-date { font-weight: 700; color: #502314; font-size: 14px; }
 .hist-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 700; white-space: nowrap; }
 .src-delivery { background: #FFF0EE; color: #E76F51; }
 .src-supplier { background: #EFF6FF; color: #2563eb; }
@@ -4533,11 +3729,6 @@ tr.del-err { background: #fef2f2; }
 .status-badge.st-submitted { background: #ECFDF5; color: #16a34a; }
 .status-badge.st-locked   { background: #FEF2F2; color: #dc2626; }
 .status-badge.st-draft    { background: #F5F0EB; color: #8b7355; }
-.hist-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.hist-meta-pill { font-size: 12px; color: #6b4f3a; background: #F7F2EC; border-radius: 8px; padding: 2px 8px; font-weight: 600; }
-.hist-meta-skip { font-size: 12px; color: #d97706; font-style: italic; }
-.hist-card-time { font-size: 11px; color: #b0a090; margin-left: auto; }
-
 /* History modal */
 .hist-modal .cab-modal-head { border-bottom: 1px solid #F2EDE8; }
 .hist-modal-title-block { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -4565,376 +3756,6 @@ tr.del-err { background: #fef2f2; }
 .stock-card p { color: #8b7355; font-size: 14px; margin: 0; }
 .stock-link { display: inline-flex; margin-top: 16px; }
 
-/* ═══ Опросы (wizard) ═══ */
-.cab-sv-section { max-width: 720px; margin: 0 auto; }
-.cab-sv-optional { font-weight: 500; color: #a89a87; margin-left: 6px; font-size: 13px; }
-
-/* ─── Список опросов ─── */
-.cab-sv-home { display: flex; flex-direction: column; gap: 24px; }
-.cab-sv-group { display: flex; flex-direction: column; gap: 10px; }
-.cab-sv-group-head {
-  display: flex; align-items: baseline; gap: 10px;
-  padding: 0 4px;
-}
-.cab-sv-group-title {
-  font-size: 13px; font-weight: 800; color: #502314;
-  text-transform: uppercase; letter-spacing: .06em;
-}
-.cab-sv-group-count {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;
-  background: #FFEACE; color: #B45309;
-  font-size: 11px; font-weight: 800;
-}
-.cab-sv-group-count.muted { background: #EEEAE5; color: #8b7355; }
-
-.cab-sv-bigcard {
-  display: flex; align-items: center; gap: 14px;
-  width: 100%; padding: 18px 18px; text-align: left;
-  background: white; border: 1.5px solid #EDE8E3; border-radius: 18px;
-  cursor: pointer; font: inherit; color: inherit;
-  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
-}
-.cab-sv-bigcard:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(80,35,20,0.08);
-  border-color: #E2CFB0;
-}
-.cab-sv-bigcard.pending { border-left: 4px solid #F59E0B; }
-.cab-sv-bigcard.done { border-left: 4px solid #10B981; opacity: .9; }
-.cab-sv-bigcard-icon {
-  width: 44px; height: 44px; border-radius: 12px;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #FFF6E7, #FAE4BF);
-  color: #B45309; flex-shrink: 0;
-}
-.cab-sv-bigcard.done .cab-sv-bigcard-icon {
-  background: linear-gradient(135deg, #E6F9EE, #BCEACB);
-  color: #15803D;
-}
-.cab-sv-bigcard-body { flex: 1; min-width: 0; }
-.cab-sv-bigcard-title {
-  font-size: 15px; font-weight: 800; color: #502314;
-  line-height: 1.3; word-break: break-word;
-}
-.cab-sv-bigcard-meta {
-  display: flex; gap: 8px; flex-wrap: wrap;
-  margin-top: 6px; font-size: 12px; color: #8b7355; font-weight: 500;
-}
-.cab-sv-bigcard-arrow {
-  flex-shrink: 0; color: #C5B8AA;
-  display: flex; align-items: center;
-  transition: color .15s ease, transform .15s ease;
-}
-.cab-sv-bigcard:hover .cab-sv-bigcard-arrow {
-  color: #502314; transform: translateX(2px);
-}
-
-/* ─── Кнопка «назад» ─── */
-.cab-sv-back {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: none; border: none; cursor: pointer;
-  font: inherit; font-size: 13px; font-weight: 700;
-  color: #6b4f3a; padding: 6px 8px; margin: 0 0 12px -8px;
-  border-radius: 8px; transition: background .15s ease, color .15s ease;
-}
-.cab-sv-back:hover { background: #FBF6F1; color: #502314; }
-
-/* ─── Мастер (wizard) ─── */
-.cab-sv-wiz { max-width: 640px; margin: 0 auto; }
-.cab-sv-wiz-card {
-  background: white; border: 1px solid #EDE8E3; border-radius: 22px;
-  padding: 26px 28px 22px; box-shadow: 0 2px 12px rgba(80,35,20,0.04);
-}
-.cab-sv-wiz-head { margin-bottom: 18px; }
-.cab-sv-wiz-pretitle {
-  font-size: 11px; font-weight: 800; color: #B45309;
-  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px;
-}
-.cab-sv-wiz-title {
-  margin: 0; font-size: 22px; font-weight: 800; color: #502314;
-  line-height: 1.25; letter-spacing: -0.01em; word-break: break-word;
-}
-.cab-sv-wiz-desc {
-  margin: 10px 0 0; color: #6b4f3a; font-size: 14px;
-  line-height: 1.5; white-space: pre-line;
-}
-
-/* Цепочка сегментов */
-.cab-sv-chain {
-  display: flex; gap: 6px; margin: 4px 0 6px;
-  padding: 2px 0;
-}
-.cab-sv-chain-seg {
-  flex: 1; height: 8px; border-radius: 4px; border: none;
-  background: #F0E8DE; padding: 0; cursor: pointer;
-  transition: background .2s ease, transform .2s ease;
-}
-.cab-sv-chain-seg.filled { background: #D08B3A; }
-.cab-sv-chain-seg.active {
-  background: #502314;
-  transform: scaleY(1.35);
-}
-.cab-sv-chain-seg.locked { cursor: not-allowed; opacity: .6; }
-.cab-sv-chain-label {
-  font-size: 11px; font-weight: 700; color: #8b7355;
-  text-transform: uppercase; letter-spacing: .08em;
-  margin: 4px 0 16px;
-}
-
-/* Шаг */
-.cab-sv-step { min-height: 220px; }
-.cab-sv-step-title {
-  margin: 0 0 14px; font-size: 17px; font-weight: 800;
-  color: #502314; line-height: 1.4; word-break: break-word;
-}
-.cab-sv-step-hint {
-  margin: -8px 0 14px; color: #8b7355; font-size: 13px;
-}
-
-/* Большие варианты */
-.cab-sv-bigopts {
-  display: flex; flex-direction: column; gap: 10px;
-}
-.cab-sv-bigopt {
-  display: flex; align-items: center; gap: 14px;
-  width: 100%; padding: 16px 18px; text-align: left;
-  background: white; border: 2px solid #EDE8E3; border-radius: 14px;
-  cursor: pointer; font: inherit;
-  transition: transform .12s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
-}
-.cab-sv-bigopt:hover:not(:disabled) {
-  border-color: #D7B79A; background: #FFFBF5;
-  transform: translateY(-1px);
-}
-.cab-sv-bigopt:disabled { cursor: default; opacity: .75; }
-.cab-sv-bigopt-mark {
-  width: 26px; height: 26px; border-radius: 50%;
-  border: 2px solid #D7C4AA; background: white;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: white; flex-shrink: 0;
-  transition: .18s ease;
-}
-.cab-sv-bigopt-mark svg { opacity: 0; transform: scale(0.5); transition: .18s ease; }
-.cab-sv-bigopt-text {
-  flex: 1; font-size: 15px; font-weight: 500; color: #502314;
-  line-height: 1.35; word-break: break-word;
-}
-.cab-sv-bigopt.selected {
-  border-color: #D08B3A;
-  background: linear-gradient(135deg, #FFF8EB 0%, #FBF1E0 100%);
-  box-shadow: 0 4px 14px rgba(208,139,58,0.18);
-}
-.cab-sv-bigopt.selected .cab-sv-bigopt-mark {
-  background: #D08B3A; border-color: #D08B3A;
-}
-.cab-sv-bigopt.selected .cab-sv-bigopt-mark svg {
-  opacity: 1; transform: scale(1);
-}
-.cab-sv-bigopt.selected .cab-sv-bigopt-text { color: #4A2C18; font-weight: 700; }
-.cab-sv-scale {
-  display: grid;
-  grid-template-columns: repeat(10, minmax(42px, 1fr));
-  gap: 8px;
-}
-.cab-sv-scale-btn {
-  min-height: 46px;
-  border: 2px solid #EDE8E3;
-  border-radius: 10px;
-  background: #fff;
-  color: #502314;
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-}
-.cab-sv-scale-btn.selected {
-  border-color: #D08B3A;
-  background: #FFF1D7;
-  color: #4A2C18;
-}
-
-/* Textarea */
-.cab-sv-textarea {
-  width: 100%; min-height: 120px; padding: 14px 16px;
-  border: 1.5px solid #E0DBD5; border-radius: 12px;
-  font: inherit; font-size: 14px; color: #502314;
-  background: white; resize: vertical;
-  transition: .15s ease;
-}
-.cab-sv-textarea:focus {
-  outline: none; border-color: #D08B3A;
-  box-shadow: 0 0 0 3px rgba(208,139,58,0.14);
-}
-
-/* Навигация */
-.cab-sv-wiz-nav {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 10px; margin-top: 22px; padding-top: 18px;
-  border-top: 1px solid #F5F0EB;
-}
-.cab-sv-nav-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 12px 20px; border-radius: 12px; border: none;
-  font: inherit; font-size: 14px; font-weight: 700;
-  cursor: pointer; transition: .15s ease;
-}
-.cab-sv-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
-.cab-sv-nav-btn.back {
-  background: #F5F0EB; color: #6b4f3a;
-}
-.cab-sv-nav-btn.back:hover:not(:disabled) { background: #EAE2D8; color: #502314; }
-.cab-sv-nav-btn.next {
-  background: #502314; color: white;
-  padding: 12px 22px;
-}
-.cab-sv-nav-btn.next:hover:not(:disabled) { background: #3E1A0D; }
-.cab-sv-nav-btn.submit {
-  background: linear-gradient(135deg, #D08B3A, #B87528);
-  color: white; padding: 12px 24px;
-  box-shadow: 0 4px 14px rgba(208,139,58,0.35);
-}
-.cab-sv-nav-btn.submit:hover:not(:disabled) {
-  box-shadow: 0 6px 18px rgba(208,139,58,0.45);
-  transform: translateY(-1px);
-}
-
-/* Slide переходы */
-.cab-sv-slide-forward-enter-active,
-.cab-sv-slide-forward-leave-active,
-.cab-sv-slide-back-enter-active,
-.cab-sv-slide-back-leave-active {
-  transition: transform .26s ease, opacity .22s ease;
-}
-.cab-sv-slide-forward-enter-from { opacity: 0; transform: translateX(24px); }
-.cab-sv-slide-forward-leave-to   { opacity: 0; transform: translateX(-24px); }
-.cab-sv-slide-back-enter-from    { opacity: 0; transform: translateX(-24px); }
-.cab-sv-slide-back-leave-to      { opacity: 0; transform: translateX(24px); }
-
-/* ─── Readonly просмотр ─── */
-.cab-sv-ro { max-width: 640px; margin: 0 auto; }
-.cab-sv-ro-card {
-  background: white; border: 1px solid #EDE8E3; border-radius: 22px;
-  overflow: hidden; box-shadow: 0 2px 12px rgba(80,35,20,0.04);
-}
-.cab-sv-ro-head {
-  padding: 22px 26px 18px;
-  background: linear-gradient(135deg, #F0FDF4 0%, #D6F5E0 100%);
-  border-bottom: 1px solid #C6EACF;
-}
-.cab-sv-ro-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px; border-radius: 999px;
-  background: white; color: #15803D;
-  font-size: 11px; font-weight: 800;
-  text-transform: uppercase; letter-spacing: .04em;
-  box-shadow: 0 1px 3px rgba(16,122,64,0.10);
-}
-.cab-sv-ro-title {
-  margin: 12px 0 0; font-size: 20px; font-weight: 800;
-  color: #15401E; line-height: 1.25; word-break: break-word;
-}
-.cab-sv-ro-desc {
-  margin: 8px 0 0; color: #3a6147; font-size: 14px;
-  line-height: 1.5; white-space: pre-line;
-}
-.cab-sv-ro-meta {
-  margin-top: 10px; font-size: 12px; color: #3a6147; font-weight: 600;
-}
-.cab-sv-ro-body { padding: 18px 26px 22px; }
-.cab-sv-ro-q {
-  padding: 14px 0; border-bottom: 1px solid #F5F0EB;
-}
-.cab-sv-ro-q:last-of-type { border-bottom: none; }
-.cab-sv-ro-qhead {
-  display: flex; align-items: flex-start; gap: 10px;
-  margin-bottom: 10px;
-}
-.cab-sv-ro-qnum {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: #502314; color: white;
-  font-size: 12px; font-weight: 800; flex-shrink: 0;
-}
-.cab-sv-ro-qtext {
-  flex: 1; font-size: 15px; font-weight: 700; color: #502314;
-  line-height: 1.35; padding-top: 2px;
-}
-.cab-sv-ro-opts { display: flex; flex-direction: column; gap: 6px; padding-left: 34px; }
-.cab-sv-ro-opt {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; border-radius: 10px;
-  background: #FBF6EE; color: #8b7355;
-  font-size: 13px; line-height: 1.35;
-}
-.cab-sv-ro-opt.selected {
-  background: linear-gradient(135deg, #FFF8EB 0%, #FBF1E0 100%);
-  color: #4A2C18; font-weight: 700;
-}
-.cab-sv-ro-opt-mark {
-  width: 18px; height: 18px; border-radius: 50%;
-  border: 2px solid #D7C4AA; background: white;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: white; flex-shrink: 0;
-}
-.cab-sv-ro-opt.selected .cab-sv-ro-opt-mark {
-  background: #D08B3A; border-color: #D08B3A;
-}
-.cab-sv-ro-text-answer {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #FBF6EE;
-  color: #4A2C18;
-  font-size: 14px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-.cab-sv-ro-comment {
-  margin-top: 14px; padding: 14px 16px;
-  background: #FBF6EE; border-radius: 12px;
-}
-.cab-sv-ro-comment-label {
-  font-size: 11px; font-weight: 800; color: #8b7355;
-  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px;
-}
-.cab-sv-ro-comment-value {
-  color: #502314; font-size: 14px; line-height: 1.5; white-space: pre-wrap;
-}
-
-/* ─── Success ─── */
-.cab-sv-success-screen {
-  display: flex; flex-direction: column; align-items: center;
-  padding: 50px 20px 40px; text-align: center;
-}
-.cab-sv-success-ring {
-  width: 96px; height: 96px; border-radius: 50%;
-  background: linear-gradient(135deg, #10B981, #059669);
-  display: flex; align-items: center; justify-content: center;
-  color: white;
-  box-shadow: 0 12px 32px rgba(16,185,129,0.35);
-  animation: cabSvPop .45s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.cab-sv-success-check {
-  stroke-dasharray: 34;
-  stroke-dashoffset: 34;
-  animation: cabSvDraw .5s ease-out .25s forwards;
-}
-@keyframes cabSvPop {
-  0%   { transform: scale(.4); opacity: 0; }
-  60%  { transform: scale(1.12); opacity: 1; }
-  100% { transform: scale(1); }
-}
-@keyframes cabSvDraw {
-  to { stroke-dashoffset: 0; }
-}
-.cab-sv-success-title {
-  margin: 22px 0 6px; font-size: 26px; font-weight: 800; color: #502314;
-}
-.cab-sv-success-text {
-  margin: 0 0 22px; color: #6b4f3a; font-size: 15px;
-}
-.cab-sv-success-btn { min-width: 180px; }
-.cab-sv-fade-enter-active, .cab-sv-fade-leave-active { transition: opacity .25s ease; }
-.cab-sv-fade-enter-from, .cab-sv-fade-leave-to { opacity: 0; }
 
 /* ═══ Сбор остатков (редизайн) ═══ */
 .sc-section { padding-bottom: 120px; }
@@ -5101,54 +3922,6 @@ tr.del-err { background: #fef2f2; }
 }
 .sc-savebar-btn { flex-shrink: 0; min-width: 180px; }
 
-.whs-section { max-width: 1180px; margin-left: auto; margin-right: auto; }
-.whs-panel { background: #fff; border: 1px solid #EDE8E3; border-radius: 18px; padding: 18px; }
-.whs-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
-.whs-head h2 { margin: 0 0 4px; color: #502314; font-size: 20px; }
-.whs-head p { margin: 0; color: #8b7355; font-size: 13px; }
-.whs-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-.whs-search { flex: 1; min-width: 260px; display: flex; align-items: center; gap: 8px; background: #FAFAF8; border: 1px solid #EDE8E3; border-radius: 10px; padding: 0 12px; min-height: 44px; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
-.whs-search:focus-within { background: #fff; border-color: #502314; box-shadow: 0 0 0 3px rgba(80, 35, 20, .12); }
-.whs-search svg { width: 18px; height: 18px; stroke: #8b7355; }
-.whs-search input { appearance: none; -webkit-appearance: none; border: 0; outline: 0; box-shadow: none; border-radius: 0; background: transparent; width: 100%; font: inherit; color: #2b1a0e; min-height: 42px; }
-.whs-search input:focus { outline: 0; box-shadow: none; }
-.whs-check { min-height: 44px; display: flex; align-items: center; gap: 8px; color: #5f4b38; font-size: 13px; cursor: pointer; user-select: none; }
-.whs-check input { width: 16px; height: 16px; accent-color: #E76F51; }
-.whs-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 8px; -webkit-overflow-scrolling: touch; }
-.whs-tab { border: 1px solid #EDE8E3; background: #FAFAF8; color: #5f4b38; min-height: 40px; padding: 8px 12px; border-radius: 10px; font-weight: 700; font-size: 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
-.whs-tab span { color: #9b8064; font-weight: 700; }
-.whs-tab.active { background: #502314; border-color: #502314; color: #fff; }
-.whs-tab.active span { color: rgba(255,255,255,0.75); }
-.whs-list { display: flex; flex-direction: column; gap: 8px; }
-.whs-list-head { display: grid; grid-template-columns: minmax(0, 1fr) 120px 180px; gap: 12px; align-items: center; padding: 0 12px 2px; color: #8b7355; font-size: 11px; font-weight: 800; text-transform: uppercase; }
-.whs-list-head span:nth-child(2), .whs-list-head span:nth-child(3) { text-align: right; }
-.whs-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 180px; gap: 12px; align-items: center; border: 1px solid #F0E8DD; border-radius: 12px; padding: 12px; background: #fff; }
-.whs-row.soon { border-color: #F4A261; background: #FFF8EF; }
-.whs-row-main { min-width: 0; }
-.whs-name { display: flex; gap: 8px; align-items: baseline; color: #2b1a0e; font-weight: 700; line-height: 1.35; }
-.whs-copy { border: 0; background: transparent; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-.whs-copy:hover { color: #E76F51; text-decoration: none; }
-.whs-copy:focus-visible { outline: 2px solid rgba(80, 35, 20, .35); outline-offset: 2px; border-radius: 4px; }
-.whs-sku { color: #E76F51; font-size: 12px; font-weight: 800; white-space: nowrap; }
-.whs-title { min-width: 0; font-weight: 700; }
-.whs-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 5px; color: #8b7355; font-size: 12px; }
-.whs-copied { color: #2e7d32; font-weight: 700; }
-.whs-qty { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; color: #2b1a0e; font-variant-numeric: tabular-nums; }
-.whs-qty strong { font-size: 16px; font-weight: 700; line-height: 1.2; }
-.whs-exp { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; font-weight: 700; text-align: right; }
-.whs-exp .ok { color: #2e7d32; }
-.whs-exp .warn { color: #ef6c00; }
-.whs-exp .bad { color: #c0392b; }
-.whs-batches-btn { border: 0; background: transparent; color: #E76F51; padding: 2px 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
-.whs-batches { grid-column: 1 / -1; border-top: 1px solid #F0E8DD; padding-top: 10px; display: grid; gap: 0; }
-.whs-batch { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(150px, 220px) 92px 118px minmax(100px, 140px); gap: 12px; align-items: center; color: #5f4b38; font-size: 12px; padding: 7px 8px; border-bottom: 1px solid #F6EFE7; }
-.whs-batch:last-child { border-bottom: 0; }
-.whs-batch-head { color: #8b7355; font-weight: 800; background: #FAFAF8; border-radius: 8px; border-bottom: 0; margin-bottom: 2px; }
-.whs-batch-name { color: #2b1a0e; font-weight: 700; }
-.whs-batch-head span:nth-child(n+3) { text-align: right; }
-.whs-batch b { color: #2b1a0e; text-align: right; font-variant-numeric: tabular-nums; }
-.whs-batch span:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; }
-
 /* Profile */
 .profile-card { background: white; border-radius: 18px; padding: 20px; margin-bottom: 12px; display: flex; border: 1px solid #EDE8E3; }
 .profile-header { display: flex; align-items: center; gap: 12px; }
@@ -5207,135 +3980,6 @@ tr.del-err { background: #fef2f2; }
 .info-files { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
 .info-files-modal { margin-bottom: 12px; }
 
-/* Информация — редизайн */
-.info-section { max-width: 760px; margin: 0 auto; padding-bottom: 100px; }
-.info-empty {
-  background: #fff; border: 1px solid #ECE3D6; border-radius: 16px;
-  padding: 36px 24px; text-align: center;
-}
-.info-empty-icon {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 60px; height: 60px; border-radius: 16px;
-  background: #FFF1E0; color: #C16B4D;
-  margin: 0 auto 14px;
-}
-.info-empty h3 { margin: 0 0 6px; font-size: 17px; color: #2C1A12; }
-.info-empty p { margin: 0; color: #8B7355; font-size: 13.5px; line-height: 1.5; max-width: 320px; margin: 0 auto; }
-
-.info-filter-chips {
-  display: flex; gap: 8px; margin-bottom: 14px;
-  overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px;
-}
-.info-fchip {
-  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
-  padding: 7px 12px; border: 1.5px solid #E8DCC8; background: #FFFBF6;
-  color: #6B5344; border-radius: 999px; cursor: pointer; font: inherit;
-  font-size: 13px; font-weight: 600; transition: all .15s;
-}
-.info-fchip:hover:not(.active) { border-color: #E76F51; }
-.info-fchip.active { background: #E76F51; color: #fff; border-color: #E76F51; }
-.info-fchip-count {
-  display: inline-block; min-width: 18px; padding: 1px 7px;
-  border-radius: 10px; background: rgba(0,0,0,.08);
-  font-size: 11px; font-weight: 700;
-}
-.info-fchip.active .info-fchip-count { background: rgba(255,255,255,.25); }
-
-.info-list { display: flex; flex-direction: column; gap: 12px; }
-.info-card {
-  background: #fff; border: 1.5px solid #ECE3D6; border-radius: 14px;
-  padding: 16px 18px;
-  transition: border-color .15s, box-shadow .15s;
-}
-.info-card.unread {
-  border-color: #F4A261;
-  box-shadow: 0 4px 14px rgba(244,162,97,.15);
-  background: linear-gradient(to bottom right, #FFF8F0, #FFFFFF 60%);
-}
-.info-card-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; margin-bottom: 10px;
-}
-.info-card-author { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.info-card-avatar {
-  width: 38px; height: 38px; border-radius: 50%;
-  background: linear-gradient(135deg, #502314, #6B321F);
-  color: #fff; font-size: 15px; font-weight: 700;
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.info-card.unread .info-card-avatar {
-  background: linear-gradient(135deg, #E76F51, #F4A261);
-}
-.info-card-author-info { min-width: 0; }
-.info-card-author-name { font-size: 13.5px; font-weight: 700; color: #2C1A12; line-height: 1.2; }
-.info-card-time { font-size: 11.5px; color: #8B7355; line-height: 1.3; display: block; margin-top: 2px; }
-.info-card-dot {
-  flex-shrink: 0;
-  width: 9px; height: 9px; border-radius: 50%;
-  background: #E76F51;
-  box-shadow: 0 0 0 4px rgba(231,111,81,.2);
-}
-.info-card-title {
-  margin: 0 0 8px; font-size: 16px; font-weight: 700; color: #2C1A12;
-  line-height: 1.35;
-}
-.info-card-message {
-  margin: 0; color: #4B3527; font-size: 14.5px; line-height: 1.55;
-  white-space: pre-line;
-}
-
-.info-card-files {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px; margin-top: 14px;
-}
-.info-file {
-  display: flex; align-items: center; gap: 10px;
-  background: #FAFAF8; border: 1px solid #EDE8E3; border-radius: 10px;
-  padding: 8px 10px; cursor: pointer; font: inherit; color: #2C1A12;
-  text-align: left; min-width: 0;
-  transition: border-color .15s, background .15s;
-}
-.info-file:hover { border-color: #E76F51; background: #FFF8F0; }
-.info-file.image {
-  flex-direction: column; align-items: stretch; gap: 0; padding: 0;
-  overflow: hidden;
-}
-.info-file-img {
-  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block;
-  background: #F4ECE4;
-}
-.info-file.image .info-file-meta { padding: 8px 10px; }
-.info-file-ico {
-  width: 36px; height: 36px; flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px; background: #FFF1E0; color: #C16B4D;
-}
-.info-file-ico svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.info-file-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
-.info-file-name {
-  font-size: 13px; font-weight: 600; color: #2C1A12;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.info-file-size { font-size: 11.5px; color: #8B7355; }
-
-.info-card-foot {
-  margin-top: 14px; padding-top: 12px; border-top: 1px solid #F2EDE8;
-}
-.info-read {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 14px; border: 1.5px solid #E8DCC8; border-radius: 999px;
-  background: #FFFBF6; color: #C16B4D; font: inherit;
-  font-size: 13px; font-weight: 600; cursor: pointer;
-  transition: all .15s;
-}
-.info-read:hover { background: #E76F51; color: #fff; border-color: #E76F51; }
-
-@media (max-width: 640px) {
-  .info-card { padding: 14px; border-radius: 12px; }
-  .info-card-files { grid-template-columns: 1fr 1fr; gap: 6px; }
-  .info-empty { padding: 28px 16px; }
-}
 .image-preview-overlay { z-index: 11000; }
 .important-image-modal {
   max-width: min(960px, 96vw); max-height: 92vh; background: white; border-radius: 12px; overflow: hidden;
@@ -5616,6 +4260,7 @@ tr.del-err { background: #fef2f2; }
   display: block;
 }
 .dash-tile--cards .dash-tile-icon { background: #E0F2FE; color: #1D4ED8; }
+.dash-tile--reminders .dash-tile-icon { background: #FEEFCB; color: #B45309; }
 
 @media (max-width: 640px) {
   .dash-tiles { grid-template-columns: 1fr; gap: 8px; }

@@ -1,5 +1,9 @@
 <template>
-  <div v-if="items.length" class="rtr-wrap" :class="{ 'rtr-compact': compact }">
+  <div v-if="allDone" class="rtr-allgood" :class="{ 'rtr-compact': compact }">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    <span>Все заявки на сегодня поданы ({{ items.length }})</span>
+  </div>
+  <div v-else-if="items.length" class="rtr-wrap" :class="{ 'rtr-compact': compact }">
     <div v-if="!compact" class="rtr-title">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
       <span>Сегодня нужно подать заявки</span>
@@ -55,6 +59,7 @@ const toast = useToastStore();
 const items = ref([]);
 const busy = reactive({});
 let pollTimer = null;
+const allDone = computed(() => items.value.length > 0 && items.value.every(it => it.is_acknowledged));
 
 function buildHeaders(json = false) {
   const h = {};
@@ -202,4 +207,12 @@ defineExpose({ load });
 .rtr-btn-done.is-late:hover { background: #7f0000; }
 .rtr-btn-undo { padding: 5px 10px; border: 1px solid #ddd; background: #fff; color: #666; font-size: 11px; border-radius: 5px; cursor: pointer; }
 .rtr-btn-undo:hover { background: #f5f5f5; color: #c62828; border-color: #f6a8a8; }
+.rtr-allgood {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; margin-bottom: 14px;
+  background: #ebf6ec; border: 1px solid #c4e6c8; border-radius: 10px;
+  color: #1b5e20; font-size: 13px; font-weight: 600;
+}
+.rtr-allgood.rtr-compact { padding: 8px 12px; font-size: 12px; }
+.rtr-allgood svg { color: #2e7d32; flex-shrink: 0; }
 </style>

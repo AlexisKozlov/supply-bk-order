@@ -3100,11 +3100,15 @@ if ($roAction === 'all-history' && $method === 'GET') {
     $restEntity = $rest['legal_entity'] ?? '';
     if (!$restEntity) roRespond(['error' => 'У ресторана не задано юр. лицо'], 400);
     $limit = min((int)($_GET['limit'] ?? 30), 100);
+
+    // Курсор: подгружаем заказы старше указанной даты (для «Загрузить ещё»)
+    $beforeDate = trim((string)($_GET['before_date'] ?? ''));
+    $hasBefore = ($beforeDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $beforeDate));
     $allOrders = [];
 
     // 1. Основная поставка (ro_orders) — показываем в истории только если модуль включён
     if (roRestaurantOrdersEnabled($pdo, $restEntity, $group)) {
-        $s1 = $pdo->prepare("
+        $sql1 = "
             SELECT o.id, o.delivery_date, o.status, o.submitted_at,
                    (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
                    (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty,
@@ -3113,9 +3117,12 @@ if ($roAction === 'all-history' && $method === 'GET') {
                       LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity_group = o.legal_entity_group AND pp.price_type = 'deposit'
                       WHERE oi.order_id = o.id) as total_deposit
             FROM ro_orders o WHERE o.restaurant_number = ? AND o.legal_entity = ?
-            ORDER BY o.delivery_date DESC LIMIT {$limit}
-        ");
-        $s1->execute([$rn, $restEntity]);
+        ";
+        $params1 = [$rn, $restEntity];
+        if ($hasBefore) { $sql1 .= " AND o.delivery_date < ?"; $params1[] = $beforeDate; }
+        $sql1 .= " ORDER BY o.delivery_date DESC LIMIT {$limit}";
+        $s1 = $pdo->prepare($sql1);
+        $s1->execute($params1);
         foreach ($s1->fetchAll() as $r) {
             $r['source'] = 'delivery';
             $r['source_name'] = 'Основная поставка';
@@ -3124,7 +3131,7 @@ if ($roAction === 'all-history' && $method === 'GET') {
     }
 
     // 2. Заявки поставщикам (so_orders)
-    $s2 = $pdo->prepare("
+    $sql2 = "
         SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.supplier_id,
                s.short_name as supplier_name,
                (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id) as item_count,
@@ -3132,9 +3139,12 @@ if ($roAction === 'all-history' && $method === 'GET') {
         FROM so_orders o
         LEFT JOIN suppliers s ON s.id = o.supplier_id
         WHERE o.restaurant_number = ? AND o.legal_entity = ?
-        ORDER BY o.delivery_date DESC LIMIT {$limit}
-    ");
-    $s2->execute([$rn, $restEntity]);
+    ";
+    $params2 = [$rn, $restEntity];
+    if ($hasBefore) { $sql2 .= " AND o.delivery_date < ?"; $params2[] = $beforeDate; }
+    $sql2 .= " ORDER BY o.delivery_date DESC LIMIT {$limit}";
+    $s2 = $pdo->prepare($sql2);
+    $s2->execute($params2);
     foreach ($s2->fetchAll() as $r) {
         $r['source'] = 'supplier';
         $r['source_name'] = $r['supplier_name'] ?: 'Поставщик';
@@ -3146,8 +3156,10 @@ if ($roAction === 'all-history' && $method === 'GET') {
     usort($allOrders, function($a, $b) {
         return strcmp($b['delivery_date'], $a['delivery_date']);
     });
+    // has_more = после среза остались хвосты хотя бы в одной из таблиц
+    $hasMore = (count($allOrders) > $limit);
     $allOrders = array_slice($allOrders, 0, $limit);
-    roRespond(['orders' => $allOrders]);
+    roRespond(['orders' => $allOrders, 'has_more' => $hasMore]);
 }
 
 // --- Детали заказа из истории ресторана ---

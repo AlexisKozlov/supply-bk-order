@@ -25,9 +25,15 @@
     </div>
 
     <div v-else>
-      <p class="rrt-intro">
-        Включи получение напоминаний для нужных поставщиков. В назначенное расписанием время (за день/часы до дедлайна подачи заявки) ты увидишь баннер в кабинете и/или получишь сообщение в Telegram.
-      </p>
+      <div class="rrt-intro-row">
+        <p class="rrt-intro">
+          Включи получение напоминаний для нужных поставщиков. В назначенное расписанием время (за день/часы до дедлайна подачи заявки) ты увидишь баннер в кабинете и/или получишь сообщение в Telegram.
+        </p>
+        <button type="button" class="rrt-tut-btn" @click="openTutorial" title="Открыть видеоинструкцию">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          Видеоинструкция
+        </button>
+      </div>
 
       <div v-if="!availableTg.length" class="rrt-tg-warning">
         Никто из сотрудников ресторана ещё не привязал Telegram-бота. Сотрудники могут привязать чат через настройки уведомлений в боте — тогда они появятся в списке для выбора.
@@ -179,6 +185,10 @@ async function openFullscreen() {
 function dismissTutorial() {
   showTutorial.value = false;
   try { localStorage.setItem(TUTORIAL_KEY, '1'); } catch (e) { /* ignore */ }
+}
+
+function openTutorial() {
+  showTutorial.value = true;
 }
 
 function onTutorialEsc(e) {
@@ -388,7 +398,20 @@ onBeforeUnmount(() => {
 .rrt { padding: 12px 4px 24px; }
 .rrt-loading, .rrt-empty { padding: 28px 16px; color: #777; text-align: center; }
 .rrt-empty p { margin: 6px 0; line-height: 1.5; }
-.rrt-intro { font-size: 13px; color: #555; line-height: 1.5; margin: 0 0 14px; padding: 10px 14px; background: #f7f9fb; border-radius: 8px; }
+.rrt-intro { font-size: 13px; color: #555; line-height: 1.5; margin: 0; padding: 10px 14px; background: #f7f9fb; border-radius: 8px; flex: 1; }
+.rrt-intro-row { display: flex; gap: 12px; align-items: stretch; margin: 0 0 14px; }
+.rrt-tut-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 14px; border-radius: 8px;
+  background: #fff; border: 1px solid #d1d8df; color: #2d3a48;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.rrt-tut-btn:hover { background: #f0f4f8; border-color: #b3c0cf; color: #1a73e8; }
+@media (max-width: 640px) {
+  .rrt-intro-row { flex-direction: column; }
+  .rrt-tut-btn { justify-content: center; padding: 10px 14px; }
+}
 .rrt-tg-warning { font-size: 13px; color: #b35900; background: #fff4e0; border: 1px solid #ffe0b2; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; line-height: 1.5; }
 
 .rrt-list { display: flex; flex-direction: column; gap: 14px; }

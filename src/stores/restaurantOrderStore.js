@@ -503,9 +503,14 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   }
 
   // === Личный кабинет ресторана ===
-  async function loadAllHistory(limit = 30) {
-    const data = await api(`all-history?limit=${limit}`);
-    return data.orders || [];
+  async function loadAllHistory(opts = {}) {
+    // Поддерживаем старый формат — число вместо объекта
+    if (typeof opts === 'number') opts = { limit: opts };
+    const limit = opts.limit ?? 30;
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (opts.beforeDate) params.set('before_date', opts.beforeDate);
+    const data = await api(`all-history?${params}`);
+    return { orders: data.orders || [], hasMore: !!data.has_more };
   }
 
   async function loadHistoryOrder(source, id) {
