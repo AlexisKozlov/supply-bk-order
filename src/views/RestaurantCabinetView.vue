@@ -206,7 +206,7 @@
           </div>
 
           <!-- Напоминания на сегодня -->
-          <RestaurantTodayReminders @updated="onTodayRemindersUpdated" />
+          <RestaurantTodayReminders />
 
           <!-- Срочные карточки -->
           <div v-if="urgentItems.length" class="dash-urgent">
@@ -1510,14 +1510,13 @@ const {
   showPushOnboarding,
   dismissPushOnboarding,
   enablePushOnboarding,
-  onTodayRemindersUpdated,
   todaySignals,
 } = useCabinetDashboard({
   stockCollection,
   stockCollectionUnfilledCount,
   surveyPendingCount,
   switchTab: (tab, sub) => switchTab(tab, sub),
-  toast: toastStore,
+  toast,
 });
 
 const urgentItems = computed(() => {

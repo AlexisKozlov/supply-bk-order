@@ -3,7 +3,7 @@
  *
  * Что внутри:
  *  - PWA push онбординг (определение «приложение» / запоминание «не сейчас»)
- *  - Сводная карточка «Сегодня нужно сделать»: дедлайны, остатки, опросы
+ *  - Сводная карточка «Сегодня нужно сделать»: незаполненный сбор остатков, новые опросы
  *
  * Из RestaurantCabinetView.vue это вынесено, чтобы:
  *  - облегчить большой файл кабинета
@@ -13,7 +13,7 @@
  *   const {
  *     push, isStandalonePwa, showPushOnboarding,
  *     dismissPushOnboarding, enablePushOnboarding,
- *     onTodayRemindersUpdated, todaySignals,
+ *     todaySignals,
  *   } = useCabinetDashboard({ stockCollection, stockCollectionUnfilledCount, surveyPendingCount, switchTab, toast });
  */
 
@@ -58,25 +58,10 @@ export function useCabinetDashboard({ stockCollection, stockCollectionUnfilledCo
   }
 
   // ─── Карточка «Сегодня нужно сделать» ───
-  const todayReminderItems = ref([]);
-  function onTodayRemindersUpdated(items) {
-    // Берём только сегодняшние неподтверждённые. Advance-айтемы (завтра)
-    // показываются отдельно баннером RestaurantTodayReminders.
-    todayReminderItems.value = (items || []).filter(it => !it.is_acknowledged && !it.is_advance);
-  }
-
+  // Сами напоминания о заявках поставщикам показываются отдельным блоком
+  // (RestaurantTodayReminders) с кнопками «Подал», поэтому в сводке их не дублируем.
   const todaySignals = computed(() => {
     const out = [];
-    const remindersCount = todayReminderItems.value.length;
-    if (remindersCount > 0) {
-      out.push({
-        key: 'reminders',
-        count: remindersCount,
-        label: remindersCount === 1 ? 'заявка к поставщику ждёт подачи' : `заявки к поставщикам (${remindersCount})`,
-        tone: 'warn',
-        action: () => switchTab('orders', 'reminders'),
-      });
-    }
     if (stockCollection?.active && stockCollectionUnfilledCount?.value > 0) {
       out.push({
         key: 'stock',
@@ -104,8 +89,6 @@ export function useCabinetDashboard({ stockCollection, stockCollectionUnfilledCo
     showPushOnboarding,
     dismissPushOnboarding,
     enablePushOnboarding,
-    todayReminderItems,
-    onTodayRemindersUpdated,
     todaySignals,
   };
 }

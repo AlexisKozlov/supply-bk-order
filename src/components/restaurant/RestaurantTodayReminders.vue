@@ -54,8 +54,6 @@ const props = defineProps({
   compact: { type: Boolean, default: false }, // компактный режим для дашборда
 });
 
-const emit = defineEmits(['updated']);
-
 const toast = useToastStore();
 const items = ref([]);
 const busy = reactive({});
@@ -125,7 +123,6 @@ async function load() {
     const data = await roFetch('/api/restaurant-reminders/today');
     // Показываем только подписанные позиции (включён мастер-тумблер)
     items.value = (data.items || []).filter(it => it.is_subscribed);
-    emit('updated', items.value);
   } catch (e) {
     items.value = [];
   }
