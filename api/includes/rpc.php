@@ -6364,6 +6364,74 @@ if ($endpoint === 'rpc') {
         ]);
     }
 
+    // Подписки ресторанов на напоминания об ОСНОВНОЙ поставке — для индикатора
+    // в DeliveryScheduleView (страница «График доставки»). Структура аналогична
+    // subscriptions из list_supplier_schedules, но без supplier_id (у основной
+    // поставки только одна подписка на ресторан).
+    if ($fn === 'list_main_delivery_subscriptions') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'delivery-schedule', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $group = trim((string)($body['legal_entity_group'] ?? ''));
+        if (!in_array($group, ['BK_VM', 'PS'], true)) respond(['error' => 'Требуется legal_entity_group (BK_VM или PS)'], 400);
+
+        // Фильтр по доступным пользователю юр.лицам.
+        $userEntities = $caller['legal_entities'] ?? null;
+        if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
+        $entityWhere = '';
+        $entityParams = [];
+        if (is_array($userEntities) && !empty($userEntities)) {
+            $ph = implode(',', array_fill(0, count($userEntities), '?'));
+            $entityWhere = " AND r.legal_entity IN ($ph) ";
+            $entityParams = $userEntities;
+        }
+
+        $subStmt = $pdo->prepare("
+            SELECT sub.id, sub.restaurant_id, sub.is_enabled, sub.telegram_enabled
+            FROM restaurant_main_delivery_subscriptions sub
+            JOIN restaurants r ON r.id = sub.restaurant_id
+            WHERE r.legal_entity_group = ?
+              AND r.active = 1
+              $entityWhere
+        ");
+        $subStmt->execute(array_merge([$group], $entityParams));
+
+        $subscriptions = [];
+        $subById = [];
+        foreach ($subStmt->fetchAll() as $r) {
+            $subId = (int)$r['id'];
+            $subById[$subId] = $r;
+            $subscriptions[(int)$r['restaurant_id']] = [
+                'is_enabled' => (int)$r['is_enabled'] === 1,
+                'telegram_enabled' => (int)$r['telegram_enabled'] === 1,
+                'tg_names' => [],
+            ];
+        }
+
+        // Имена выбранных Telegram-подписчиков для каждой подписки.
+        if ($subById) {
+            $sIds = array_keys($subById);
+            $sph = implode(',', array_fill(0, count($sIds), '?'));
+            $tgStmt = $pdo->prepare("
+                SELECT rmts.subscription_id, rts.first_name, rts.username
+                FROM restaurant_main_delivery_tg_subscribers rmts
+                JOIN ro_telegram_subs rts ON rts.id = rmts.ro_tg_sub_id
+                WHERE rmts.subscription_id IN ($sph)
+                  AND rmts.is_active = 1
+                  AND rts.verified_at IS NOT NULL
+            ");
+            $tgStmt->execute($sIds);
+            foreach ($tgStmt->fetchAll() as $t) {
+                $subInfo = $subById[(int)$t['subscription_id']];
+                $name = $t['first_name'] ?: ($t['username'] ? '@' . $t['username'] : 'tg');
+                $subscriptions[(int)$subInfo['restaurant_id']]['tg_names'][] = $name;
+            }
+        }
+
+        respond(['subscriptions' => $subscriptions]);
+    }
+
     if ($fn === 'save_supplier_schedule_row') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);

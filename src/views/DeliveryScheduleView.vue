@@ -76,7 +76,16 @@
               :key="r.id"
               class="pf-mrow"
             >
-              <td class="pf-mtd pf-mtd-center ds-td-num">{{ displayNumber(r) }}</td>
+              <td class="pf-mtd pf-mtd-center ds-td-num">
+                <span class="ds-num-text">{{ displayNumber(r) }}</span>
+                <span v-if="mainSubFor(r)?.is_enabled"
+                      class="ds-rest-sub"
+                      :class="{ 'has-tg': (mainSubFor(r)?.tg_names || []).length }"
+                      :title="mainSubTitle(r)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+                  <span v-if="(mainSubFor(r)?.tg_names || []).length" class="ds-rest-sub-count">{{ mainSubFor(r).tg_names.length }}</span>
+                </span>
+              </td>
               <td v-if="isPSGroup" class="pf-mtd pf-mtd-center ds-td-num">{{ r.dodo_is_number || '—' }}</td>
               <td class="pf-mtd ds-td-addr" :class="{ 'ds-td-addr-editable': isEditing }" @dblclick="startEditRestaurant(r)">{{ r.address }}</td>
               <td class="pf-mtd pf-mtd-center ds-td-cnt">
@@ -528,6 +537,21 @@ const isPSGroup = computed(() => {
 function displayNumber(r) {
   if (r.legal_entity_group === 'PS' && r.number >= 1000) return r.number - 1000;
   return r.number;
+}
+
+// Подписка ресторана на напоминания об основной поставке.
+// Используется в шаблоне для иконки-колокольчика рядом с номером.
+function mainSubFor(restaurant) {
+  return store.mainSubscriptionFor(restaurant.id);
+}
+
+function mainSubTitle(restaurant) {
+  const s = mainSubFor(restaurant);
+  if (!s || !s.is_enabled) return 'Ресторан не подписан на напоминания';
+  const names = (s.tg_names || []);
+  if (names.length) return 'Подписан, Telegram: ' + names.join(', ');
+  if (s.telegram_enabled) return 'Подписан, Telegram-канал включён, но получатели не выбраны';
+  return 'Подписан на напоминания в кабинете';
 }
 
 function deliveryCount(restaurant) {
@@ -1078,6 +1102,19 @@ function formatLastUpdate(upd) {
   font-size: 13px;
   font-family: 'Plus Jakarta Sans', sans-serif;
 }
+/* Иконка-колокольчик: ресторан подписан на напоминания об основной поставке.
+   Серый — подписан без Telegram-получателей, оранжевый — с получателями (число рядом). */
+.ds-rest-sub {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-left: 5px; vertical-align: middle;
+  color: #9aa0a6;
+}
+.ds-rest-sub.has-tg { color: var(--bk-orange, #E76F51); }
+.ds-rest-sub-count {
+  font-size: 10px; font-weight: 700;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.ds-num-text { display: inline-block; }
 .ds-td-addr {
   text-align: left;
   font-weight: 600; color: var(--bk-brown); font-size: 12px;
