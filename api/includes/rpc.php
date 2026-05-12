@@ -4511,62 +4511,26 @@ if ($endpoint === 'rpc') {
         $c = $corr->fetch();
         if (!$c) respond(['error' => 'Не найдено'], 404);
 
-        // Определяем батч — все позиции этого ресторана на эту дату от того же отправителя
-        $batchSt = $pdo->prepare("SELECT * FROM order_corrections WHERE restaurant_number = ? AND delivery_date = ? AND restaurant_chat_id = ? ORDER BY id");
-        $batchSt->execute([$c['restaurant_number'], $c['delivery_date'], $c['restaurant_chat_id']]);
-        $batchItems = $batchSt->fetchAll();
+        // Определяем батч: для кабинетных — по batch_uuid, для TG-старых — по (restaurant, date, chat_id).
+        if (!empty($c['batch_uuid'])) {
+            $batchSt = $pdo->prepare("SELECT id FROM order_corrections WHERE batch_uuid = ? ORDER BY id");
+            $batchSt->execute([$c['batch_uuid']]);
+        } else {
+            $batchSt = $pdo->prepare("SELECT id FROM order_corrections WHERE restaurant_number = ? AND delivery_date = ? AND restaurant_chat_id = ? ORDER BY id");
+            $batchSt->execute([$c['restaurant_number'], $c['delivery_date'], $c['restaurant_chat_id']]);
+        }
+        $batchIds = array_map('intval', $batchSt->fetchAll(PDO::FETCH_COLUMN));
 
-        // Проверяем остались ли необработанные (pending или in_progress)
-        $hasPending = false;
-        foreach ($batchItems as $bi) { if ($bi['status'] === 'pending' || $bi['status'] === 'in_progress') { $hasPending = true; break; } }
-
-        // Если все обработаны — отправляем сводку ресторану
-        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
-        if (!$hasPending && $botToken && $c['restaurant_chat_id']) {
-            $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
-            $dow = (int)(new DateTime($c['delivery_date']))->format('N');
-            $dateFmt = $dayNames[$dow] . ' ' . date('d.m', strtotime($c['delivery_date']));
-
-            $rNum = htmlspecialchars((string)$c['restaurant_number'], ENT_QUOTES, 'UTF-8');
-            $text = "📋 <b>Результат корректировки заказа</b>\n";
-            $text .= "🏪 Ресторан <b>{$rNum}</b> | Доставка: {$dateFmt}\n";
-            $text .= "─────────────────────\n";
-            foreach ($batchItems as $bi) {
-                $uom = htmlspecialchars((string)($bi['unit_of_measure'] ?: 'кор.'), ENT_QUOTES, 'UTF-8');
-                $qty = rtrim(rtrim(number_format(floatval($bi['quantity']), 2, '.', ''), '0'), '.') . " {$uom}";
-                $pname = htmlspecialchars((string)$bi['product_name'], ENT_QUOTES, 'UTF-8');
-                if ($bi['status'] === 'approved') {
-                    $label = $bi['action'] === 'add' ? 'Добавлено' : 'Убрано';
-                    $text .= "✅ <b>{$label}:</b> {$pname} — {$qty}\n";
-                } else {
-                    $label = $bi['action'] === 'add' ? 'Добавить' : 'Убрать';
-                    $text .= "❌ <b>Отклонено</b> ({$label}): {$pname} — {$qty}\n";
-                    if ($bi['review_comment']) $text .= "    Причина: " . htmlspecialchars((string)$bi['review_comment'], ENT_QUOTES, 'UTF-8') . "\n";
-                }
+        // Освежаем сообщения у закупок (это работает даже если батч ещё не закрыт целиком),
+        // и пытаемся отправить итог ресторану (функция сама вернётся, если ещё есть pending/in_progress).
+        try {
+            require_once __DIR__ . '/bot_rest.php';
+            if ($batchIds) {
+                corrUpdateAllReviewMessages($pdo, $batchIds);
+                corrSendResultToRestaurant($pdo, $batchIds, $callerName);
             }
-            $text .= "─────────────────────\n";
-            $text .= "Обработал: " . htmlspecialchars((string)$callerName, ENT_QUOTES, 'UTF-8');
-
-            $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);
-            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-            curl_exec($ch); curl_close($ch);
-
-            // Обновляем сообщения отдела закупок — перестраиваем с актуальными статусами
-            $nm = json_decode($c['notify_messages'] ?? '{}', true);
-            $messages = $nm['messages'] ?? [];
-            $batchIdsNm = $nm['batch_ids'] ?? array_column($batchItems, 'id');
-            if ($messages && $batchIdsNm) {
-                // Перестраиваем текст и кнопки
-                require_once __DIR__ . '/bot_rest.php';
-                $msgData = corrBuildReviewMessage($pdo, $batchIdsNm);
-                foreach ($messages as $m) {
-                    $epayload = json_encode(['chat_id' => $m['chat_id'], 'message_id' => $m['message_id'], 'text' => $msgData['text'], 'parse_mode' => 'HTML', 'reply_markup' => json_encode($msgData['keyboard'])]);
-                    $ch2 = curl_init("https://api.telegram.org/bot{$botToken}/editMessageText");
-                    curl_setopt_array($ch2, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $epayload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                    curl_exec($ch2); curl_close($ch2);
-                }
-            }
+        } catch (\Throwable $e) {
+            error_log('[correction_review] notify failed: ' . $e->getMessage());
         }
 
         auditLog($pdo, 'correction_reviewed', 'correction', $id, $callerName, ['action' => $action, 'restaurant' => $c['restaurant_number'], 'product' => $c['product_name']]);
@@ -4606,47 +4570,30 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Ошибка обновления'], 500);
         }
 
-        // Берём первую корректировку для определения батча и отправки уведомления
-        $first = $pdo->prepare("SELECT * FROM order_corrections WHERE id = ?");
-        $first->execute([intval($ids[0])]);
-        $c = $first->fetch();
-        if ($c) {
-            // Проверяем батч
-            $batchSt = $pdo->prepare("SELECT * FROM order_corrections WHERE restaurant_number = ? AND delivery_date = ? AND restaurant_chat_id = ? ORDER BY id");
-            $batchSt->execute([$c['restaurant_number'], $c['delivery_date'], $c['restaurant_chat_id']]);
-            $batchItems = $batchSt->fetchAll();
-            $hasPending = false;
-            foreach ($batchItems as $bi) { if ($bi['status'] === 'pending' || $bi['status'] === 'in_progress') { $hasPending = true; break; } }
-
-            $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
-            if (!$hasPending && $botToken && $c['restaurant_chat_id']) {
-                $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
-                $dow = (int)(new DateTime($c['delivery_date']))->format('N');
-                $dateFmt = $dayNames[$dow] . ' ' . date('d.m', strtotime($c['delivery_date']));
-                $rNum = htmlspecialchars((string)$c['restaurant_number'], ENT_QUOTES, 'UTF-8');
-                $text = "📋 <b>Результат корректировки заказа</b>\n";
-                $text .= "🏪 Ресторан <b>{$rNum}</b> | Доставка: {$dateFmt}\n";
-                $text .= "─────────────────────\n";
-                foreach ($batchItems as $bi) {
-                    $uom = htmlspecialchars((string)($bi['unit_of_measure'] ?: 'кор.'), ENT_QUOTES, 'UTF-8');
-                    $qty = rtrim(rtrim(number_format(floatval($bi['quantity']), 2, '.', ''), '0'), '.') . " {$uom}";
-                    $pname = htmlspecialchars((string)$bi['product_name'], ENT_QUOTES, 'UTF-8');
-                    if ($bi['status'] === 'approved') {
-                        $label = $bi['action'] === 'add' ? 'Добавлено' : 'Убрано';
-                        $text .= "✅ <b>{$label}:</b> {$pname} — {$qty}\n";
-                    } else {
-                        $label = $bi['action'] === 'add' ? 'Добавить' : 'Убрать';
-                        $text .= "❌ <b>Отклонено</b> ({$label}): {$pname} — {$qty}\n";
-                        if ($bi['review_comment']) $text .= "    Причина: " . htmlspecialchars((string)$bi['review_comment'], ENT_QUOTES, 'UTF-8') . "\n";
-                    }
+        // Перерисовываем TG-сообщения у закупок и отправляем итог ресторану
+        // через единую функцию (push + TG всем верифицированным сотрудникам).
+        try {
+            require_once __DIR__ . '/bot_rest.php';
+            // Группируем по batch_uuid (для кабинетных), и по (restaurant, date, chat_id) — для TG-старых.
+            $first = $pdo->prepare("SELECT batch_uuid, restaurant_number, delivery_date, restaurant_chat_id FROM order_corrections WHERE id = ?");
+            $first->execute([intval($ids[0])]);
+            $c = $first->fetch();
+            if ($c) {
+                if (!empty($c['batch_uuid'])) {
+                    $batchSt = $pdo->prepare("SELECT id FROM order_corrections WHERE batch_uuid = ? ORDER BY id");
+                    $batchSt->execute([$c['batch_uuid']]);
+                } else {
+                    $batchSt = $pdo->prepare("SELECT id FROM order_corrections WHERE restaurant_number = ? AND delivery_date = ? AND restaurant_chat_id = ? ORDER BY id");
+                    $batchSt->execute([$c['restaurant_number'], $c['delivery_date'], $c['restaurant_chat_id']]);
                 }
-                $text .= "─────────────────────\n";
-                $text .= "Обработал: " . htmlspecialchars((string)$callerName, ENT_QUOTES, 'UTF-8');
-                $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);
-                $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                curl_exec($ch); curl_close($ch);
+                $batchIds = array_map('intval', $batchSt->fetchAll(PDO::FETCH_COLUMN));
+                if ($batchIds) {
+                    corrUpdateAllReviewMessages($pdo, $batchIds);
+                    corrSendResultToRestaurant($pdo, $batchIds, $callerName, $comment ?: null);
+                }
             }
+        } catch (\Throwable $e) {
+            error_log('[correction_review_batch] notify failed: ' . $e->getMessage());
         }
 
         auditLog($pdo, 'correction_reviewed', 'correction', implode(',', $ids), $callerName, ['action' => $action, 'count' => count($ids)]);

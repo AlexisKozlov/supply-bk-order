@@ -2681,8 +2681,30 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
     $text .= "─────────────────────\n";
     $text .= "Обработал: {$reviewerName}";
 
-    // 1) Telegram-сообщение тому, кто подавал из бота (если был chat_id).
-    if ($restChatId) sendMessage($restChatId, $text);
+    // 1) Telegram-сообщения ресторану:
+    //    — Если корректировка из бота — приоритетно идёт тому, кто её подавал.
+    //    — Дополнительно дублируем всем верифицированным TG-сотрудникам ресторана,
+    //      чтобы команда узнала о решении даже если подавали из кабинета.
+    $tgChatIds = [];
+    if ($restChatId) $tgChatIds[(int)$restChatId] = true;
+    try {
+        $subsSt = $pdo->prepare("
+            SELECT DISTINCT chat_id
+            FROM ro_telegram_subs
+            WHERE restaurant_number = ?
+              AND legal_entity_group = ?
+              AND verified_at IS NOT NULL
+        ");
+        $subsSt->execute([(int)$first['restaurant_number'], (string)($first['legal_entity_group'] ?: 'BK_VM')]);
+        foreach ($subsSt->fetchAll() as $r) {
+            if (!empty($r['chat_id'])) $tgChatIds[(int)$r['chat_id']] = true;
+        }
+    } catch (\Throwable $e) {
+        error_log('[corrSendResultToRestaurant] subs lookup failed: ' . $e->getMessage());
+    }
+    foreach (array_keys($tgChatIds) as $cid) {
+        sendMessage($cid, $text);
+    }
 
     // 2) Web Push на устройства ресторана — работает и для кабинетных корректировок,
     //    и как дублирование для тех, кто подавал из бота, но открыл PWA.
