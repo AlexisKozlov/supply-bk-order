@@ -1,10 +1,70 @@
 <template>
   <div class="rco">
+    <!-- Онбординг: модалка с подробностями. По умолчанию открывается один раз -->
+    <div v-if="showTutorial" class="rco-tut-overlay" @click.self="dismissTutorial">
+      <div class="rco-tut-box" role="dialog" aria-modal="true" aria-label="Как пользоваться корректировками">
+        <button type="button" class="rco-tut-close" aria-label="Закрыть" @click="dismissTutorial">×</button>
+        <h3 class="rco-tut-title">Как работают корректировки</h3>
+
+        <ol class="rco-tut-list">
+          <li>
+            <strong>Что это.</strong> Если в уже отправленном заказе на ближайшую поставку нужно что-то <em>добавить, убрать или поправить количество</em> — отправь корректировку. Закупки получат её сразу в Telegram и в&nbsp;портале.
+          </li>
+          <li>
+            <strong>Когда успеть.</strong> Подать можно до <em>дедлайна корректировки</em> — он указан под датой каждой поставки. После дедлайна доставка уходит в работу и менять её нельзя.
+          </li>
+          <li>
+            <strong>Как заполнить.</strong> Жми «Ещё позиция», для каждой выбери действие <span class="rco-tut-chip rco-tut-chip-add">+ Добавить</span> или <span class="rco-tut-chip rco-tut-chip-rem">− Убрать</span>, найди товар по артикулу или названию, укажи количество и единицу (коробки/штуки). Если товара нет в базе — отправится тем, как написал.
+          </li>
+          <li>
+            <strong>Причина.</strong> Поле внизу — необязательное, но если есть нюанс («запуск меню», «мероприятие в пятницу»), напиши — закупки увидят это рядом с заявкой.
+          </li>
+          <li>
+            <strong>Что дальше.</strong> Заявка приходит закупкам. Статусы:
+            <ul class="rco-tut-sub">
+              <li><span class="rco-stat-icon">⏳</span> <strong>Ожидает</strong> — пришло, ещё не разобрали.</li>
+              <li><span class="rco-stat-icon">🛠</span> <strong>В работе</strong> — кто-то из закупок взял в работу.</li>
+              <li><span class="rco-stat-icon">✅</span> <strong>Принято</strong> — изменение войдёт в поставку.</li>
+              <li><span class="rco-stat-icon">❌</span> <strong>Отклонено</strong> — не приняли, рядом будет комментарий почему.</li>
+              <li><span class="rco-stat-icon">⛔</span> <strong>Отменено</strong> — ты сам отозвал заявку.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>Изменить / отозвать.</strong> Пока статус «Ожидает», можешь нажать «Изменить» или «Отменить». После «В работе» — уже нельзя.
+          </li>
+          <li>
+            <strong>Уведомления.</strong> Когда закупки ответят — придёт push в браузере (если включил его в «Напоминаниях») и сообщение в Telegram-боте (тем, кто привязан).
+          </li>
+          <li>
+            <strong>История.</strong> Сверху есть переключатель — «Активные» и «Вся история». В истории фильтр по статусу.
+          </li>
+        </ol>
+
+        <button type="button" class="rco-tut-ok" @click="dismissTutorial">Понятно</button>
+      </div>
+    </div>
+
+    <!-- Шапка: короткое объяснение + кнопка «?» -->
+    <div class="rco-intro-row" v-if="!loading">
+      <p class="rco-intro-text">
+        Здесь можно изменить уже отправленный заказ — добавить, убрать или поправить позиции на ближайшую доставку до её дедлайна.
+      </p>
+      <button type="button" class="rco-help-btn" @click="openTutorial" title="Как это работает" aria-label="Как это работает">?</button>
+    </div>
+
+    <!-- Переключатель «Активные / Вся история» -->
+    <div class="rco-mode-tabs" v-if="!loading">
+      <button type="button" class="rco-mode-tab" :class="{ 'is-active': viewMode === 'active' }" @click="switchMode('active')">Активные</button>
+      <button type="button" class="rco-mode-tab" :class="{ 'is-active': viewMode === 'history' }" @click="switchMode('history')">Вся история</button>
+    </div>
+
     <div v-if="loading" class="rco-state">
       <BurgerSpinner text="Загрузка корректировок..." />
     </div>
 
-    <div v-else-if="!deliveries.length && !batches.length" class="rco-state rco-state-empty">
+    <!-- ─────── ВКЛАДКА «АКТИВНЫЕ» ─────── -->
+    <template v-else-if="viewMode === 'active'">
+    <div v-if="!deliveries.length && !batches.length" class="rco-state rco-state-empty">
       <h3>Корректировок не подать</h3>
       <p>Сейчас нет ближайших поставок, по которым дедлайн ещё впереди.</p>
       <p class="rco-state-hint">Корректировка возможна до 11:30 рабочего дня перед поставкой.</p>
@@ -139,6 +199,52 @@
         </div>
       </section>
     </template>
+    </template>
+
+    <!-- ─────── ВКЛАДКА «ВСЯ ИСТОРИЯ» ─────── -->
+    <template v-else-if="viewMode === 'history'">
+      <section class="rco-history">
+        <div class="rco-history-toolbar">
+          <span class="rco-history-toolbar-label">Статус:</span>
+          <button type="button"
+                  v-for="opt in HISTORY_STATUS_OPTIONS"
+                  :key="opt.value"
+                  class="rco-history-chip"
+                  :class="{ 'is-active': historyStatusFilter === opt.value }"
+                  @click="historyStatusFilter = opt.value">{{ opt.label }}</button>
+        </div>
+
+        <div v-if="!filteredHistory.length" class="rco-state rco-state-empty">
+          <p>Корректировок не найдено по этому фильтру.</p>
+        </div>
+
+        <article v-for="b in filteredHistory" :key="b.batch_uuid || b.created_at" class="rco-batch" :class="'rco-batch--' + dominantStatus(b)">
+          <header class="rco-batch-head">
+            <div class="rco-batch-meta">
+              <span class="rco-batch-status-chip" :class="'is-' + dominantStatus(b)">{{ batchStatusLabel(b) }}</span>
+              <span class="rco-batch-when-strong">Доставка {{ fmtDateShort(b.delivery_date) }}</span>
+              <span class="rco-batch-src">{{ b.source === 'cabinet' ? 'из кабинета' : 'из Telegram' }}</span>
+              <span class="rco-batch-when">{{ fmtDateTime(b.created_at) }}</span>
+            </div>
+          </header>
+
+          <p v-if="b.comment" class="rco-batch-comment">💬 {{ b.comment }}</p>
+
+          <ul class="rco-batch-items">
+            <li v-for="it in b.items" :key="it.id" class="rco-batch-item" :class="'is-' + it.status">
+              <span class="rco-batch-item-icon" :title="statusLabel(it.status)">{{ statusIcon(it.status) }}</span>
+              <span class="rco-batch-item-act" :class="it.action">{{ it.action === 'add' ? 'Добавить' : 'Убрать' }}</span>
+              <span class="rco-batch-item-name">
+                <span v-if="it.sku !== '-'" class="rco-batch-item-sku">{{ it.sku }}</span>
+                {{ it.name }}
+              </span>
+              <span class="rco-batch-item-qty">{{ fmtQty(it.qty) }} {{ it.unit }}</span>
+              <span v-if="it.review_comment" class="rco-batch-item-rc">«{{ it.review_comment }}»</span>
+            </li>
+          </ul>
+        </article>
+      </section>
+    </template>
   </div>
 </template>
 
@@ -153,9 +259,41 @@ const toast = useToastStore();
 const loading = ref(true);
 const busy = ref(false);
 
+// 'active' — рабочая вкладка (ближайшие даты + форма + батчи по выбранной дате)
+// 'history' — вся история ресторана со статус-фильтром
+const viewMode = ref('active');
+
+// Онбординг при первом визите. Флаг хранится в localStorage по версии:
+// если решим обновить туториал, поменяем суффикс — увидят заново.
+const TUTORIAL_KEY = 'corrections_tutorial_seen_v1';
+const showTutorial = ref(false);
+function openTutorial() { showTutorial.value = true; }
+function dismissTutorial() {
+  showTutorial.value = false;
+  try { localStorage.setItem(TUTORIAL_KEY, '1'); } catch (e) { /* ignore */ }
+}
+function onTutorialEsc(e) { if (e.key === 'Escape' && showTutorial.value) dismissTutorial(); }
+
 const deliveries = ref([]);
 const selectedDate = ref('');
 const batches = ref([]);
+
+// История — все батчи ресторана (загружается лениво при переключении)
+const historyBatches = ref([]);
+const historyLoaded = ref(false);
+const historyStatusFilter = ref('');
+const HISTORY_STATUS_OPTIONS = [
+  { value: '', label: 'Все' },
+  { value: 'pending', label: 'Ожидают' },
+  { value: 'in_progress', label: 'В работе' },
+  { value: 'approved', label: 'Принято' },
+  { value: 'rejected', label: 'Отклонено' },
+  { value: 'cancelled', label: 'Отменено' },
+];
+const filteredHistory = computed(() => {
+  if (!historyStatusFilter.value) return historyBatches.value;
+  return historyBatches.value.filter(b => dominantStatus(b) === historyStatusFilter.value);
+});
 
 // Форма
 const editingBatchUuid = ref('');
@@ -211,6 +349,28 @@ async function loadBatches() {
   } catch (e) {
     toast.error(e.message || 'Не удалось загрузить корректировки');
     batches.value = [];
+  }
+}
+
+async function loadHistory() {
+  try {
+    const data = await roFetch('/api/restaurant-corrections/list');
+    historyBatches.value = data.batches || [];
+    historyLoaded.value = true;
+  } catch (e) {
+    toast.error(e.message || 'Не удалось загрузить историю');
+    historyBatches.value = [];
+  }
+}
+
+async function switchMode(mode) {
+  viewMode.value = mode;
+  if (mode === 'history' && !historyLoaded.value) {
+    loading.value = true;
+    try { await loadHistory(); } finally { loading.value = false; }
+  } else if (mode === 'history') {
+    // Подгружаем свежую версию без полноэкранного спиннера
+    loadHistory();
   }
 }
 
@@ -327,6 +487,7 @@ async function askCancel(batch) {
     });
     toast.success('Корректировка отозвана');
     await loadBatches();
+    historyLoaded.value = false;
   } catch (e) {
     toast.error(e.message || 'Не удалось отозвать');
   } finally {
@@ -361,6 +522,7 @@ async function submit() {
     }
     cancelEdit();
     await loadBatches();
+    historyLoaded.value = false; // история устарела — перезагрузим при переходе
   } catch (e) {
     toast.error(e.message || 'Не удалось отправить');
   } finally {
@@ -379,6 +541,13 @@ function fmtDateTime(iso) {
   const d = new Date(iso.replace(' ', 'T'));
   if (isNaN(d)) return iso;
   return d.toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function fmtDateShort(iso) {
+  if (!iso) return '';
+  const d = new Date(iso + (iso.includes('T') ? '' : 'T00:00:00'));
+  if (isNaN(d)) return iso;
+  const days = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+  return days[d.getDay()] + ' ' + d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 }
 const STATUS_ICONS = { pending: '⏳', in_progress: '🛠', approved: '✅', rejected: '❌', cancelled: '⛔' };
 const STATUS_LABELS = { pending: 'Ожидает', in_progress: 'В работе', approved: 'Принято', rejected: 'Отклонено', cancelled: 'Отменено' };
@@ -400,30 +569,145 @@ function dominantStatus(b) {
   return items[0].status;
 }
 
-// Когда пользователь возвращается во вкладку — освежаем список батчей,
+// Когда пользователь возвращается во вкладку — освежаем данные текущего режима,
 // чтобы сразу увидеть свежие статусы после approve/reject от закупок.
+function refreshCurrentView() {
+  if (busy.value) return;
+  if (viewMode.value === 'history') { loadHistory(); return; }
+  if (selectedDate.value) loadBatches();
+}
 function onVisibilityChange() {
-  if (document.visibilityState === 'visible' && selectedDate.value && !busy.value) {
-    loadBatches();
-  }
+  if (document.visibilityState === 'visible') refreshCurrentView();
 }
-function onWindowFocus() {
-  if (selectedDate.value && !busy.value) loadBatches();
-}
+function onWindowFocus() { refreshCurrentView(); }
 
 onMounted(() => {
   initialLoad();
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('focus', onWindowFocus);
+  window.addEventListener('keydown', onTutorialEsc);
+  try {
+    if (!localStorage.getItem(TUTORIAL_KEY)) showTutorial.value = true;
+  } catch (e) { /* ignore */ }
 });
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   window.removeEventListener('focus', onWindowFocus);
+  window.removeEventListener('keydown', onTutorialEsc);
 });
 </script>
 
 <style scoped>
 .rco { padding: 12px 4px 24px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Шапка: интро + кнопка «?» ── */
+.rco-intro-row {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 10px 14px; background: #f7f9fb; border: 1px solid #e6ebf1; border-radius: 10px;
+}
+.rco-intro-text { margin: 0; flex: 1; min-width: 220px; font-size: 13px; line-height: 1.5; color: #455565; }
+.rco-help-btn {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: 1px solid #d1d8df;
+  background: #fff; color: #2d3a48; border-radius: 50%;
+  cursor: pointer; font-weight: 700; font-size: 14px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.rco-help-btn:hover { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+
+/* ── Онбординг ── */
+.rco-tut-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(20, 24, 32, 0.55);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  animation: rco-tut-fade 0.25s ease-out;
+}
+.rco-tut-box {
+  position: relative;
+  width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto;
+  background: #fff; border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  padding: 22px 24px 20px;
+  animation: rco-tut-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.rco-tut-close {
+  position: absolute; top: 10px; right: 12px;
+  width: 32px; height: 32px; border: none;
+  background: rgba(0,0,0,0.05); color: #555;
+  font-size: 22px; line-height: 1; border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+.rco-tut-close:hover { background: rgba(0,0,0,0.1); color: #111; transform: rotate(90deg); }
+.rco-tut-title { margin: 0 26px 14px 0; font-size: 18px; color: #1c1f24; }
+.rco-tut-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 11px; font-size: 14px; line-height: 1.55; color: #2d3a48; }
+.rco-tut-list strong { color: #1c1f24; }
+.rco-tut-list em { color: #1976d2; font-style: normal; font-weight: 600; }
+.rco-tut-sub { margin: 6px 0 0; padding-left: 4px; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.rco-tut-sub li { display: flex; align-items: baseline; gap: 6px; }
+.rco-stat-icon { font-size: 14px; width: 18px; text-align: center; }
+.rco-tut-chip {
+  display: inline-block; padding: 1px 7px; border-radius: 5px;
+  font-size: 12px; font-weight: 700; vertical-align: 1px;
+}
+.rco-tut-chip-add { background: #e7f5e8; color: #2e7d32; }
+.rco-tut-chip-rem { background: #fff4e0; color: #b35900; }
+
+.rco-tut-ok {
+  margin-top: 18px; width: 100%;
+  padding: 11px 16px; border: none; border-radius: 10px;
+  background: linear-gradient(180deg, #1976d2, #1565c0);
+  color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
+  transition: filter 0.12s, transform 0.12s;
+}
+.rco-tut-ok:hover { filter: brightness(1.05); }
+.rco-tut-ok:active { transform: translateY(1px); }
+
+@keyframes rco-tut-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rco-tut-pop {
+  0% { opacity: 0; transform: translateY(12px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 520px) {
+  .rco-tut-box { padding: 18px 16px 16px; border-radius: 12px; }
+  .rco-tut-title { font-size: 16px; }
+  .rco-tut-list { font-size: 13px; }
+}
+
+/* ── Режимы «Активные / Вся история» ── */
+.rco-mode-tabs {
+  display: inline-flex; gap: 0; padding: 3px; background: #eef2f6; border-radius: 10px; align-self: flex-start;
+}
+.rco-mode-tab {
+  padding: 6px 14px; border: none; background: transparent; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: #5a6b7c; border-radius: 8px;
+  transition: background 0.12s, color 0.12s;
+}
+.rco-mode-tab:hover { color: #2d3a48; }
+.rco-mode-tab.is-active { background: #fff; color: #1976d2; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+
+/* ── Тулбар истории ── */
+.rco-history { display: flex; flex-direction: column; gap: 12px; }
+.rco-history-toolbar {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  background: #fff; border: 1px solid #e8e8e8; border-radius: 10px; padding: 10px 12px;
+}
+.rco-history-toolbar-label { font-size: 12px; color: #888; margin-right: 4px; }
+.rco-history-chip {
+  padding: 4px 12px; border-radius: 999px;
+  background: #f1f4f8; border: 1px solid transparent; color: #455565;
+  font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.12s;
+}
+.rco-history-chip:hover { background: #e7ecf2; }
+.rco-history-chip.is-active { background: #1976d2; color: #fff; }
+
+.rco-batch-when-strong { font-size: 12px; font-weight: 600; color: #2b2b2b; }
+
 .rco-state { padding: 30px 16px; text-align: center; color: #777; }
 .rco-state-empty h3 { margin: 0 0 6px; font-size: 16px; color: #333; }
 .rco-state-empty p { margin: 4px 0; }

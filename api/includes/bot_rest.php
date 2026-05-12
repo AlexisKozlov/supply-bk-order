@@ -1,6 +1,60 @@
 <?php
 require_once __DIR__ . '/so_deadline.php';
 
+// ═══ Инициализация Telegram-токена и низкоуровневых хелперов ═══
+// При загрузке из telegram_bot.php токен и функции уже определены — function_exists
+// и проверка на пустоту защищают от дублирующих объявлений. При загрузке из
+// api/index.php (например, restaurant_corrections.php) — определяем здесь, чтобы
+// общие функции уведомлений умели слать сообщения и из веб-эндпоинтов.
+global $BOT_TOKEN;
+if (empty($BOT_TOKEN)) {
+    $BOT_TOKEN = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+}
+
+if (!function_exists('sendMessage')) {
+    function sendMessage($chatId, $text, $replyMarkup = null) {
+        global $BOT_TOKEN;
+        if (!$BOT_TOKEN) { error_log('[bot_rest] sendMessage skipped: empty BOT_TOKEN'); return; }
+        $data = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML'];
+        if ($replyMarkup) $data['reply_markup'] = json_encode($replyMarkup);
+        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage";
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
+        @file_get_contents($url, false, stream_context_create($opts));
+    }
+}
+if (!function_exists('editMessage')) {
+    function editMessage($chatId, $messageId, $text, $replyMarkup = null) {
+        global $BOT_TOKEN;
+        if (!$BOT_TOKEN) return;
+        $data = ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $text, 'parse_mode' => 'HTML'];
+        if ($replyMarkup) $data['reply_markup'] = json_encode($replyMarkup);
+        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/editMessageText";
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
+        @file_get_contents($url, false, stream_context_create($opts));
+    }
+}
+if (!function_exists('editMessageReplyMarkup')) {
+    function editMessageReplyMarkup($chatId, $messageId, $replyMarkup = null) {
+        global $BOT_TOKEN;
+        if (!$BOT_TOKEN) return;
+        $data = ['chat_id' => $chatId, 'message_id' => $messageId];
+        $data['reply_markup'] = json_encode($replyMarkup ?: ['inline_keyboard' => []]);
+        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/editMessageReplyMarkup";
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
+        @file_get_contents($url, false, stream_context_create($opts));
+    }
+}
+if (!function_exists('deleteMessage')) {
+    function deleteMessage($chatId, $messageId) {
+        global $BOT_TOKEN;
+        if (!$BOT_TOKEN) return;
+        $data = ['chat_id' => $chatId, 'message_id' => $messageId];
+        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/deleteMessage";
+        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
+        @file_get_contents($url, false, stream_context_create($opts));
+    }
+}
+
 // ═══ Ресторанные подписки и уведомления ═══
 // cmdRestSubsStats, restShowMySubs, restShowRestaurants, restShowSubsManage, restNotifySubscribers
 //
@@ -2392,6 +2446,7 @@ function corrSubmitBatch($chatId) {
 function corrNotifyPurchasersBatch($pdo, $corrIds, $restNum, $deliveryDate, $submitterName) {
     global $BOT_TOKEN;
     if (empty($corrIds)) return;
+    if (!$BOT_TOKEN) { error_log('[corrNotifyPurchasersBatch] empty BOT_TOKEN'); return; }
     $st = $pdo->query("SELECT u.telegram_chat_id, u.name FROM telegram_settings ts JOIN users u ON u.name = ts.user_name WHERE ts.correction_notifications = 1 AND u.telegram_chat_id IS NOT NULL");
     $recipients = $st->fetchAll();
     if (!$recipients) return;

@@ -16,6 +16,12 @@
           <option value="pending">Ожидают</option>
           <option value="approved">Приняты</option>
           <option value="rejected">Отклонены</option>
+          <option value="cancelled">Отменены рестораном</option>
+        </select>
+        <select v-model="sourceFilter" class="corr-input" @change="loadCorrections">
+          <option value="">Все источники</option>
+          <option value="cabinet">Из кабинета</option>
+          <option value="telegram">Из Telegram</option>
         </select>
         <input v-model="restFilter" class="corr-input" placeholder="Ресторан..." style="width:90px;" @input="debounceLoad"/>
         <span v-if="pendingCount" class="corr-pending-badge">{{ pendingCount }} ожидают</span>
@@ -47,26 +53,32 @@
               <td class="col-date">{{ g.dateLabel }}</td>
               <td class="col-items">
                 <div v-for="c in g.items" :key="c.id" class="corr-item-line">
-                  <span class="corr-status-icon">{{ {pending:'⏳',in_progress:'🔄',approved:'✅',rejected:'❌'}[c.status] }}</span>
+                  <span class="corr-status-icon">{{ {pending:'⏳',in_progress:'🔄',approved:'✅',rejected:'❌',cancelled:'⛔'}[c.status] || '•' }}</span>
                   <span :class="c.action === 'add' ? 'act-add' : 'act-rem'">{{ c.action === 'add' ? '+' : '−' }}</span>
                   <span v-if="c.product_sku && c.product_sku !== '-'" class="corr-sku">{{ c.product_sku }}</span>
                   <span>{{ c.product_name }}</span>
                   <strong>{{ fmtQty(c.quantity) }} {{ c.unit_of_measure }}</strong>
-                  <template v-if="c.status === 'pending'">
+                  <template v-if="c.status === 'pending' || c.status === 'in_progress'">
                     <button class="corr-item-btn approve" @click.stop="reviewBatch([c.id], 'approve')" title="Принять">✓</button>
                     <button class="corr-item-btn reject" @click.stop="openReject([c.id])" title="Отклонить">✕</button>
                   </template>
-                  <span v-else-if="c.reviewer_name" class="corr-item-reviewer">{{ c.reviewer_name }}</span>
+                  <span v-if="c.reviewer_name && (c.status === 'in_progress' || c.status === 'approved' || c.status === 'rejected')" class="corr-item-reviewer">{{ c.reviewer_name }}</span>
                 </div>
               </td>
               <td class="col-comment">
+                <div v-if="g.submitterComment" class="corr-submitter-comment" :title="g.submitterComment">💬 {{ g.submitterComment }}</div>
                 <div v-for="c in g.items" :key="'cm'+c.id" class="corr-comment-line">
                   <span v-if="c.comment" class="corr-comment-text" :title="c.comment">{{ c.comment }}</span>
                   <span v-if="c.review_comment" class="corr-review-text">{{ c.review_comment }}</span>
                 </div>
               </td>
               <td class="col-who">
-                <div class="corr-meta">{{ g.submitter || '—' }}</div>
+                <div class="corr-meta">
+                  <span class="corr-source-badge" :class="'src-' + g.source" :title="g.source === 'cabinet' ? 'Подано из кабинета ресторана' : 'Подано из Telegram-бота'">
+                    {{ g.source === 'cabinet' ? '🌐' : '✈' }}
+                  </span>
+                  {{ g.submitter || '—' }}
+                </div>
                 <div class="corr-meta-sub">{{ fmtDateTime(g.created_at) }}</div>
               </td>
               <td class="col-status">
@@ -77,9 +89,10 @@
               </td>
               <td class="col-actions">
                 <div class="corr-action-btns">
-                  <template v-if="g.hasPending">
-                    <button class="corr-btn approve" @click="reviewBatch(g.pendingIds, 'approve')" title="Принять всё">✓</button>
-                    <button class="corr-btn reject" @click="openReject(g.pendingIds)" title="Отклонить всё">✕</button>
+                  <button v-if="g.hasUntaken" class="corr-btn take" @click="takeInWork(g.untakenIds)" title="Взять в работу">🔄</button>
+                  <template v-if="g.hasOpen">
+                    <button class="corr-btn approve" @click="reviewBatch(g.openIds, 'approve')" title="Принять всё">✓</button>
+                    <button class="corr-btn reject" @click="openReject(g.openIds)" title="Отклонить всё">✕</button>
                   </template>
                   <button class="corr-btn delete" @click="deleteGroup(g)" title="Удалить">🗑</button>
                 </div>
@@ -137,6 +150,7 @@ const tab = useTabRoute('requests', ['requests', 'settings'])
 const loading = ref(false)
 const corrections = ref([])
 const statusFilter = ref('')
+const sourceFilter = ref('')
 const restFilter = ref('')
 const settingsLoading = ref(false)
 const settingsUsers = ref([])
@@ -144,36 +158,53 @@ const rejectModal = ref({ show: false, ids: [], comment: '' })
 
 const pendingCount = computed(() => corrections.value.filter(c => c.status === 'pending').length)
 
-// Группируем позиции в заявки: по ресторану + дате + submitter + близкое время
+// Группируем позиции в заявки.
+// Для кабинетных корректировок ключ — batch_uuid (поле есть всегда, source='cabinet').
+// Для телеграмовских — старая логика: ресторан + дата + чат подавшего.
 const groupedCorrections = computed(() => {
   const groups = {}
   for (const c of corrections.value) {
-    // Ключ: ресторан + дата + подавший (одна заявка = одна пачка)
-    const key = `${c.restaurant_number}_${c.delivery_date}_${c.restaurant_chat_id}`
+    const key = c.batch_uuid
+      ? `uuid_${c.batch_uuid}`
+      : `${c.restaurant_number}_${c.delivery_date}_${c.restaurant_chat_id}`
     if (!groups[key]) {
       groups[key] = {
         key,
         restaurant_number: c.restaurant_number,
+        legal_entity_group: c.legal_entity_group,
         delivery_date: c.delivery_date,
         dateLabel: fmtDate(c.delivery_date),
         submitter: c.submitter_name,
+        source: c.submitter_source || 'telegram',
+        submitterComment: c.submitter_comment || '',
         created_at: c.created_at,
         items: [],
         pendingIds: [],
+        untakenIds: [],  // только pending — для «Взять в работу»
+        openIds: [],     // pending + in_progress — для approve/reject
         reviewer: null,
       }
     }
     groups[key].items.push(c)
-    if (c.status === 'pending') groups[key].pendingIds.push(c.id)
+    if (c.status === 'pending') {
+      groups[key].pendingIds.push(c.id)
+      groups[key].untakenIds.push(c.id)
+      groups[key].openIds.push(c.id)
+    } else if (c.status === 'in_progress') {
+      groups[key].openIds.push(c.id)
+    }
     if (c.reviewer_name && !groups[key].reviewer) groups[key].reviewer = c.reviewer_name
   }
   // Определяем общий статус
   for (const g of Object.values(groups)) {
     const statuses = new Set(g.items.map(i => i.status))
     if (statuses.has('pending')) g.overallStatus = 'pending'
+    else if (statuses.has('in_progress')) g.overallStatus = 'in_progress'
     else if (statuses.size === 1) g.overallStatus = [...statuses][0]
     else g.overallStatus = 'mixed'
     g.hasPending = g.pendingIds.length > 0
+    g.hasUntaken = g.untakenIds.length > 0
+    g.hasOpen = g.openIds.length > 0
   }
   return Object.values(groups).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
 })
@@ -187,11 +218,21 @@ async function loadCorrections() {
     const groupCode = getEntityGroupCode(orderStore.settings.legalEntity)
     let query = db.from('order_corrections').select('*').eq('legal_entity_group', groupCode).order('created_at', { ascending: false }).limit(500)
     if (statusFilter.value) query = query.eq('status', statusFilter.value)
+    if (sourceFilter.value) query = query.eq('submitter_source', sourceFilter.value)
     if (restFilter.value.trim()) query = query.eq('restaurant_number', restFilter.value.trim())
     const { data } = await query
     corrections.value = data || []
   } catch { corrections.value = [] }
   finally { loading.value = false }
+}
+
+async function takeInWork(ids) {
+  if (!ids || !ids.length) return
+  try {
+    await db.rpc('correction_take_batch', { ids })
+    toastStore.show('Взято в работу')
+    await loadCorrections()
+  } catch (e) { toastStore.show('Ошибка: ' + (e.message || e), 'error') }
 }
 
 async function reviewBatch(ids, action, comment = '') {
@@ -251,7 +292,7 @@ async function toggleNotification(user) {
   } catch { toastStore.show('Ошибка', 'error') }
 }
 
-function statusLabel(s) { return { pending: 'Ожидает', in_progress: 'В работе', approved: 'Принята', rejected: 'Отклонена', mixed: 'Частично' }[s] || s }
+function statusLabel(s) { return { pending: 'Ожидает', in_progress: 'В работе', approved: 'Принята', rejected: 'Отклонена', cancelled: 'Отменена', mixed: 'Частично' }[s] || s }
 
 function fmtDate(d) {
   if (!d) return ''
@@ -330,6 +371,23 @@ watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 .corr-badge.approved { background: #E8F5E9; color: #2E7D32; }
 .corr-badge.rejected { background: #FFEBEE; color: #C62828; }
 .corr-badge.mixed { background: #E3F2FD; color: #1565C0; }
+.corr-badge.cancelled { background: #ECEFF1; color: #546E7A; }
+
+.corr-source-badge {
+  display: inline-block; margin-right: 6px;
+  width: 18px; height: 18px; line-height: 18px; text-align: center;
+  border-radius: 50%; font-size: 11px;
+  background: #E3F2FD; color: #1565C0;
+}
+.corr-source-badge.src-cabinet { background: #E8F5E9; color: #2E7D32; }
+.corr-source-badge.src-telegram { background: #E3F2FD; color: #1565C0; }
+
+.corr-submitter-comment {
+  font-size: 12px; color: #455565; font-style: italic;
+  background: #FAFAFA; border-radius: 6px; padding: 4px 8px;
+  margin-bottom: 4px; line-height: 1.4;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .corr-action-btns { display: flex; gap: 4px; }
 .corr-btn { width: 30px; height: 30px; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 15px; color: #fff; }

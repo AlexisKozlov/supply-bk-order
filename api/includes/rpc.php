@@ -4446,6 +4446,43 @@ if ($endpoint === 'rpc') {
 
     // ═══ Корректировки заказов ═══
 
+    if ($fn === 'correction_take_batch') {
+        requireModuleAccess($authUser, 'corrections', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $ids = $body['ids'] ?? [];
+        if (!is_array($ids) || empty($ids)) respond(['error' => 'Нет идентификаторов'], 400);
+        $ids = array_values(array_filter(array_map('intval', $ids), function($v) { return $v > 0; }));
+        if (!$ids) respond(['error' => 'Нет валидных id'], 400);
+
+        $caller = getSessionUser($pdo);
+        $callerName = $caller['name'] ?? 'unknown';
+        $callerChatId = $caller['telegram_chat_id'] ?? null;
+
+        // Проверка доступа к группе юр.лиц (берём по первой записи).
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $accSt = $pdo->prepare("SELECT DISTINCT legal_entity_group FROM order_corrections WHERE id IN ($ph)");
+        $accSt->execute($ids);
+        $groups = $accSt->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($groups as $g) {
+            if (!checkLegalEntityGroupAccess($caller, $g)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+        }
+
+        // Атомарно — только из статуса pending.
+        $upd = $pdo->prepare("UPDATE order_corrections SET status = 'in_progress', reviewer_chat_id = ?, reviewer_name = ? WHERE id IN ($ph) AND status = 'pending'");
+        $upd->execute(array_merge([$callerChatId, $callerName], $ids));
+        $taken = $upd->rowCount();
+
+        // Освежаем TG-сообщения у закупок — там перерисуются текст и кнопки.
+        try {
+            require_once __DIR__ . '/bot_rest.php';
+            corrUpdateAllReviewMessages($pdo, $ids);
+        } catch (\Throwable $e) {
+            error_log('[correction_take_batch] tg refresh failed: ' . $e->getMessage());
+        }
+
+        auditLog($pdo, 'correction_taken', 'correction', implode(',', $ids), $callerName, ['count' => $taken]);
+        respond(['success' => true, 'taken' => $taken]);
+    }
+
     if ($fn === 'correction_review') {
         requireModuleAccess($authUser, 'corrections', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);

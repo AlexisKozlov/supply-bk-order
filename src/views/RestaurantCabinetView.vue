@@ -52,7 +52,7 @@
         <span class="sb-ext" v-html="cabIconSvg.external"></span>
       </a>
       <!-- Корректировки основной поставки -->
-      <button v-if="roStore.restaurantOrdersEnabled" class="sb-item"
+      <button class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'corrections' }"
         @click="switchTab('orders', 'corrections')">
         <span class="sb-icon" v-html="cabIconSvg.corrections"></span>
@@ -383,7 +383,7 @@
           {{ link.name }}
           <span class="ord-tab-ext" v-html="cabIconSvg.external"></span>
         </a>
-        <button v-if="roStore.restaurantOrdersEnabled" class="ord-tab" :class="{ active: orderSubTab === 'corrections' }" @click="switchTab('orders', 'corrections')">
+        <button class="ord-tab" :class="{ active: orderSubTab === 'corrections' }" @click="switchTab('orders', 'corrections')">
           <span class="ord-tab-icon" v-html="cabIconSvg.corrections"></span>
           Корректировки
           <span class="ord-tab-beta">BETA</span>
