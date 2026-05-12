@@ -4,11 +4,15 @@
     <div v-if="showTutorial" class="rco-tut-overlay" @click.self="dismissTutorial">
       <div class="rco-tut-box" role="dialog" aria-modal="true" aria-label="Как пользоваться корректировками">
         <button type="button" class="rco-tut-close" aria-label="Закрыть" @click="dismissTutorial">×</button>
-        <h3 class="rco-tut-title">Как работают корректировки</h3>
+        <h3 class="rco-tut-title">Как работают корректировки основной поставки</h3>
+
+        <p class="rco-tut-lead">
+          Раздел только про <strong>основную поставку со склада</strong>. Заявки локальных поставщиков (Камако и др.) сюда не относятся — у них своя процедура.
+        </p>
 
         <ol class="rco-tut-list">
           <li>
-            <strong>Что это.</strong> Если в уже отправленном заказе на ближайшую поставку нужно что-то <em>добавить, убрать или поправить количество</em> — отправь корректировку. Закупки получат её сразу в Telegram и в&nbsp;портале.
+            <strong>Что это.</strong> Если в уже отправленном заказе на ближайшую <em>основную поставку</em> нужно что-то <em>добавить, убрать или поправить количество</em> — отправь корректировку. Закупки получат её сразу в Telegram и в&nbsp;портале.
           </li>
           <li>
             <strong>Когда успеть.</strong> Подать можно до <em>дедлайна корректировки</em> — он указан под датой каждой поставки. После дедлайна доставка уходит в работу и менять её нельзя.
@@ -44,13 +48,15 @@
       </div>
     </div>
 
-    <!-- Шапка: короткое объяснение + кнопка «?» -->
-    <div class="rco-intro-row" v-if="!loading">
-      <p class="rco-intro-text">
-        Здесь можно изменить уже отправленный заказ — добавить, убрать или поправить позиции на ближайшую доставку до её дедлайна.
-      </p>
+    <!-- Шапка: заголовок + короткое объяснение + кнопка «?» -->
+    <header class="rco-page-head" v-if="!loading">
+      <h2 class="rco-page-title">
+        <span class="rco-page-title-icon" aria-hidden="true">📦</span>
+        Корректировка заказа основной поставки
+      </h2>
+      <p class="rco-page-sub">Доставка со склада. Здесь можно изменить уже отправленный заказ — добавить, убрать или поправить позиции на ближайшую доставку до её дедлайна.</p>
       <button type="button" class="rco-help-btn" @click="openTutorial" title="Как это работает" aria-label="Как это работает">?</button>
-    </div>
+    </header>
 
     <!-- Переключатель «Активные / Вся история» -->
     <div class="rco-mode-tabs" v-if="!loading">
@@ -73,7 +79,7 @@
     <template v-else>
       <!-- ── Выбор даты поставки ── -->
       <section class="rco-deliveries">
-        <h3 class="rco-section-title">Корректировка на доставку</h3>
+        <h3 class="rco-section-title">На какую дату основной поставки?</h3>
         <div class="rco-d-pills">
           <button v-for="d in deliveries"
                   :key="d.date"
@@ -600,21 +606,43 @@ onBeforeUnmount(() => {
 <style scoped>
 .rco { padding: 12px 4px 24px; display: flex; flex-direction: column; gap: 16px; }
 
-/* ── Шапка: интро + кнопка «?» ── */
-.rco-intro-row {
-  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-  padding: 10px 14px; background: #f7f9fb; border: 1px solid #e6ebf1; border-radius: 10px;
+/* ── Заголовок страницы ── */
+.rco-page-head {
+  position: relative;
+  padding: 14px 16px 12px;
+  background: linear-gradient(180deg, #fff7e8 0%, #fff 90%);
+  border: 1px solid #f3d9a8;
+  border-radius: 12px;
 }
-.rco-intro-text { margin: 0; flex: 1; min-width: 220px; font-size: 13px; line-height: 1.5; color: #455565; }
+.rco-page-title {
+  margin: 0 36px 4px 0;
+  font-size: 17px; font-weight: 800; color: #5a3a10; line-height: 1.25;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.rco-page-title-icon { font-size: 20px; line-height: 1; }
+.rco-page-sub {
+  margin: 0; font-size: 13px; line-height: 1.5; color: #6b5b3a;
+}
 .rco-help-btn {
-  flex: none;
+  position: absolute; top: 12px; right: 12px;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; padding: 0; border: 1px solid #d1d8df;
-  background: #fff; color: #2d3a48; border-radius: 50%;
-  cursor: pointer; font-weight: 700; font-size: 14px;
+  width: 30px; height: 30px; padding: 0; border: 1px solid #d1b87a;
+  background: #fff; color: #5a3a10; border-radius: 50%;
+  cursor: pointer; font-weight: 700; font-size: 15px;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.rco-help-btn:hover { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+.rco-help-btn:hover { background: #c8862a; color: #fff; border-color: #c8862a; }
+
+/* Лид-параграф в туториале */
+.rco-tut-lead {
+  margin: -4px 0 14px;
+  padding: 9px 12px;
+  background: #fff8e7;
+  border-left: 3px solid #f0b94c;
+  border-radius: 6px;
+  font-size: 13px; line-height: 1.5; color: #5a3a10;
+}
+.rco-tut-lead strong { color: #3d260b; }
 
 /* ── Онбординг ── */
 .rco-tut-overlay {
@@ -894,8 +922,10 @@ onBeforeUnmount(() => {
 /* Планшет и узкие экраны */
 @media (max-width: 720px) {
   .rco { padding: 8px 0 20px; gap: 12px; }
-  .rco-intro-row { padding: 9px 12px; }
-  .rco-intro-text { font-size: 13px; }
+  .rco-page-head { padding: 12px 14px 10px; }
+  .rco-page-title { font-size: 15px; margin-right: 38px; }
+  .rco-page-title-icon { font-size: 17px; }
+  .rco-page-sub { font-size: 12.5px; }
   .rco-section-title { font-size: 13px; margin-bottom: 8px; }
   .rco-deliveries { padding: 10px 12px; }
   .rco-form { padding: 12px; }
