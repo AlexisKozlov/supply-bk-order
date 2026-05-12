@@ -51,6 +51,14 @@
         {{ link.name }}
         <span class="sb-ext" v-html="cabIconSvg.external"></span>
       </a>
+      <!-- Корректировки основной поставки -->
+      <button v-if="roStore.restaurantOrdersEnabled" class="sb-item"
+        :class="{ active: activeTab === 'orders' && orderSubTab === 'corrections' }"
+        @click="switchTab('orders', 'corrections')">
+        <span class="sb-icon" v-html="cabIconSvg.corrections"></span>
+        Корректировки
+        <span class="sb-beta">BETA</span>
+      </button>
       <!-- История заказов -->
       <button class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'history' }"
@@ -375,6 +383,11 @@
           {{ link.name }}
           <span class="ord-tab-ext" v-html="cabIconSvg.external"></span>
         </a>
+        <button v-if="roStore.restaurantOrdersEnabled" class="ord-tab" :class="{ active: orderSubTab === 'corrections' }" @click="switchTab('orders', 'corrections')">
+          <span class="ord-tab-icon" v-html="cabIconSvg.corrections"></span>
+          Корректировки
+          <span class="ord-tab-beta">BETA</span>
+        </button>
         <button class="ord-tab" :class="{ active: orderSubTab === 'reminders' }" @click="switchTab('orders', 'reminders')">
           <span class="ord-tab-icon" v-html="cabIconSvg.reminders"></span>
           Напоминания
@@ -686,6 +699,11 @@
           </template>
         </div>
       </template>
+
+      <!-- Корректировки основной поставки -->
+      <div v-if="orderSubTab === 'corrections'">
+        <RestaurantCorrectionsTab />
+      </div>
 
       <!-- Напоминания о подаче заявок локальным поставщикам -->
       <div v-if="orderSubTab === 'reminders'">
@@ -1265,6 +1283,7 @@ import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
 const RestaurantKegReturnsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantKegReturnsTab.vue'));
 const RestaurantRemindersTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantRemindersTab.vue'));
+const RestaurantCorrectionsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantCorrectionsTab.vue'));
 const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components/restaurant/RestaurantTodayReminders.vue'));
 const RestaurantOrderHistoryTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantOrderHistoryTab.vue'));
 const RestaurantSurveysTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSurveysTab.vue'));
@@ -2442,6 +2461,9 @@ function applyRouteToState() {
   } else if (name === 'restaurant-reminders') {
     activeTab.value = 'orders';
     orderSubTab.value = 'reminders';
+  } else if (name === 'restaurant-orders-corrections') {
+    activeTab.value = 'orders';
+    orderSubTab.value = 'corrections';
   }
   ensureSupDeadlineTimer();
 }
@@ -2466,6 +2488,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-keg-returns' };
   } else if (activeTab.value === 'orders' && orderSubTab.value === 'reminders') {
     target = { name: 'restaurant-reminders' };
+  } else if (activeTab.value === 'orders' && orderSubTab.value === 'corrections') {
+    target = { name: 'restaurant-orders-corrections' };
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
     if (sub === 'delivery' && roStore.restaurantOrdersEnabled) target = { name: 'restaurant-orders-delivery' };

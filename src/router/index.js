@@ -108,6 +108,7 @@ const routes = [
       { path: 'orders/delivery', name: 'restaurant-orders-delivery', component: EmptySlot, meta: { title: 'Основная поставка' } },
       { path: 'orders/supplier/:supplierId', name: 'restaurant-orders-supplier', component: EmptySlot, meta: { title: 'Поставщик' } },
       { path: 'orders/history', name: 'restaurant-orders-history', component: EmptySlot, meta: { title: 'История заказов' } },
+      { path: 'orders/corrections', name: 'restaurant-orders-corrections', component: EmptySlot, meta: { title: 'Корректировки' } },
       { path: 'info', name: 'restaurant-info', component: EmptySlot, meta: { title: 'Важная информация' } },
       { path: 'surveys', name: 'restaurant-surveys', component: EmptySlot, meta: { title: 'Опросы' } },
       { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Сбор остатков' } },
