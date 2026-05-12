@@ -142,7 +142,7 @@ function tlGetOrdersForDate($pdo, $date) {
 
     // Порядок сортировки юрлиц — единственная точка правки при добавлении нового юрлица
     $legalEntityOrder = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
-    $legalEntityField = 'FIELD(o.legal_entity, ' . implode(', ', array_map(function($e) {
+    $legalEntityField = 'FIELD(o.legal_entity, ' . implode(', ', array_map(function($e) use ($pdo) {
         return $pdo->quote($e);
     }, $legalEntityOrder)) . ')';
 
