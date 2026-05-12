@@ -1459,6 +1459,29 @@ const historyOrderModal = reactive({
 const surveyItems = ref([]);
 const surveyListLoading = ref(false);
 const surveyPendingCount = computed(() => surveyItems.value.filter(item => !item.already_answered).length);
+
+// Счётчик незаполненных позиций в сборе остатков. Объявлен ДО useCabinetDashboard,
+// чтобы избежать TDZ — в композабл передаётся как ref.
+// Тело computed выполняется лениво, поэтому stockProducts/stockProductFilled
+// внутри могут быть объявлены ниже.
+const stockCollectionUnfilledCount = computed(() => {
+  if (!stockCollection.active) return 0;
+  const products = stockProducts.value || [];
+  if (products.length) {
+    let n = 0;
+    for (const p of products) {
+      if (!stockProductFilled(p.id)) n++;
+    }
+    return n;
+  }
+  const c = stockCollection.collection;
+  if (c && c.total_products != null) {
+    const total = Number(c.total_products) || 0;
+    const sub = Number(c.submitted_count) || 0;
+    return Math.max(0, total - sub);
+  }
+  return 0;
+});
 // ═══ Dashboard ═══
 const dashOrdersSubmitted = computed(() => {
   let total = roStore.restaurantOrdersEnabled
@@ -1592,29 +1615,6 @@ const mobileTabs = computed(() => {
     tabs.push({ id: 'surveys', label: 'Опросы', badge: surveyPendingCount.value || null, badgeType: surveyPendingCount.value ? 'warn' : '' });
   }
   return tabs;
-});
-
-// Сколько товаров в активном сборе остатков ещё не заполнены.
-// Используется для бейджа в нижнем таббаре. 0 = бейджа нет.
-// Источник: если уже загружен список stockProducts — считаем по нему;
-// иначе (ещё не открывали вкладку) — берём submitted_count/total_products из статуса.
-const stockCollectionUnfilledCount = computed(() => {
-  if (!stockCollection.active) return 0;
-  const products = stockProducts.value || [];
-  if (products.length) {
-    let n = 0;
-    for (const p of products) {
-      if (!stockProductFilled(p.id)) n++;
-    }
-    return n;
-  }
-  const c = stockCollection.collection;
-  if (c && c.total_products != null) {
-    const total = Number(c.total_products) || 0;
-    const sub = Number(c.submitted_count) || 0;
-    return Math.max(0, total - sub);
-  }
-  return 0;
 });
 
 const kegReturnsEnabled = ref(false);
