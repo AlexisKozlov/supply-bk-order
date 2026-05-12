@@ -488,10 +488,76 @@ const availableEntities = computed(() => {
   return [...new Set(rawRows.value.map(r => r.legal_entity))].sort();
 });
 
+// Достраиваем недостающие строки за выходные на уровне (date+entity+type):
+// если на Сб/Вс по конкретной паре «юрлицо × тип» нет записи — берём её
+// с ближайшего следующего понедельника (или ближайшего рабочего дня до выходных,
+// если впереди понедельника нет). Та же логика, что в разделе «Ячейки».
+// Делается на уровне строк, поэтому работает и для частично заполненных
+// выходных (когда в БД есть cold/frozen, но нет dry).
+function fillWeekendRowGaps(rows) {
+  if (!rows.length) return rows;
+  const ymd = (d) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  // Индекс строк: entity|type -> Map<date, row>
+  const byEntityType = new Map();
+  for (const r of rows) {
+    const k = r.legal_entity + '|' + r.stock_type;
+    if (!byEntityType.has(k)) byEntityType.set(k, new Map());
+    byEntityType.get(k).set(r.report_date, r);
+  }
+  const allDates = [...new Set(rows.map(r => r.report_date))].sort();
+  const minDate = allDates[0];
+  const maxDate = allDates[allDates.length - 1];
+  const synthetic = [];
+  for (let d = new Date(minDate + 'T00:00:00'); d <= new Date(maxDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) continue;
+    const ds = ymd(d);
+    // следующий понедельник
+    const fwd = new Date(d);
+    fwd.setDate(fwd.getDate() + (dow === 0 ? 1 : 2));
+    const mondayStr = ymd(fwd);
+    for (const [key, dateMap] of byEntityType) {
+      if (dateMap.has(ds)) continue;
+      let src = dateMap.get(mondayStr);
+      if (!src) {
+        // последний рабочий день до выходных (макс 7 дней назад)
+        const back = new Date(d);
+        for (let i = 0; i < 7; i++) {
+          back.setDate(back.getDate() - 1);
+          const bd = back.getDay();
+          if (bd === 0 || bd === 6) continue;
+          const cand = dateMap.get(ymd(back));
+          if (cand) { src = cand; break; }
+        }
+      }
+      if (!src) continue;
+      const [legalEntity, stockType] = key.split('|');
+      synthetic.push({
+        report_date: ds,
+        legal_entity: legalEntity,
+        stock_type: stockType,
+        cell_count: src.cell_count,
+        is_manual: 0,
+        fromFallback: true,
+      });
+    }
+  }
+  if (!synthetic.length) return rows;
+  return rows.concat(synthetic);
+}
+
+// Сырые строки + достроенные выходные. Используется везде вместо rawRows.
+const enrichedRows = computed(() => fillWeekendRowGaps(rawRows.value));
+
 // Данные с применённым фильтром по юрлицу
 const filteredRows = computed(() => {
-  if (!filterEntity.value) return rawRows.value;
-  return rawRows.value.filter(r => r.legal_entity === filterEntity.value);
+  if (!filterEntity.value) return enrichedRows.value;
+  return enrichedRows.value.filter(r => r.legal_entity === filterEntity.value);
 });
 
 // ─── URL share ───
@@ -614,6 +680,8 @@ async function loadData() {
 }
 
 // ─── Чистые функции расчёта (используются как для общего, так и для per-entity) ───
+// Выходные уже достроены на уровне строк (fillWeekendRowGaps), поэтому здесь
+// просто агрегируем по дате.
 function buildDailyTotals(rows) {
   const byDate = new Map();
   for (const r of rows) {
@@ -626,56 +694,7 @@ function buildDailyTotals(rows) {
     d.byEntity[r.legal_entity] = (d.byEntity[r.legal_entity] || 0) + cnt;
     d.byType[r.stock_type] = (d.byType[r.stock_type] || 0) + cnt;
   }
-  const sorted = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-  return fillWeekendGaps(sorted);
-}
-
-// Заполняет даты Сб/Вс между минимальной и максимальной датой в массиве,
-// используя ближайший следующий понедельник или, при его отсутствии,
-// ближайшую пятницу до выходных. Логика та же, что в ShelfLifeView/Ячейки.
-function fillWeekendGaps(days) {
-  if (!days.length) return days;
-  const byDate = new Map(days.map(d => [d.date, d]));
-  const ymd = (d) => {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  };
-  const minDate = days[0].date;
-  const maxDate = days[days.length - 1].date;
-  const result = [];
-  for (let d = new Date(minDate + 'T00:00:00'); d <= new Date(maxDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
-    const ds = ymd(d);
-    if (byDate.has(ds)) { result.push(byDate.get(ds)); continue; }
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) continue; // только выходные подтягиваем
-    // следующий понедельник
-    const forward = new Date(d);
-    forward.setDate(forward.getDate() + (dow === 0 ? 1 : 2));
-    let src = byDate.get(ymd(forward));
-    // если нет — последний рабочий день до выходных
-    if (!src) {
-      const back = new Date(d);
-      for (let i = 0; i < 7; i++) {
-        back.setDate(back.getDate() - 1);
-        const bd = back.getDay();
-        if (bd === 0 || bd === 6) continue;
-        const candidate = byDate.get(ymd(back));
-        if (candidate) { src = candidate; break; }
-      }
-    }
-    if (!src) continue;
-    // Клонируем строку с новой датой
-    result.push({
-      date: ds,
-      total: src.total,
-      byEntity: { ...src.byEntity },
-      byType: { ...src.byType },
-      fromFallback: true,
-    });
-  }
-  return result;
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // ─── Подготовка серий ───
@@ -1110,16 +1129,19 @@ const entityBlocks = computed(() => {
     };
   };
 
-  // Один блок: выбран фильтр или включено сведение
+  // Один блок: выбран фильтр или включено сведение.
+  // Используем enrichedRows, чтобы по каждому юрлицу выходные были достроены
+  // с понедельника (включая отдельные типы хранения).
+  const src = enrichedRows.value;
   if (filterEntity.value) {
-    const rows = rawRows.value.filter(r => r.legal_entity === filterEntity.value);
+    const rows = src.filter(r => r.legal_entity === filterEntity.value);
     blocks.push(makeBlock(filterEntity.value, filterEntity.value, rows));
   } else if (mergeEntities.value) {
-    blocks.push(makeBlock('Все юрлица (свод)', '__merged__', rawRows.value));
+    blocks.push(makeBlock('Все юрлица (свод)', '__merged__', src));
   } else {
     // Раздельно по каждому юрлицу
     for (const e of availableEntities.value) {
-      const rows = rawRows.value.filter(r => r.legal_entity === e);
+      const rows = src.filter(r => r.legal_entity === e);
       blocks.push(makeBlock(e, e, rows));
     }
   }
