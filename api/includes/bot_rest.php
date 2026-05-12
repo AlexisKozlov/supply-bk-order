@@ -2446,6 +2446,11 @@ function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, 
 
     $text = "📦 <b>Корректировка заказа</b>\n";
     $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>{$from} | {$dateFmt}\n";
+    // «Причина» от ресторана (если есть — общая на батч, лежит во всех строках одинаково).
+    $submitterComment = $first['submitter_comment'] ?? null;
+    if ($submitterComment) {
+        $text .= "💬 <i>" . corrEsc($submitterComment) . "</i>\n";
+    }
     $text .= "─────────────────────\n";
 
     $pendingIds = [];
@@ -2467,6 +2472,8 @@ function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, 
             $doneLabel = $c['action'] === 'add' ? 'Добавлено' : 'Убрано';
             $line = "✅ {$doneLabel}: {$name} — {$qty}";
             if ($c['reviewer_name']) $line .= " <i>({$c['reviewer_name']})</i>";
+        } elseif ($c['status'] === 'cancelled') {
+            $line = "⛔ Отменено рестораном: {$actionLabel} {$name} — {$qty}";
         } else {
             $line = "❌ Отклонено: {$name} — {$qty}";
             if ($c['reviewer_name']) $line .= " <i>({$c['reviewer_name']})</i>";
@@ -2523,19 +2530,26 @@ function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, 
             ['text' => '🔄 Взять в работу', 'callback_data' => "corr_take_{$firstId}"],
         ];
     } else {
-        // Все обработаны — проверяем, отправлен ли результат
-        $nm = json_decode($items[0]['notify_messages'] ?? '{}', true);
-        if (!empty($nm['result_sent'])) {
-            $text .= "\n✅ <i>Результат отправлен ресторану</i>";
+        // Если все позиции отменены рестораном — кнопок не нужно.
+        $allCancelled = true;
+        foreach ($items as $c) { if ($c['status'] !== 'cancelled') { $allCancelled = false; break; } }
+        if ($allCancelled) {
+            $text .= "\n⛔ <i>Ресторан отозвал корректировку</i>";
         } else {
-            $firstId = $items[0]['id'];
-            $keyboard['inline_keyboard'][] = [
-                ['text' => '📩 Отправить результат', 'callback_data' => "corr_send_{$firstId}"],
-            ];
-            $keyboard['inline_keyboard'][] = [
-                ['text' => '💬 Добавить комментарий', 'callback_data' => "corr_fc_{$firstId}"],
-            ];
-            $text .= "\n⏳ <i>Ожидает отправки ресторану</i>";
+            // Все обработаны — проверяем, отправлен ли результат
+            $nm = json_decode($items[0]['notify_messages'] ?? '{}', true);
+            if (!empty($nm['result_sent'])) {
+                $text .= "\n✅ <i>Результат отправлен ресторану</i>";
+            } else {
+                $firstId = $items[0]['id'];
+                $keyboard['inline_keyboard'][] = [
+                    ['text' => '📩 Отправить результат', 'callback_data' => "corr_send_{$firstId}"],
+                ];
+                $keyboard['inline_keyboard'][] = [
+                    ['text' => '💬 Добавить комментарий', 'callback_data' => "corr_fc_{$firstId}"],
+                ];
+                $text .= "\n⏳ <i>Ожидает отправки ресторану</i>";
+            }
         }
     }
 

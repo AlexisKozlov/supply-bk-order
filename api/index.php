@@ -112,6 +112,9 @@ require_once __DIR__ . '/includes/push.php';
 // Заявки поставщикам (универсальный модуль)
 require_once __DIR__ . '/includes/supplier_orders.php';
 
+// Корректировки основной поставки из кабинета ресторана (синхронизация с TG-ботом)
+require_once __DIR__ . '/includes/restaurant_corrections.php';
+
 // Загрузка машин
 require_once __DIR__ . '/includes/truck_loading.php';
 
