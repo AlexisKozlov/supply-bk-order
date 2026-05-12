@@ -6,14 +6,15 @@
   <div v-else-if="items.length" class="rtr-wrap" :class="{ 'rtr-compact': compact }">
     <div v-if="!compact" class="rtr-title">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      <span>Сегодня нужно подать заявки</span>
+      <span>Ближайшие заявки</span>
     </div>
     <div class="rtr-list">
-      <div v-for="it in items" :key="it.supplier_id + '-' + it.order_day" class="rtr-item" :class="itemClass(it)">
+      <div v-for="it in items" :key="itemKey(it)" class="rtr-item" :class="itemClass(it)">
         <div class="rtr-info">
           <div class="rtr-supplier">
             {{ it.supplier_name }}
             <span v-if="it.is_main_delivery" class="rtr-tag-main">склад</span>
+            <span v-if="it.is_advance" class="rtr-tag-advance">{{ advanceLabel(it) }}</span>
           </div>
           <div class="rtr-deadline">
             <template v-if="it.is_acknowledged">
@@ -25,15 +26,15 @@
               <span v-if="it.deadline_time" class="rtr-meta">было до {{ fmtTime(it.deadline_time) }}</span>
             </template>
             <template v-else>
-              <span class="rtr-deadline-label">До</span>
+              <span class="rtr-deadline-label">{{ it.is_advance ? whenLabel(it) + ' до' : 'До' }}</span>
               <span class="rtr-deadline-time">{{ fmtTime(it.deadline_time) || '—' }}</span>
-              <span v-if="timeLeft(it)" class="rtr-meta">{{ timeLeft(it) }}</span>
+              <span v-if="!it.is_advance && timeLeft(it)" class="rtr-meta">{{ timeLeft(it) }}</span>
             </template>
           </div>
         </div>
         <div class="rtr-actions">
-          <button v-if="!it.is_acknowledged" class="rtr-btn-done" :class="{ 'is-late': it.is_expired }" :disabled="busy[itemKey(it)]" @click="onAck(it)">
-            ✓ {{ it.is_expired ? 'Подал постфактум' : 'Сделал' }}
+          <button v-if="!it.is_acknowledged" class="rtr-btn-done" :class="{ 'is-late': it.is_expired, 'is-advance': it.is_advance }" :disabled="busy[itemKey(it)]" @click="onAck(it)">
+            ✓ {{ it.is_expired ? 'Подал постфактум' : (it.is_advance ? 'Уже подал' : 'Сделал') }}
           </button>
           <button v-else class="rtr-btn-undo" :disabled="busy[itemKey(it)]" @click="onUnack(it)" title="Отменить отметку">
             Откатить
@@ -69,13 +70,28 @@ function buildHeaders(json = false) {
   return h;
 }
 
-function itemKey(it) { return it.supplier_id + '-' + it.order_day; }
+function itemKey(it) { return it.supplier_id + '-' + it.order_day + '-' + (it.order_date || ''); }
 function fmtTime(t) { return t ? String(t).slice(0, 5) : ''; }
+
+const DAY_NAMES_RU = ['', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
+function whenLabel(it) {
+  const db = Number(it.days_before) || 0;
+  if (db === 1) return 'Завтра';
+  if (db === 2) return 'Послезавтра';
+  return 'В ' + (DAY_NAMES_RU[it.order_day] || '').toLowerCase();
+}
+function advanceLabel(it) {
+  const db = Number(it.days_before) || 0;
+  if (db === 1) return 'на завтра';
+  if (db === 2) return 'на послезавтра';
+  return 'на ' + (DAY_NAMES_RU[it.order_day] || '').toLowerCase();
+}
 
 function itemClass(it) {
   if (it.is_acknowledged) return 'is-done';
   if (it.is_expired) return 'is-expired';
-  // менее 30 минут до дедлайна — тревога
+  if (it.is_advance) return 'is-advance';
+  // менее 30 минут до дедлайна — тревога (только для сегодняшних)
   if (it.deadline_time) {
     const dl = new Date();
     const [h, m] = String(it.deadline_time).split(':').map(Number);
@@ -134,7 +150,7 @@ async function onAck(it) {
   try {
     const res = await fetch('/api/restaurant-reminders/acknowledge', {
       method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify({ supplier_id: it.supplier_id, order_day: it.order_day }),
+      body: JSON.stringify({ supplier_id: it.supplier_id, order_day: it.order_day, order_date: it.order_date }),
     });
     const data = await res.json();
     if (!res.ok) { toast.error(data.error || 'Ошибка'); return; }
@@ -154,7 +170,7 @@ async function onUnack(it) {
   try {
     const res = await fetch('/api/restaurant-reminders/unacknowledge', {
       method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify({ supplier_id: it.supplier_id, order_day: it.order_day }),
+      body: JSON.stringify({ supplier_id: it.supplier_id, order_day: it.order_day, order_date: it.order_date }),
     });
     const data = await res.json();
     if (!res.ok) { toast.error(data.error || 'Ошибка'); return; }
@@ -191,6 +207,11 @@ defineExpose({ load });
 .rtr-item.is-expired { background: #fde2e2; border: 2px solid #c62828; }
 .rtr-item.is-expired .rtr-status-expired { color: #b71c1c; font-weight: 700; }
 .rtr-item.is-expired .rtr-supplier { color: #b71c1c; }
+.rtr-item.is-advance { background: #f4f8fc; border-color: #cdd9e8; }
+.rtr-tag-main { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: #e8f5e9; color: #2e7d32; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.rtr-tag-advance { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: #e3f2fd; color: #1565c0; font-weight: 600; }
+.rtr-btn-done.is-advance { background: #1976d2; }
+.rtr-btn-done.is-advance:hover { background: #0d47a1; }
 .rtr-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .rtr-supplier { font-size: 14px; font-weight: 700; color: #2b2b2b; }
 .rtr-deadline { font-size: 12px; color: #555; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }

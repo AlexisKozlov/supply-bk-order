@@ -14,9 +14,8 @@
 
 if ($endpoint !== 'restaurant-reminders') return;
 
-// Sentinel supplier_id для записей основной поставки в общих таблицах
-// (reminder_acknowledgements / reminder_runs). Позволяет переиспользовать
-// существующую инфраструктуру без миграций schema.
+// Backward-compat: фронт по этому маркеру отличает «карточку основной поставки»
+// от поставщика. В БД больше не используется — reminder_kind ENUM сделал это явно.
 const MAIN_DELIVERY_SUPPLIER_ID = '00000000-0000-0000-0000-000000000000';
 
 function rrRespond($data, $code = 200) {
@@ -236,6 +235,10 @@ if ($subpoint === 'set' && $method === 'POST') {
     $telegramEnabled = isset($body['telegram_enabled']) ? (!empty($body['telegram_enabled']) ? 1 : 0) : 0;
     $updatedBy = 'ro:' . $rrUser['restaurant_number'];
 
+    $prev = $pdo->prepare("SELECT is_enabled, telegram_enabled FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ?");
+    $prev->execute([$rrRestPk, $supplierId]);
+    $prevState = $prev->fetch();
+
     $pdo->prepare("
         INSERT INTO restaurant_reminder_subscriptions
             (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, updated_at, updated_by)
@@ -247,6 +250,14 @@ if ($subpoint === 'set' && $method === 'POST') {
             updated_at = NOW(),
             updated_by = VALUES(updated_by)
     ")->execute([$rrRestPk, $supplierId, $isEnabled, $portalEnabled, $telegramEnabled, $updatedBy]);
+
+    auditLog($pdo, 'reminder_sub_toggled', 'restaurant_reminder_subscriptions', $rrRestPk, $updatedBy,
+        ['supplier_id' => $supplierId, 'restaurant_number' => $rrUser['restaurant_number']],
+        [
+            'is_enabled'       => ['from' => (int)($prevState['is_enabled'] ?? 0), 'to' => $isEnabled],
+            'telegram_enabled' => ['from' => (int)($prevState['telegram_enabled'] ?? 0), 'to' => $telegramEnabled],
+        ]
+    );
 
     rrRespond(['success' => true]);
 }
@@ -323,6 +334,10 @@ if ($subpoint === 'main-set' && $method === 'POST') {
     $telegramEnabled = isset($body['telegram_enabled']) ? (!empty($body['telegram_enabled']) ? 1 : 0) : 0;
     $updatedBy = 'ro:' . $rrUser['restaurant_number'];
 
+    $prevMain = $pdo->prepare("SELECT is_enabled, telegram_enabled FROM restaurant_main_delivery_subscriptions WHERE restaurant_id = ?");
+    $prevMain->execute([$rrRestPk]);
+    $prevMainState = $prevMain->fetch();
+
     $pdo->prepare("
         INSERT INTO restaurant_main_delivery_subscriptions
             (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_at, updated_by)
@@ -334,6 +349,14 @@ if ($subpoint === 'main-set' && $method === 'POST') {
             updated_at = NOW(),
             updated_by = VALUES(updated_by)
     ")->execute([$rrRestPk, $isEnabled, $portalEnabled, $telegramEnabled, $updatedBy]);
+
+    auditLog($pdo, 'reminder_main_toggled', 'restaurant_main_delivery_subscriptions', $rrRestPk, $updatedBy,
+        ['restaurant_number' => $rrUser['restaurant_number']],
+        [
+            'is_enabled'       => ['from' => (int)($prevMainState['is_enabled'] ?? 0), 'to' => $isEnabled],
+            'telegram_enabled' => ['from' => (int)($prevMainState['telegram_enabled'] ?? 0), 'to' => $telegramEnabled],
+        ]
+    );
 
     rrRespond(['success' => true]);
 }
@@ -401,106 +424,173 @@ if ($subpoint === 'main-tg-set' && $method === 'POST') {
 }
 
 if ($subpoint === 'today' && $method === 'GET') {
-    // Активные напоминания для ресторана на сегодня (для баннера в кабинете).
-    // Возвращает строки с дедлайном, который ещё не прошёл и по которому нет
-    // отметки «Сделал заказ».
+    // Активные напоминания для баннера в кабинете.
+    // Возвращает items за сегодня + advance-напоминания: расписания, у которых
+    // сегодня попадает в окно reminder_times для будущего order_day (до 7 дней).
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
     $today = $now->format('Y-m-d');
     $todayDow = (int)$now->format('N'); // 1=Пн ... 7=Вс
 
-    // Расписания на сегодня + дедлайны + информация о подписке + ack
-    // (только локальные поставщики — у so свои автоматические напоминания)
+    // helper: парсинг reminder_times из JSON
+    $rrParseRt = function($raw) {
+        if (!$raw) return [];
+        $arr = is_string($raw) ? json_decode($raw, true) : $raw;
+        if (!is_array($arr)) return [];
+        $out = [];
+        foreach ($arr as $rt) {
+            if (!is_array($rt)) continue;
+            $db = (int)($rt['days_before'] ?? -1);
+            $t  = $rt['time'] ?? '';
+            if ($db < 0 || $db > 7 || !preg_match('/^\d{1,2}:\d{2}/', $t)) continue;
+            $out[] = ['days_before' => $db, 'time' => substr($t, 0, 5)];
+        }
+        return $out;
+    };
+
+    // helper: должно ли сегодня показывать этот row (advance reminders)
+    // Ограничение: показываем только «сегодня» и «завтра» (не дальше).
+    $rrShouldShowToday = function($orderDow, $rtimes) use ($todayDow) {
+        $diffToOrder = ($orderDow - $todayDow + 7) % 7;
+        if ($diffToOrder === 0) return 0; // сегодня = день подачи
+        if ($diffToOrder > 1) return false; // не показываем дальше чем «на завтра»
+        foreach ($rtimes as $rt) {
+            if ((int)$rt['days_before'] === $diffToOrder) return $diffToOrder;
+        }
+        return false;
+    };
+
+    // ─── Локальные поставщики ─────────────────────────────────────────────
     $rows = $pdo->prepare("
         SELECT ss.supplier_id, ss.order_day, ss.delivery_day,
                s.short_name AS supplier_name, s.so_enabled,
                sd.deadline_time AS deadline_override,
-               sub.id AS subscription_id, sub.is_enabled, sub.portal_enabled,
-               ack.id AS ack_id, ack.acknowledged_at, ack.acknowledged_by
+               sd.reminder_times AS reminder_times_override,
+               sub.id AS subscription_id, sub.is_enabled, sub.portal_enabled
         FROM supplier_schedules ss
         JOIN suppliers s ON s.id = ss.supplier_id
         LEFT JOIN supplier_schedule_deadlines sd
                ON sd.supplier_id = ss.supplier_id AND sd.restaurant_id = ss.restaurant_id AND sd.order_day = ss.order_day
         LEFT JOIN restaurant_reminder_subscriptions sub
                ON sub.restaurant_id = ss.restaurant_id AND sub.supplier_id = ss.supplier_id
-        LEFT JOIN reminder_acknowledgements ack
-               ON ack.restaurant_id = ss.restaurant_id AND ack.supplier_id = ss.supplier_id
-              AND ack.target_date = ? AND ack.order_day = ss.order_day
-        WHERE ss.restaurant_id = ? AND ss.is_active = 1 AND ss.order_day = ?
+        WHERE ss.restaurant_id = ? AND ss.is_active = 1
           AND s.is_active = 1 AND s.so_enabled = 0
         ORDER BY s.short_name
     ");
-    $rows->execute([$today, $rrRestPk, $todayDow]);
+    $rows->execute([$rrRestPk]);
     $list = $rows->fetchAll();
 
-    // Подтянем дефолты поставщиков (для тех у кого нет override)
+    // Дефолты поставщиков
     $supplierIds = array_values(array_unique(array_column($list, 'supplier_id')));
-    $defaultsByPair = []; // [supplier_id][delivery_dow] = time
+    $defaultsByPair = [];
+    $defaultRtimesByPair = [];
     if ($supplierIds) {
         $ph = implode(',', array_fill(0, count($supplierIds), '?'));
-        $ds = $pdo->prepare("SELECT supplier_id, delivery_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id IN ($ph)");
+        $ds = $pdo->prepare("SELECT supplier_id, delivery_dow, deadline_time, reminder_times FROM supplier_default_deadlines WHERE supplier_id IN ($ph)");
         $ds->execute($supplierIds);
         foreach ($ds->fetchAll() as $d) {
             $defaultsByPair[$d['supplier_id']][(int)$d['delivery_dow']] = $d['deadline_time'];
+            $defaultRtimesByPair[$d['supplier_id']][(int)$d['delivery_dow']] = $d['reminder_times'];
         }
+    }
+
+    // Префетч ack-записей за окно [today, today+7]
+    $tomorrow7 = (clone $now)->modify('+7 days')->format('Y-m-d');
+    $ackQuery = $pdo->prepare("
+        SELECT reminder_kind, supplier_id, target_date, order_day, acknowledged_at, acknowledged_by
+        FROM reminder_acknowledgements
+        WHERE restaurant_id = ? AND target_date BETWEEN ? AND ?
+    ");
+    $ackQuery->execute([$rrRestPk, $today, $tomorrow7]);
+    $acks = [];
+    foreach ($ackQuery->fetchAll() as $a) {
+        // Ключ: kind|supplier|date|order_day. Для main_delivery supplier_id=''
+        $key = $a['reminder_kind'] . '|' . $a['supplier_id'] . '|' . $a['target_date'] . '|' . (int)$a['order_day'];
+        $acks[$key] = $a;
     }
 
     $items = [];
     foreach ($list as $r) {
         $deadline = $r['deadline_override']
             ?: ($defaultsByPair[$r['supplier_id']][(int)$r['delivery_day']] ?? null);
+        $rtimes = $rrParseRt($r['reminder_times_override']
+            ?: ($defaultRtimesByPair[$r['supplier_id']][(int)$r['delivery_day']] ?? null));
+
+        $orderDow = (int)$r['order_day'];
+        $diffToOrder = ($orderDow - $todayDow + 7) % 7;
+        // Показываем строку, если она на сегодня ИЛИ today попадает в advance-окно
+        $showDb = $rrShouldShowToday($orderDow, $rtimes);
+        if ($diffToOrder !== 0 && $showDb === false) continue;
+
+        $orderDate = (clone $now)->modify("+{$diffToOrder} days");
+        $orderDateStr = $orderDate->format('Y-m-d');
         $isEnabled = (int)$r['is_enabled'] === 1;
-        $isAcked = !empty($r['ack_id']);
-        $deadlineDt = $deadline ? DateTime::createFromFormat('Y-m-d H:i:s', $today . ' ' . $deadline, $tz) : null;
+        $ackKey = 'supplier|' . $r['supplier_id'] . '|' . $orderDateStr . '|' . $orderDow;
+        $ack = $acks[$ackKey] ?? null;
+        $deadlineDt = $deadline ? DateTime::createFromFormat('Y-m-d H:i:s', $orderDateStr . ' ' . $deadline, $tz) : null;
         $isExpired = $deadlineDt && $now > $deadlineDt;
+
         $items[] = [
             'supplier_id'      => $r['supplier_id'],
             'supplier_name'    => $r['supplier_name'],
             'so_enabled'       => (int)$r['so_enabled'] === 1,
-            'order_day'        => (int)$r['order_day'],
+            'order_day'        => $orderDow,
             'delivery_day'     => (int)$r['delivery_day'],
             'deadline_time'    => $deadline,
+            'order_date'       => $orderDateStr,
+            'days_before'      => $diffToOrder,
+            'is_advance'       => $diffToOrder > 0,
             'is_subscribed'    => $isEnabled,
-            'is_acknowledged'  => $isAcked,
-            'acknowledged_at'  => $r['acknowledged_at'] ?? null,
-            'acknowledged_by'  => $r['acknowledged_by'] ?? null,
+            'is_acknowledged'  => $ack !== null,
+            'acknowledged_at'  => $ack['acknowledged_at'] ?? null,
+            'acknowledged_by'  => $ack['acknowledged_by'] ?? null,
             'is_expired'       => $isExpired,
         ];
     }
+
     // ─── Основная поставка ────────────────────────────────────────────────
     $mainRow = $pdo->prepare("
-        SELECT ds.order_day, ds.day_of_week AS delivery_day, ds.order_deadline,
-               sub.id AS subscription_id, sub.is_enabled, sub.portal_enabled,
-               ack.id AS ack_id, ack.acknowledged_at, ack.acknowledged_by
+        SELECT ds.order_day, ds.day_of_week AS delivery_day, ds.order_deadline, ds.reminder_times,
+               sub.id AS subscription_id, sub.is_enabled, sub.portal_enabled
         FROM delivery_schedule ds
         LEFT JOIN restaurant_main_delivery_subscriptions sub ON sub.restaurant_id = ds.restaurant_id
-        LEFT JOIN reminder_acknowledgements ack
-               ON ack.restaurant_id = ds.restaurant_id AND ack.supplier_id = ?
-              AND ack.target_date = ? AND ack.order_day = ds.order_day
         WHERE ds.restaurant_id = ?
-          AND ds.order_day = ?
+          AND ds.order_day IS NOT NULL
           AND ds.order_deadline IS NOT NULL
         ORDER BY ds.day_of_week
     ");
-    $mainRow->execute([MAIN_DELIVERY_SUPPLIER_ID, $today, $rrRestPk, $todayDow]);
+    $mainRow->execute([$rrRestPk]);
     foreach ($mainRow->fetchAll() as $r) {
         $deadline = $r['order_deadline'];
+        $rtimes = $rrParseRt($r['reminder_times']);
+        $orderDow = (int)$r['order_day'];
+        $diffToOrder = ($orderDow - $todayDow + 7) % 7;
+        $showDb = $rrShouldShowToday($orderDow, $rtimes);
+        if ($diffToOrder !== 0 && $showDb === false) continue;
+
+        $orderDate = (clone $now)->modify("+{$diffToOrder} days");
+        $orderDateStr = $orderDate->format('Y-m-d');
         $isEnabled = (int)$r['is_enabled'] === 1;
-        $isAcked = !empty($r['ack_id']);
-        $deadlineDt = $deadline ? DateTime::createFromFormat('Y-m-d H:i:s', $today . ' ' . $deadline, $tz) : null;
+        $ackKey = 'main_delivery||' . $orderDateStr . '|' . $orderDow;
+        $ack = $acks[$ackKey] ?? null;
+        $deadlineDt = $deadline ? DateTime::createFromFormat('Y-m-d H:i:s', $orderDateStr . ' ' . $deadline, $tz) : null;
         $isExpired = $deadlineDt && $now > $deadlineDt;
+
         $items[] = [
             'supplier_id'      => MAIN_DELIVERY_SUPPLIER_ID,
             'supplier_name'    => 'Основная поставка',
             'so_enabled'       => false,
             'is_main_delivery' => true,
-            'order_day'        => (int)$r['order_day'],
+            'order_day'        => $orderDow,
             'delivery_day'     => (int)$r['delivery_day'],
             'deadline_time'    => $deadline,
+            'order_date'       => $orderDateStr,
+            'days_before'      => $diffToOrder,
+            'is_advance'       => $diffToOrder > 0,
             'is_subscribed'    => $isEnabled,
-            'is_acknowledged'  => $isAcked,
-            'acknowledged_at'  => $r['acknowledged_at'] ?? null,
-            'acknowledged_by'  => $r['acknowledged_by'] ?? null,
+            'is_acknowledged'  => $ack !== null,
+            'acknowledged_at'  => $ack['acknowledged_at'] ?? null,
+            'acknowledged_by'  => $ack['acknowledged_by'] ?? null,
             'is_expired'       => $isExpired,
         ];
     }
@@ -521,8 +611,18 @@ if ($subpoint === 'acknowledge' && $method === 'POST') {
     $today = (new DateTime('now', $tz))->format('Y-m-d');
     if (!$orderDay) $orderDay = (int)(new DateTime('now', $tz))->format('N');
 
-    // Проверка: у ресторана есть такая связка на этот день
-    if ($supplierId === MAIN_DELIVERY_SUPPLIER_ID) {
+    // target_date может быть в будущем (advance-ack для «завтрашней» заявки).
+    $targetDate = $today;
+    if (!empty($body['order_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $body['order_date'])) {
+        $targetDate = $body['order_date'];
+    }
+
+    // reminder_kind: фронт по-прежнему может прислать legacy-UUID для main delivery.
+    $isMain = ($supplierId === MAIN_DELIVERY_SUPPLIER_ID);
+    $reminderKind = $isMain ? 'main_delivery' : 'supplier';
+    $dbSupplierId = $isMain ? '' : $supplierId;
+
+    if ($isMain) {
         $check = $pdo->prepare("SELECT 1 FROM delivery_schedule WHERE restaurant_id = ? AND order_day = ? AND order_deadline IS NOT NULL LIMIT 1");
         $check->execute([$rrRestPk, $orderDay]);
     } else {
@@ -534,13 +634,13 @@ if ($subpoint === 'acknowledge' && $method === 'POST') {
     $by = 'ro:' . $rrUser['restaurant_number'];
     $minskNow = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('Y-m-d H:i:s');
     $pdo->prepare("
-        INSERT INTO reminder_acknowledgements (restaurant_id, supplier_id, target_date, order_day, acknowledged_by, acknowledged_at, source)
-        VALUES (?, ?, ?, ?, ?, ?, 'portal')
+        INSERT INTO reminder_acknowledgements (restaurant_id, reminder_kind, supplier_id, target_date, order_day, acknowledged_by, acknowledged_at, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'portal')
         ON DUPLICATE KEY UPDATE
             acknowledged_by = VALUES(acknowledged_by),
             acknowledged_at = VALUES(acknowledged_at),
             source = VALUES(source)
-    ")->execute([$rrRestPk, $supplierId, $today, $orderDay, $by, $minskNow]);
+    ")->execute([$rrRestPk, $reminderKind, $dbSupplierId, $targetDate, $orderDay, $by, $minskNow]);
 
     rrRespond(['success' => true]);
 }
@@ -553,9 +653,16 @@ if ($subpoint === 'unacknowledge' && $method === 'POST') {
     $tz = new DateTimeZone('Europe/Minsk');
     $today = (new DateTime('now', $tz))->format('Y-m-d');
     if (!$orderDay) $orderDay = (int)(new DateTime('now', $tz))->format('N');
+    $targetDate = $today;
+    if (!empty($body['order_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $body['order_date'])) {
+        $targetDate = $body['order_date'];
+    }
+    $isMain = ($supplierId === MAIN_DELIVERY_SUPPLIER_ID);
+    $reminderKind = $isMain ? 'main_delivery' : 'supplier';
+    $dbSupplierId = $isMain ? '' : $supplierId;
 
-    $pdo->prepare("DELETE FROM reminder_acknowledgements WHERE restaurant_id = ? AND supplier_id = ? AND target_date = ? AND order_day = ?")
-        ->execute([$rrRestPk, $supplierId, $today, $orderDay]);
+    $pdo->prepare("DELETE FROM reminder_acknowledgements WHERE restaurant_id = ? AND reminder_kind = ? AND supplier_id = ? AND target_date = ? AND order_day = ?")
+        ->execute([$rrRestPk, $reminderKind, $dbSupplierId, $targetDate, $orderDay]);
     rrRespond(['success' => true]);
 }
 

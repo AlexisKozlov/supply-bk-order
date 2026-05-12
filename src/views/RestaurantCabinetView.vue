@@ -177,8 +177,36 @@
       <!-- Реальный дашборд (после загрузки) -->
       <div v-if="!globalLoading" class="dash-wrap">
         <div class="dash-col-main">
+          <!-- PWA push онбординг — баннер при первом открытии как «приложение» -->
+          <div v-if="showPushOnboarding" class="dash-push-onboard">
+            <div class="dash-push-onboard-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+            </div>
+            <div class="dash-push-onboard-text">
+              <strong>Включить уведомления?</strong>
+              <span>Будем напоминать о дедлайнах прямо на этом устройстве, даже когда сайт закрыт.</span>
+            </div>
+            <button class="dash-push-onboard-btn" :disabled="push.busy.value" @click="enablePushOnboarding">Включить</button>
+            <button class="dash-push-onboard-skip" @click="dismissPushOnboarding" aria-label="Не сейчас">×</button>
+          </div>
+
+          <!-- Сводка «Сегодня нужно сделать» -->
+          <div v-if="todaySignals.length" class="dash-today">
+            <div class="dash-today-head">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+              <h3>Сегодня нужно сделать</h3>
+            </div>
+            <ul class="dash-today-list">
+              <li v-for="s in todaySignals" :key="s.key" class="dash-today-item" :class="'is-' + s.tone" @click="s.action">
+                <span class="dash-today-num">{{ s.count }}</span>
+                <span class="dash-today-text">{{ s.label }}</span>
+                <svg class="dash-today-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </li>
+            </ul>
+          </div>
+
           <!-- Напоминания на сегодня -->
-          <RestaurantTodayReminders />
+          <RestaurantTodayReminders @updated="onTodayRemindersUpdated" />
 
           <!-- Срочные карточки -->
           <div v-if="urgentItems.length" class="dash-urgent">
@@ -426,6 +454,10 @@
           <div v-if="delSelectedDate" class="order-form">
             <div v-if="delDraftRestoreNotice" class="draft-restored">
               <span>↩ {{ delDraftRestoreNotice }}</span>
+            </div>
+            <div v-if="delDraftSavedLabel && !delShowSuccess" class="draft-saved-indicator" :title="'Черновик автоматически сохраняется на этом устройстве'">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Сохранено в {{ delDraftSavedLabel }}
             </div>
             <div class="deadline-bar" :class="'dl-' + delCurrentDeadlineStatus">
               <span class="deadline-icon" v-if="delCurrentDeadlineStatus === 'open' || delCurrentDeadlineStatus === 'warning'">
@@ -1225,6 +1257,8 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
+import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg } from '@/lib/cabinetIcons.js';
+import { usePushNotifications } from '@/composables/usePushNotifications.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
@@ -1268,45 +1302,7 @@ const cabBrand = computed(() => {
 });
 const isPizzaStarCabinet = computed(() => roStore.restaurant?.legal_entity_group === 'PS');
 const canUseCardSearch = computed(() => !isPizzaStarCabinet.value);
-const cabIconSvg = {
-  dashboard: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/><path d="M9.5 20v-6h5v6"/></svg>',
-  orders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8l8-4 8 4-8 4-8-4Z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/></svg>',
-  history: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/><path d="M12 8v4l3 2"/></svg>',
-  info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5h.01"/></svg>',
-  surveys: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M9 9h6"/><path d="M9 13h6"/><path d="M8.5 17l1.5 1.5 3-3"/></svg>',
-  stock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>',
-  warehouse: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-5 9 5"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/><path d="M8 12h8"/></svg>',
-  scanner: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8"/><path d="M12 8v8"/><path d="M16 8v8"/></svg>',
-  search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>',
-  profile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
-  external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="M16 8 7 17"/></svg>',
-  help: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 0 1 4.6 1.2c0 1.8-2.4 2-2.4 3.8"/><path d="M12 17.5h.01"/></svg>',
-  file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l3 3v15H7z"/><path d="M14 3v4h4"/><path d="M9.5 12h5"/><path d="M9.5 16h5"/></svg>',
-  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 10 17l9-10"/></svg>',
-  x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10"/><path d="M17 7 7 17"/></svg>',
-  skip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M7 17 17 7"/></svg>',
-  edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5-.5 4 4-.5L18.5 9 15 5.5 4 16.5Z"/><path d="m13.5 7 3.5 3.5"/></svg>',
-  truck: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
-  // Возврат кег: кега + дугообразная стрелка возврата сверху (стиль сайдбара)
-  kegReturn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>',
-  // Колокольчик-будильник — для вкладки «Напоминания»
-  reminders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
-};
-
-// Иконки для крупных плиток дашборда — более «жирные» и выразительные.
-const tileIconSvg = {
-  scanner: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2.5"/><line x1="7" y1="9" x2="7" y2="15"/><line x1="10.5" y1="9" x2="10.5" y2="15"/><line x1="13.5" y1="9" x2="13.5" y2="15"/><line x1="17" y1="9" x2="17" y2="15"/><line x1="3" y1="12" x2="21" y2="12" stroke-width="2.4" stroke-linecap="round" opacity="0.55"/></svg>',
-  warehouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11V8.5L12 4l9 4.5V11"/><path d="M4 11h16v9.5H4z"/><path d="M9 14.5h6"/><path d="M9 17.5h6"/><circle cx="17.5" cy="6.5" r="3" fill="currentColor" opacity="0.18" stroke="none"/><path d="M17.5 5v1.5l1 .8" stroke-width="1.6"/></svg>',
-  keg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>',
-  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="13" height="16" rx="2.5"/><path d="M6.5 8h7"/><path d="M6.5 12h5"/><circle cx="17" cy="15.5" r="3.8" fill="currentColor" fill-opacity="0.1"/><path d="M19.7 18.2 22 20.5"/></svg>',
-  reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
-};
-const supplierIconSvg = {
-  drinks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h4"/><path d="M9 3v3l-2 2v11a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V8l-2-2V3"/><path d="M7 12h6"/><path d="M16 7h2l1 3v9a2 2 0 0 1-2 2h-1"/><path d="M16 11h3"/></svg>',
-  vegetables: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14c-2.2-2.8-.4-6.5 4.5-8 0 4-1.5 6.5-4.5 8Z"/><path d="M14 14c.2-3.8 3-6.2 6.5-5.8-1 3.5-3.4 5.6-6.5 5.8Z"/><path d="M5 15h14l-1.2 3.4A4 4 0 0 1 14 21h-4a4 4 0 0 1-3.8-2.6L5 15Z"/><path d="M10 16.5h4"/></svg>',
-  sauce: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v4l-2 3v8a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3v-8l-2-3V3"/><path d="M8 12h8"/><path d="M9 16h6"/><path d="M12 8v1"/></svg>',
-  package: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8l8-4 8 4-8 4-8-4Z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/><path d="M8 6.2 16 10"/></svg>',
-};
+// Иконки кабинета вынесены в src/lib/cabinetIcons.js
 const externalOrderLinks = [
   { id: 'lidskae', name: 'Лидское пиво', url: 'https://client.lidskae.by/catalog', iconKey: 'drinks', iconClass: 'supplier-icon-drinks' },
   { id: 'salatoria', name: 'Салатория', url: 'http://salatoria.liam.by/my_zakaz/ru_RU', iconKey: 'vegetables', iconClass: 'supplier-icon-vegetables' },
@@ -1314,30 +1310,11 @@ const externalOrderLinks = [
 const externalSupplierLinks = computed(() => (
   roStore.restaurant?.legal_entity_group === ENTITY_GROUP_BK_VM ? externalOrderLinks : []
 ));
-// SVG только из локальной карты — защита от XSS, если в будущем кто-то
-// решит брать иконки из API, иконка не отрисуется (вернётся пустая строка).
-function trustedSupplierIcon(key) {
-  return supplierIconSvg[key] || '';
-}
 // Защита от javascript:-ссылок: если url не http(s) — открываем как about:blank.
 function safeExternalUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) ? url : 'about:blank';
 }
-
-function supplierIcon(name) {
-  const n = String(name || '').toLowerCase();
-  if (n.includes('камако')) return { svg: supplierIconSvg.sauce, className: 'supplier-icon-sauce' };
-  if (n.includes('лидск')) return { svg: supplierIconSvg.drinks, className: 'supplier-icon-drinks' };
-  if (n.includes('салатор') || n.includes('планета')) return { svg: supplierIconSvg.vegetables, className: 'supplier-icon-vegetables' };
-  return { svg: supplierIconSvg.package, className: 'supplier-icon-neutral' };
-}
-
-function tabIconSvg(tabId) {
-  if (tabId === 'warehouse-stock') return cabIconSvg.warehouse;
-  if (tabId === 'keg-returns') return cabIconSvg.kegReturn;
-  if (tabId === 'reminders') return cabIconSvg.reminders;
-  return cabIconSvg[tabId] || cabIconSvg.profile;
-}
+// trustedSupplierIcon, supplierIcon, tabIconSvg — импортированы из cabinetIcons.js
 
 // Адрес без дублирования города
 const restaurantAddress = computed(() => {
@@ -1503,6 +1480,83 @@ const dashOrdersPending = computed(() => {
   return total;
 });
 
+// ═══ PWA push онбординг ═══
+const push = usePushNotifications();
+const PUSH_ONBOARDING_KEY = 'ro_push_onboarding_seen_v1';
+const pushOnboardingDismissed = ref(false);
+const isStandalonePwa = ref(false);
+try {
+  isStandalonePwa.value = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
+    // iOS Safari устаревший флаг
+    || window.navigator?.standalone === true;
+  pushOnboardingDismissed.value = localStorage.getItem(PUSH_ONBOARDING_KEY) === '1';
+} catch (e) { /* ignore */ }
+
+const showPushOnboarding = computed(() => {
+  if (!isStandalonePwa.value) return false;
+  if (pushOnboardingDismissed.value) return false;
+  if (!push.isSupported.value) return false;
+  if (push.permission.value === 'denied') return false;
+  if (push.isSubscribed.value) return false;
+  return true;
+});
+
+function dismissPushOnboarding() {
+  pushOnboardingDismissed.value = true;
+  try { localStorage.setItem(PUSH_ONBOARDING_KEY, '1'); } catch (e) { /* ignore */ }
+}
+
+async function enablePushOnboarding() {
+  const ok = await push.subscribe();
+  if (ok) {
+    toastStore.success('Уведомления включены');
+    dismissPushOnboarding();
+  } else if (push.error.value) {
+    toastStore.error(push.error.value);
+  }
+}
+
+// ═══ Сводка «Сегодня нужно сделать» ═══
+// Собирает три ключевых сигнала: дедлайны заявок, незаполненный сбор остатков, новые опросы.
+const todayReminderItems = ref([]);
+function onTodayRemindersUpdated(items) {
+  // Учитываем только сегодняшние неотмеченные. Advance-items (is_advance) показываем
+  // отдельно, чтобы не считать «завтрашнюю заявку» как «сегодня надо сделать».
+  todayReminderItems.value = (items || []).filter(it => !it.is_acknowledged && !it.is_advance);
+}
+const todaySignals = computed(() => {
+  const out = [];
+  const remindersCount = todayReminderItems.value.length;
+  if (remindersCount > 0) {
+    out.push({
+      key: 'reminders',
+      count: remindersCount,
+      label: remindersCount === 1 ? 'заявка к поставщику ждёт подачи' : `заявки к поставщикам (${remindersCount})`,
+      tone: 'warn',
+      action: () => switchTab('orders', 'reminders'),
+    });
+  }
+  if (stockCollection.active && stockCollectionUnfilledCount.value > 0) {
+    out.push({
+      key: 'stock',
+      count: stockCollectionUnfilledCount.value,
+      label: 'позиций не заполнено в сборе остатков',
+      tone: 'alert',
+      action: () => switchTab('stock'),
+    });
+  }
+  if (surveyPendingCount.value > 0) {
+    out.push({
+      key: 'surveys',
+      count: surveyPendingCount.value,
+      label: surveyPendingCount.value === 1 ? 'новый опрос ждёт ответа' : `новых опросов (${surveyPendingCount.value})`,
+      tone: 'info',
+      action: () => switchTab('surveys'),
+    });
+  }
+  return out;
+});
+
 const urgentItems = computed(() => {
   const items = [];
   const earliest = (arr, field = 'deadline') => {
@@ -1630,7 +1684,11 @@ async function loadKegReturnsAvailability() {
     const res = await fetch('/api/keg-returns/restaurant-info', { headers: t ? { 'X-RO-Token': t } : {} });
     if (!res.ok) { kegReturnsEnabled.value = false; return; }
     const data = await res.json();
-    kegReturnsEnabled.value = !!parseInt(data.pickup_weekdays || 0);
+    // Видимость модуля = глобальный тумблер «keg_returns_enabled» (включает закупка)
+    // И наличие хотя бы одного дня вывоза «pickup_weekdays» у конкретного ресторана.
+    const moduleOn = !!data.keg_returns_enabled;
+    const restaurantOn = !!parseInt(data.pickup_weekdays || 0);
+    kegReturnsEnabled.value = moduleOn && restaurantOn;
   } catch { kegReturnsEnabled.value = false; }
 }
 // ═══ Delivery (основная поставка) ═══
@@ -1837,6 +1895,7 @@ async function delSelectDay(date) {
   delOnlyFilled.value = false;
   delOrderComment.value = '';
   delDraftRestoreNotice.value = '';
+  delDraftSavedAt.value = null;
   try {
     const order = await roStore.loadMyOrder(date);
     if (requestId !== delSelectRequestId || delSelectedDate.value !== date) return;
@@ -1917,6 +1976,12 @@ async function delSelectDay(date) {
 
 // ═══ Автосохранение черновика основной поставки ═══
 const delDraftRestoreNotice = ref('');
+const delDraftSavedAt = ref(null); // timestamp последнего автосохранения для индикатора
+const delDraftSavedLabel = computed(() => {
+  if (!delDraftSavedAt.value) return '';
+  const dt = new Date(delDraftSavedAt.value);
+  return dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+});
 let delDraftSaveTimer = null;
 
 function delDraftKey(date) {
@@ -1937,11 +2002,13 @@ function delSaveDraft() {
     return;
   }
   try {
+    const ts = Date.now();
     localStorage.setItem(delDraftKey(delSelectedDate.value), JSON.stringify({
       items: meaningful.map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: i.quantity, comment: i.comment, multiplicity: i.multiplicity })),
       comment: delOrderComment.value || '',
-      savedAt: Date.now(),
+      savedAt: ts,
     }));
+    delDraftSavedAt.value = ts;
   } catch {}
 }
 
@@ -1955,6 +2022,7 @@ function delLoadDraft(date) {
 
 function delClearDraft(date) {
   try { localStorage.removeItem(delDraftKey(date)); } catch {}
+  delDraftSavedAt.value = null;
 }
 
 // Watch — дебаунс 800мс на сохранение
@@ -2422,12 +2490,8 @@ function applyRouteToState() {
     activeTab.value = 'info';
     if (!importantPosts.value.length && !importantLoading.value) loadImportantPostsWithOptions({ previewAll: true });
   } else if (name === 'restaurant-surveys') {
-    if (surveyItems.value.length) {
-      activeTab.value = 'surveys';
-    } else {
-      activeTab.value = 'dashboard';
-      if (!surveyListLoading.value) loadSurveyList();
-    }
+    activeTab.value = 'surveys';
+    if (!surveyItems.value.length && !surveyListLoading.value) loadSurveyList();
   } else if (name === 'restaurant-stock') {
     activeTab.value = 'stock';
   } else if (name === 'restaurant-warehouse-stock') {
@@ -3054,7 +3118,16 @@ onMounted(async () => {
   const tgTokenParam = route.query.tg_token;
   if (tgTokenParam) {
     const redirectQ = route.query.redirect;
-    const redirectPath = (typeof redirectQ === 'string' && /^\/restaurant(\/|$)/.test(redirectQ)) ? redirectQ : null;
+    let redirectPath = (typeof redirectQ === 'string' && /^\/restaurant(\/|$)/.test(redirectQ)) ? redirectQ : null;
+    // Если явного redirect нет — сохраняем текущий путь (минус tg_token),
+    // чтобы после переавторизации пользователь оказался ровно там, куда шёл из TG.
+    if (!redirectPath && route.path && /^\/restaurant(\/|$)/.test(route.path) && route.path !== '/restaurant') {
+      const cleanQuery = { ...route.query };
+      delete cleanQuery.tg_token;
+      delete cleanQuery.redirect;
+      const qs = new URLSearchParams(cleanQuery).toString();
+      redirectPath = route.path + (qs ? '?' + qs : '');
+    }
     router.replace({
       name: 'restaurant-order-login',
       query: {
@@ -3274,6 +3347,95 @@ onUnmounted(() => {
 .dash-wrap .dash-important { order: 4; }
 .dash-wrap .dash-recent { order: 5; }
 
+/* PWA push онбординг */
+.dash-push-onboard {
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+  color: #fff;
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(25,118,210,.25);
+}
+.dash-push-onboard-icon {
+  width: 40px; height: 40px; flex-shrink: 0;
+  background: rgba(255,255,255,.18);
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.dash-push-onboard-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1.3; }
+.dash-push-onboard-text strong { font-size: 14.5px; font-weight: 700; }
+.dash-push-onboard-text span { font-size: 12.5px; opacity: 0.92; }
+.dash-push-onboard-btn {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: #fff;
+  color: #1565c0;
+  border: none;
+  border-radius: 10px;
+  font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.dash-push-onboard-btn:hover:not(:disabled) { opacity: 0.92; }
+.dash-push-onboard-btn:disabled { opacity: 0.6; cursor: default; }
+.dash-push-onboard-skip {
+  position: absolute; top: 6px; right: 8px;
+  width: 24px; height: 24px;
+  background: transparent; border: none;
+  color: rgba(255,255,255,.7);
+  font-size: 20px; line-height: 1;
+  cursor: pointer; border-radius: 50%;
+}
+.dash-push-onboard-skip:hover { background: rgba(255,255,255,.15); color: #fff; }
+@media (max-width: 520px) {
+  .dash-push-onboard { padding: 12px; gap: 10px; }
+  .dash-push-onboard-text strong { font-size: 13.5px; }
+  .dash-push-onboard-text span { font-size: 12px; }
+}
+
+/* «Сегодня нужно сделать» — сводка ключевых дел сверху дашборда */
+.dash-today {
+  background: linear-gradient(180deg, #FFF8F0 0%, #FFFFFF 100%);
+  border: 1.5px solid #F4D8B8;
+  border-radius: 14px;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(231,111,81,.08);
+}
+.dash-today-head {
+  display: flex; align-items: center; gap: 8px;
+  color: #b35900; font-size: 13px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+.dash-today-head h3 { margin: 0; font: inherit; }
+.dash-today-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.dash-today-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #f0e0c8;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color .15s, transform .12s;
+}
+.dash-today-item:hover { border-color: #E76F51; transform: translateX(2px); }
+.dash-today-item.is-warn { border-color: #f6c878; background: #fff8ec; }
+.dash-today-item.is-alert { border-color: #f6a8a8; background: #fde8e8; }
+.dash-today-item.is-info { border-color: #c4d8e8; background: #f3f8fb; }
+.dash-today-num {
+  flex-shrink: 0;
+  min-width: 28px; height: 28px; padding: 0 8px;
+  background: #E76F51; color: #fff;
+  border-radius: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px;
+}
+.dash-today-item.is-alert .dash-today-num { background: #c62828; }
+.dash-today-item.is-info .dash-today-num { background: #1976d2; }
+.dash-today-text { flex: 1; font-size: 14px; color: #2C1A12; line-height: 1.35; }
+.dash-today-arrow { color: #B0A090; flex-shrink: 0; }
+
 @media (min-width: 960px) {
   .dash-wrap { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); column-gap: 24px; row-gap: 0; align-items: start; }
   .dash-col-main, .dash-col-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
@@ -3489,6 +3651,8 @@ onUnmounted(() => {
 .deadline-bar { padding: 8px 14px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 0; }
 .deadline-timer { font-variant-numeric: tabular-nums; opacity: 0.85; }
 .draft-restored { padding: 8px 18px; font-size: 12px; font-weight: 600; color: #b45309; background: #fffbeb; border-bottom: 1px solid #fde68a; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; animation: draftFadeIn 0.3s ease; }
+.draft-saved-indicator { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: 11px; font-weight: 500; color: #2e7d32; background: #f0f7ed; border: 1px solid #c4e6c8; border-radius: 12px; align-self: flex-start; margin: 6px 0 0 12px; transition: opacity 0.2s; }
+.draft-saved-indicator svg { color: #2e7d32; flex-shrink: 0; }
 @keyframes draftFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .deadline-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
 .dl-open { background: #ECFDF5; color: #16a34a; }

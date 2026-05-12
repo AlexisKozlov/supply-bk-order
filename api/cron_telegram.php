@@ -1089,12 +1089,14 @@ try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
 
+    // Только so_*-поставщики (подключённые через портал). Локальных не
+    // автосабмитим — у них своя логика подачи через приложение.
     $autoSuppliers = $pdo->query("
         SELECT s.id, s.short_name,
                COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
         FROM suppliers s
         JOIN so_supplier_settings sst ON sst.supplier_id = s.id
-        WHERE s.is_active = 1 AND sst.auto_submit_previous = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
+        WHERE s.is_active = 1 AND s.so_enabled = 1 AND sst.auto_submit_previous = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
     ")->fetchAll();
 
     foreach ($autoSuppliers as $sup) {
@@ -1630,6 +1632,12 @@ try {
             if (wasNotifiedByKey($pdo, $notificationKey, $intervalSeconds)) {
                 continue;
             }
+            // Отдельная проверка «отложено на час» — если пользователь нажал
+            // «Напомнить через час», не шлём повтор до истечения часа.
+            $snoozeKey = "survey_snooze_{$surveyId}_{$chatId}";
+            if (wasNotifiedByKey($pdo, $snoozeKey, 3600)) {
+                continue;
+            }
 
             $text = "🔔 <b>Напоминание</b>\n\n";
             $text .= "У вас ещё есть рестораны без ответа в опросе:\n«" . htmlspecialchars($surveyTitle, ENT_QUOTES, 'UTF-8') . "»\n\n";
@@ -1637,6 +1645,7 @@ try {
 
             $btns = ['inline_keyboard' => [
                 [['text' => '📋 Пройти опрос', 'callback_data' => "srv_start_{$surveyId}"]],
+                [['text' => '⏰ Напомнить через час', 'callback_data' => "srv_snooze_{$surveyId}"]],
             ]];
 
             if (tgSend($chatId, $text, false, $btns)) {

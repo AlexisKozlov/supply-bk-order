@@ -522,15 +522,34 @@ function buildChartData() {
     dates.push(`${yyyy}-${mm}-${dd}`);
   }
 
-  // Значение «как в калькуляторе паллет»: своё за день, или подтянутое
-  // с ближайшего следующего понедельника для выходных.
+  // Подтяжка значения для выходных:
+  //   1) если есть свой отчёт — берём его
+  //   2) иначе пытаемся следующий понедельник (если уже загружен)
+  //   3) если нет — последний предыдущий рабочий день с данными
+  //      (например, сб/вс показывают данные пятницы, если понедельник ещё впереди)
+  const fmt = (d) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
   const valueAt = (date, entity, type) => {
     const own = cellStats.value.find(c => c.report_date === date && c.legal_entity === entity && c.stock_type === type);
     if (own) return own.cell_count;
     if (isWeekend(date)) {
+      // 1. Следующий понедельник
       const monday = nextMondayStr(date);
       const fb = cellStats.value.find(c => c.report_date === monday && c.legal_entity === entity && c.stock_type === type);
       if (fb) return fb.cell_count;
+      // 2. Шаг назад до ближайшего рабочего дня с данными (макс 7 дней)
+      const d = new Date(date + 'T00:00:00');
+      for (let i = 0; i < 7; i++) {
+        d.setDate(d.getDate() - 1);
+        const dow = d.getDay();
+        if (dow === 0 || dow === 6) continue;
+        const back = cellStats.value.find(c => c.report_date === fmt(d) && c.legal_entity === entity && c.stock_type === type);
+        if (back) return back.cell_count;
+      }
     }
     return 0;
   };

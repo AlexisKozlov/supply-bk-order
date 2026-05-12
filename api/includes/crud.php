@@ -20,13 +20,14 @@ $allowed = [
     'plt_products', 'plt_deliveries', 'plt_delivery_items', 'plt_daily_stock', 'plt_summary',
     'marketing_activities', 'marketing_activity_items', 'marketing_activity_files',
     'recipes', 'recipe_ingredients', 'recipe_groups', 'recipe_group_items', 'pallet_reference',
+    'reminder_cron_log',
 ];
 // Защита: только чтение через REST, запись — через RPC.
 // supplier_payments — read-only: запись через update_payment / create_payment_if_needed,
 // иначе пользователь может выставить paid_by/paid_at напрямую через REST PATCH.
 // bug_reports / bug_report_replies — убраны из $allowed выше, читаются через RPC get_bug_reports
 // (с фильтром по created_by для не-админа).
-$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'tender_files', 'marketing_activity_files', 'supplier_payments'];
+$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'tender_files', 'marketing_activity_files', 'supplier_payments', 'reminder_cron_log'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
 // audit_log — только чтение и вставка (без update/delete для защиты целостности)
@@ -61,6 +62,11 @@ if ($sessionUser) {
 // Enforce read-only
 if (in_array($table, $readOnly) && $method !== 'GET') {
     respond(['error' => 'Эта таблица доступна только для чтения'], 403);
+}
+// Admin-only tables (служебные журналы)
+$adminOnly = ['reminder_cron_log'];
+if (in_array($table, $adminOnly) && (!$sessionUser || ($sessionUser['role'] ?? '') !== 'admin')) {
+    respond(['error' => 'Только для администратора'], 403);
 }
 // Enforce no insert/delete for settings
 if (in_array($table, $noInsertDelete) && ($method === 'POST' || $method === 'DELETE')) {

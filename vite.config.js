@@ -63,6 +63,9 @@ export default defineConfig({
         // index.html из кэша.
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        // Подключаем push-обработчик к сгенерированному SW.
+        // Файл лежит в public/push-handler.js и грузится через importScripts.
+        importScripts: ['/push-handler.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,otf,woff,woff2}'],
         globIgnores: [
           '**/xlsx-*.js',

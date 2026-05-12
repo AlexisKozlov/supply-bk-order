@@ -11,19 +11,26 @@
       <p>Когда отдел закупок опубликует важную информацию, она появится здесь.</p>
     </div>
     <template v-else>
-      <div v-if="posts.length > 4" class="info-filter-chips">
-        <button class="info-fchip" :class="{ active: filter === 'all' }" @click="filter = 'all'">
-          Все <span class="info-fchip-count">{{ posts.length }}</span>
-        </button>
-        <button class="info-fchip" :class="{ active: filter === 'unread' }" @click="filter = 'unread'">
-          Непрочитанные <span class="info-fchip-count">{{ unreadCount }}</span>
-        </button>
+      <div v-if="posts.length > 2" class="info-controls">
+        <div class="info-search">
+          <svg class="info-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input v-model="searchQuery" type="search" placeholder="Поиск по тексту..." class="info-search-input" />
+          <button v-if="searchQuery" class="info-search-clear" @click="searchQuery = ''" aria-label="Очистить">×</button>
+        </div>
+        <div class="info-filter-chips">
+          <button class="info-fchip" :class="{ active: filter === 'all' }" @click="filter = 'all'">
+            Все <span class="info-fchip-count">{{ posts.length }}</span>
+          </button>
+          <button class="info-fchip" :class="{ active: filter === 'unread' }" @click="filter = 'unread'">
+            Непрочитанные <span class="info-fchip-count">{{ unreadCount }}</span>
+          </button>
+        </div>
       </div>
 
       <div v-if="!filteredPosts.length" class="info-empty">
         <span class="info-empty-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg></span>
-        <h3>Всё прочитано</h3>
-        <p>В этой категории больше нет сообщений.</p>
+        <h3>{{ searchQuery ? 'Ничего не найдено' : 'Всё прочитано' }}</h3>
+        <p>{{ searchQuery ? 'Попробуйте другие слова или очистите поиск.' : 'В этой категории больше нет сообщений.' }}</p>
       </div>
 
       <div v-else class="info-list">
@@ -94,14 +101,24 @@ const roStore = useRestaurantOrderStore();
 const toast = useToastStore();
 
 const filter = ref('all');
+const searchQuery = ref('');
 const imagePreview = reactive({ show: false, url: '', name: '' });
 
 const fileIconSvg = '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
 
 const unreadCount = computed(() => props.posts.filter(p => !p.is_read).length);
 const filteredPosts = computed(() => {
-  if (filter.value === 'unread') return props.posts.filter(p => !p.is_read);
-  return props.posts;
+  let list = props.posts;
+  if (filter.value === 'unread') list = list.filter(p => !p.is_read);
+  const q = searchQuery.value.trim().toLowerCase();
+  if (q) {
+    list = list.filter(p =>
+      (p.title || '').toLowerCase().includes(q) ||
+      (p.message || '').toLowerCase().includes(q) ||
+      (p.created_by || '').toLowerCase().includes(q)
+    );
+  }
+  return list;
 });
 
 function infoAvatar(authorName) {
@@ -175,8 +192,27 @@ function closePreview() {
 }
 .info-empty h3 { margin: 0 0 6px; font-size: 17px; color: #2C1A12; }
 .info-empty p { margin: 0; color: #8B7355; font-size: 13.5px; line-height: 1.5; max-width: 320px; margin: 0 auto; }
+.info-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.info-search {
+  position: relative; display: flex; align-items: center;
+  background: #fff; border: 1.5px solid #ECE3D6; border-radius: 12px;
+  padding: 0 10px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.info-search:focus-within { border-color: #E76F51; box-shadow: 0 0 0 3px rgba(231,111,81,.12); }
+.info-search-icon { color: #B0A090; flex-shrink: 0; }
+.info-search-input {
+  flex: 1; border: none; background: transparent; outline: none;
+  padding: 10px 8px; font: inherit; font-size: 14px; color: #2C1A12;
+}
+.info-search-input::-webkit-search-cancel-button { display: none; }
+.info-search-clear {
+  border: none; background: transparent; color: #B0A090; font-size: 22px;
+  line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.info-search-clear:hover { color: #E76F51; }
 .info-filter-chips {
-  display: flex; gap: 8px; margin-bottom: 14px;
+  display: flex; gap: 8px;
   overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px;
 }
 .info-fchip {

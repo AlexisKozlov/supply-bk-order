@@ -139,8 +139,17 @@ function rrShowMyReminders($pdo, $chatId, $editMsgId = null) {
     $sup->execute([(int)$rest['id']]);
     $suppliers = $sup->fetchAll();
 
-    if (!$suppliers) {
-        $msg = "📭 Для вашего ресторана пока не настроены графики локальных поставщиков.\n\nЕсли нужно — обратитесь в отдел закупок.";
+    // Есть ли у ресторана настроенная основная поставка (хотя бы один день с дедлайном)
+    $mainCheck = $pdo->prepare("
+        SELECT 1 FROM delivery_schedule
+        WHERE restaurant_id = ? AND order_day IS NOT NULL AND order_deadline IS NOT NULL
+        LIMIT 1
+    ");
+    $mainCheck->execute([(int)$rest['id']]);
+    $hasMain = (bool)$mainCheck->fetchColumn();
+
+    if (!$suppliers && !$hasMain) {
+        $msg = "📭 Для вашего ресторана пока не настроены графики локальных поставщиков и основной поставки.\n\nЕсли нужно — обратитесь в отдел закупок.";
         if ($editMsgId) editMessage($chatId, $editMsgId, $msg);
         else sendMessage($chatId, $msg);
         return;
@@ -158,12 +167,32 @@ function rrShowMyReminders($pdo, $chatId, $editMsgId = null) {
     $stmt->execute([(int)$tg['id'], (int)$rest['id']]);
     foreach ($stmt->fetchAll() as $r) $subscribedIds[$r['supplier_id']] = true;
 
+    // Подписан ли этот tg-пользователь на основную поставку
+    $mainOn = false;
+    if ($hasMain) {
+        $mainStmt = $pdo->prepare("
+            SELECT 1 FROM restaurant_main_delivery_tg_subscribers rmts
+            JOIN restaurant_main_delivery_subscriptions s ON s.id = rmts.subscription_id
+            WHERE rmts.ro_tg_sub_id = ? AND rmts.is_active = 1
+              AND s.restaurant_id = ? AND s.is_enabled = 1
+            LIMIT 1
+        ");
+        $mainStmt->execute([(int)$tg['id'], (int)$rest['id']]);
+        $mainOn = (bool)$mainStmt->fetchColumn();
+    }
+
     $text = "🔔 <b>Напоминания о подаче заявок</b>\n"
           . "Ресторан №" . htmlspecialchars((string)$rest['number'], ENT_QUOTES, 'UTF-8') . "\n\n"
-          . "Нажмите на поставщика, чтобы подключить или отключить напоминания.\n"
+          . "Нажмите на пункт, чтобы подключить или отключить напоминания.\n"
           . "<i>Поставщики, которые принимают заявки через портал, уведомляют автоматически — здесь не показаны.</i>";
 
     $keyboard = [];
+    if ($hasMain) {
+        $icon = $mainOn ? '✅' : '⬜';
+        $keyboard[] = [
+            ['text' => $icon . ' Основная поставка (склад)', 'callback_data' => 'rrtoggle_main'],
+        ];
+    }
     foreach ($suppliers as $s) {
         $isOn = !empty($subscribedIds[$s['id']]);
         $icon = $isOn ? '✅' : '⬜';
@@ -1929,17 +1958,23 @@ if (isset($input['callback_query'])) {
         $restaurantId = (int)$r->fetchColumn();
         if (!$restaurantId) { answerCallback($cb['id'], 'Ресторан не найден'); exit; }
 
+        // reminder_kind: для main delivery callback_data исторически несёт
+        // legacy-UUID '00000000-…' — переводим в правильный kind.
+        $isMain = ($supplierId === '00000000-0000-0000-0000-000000000000');
+        $reminderKind = $isMain ? 'main_delivery' : 'supplier';
+        $dbSupplierId = $isMain ? '' : $supplierId;
+
         $by = 'tg:' . ($tgUser['first_name'] ?: ($tgUser['username'] ?: $chatId));
         // Время сохраняем явно в Europe/Minsk, чтобы не зависеть от time_zone сессии MySQL
         $minskNow = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('Y-m-d H:i:s');
         $pdo->prepare("
-            INSERT INTO reminder_acknowledgements (restaurant_id, supplier_id, target_date, order_day, acknowledged_by, acknowledged_at, source)
-            VALUES (?, ?, ?, ?, ?, ?, 'telegram')
+            INSERT INTO reminder_acknowledgements (restaurant_id, reminder_kind, supplier_id, target_date, order_day, acknowledged_by, acknowledged_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'telegram')
             ON DUPLICATE KEY UPDATE
                 acknowledged_by = VALUES(acknowledged_by),
                 acknowledged_at = VALUES(acknowledged_at),
                 source = VALUES(source)
-        ")->execute([$restaurantId, $supplierId, $targetDate, $orderDay, $by, $minskNow]);
+        ")->execute([$restaurantId, $reminderKind, $dbSupplierId, $targetDate, $orderDay, $by, $minskNow]);
 
         // Убираем inline-кнопку (текст не трогаем, чтобы не сломать HTML)
         editMessageReplyMarkup($chatId, $msgId, null);
@@ -1953,6 +1988,54 @@ if (isset($input['callback_query'])) {
     // Открыть раздел напоминаний из меню ресторана
     if ($data === 'rest_reminders' || $data === 'rrmine') {
         answerCallback($cb['id']);
+        rrShowMyReminders($pdo, $chatId, $msgId);
+        exit;
+    }
+
+    // Включить/отключить себя как получателя напоминаний по основной поставке
+    if ($data === 'rrtoggle_main') {
+        $tgUser = rrFindRoSub($pdo, $chatId);
+        if (!$tgUser) { answerCallback($cb['id'], 'Привязка не найдена'); exit; }
+        $r = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
+        $r->execute([$tgUser['restaurant_number'], $tgUser['legal_entity_group']]);
+        $restaurantId = (int)$r->fetchColumn();
+        if (!$restaurantId) { answerCallback($cb['id'], 'Ресторан не найден'); exit; }
+
+        // Проверка: у ресторана хотя бы одна строка delivery_schedule с дедлайном
+        $check = $pdo->prepare("SELECT 1 FROM delivery_schedule WHERE restaurant_id = ? AND order_day IS NOT NULL AND order_deadline IS NOT NULL LIMIT 1");
+        $check->execute([$restaurantId]);
+        if (!$check->fetchColumn()) { answerCallback($cb['id'], 'Основная поставка не настроена'); exit; }
+
+        // Получаем (или создаём) подписку
+        $sub = $pdo->prepare("SELECT id FROM restaurant_main_delivery_subscriptions WHERE restaurant_id = ?");
+        $sub->execute([$restaurantId]);
+        $subId = $sub->fetchColumn();
+        $by = 'tg:' . ($tgUser['first_name'] ?: ($tgUser['username'] ?: $chatId));
+        if (!$subId) {
+            $pdo->prepare("INSERT INTO restaurant_main_delivery_subscriptions
+                           (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_by)
+                           VALUES (?, 1, 1, 1, ?)")
+                ->execute([$restaurantId, $by]);
+            $subId = (int)$pdo->lastInsertId();
+        } else {
+            $pdo->prepare("UPDATE restaurant_main_delivery_subscriptions
+                            SET is_enabled = 1, portal_enabled = 1, telegram_enabled = 1, updated_at = NOW()
+                            WHERE id = ?")
+                ->execute([(int)$subId]);
+        }
+
+        $existing = $pdo->prepare("SELECT id FROM restaurant_main_delivery_tg_subscribers WHERE subscription_id = ? AND ro_tg_sub_id = ? LIMIT 1");
+        $existing->execute([(int)$subId, (int)$tgUser['id']]);
+        $existingId = $existing->fetchColumn();
+
+        if ($existingId) {
+            $pdo->prepare("DELETE FROM restaurant_main_delivery_tg_subscribers WHERE id = ?")->execute([(int)$existingId]);
+            answerCallback($cb['id'], 'Отключено');
+        } else {
+            $pdo->prepare("INSERT IGNORE INTO restaurant_main_delivery_tg_subscribers (subscription_id, ro_tg_sub_id, is_active) VALUES (?, ?, 1)")
+                ->execute([(int)$subId, (int)$tgUser['id']]);
+            answerCallback($cb['id'], 'Подключено ✓');
+        }
         rrShowMyReminders($pdo, $chatId, $msgId);
         exit;
     }
@@ -2706,6 +2789,21 @@ if (isset($input['callback_query'])) {
     if (preg_match('/^srv_start_(\d+)$/', $data, $m)) {
         answerCallback($cb['id']);
         surveyStart($chatId, $msgId, (int)$m[1]);
+        exit;
+    }
+    // Отложить напоминание об опросе на 1 час
+    if (preg_match('/^srv_snooze_(\d+)$/', $data, $m)) {
+        $surveyId = (int)$m[1];
+        $snoozeKey = "survey_snooze_{$surveyId}_{$chatId}";
+        try {
+            $pdo->prepare("INSERT INTO tg_notification_log (notification_type, notification_key, chat_id, sent_at)
+                            VALUES ('survey_snooze', ?, ?, NOW())")
+                ->execute([$snoozeKey, (int)$chatId]);
+        } catch (Throwable $e) { /* ignore */ }
+        // Убираем кнопки, чтобы пользователь не нажимал повторно
+        editMessageReplyMarkup($chatId, $msgId, null);
+        sendMessage($chatId, '⏰ Напомню через час. Если опрос закроется раньше — успейте пройти.');
+        answerCallback($cb['id'], 'Отложено на час');
         exit;
     }
     if (preg_match('/^srv_rest_(\d+)_(\d+)$/', $data, $m)) {

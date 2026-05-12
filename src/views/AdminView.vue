@@ -35,6 +35,10 @@
         <span v-if="bugNewCount" class="adm-tab-dot"></span>
         <span class="adm-tab-count" :class="{ active: activeTab === 'feedback' }">{{ bugReports.length || '' }}</span>
       </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'cron-reminders' }" @click="activeTab = 'cron-reminders'; loadCronReminders()">
+        <BkIcon name="bell" size="sm"/> Крон напоминаний
+        <span v-if="cronErrCount" class="adm-tab-dot"></span>
+      </button>
     </div>
 
     <!-- ═══ Пользователи ═══ -->
@@ -745,6 +749,55 @@
       </div>
     </div>
 
+    <!-- ═══ Крон напоминаний — журнал запусков ═══ -->
+    <div v-if="activeTab === 'cron-reminders'" class="adm-section">
+      <div class="adm-toolbar">
+        <div class="adm-toolbar-info">
+          Последние {{ cronReminders.length }} запусков, обновляется каждые 5 минут
+          <span v-if="cronErrCount" class="adm-cron-err">· ошибок за сутки: {{ cronErrCount }}</span>
+        </div>
+        <button class="btn" @click="loadCronReminders" style="font-size:12px;">
+          <BkIcon name="redo" size="sm"/> Обновить
+        </button>
+      </div>
+
+      <div v-if="cronLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!cronReminders.length" class="adm-empty">Журнал пуст. Крон ещё не запускался?</div>
+      <table v-else class="adm-cron-table">
+        <thead>
+          <tr>
+            <th>Запуск</th>
+            <th>Длит.</th>
+            <th colspan="3">Поставщики</th>
+            <th colspan="3">Осн. поставка</th>
+            <th>Статус</th>
+          </tr>
+          <tr class="adm-cron-subhead">
+            <th></th><th></th>
+            <th title="portal">📰</th><th title="telegram">💬</th><th title="пропущено">⊘</th>
+            <th title="portal">📰</th><th title="telegram">💬</th><th title="пропущено">⊘</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in cronReminders" :key="row.id" :class="{ 'cron-err': row.status === 'error' }">
+            <td class="adm-cron-ts">{{ fmtCronTime(row.started_at) }}</td>
+            <td>{{ cronDuration(row) }}</td>
+            <td class="cron-num">{{ row.sup_portal }}</td>
+            <td class="cron-num">{{ row.sup_tg }}</td>
+            <td class="cron-num cron-skip">{{ row.sup_skip }}</td>
+            <td class="cron-num">{{ row.main_portal }}</td>
+            <td class="cron-num">{{ row.main_tg }}</td>
+            <td class="cron-num cron-skip">{{ row.main_skip }}</td>
+            <td>
+              <span v-if="row.status === 'ok'" class="cron-status-ok">✓</span>
+              <span v-else class="cron-status-err" :title="row.error_text">⚠ {{ truncateError(row.error_text) }}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- ═══ Модалка обновления (changelog) ═══ -->
     <Teleport to="body">
       <div v-if="changelogModal.show" class="modal" @click.self="tryCloseChangelog">
@@ -896,7 +949,7 @@ const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/Conf
 const userStore = useUserStore();
 const toast = useToastStore();
 
-const activeTab = useTabRoute('users', ['users', 'sessions', 'audit', 'feedback', 'broadcast', 'stats', 'backup', 'maintenance']);
+const activeTab = useTabRoute('users', ['users', 'sessions', 'audit', 'feedback', 'broadcast', 'stats', 'backup', 'maintenance', 'cron-reminders']);
 const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);
@@ -1851,6 +1904,76 @@ watch(() => userStore.currentUser?.role, (role) => {
   if (role && role !== 'admin') router.replace({ name: 'order' });
 });
 
+// ═══ Крон напоминаний (журнал запусков) ═══
+const cronReminders = ref([]);
+const cronLoading = ref(false);
+const cronErrCount = ref(0);
+
+async function loadCronReminders() {
+  cronLoading.value = true;
+  try {
+    const res = await db.from('reminder_cron_log')
+      .select('*')
+      .order('started_at', { ascending: false })
+      .limit(100);
+    if (res.error) {
+      cronReminders.value = [];
+      return;
+    }
+    cronReminders.value = res.data || [];
+    // Подсчёт ошибок за сутки
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    cronErrCount.value = cronReminders.value.filter(r => r.status === 'error' && new Date(r.started_at.replace(' ', 'T')).getTime() > dayAgo).length;
+  } catch (e) {
+    cronReminders.value = [];
+  } finally {
+    cronLoading.value = false;
+  }
+}
+
+function fmtCronTime(ts) {
+  if (!ts) return '';
+  try {
+    const dt = new Date(ts.replace(' ', 'T'));
+    const today = new Date();
+    const sameDay = dt.toDateString() === today.toDateString();
+    if (sameDay) return dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' +
+           dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  } catch { return ts; }
+}
+
+function cronDuration(row) {
+  if (!row.started_at || !row.finished_at) return '—';
+  try {
+    const s = new Date(row.started_at.replace(' ', 'T')).getTime();
+    const e = new Date(row.finished_at.replace(' ', 'T')).getTime();
+    const ms = e - s;
+    if (ms < 1000) return ms + ' мс';
+    return (ms / 1000).toFixed(1) + ' с';
+  } catch { return '—'; }
+}
+
+function truncateError(text) {
+  if (!text) return 'Ошибка';
+  return text.length > 50 ? text.slice(0, 47) + '…' : text;
+}
+
+// Загружаем сразу при первом открытии вкладки (см. v-on:click в шаблоне).
+// Дополнительно — стартовая проверка ошибок при монтировании для бейджа.
+onMounted(async () => {
+  try {
+    const res = await db.from('reminder_cron_log')
+      .select('status,started_at')
+      .order('started_at', { ascending: false })
+      .limit(50);
+    if (res.data) {
+      const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      cronErrCount.value = res.data.filter(r => r.status === 'error' && new Date(r.started_at.replace(' ', 'T')).getTime() > dayAgo).length;
+    }
+  } catch (e) { /* ignore */ }
+});
+
 // ═══ Обращения (баг-репорты) ═══
 const apiBase = import.meta.env.VITE_API_URL || '/api';
 const sessionToken = localStorage.getItem('bk_session_token') || '';
@@ -2116,6 +2239,19 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.adm-cron-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+.adm-cron-table th, .adm-cron-table td { padding: 6px 8px; text-align: center; border-bottom: 1px solid #eee; }
+.adm-cron-table th { background: #fafafa; font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.adm-cron-table .adm-cron-subhead th { font-size: 14px; font-weight: 400; padding: 2px 4px; background: #fff; border-bottom: 1px solid #eee; }
+.adm-cron-ts { text-align: left; font-family: monospace; font-size: 11px; color: #666; }
+.cron-num { font-family: monospace; }
+.cron-skip { color: #888; }
+.cron-err { background: #fff0f0; }
+.cron-err td { color: #b71c1c; }
+.cron-status-ok { color: #2e7d32; font-weight: 700; }
+.cron-status-err { color: #c62828; font-weight: 600; font-size: 11px; }
+.adm-cron-err { color: #c62828; font-weight: 500; margin-left: 6px; }
+
 /* ═══ Layout ═══ */
 .admin-view { padding: 0; }
 .adm-section { animation: admFade .2s ease; }

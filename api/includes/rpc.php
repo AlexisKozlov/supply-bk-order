@@ -1686,15 +1686,24 @@ if ($endpoint === 'rpc') {
         if ($diff > $maxDays) respond(['error' => 'Слишком большой период (максимум 12 месяцев)'], 400);
 
         // Не-админу отдаём только его юрлица.
+        // ВАЖНО: в warehouse_cells.legal_entity хранятся короткие имена
+        // («Бургер БК»), а у пользователей legal_entities — полные («ООО "Бургер БК"»).
+        // Поэтому добавляем сокращённые варианты к списку фильтра.
         $leWhere = '';
         $leArgs = [];
         if (($authUser['role'] ?? '') !== 'admin') {
             $userEntities = $authUser['legal_entities'] ?? '';
             if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
             if (!is_array($userEntities) || empty($userEntities)) respond(['rows' => [], 'start' => $start, 'end' => $end]);
-            $phLE = implode(',', array_fill(0, count($userEntities), '?'));
+            $allForms = [];
+            foreach ($userEntities as $e) {
+                $allForms[] = $e;
+                if (preg_match('/"([^"]+)"/u', $e, $m)) $allForms[] = $m[1]; // выдернуть из «ООО "X"» → «X»
+            }
+            $allForms = array_values(array_unique($allForms));
+            $phLE = implode(',', array_fill(0, count($allForms), '?'));
             $leWhere = " AND legal_entity IN ($phLE)";
-            $leArgs = array_values($userEntities);
+            $leArgs = $allForms;
         }
 
         $st = $pdo->prepare("
@@ -1771,15 +1780,23 @@ if ($endpoint === 'rpc') {
         $days = intval($body['days'] ?? 90);
         if ($days > 365) $days = 365;
         // Не-админу отдаём только его юрлица.
+        // ВАЖНО: warehouse_cells.legal_entity хранит короткие имена («Бургер БК»),
+        // а user.legal_entities — полные («ООО "Бургер БК"»). Добавляем оба варианта.
         $leWhere = '';
         $leArgs = [];
         if (($authUser['role'] ?? '') !== 'admin') {
             $userEntities = $authUser['legal_entities'] ?? '';
             if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
             if (!is_array($userEntities) || empty($userEntities)) respond([]);
-            $phLE = implode(',', array_fill(0, count($userEntities), '?'));
+            $allForms = [];
+            foreach ($userEntities as $e) {
+                $allForms[] = $e;
+                if (preg_match('/"([^"]+)"/u', $e, $m)) $allForms[] = $m[1];
+            }
+            $allForms = array_values(array_unique($allForms));
+            $phLE = implode(',', array_fill(0, count($allForms), '?'));
             $leWhere = " AND legal_entity IN ($phLE)";
-            $leArgs = array_values($userEntities);
+            $leArgs = $allForms;
         }
         $st = $pdo->prepare("SELECT report_date, legal_entity, stock_type, cell_count, is_manual FROM warehouse_cells WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY){$leWhere} ORDER BY report_date DESC, legal_entity, stock_type");
         $st->execute(array_merge([$days], $leArgs));

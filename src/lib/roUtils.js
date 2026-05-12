@@ -61,3 +61,52 @@ export const EXCEL_TOTAL_STYLE = {
 export const EXCEL_TRACEABLE_STYLE = {
   fill: { fgColor: { rgb: 'FFF9C4' } },
 };
+
+// ═══ Общий fetch для кабинета ресторана ═══
+// Оборачивает fetch:
+//  - подставляет токен ресторана (X-RO-Token из localStorage)
+//  - ставит Content-Type когда передаётся объект как body
+//  - таймаут по умолчанию 15 сек (через AbortController)
+//  - бросает Error при HTTP-ошибках и таймаутах (для удобной try/catch)
+
+const RO_TOKEN_KEY = 'ro_token';
+const DEFAULT_TIMEOUT = 15000;
+
+export async function roFetch(url, opts = {}) {
+  const method = opts.method || 'GET';
+  const timeout = opts.timeout ?? DEFAULT_TIMEOUT;
+
+  const headers = { ...(opts.headers || {}) };
+  const tok = localStorage.getItem(RO_TOKEN_KEY);
+  if (tok && !headers['X-RO-Token']) headers['X-RO-Token'] = tok;
+
+  let body = opts.body;
+  if (body && typeof body === 'object' && !(body instanceof FormData) && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) {
+    body = JSON.stringify(body);
+    if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  }
+
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeout);
+  let res;
+  try {
+    res = await fetch(url, { method, headers, body, signal: ctrl.signal });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Запрос слишком долгий — попробуйте позже');
+    throw e;
+  } finally {
+    clearTimeout(tid);
+  }
+
+  if (opts.skipParse) return res;
+  let data = null;
+  try { data = await res.json(); } catch { /* пустой ответ */ }
+  if (!res.ok) {
+    const msg = (data && data.error) || `Ошибка ${res.status}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}

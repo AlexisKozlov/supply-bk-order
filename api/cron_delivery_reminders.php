@@ -39,6 +39,11 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
 ]);
 $BOT_TOKEN = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
 
+// Web Push helpers
+if (!empty($_ENV['VAPID_PUBLIC']) && !empty($_ENV['VAPID_PRIVATE']) && is_file(__DIR__ . '/includes/push_send.php')) {
+    require_once __DIR__ . '/includes/push_send.php';
+}
+
 function rtgSend($botToken, $chatId, $text, $replyMarkup = null) {
     if (!$botToken || !$chatId) return false;
     $data = [
@@ -70,13 +75,62 @@ $today = $now->format('Y-m-d');
 $todayDow = (int)$now->format('N'); // 1..7
 $nowHour = (int)$now->format('G');
 
-// run_hour = 99 — финал (за 5 мин до дедлайна). UNIQUE-индекс защищает от повторов.
-const FINAL_RUN_HOUR = 99;
-const MAIN_DELIVERY_SUPPLIER_ID = '00000000-0000-0000-0000-000000000000';
-// Сдвиг id main-delivery подписок при записи в общую reminder_runs.
-const MAIN_SUB_OFFSET = 1000000000;
+// Стартуем запись журнала
+$logStart = $pdo->prepare("INSERT INTO reminder_cron_log (started_at) VALUES (NOW())");
+$logStart->execute();
+$cronLogId = (int)$pdo->lastInsertId();
+
+// Хук на завершение: сохраним статистику и/или ошибку
+$cronStats = ['sup_portal'=>0,'sup_tg'=>0,'sup_skip'=>0,'main_portal'=>0,'main_tg'=>0,'main_skip'=>0,'status'=>'ok','error'=>null];
+register_shutdown_function(function() use (&$cronStats, $cronLogId, $pdo) {
+    try {
+        $err = error_get_last();
+        if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            $cronStats['status'] = 'error';
+            $cronStats['error'] = ($err['message'] ?? '') . ' @ ' . ($err['file'] ?? '') . ':' . ($err['line'] ?? '');
+        }
+        $pdo->prepare("
+            UPDATE reminder_cron_log
+            SET finished_at = NOW(),
+                sup_portal = ?, sup_tg = ?, sup_skip = ?,
+                main_portal = ?, main_tg = ?, main_skip = ?,
+                status = ?, error_text = ?
+            WHERE id = ?
+        ")->execute([
+            $cronStats['sup_portal'], $cronStats['sup_tg'], $cronStats['sup_skip'],
+            $cronStats['main_portal'], $cronStats['main_tg'], $cronStats['main_skip'],
+            $cronStats['status'], $cronStats['error'], $cronLogId,
+        ]);
+    } catch (Throwable $e) { /* нет смысла фейлить shutdown */ }
+});
+
+// reminder_runs.run_hour хранит МИНУТНЫЙ слот HH*60+MM (0..1439).
+// Технические значения для финальных сообщений:
+//   1500 — «🔔 Последнее напоминание» (за 5 мин до дедлайна)
+//   1501 — «🚨 Дедлайн истёк» (от 0 до 60 мин после дедлайна)
+const FINAL_RUN_HOUR_PRE = 1500;
+const FINAL_RUN_HOUR_EXPIRED = 1501;
+// Для backward-совместимости с уже отправленными TG-сообщениями (старая
+// rrack-кнопка несёт этот UUID в callback_data). При получении callback —
+// конвертируем в reminder_kind='main_delivery'.
+const MAIN_DELIVERY_LEGACY_UUID = '00000000-0000-0000-0000-000000000000';
 
 const DAY_NAMES_ACC = ['', 'понедельник', 'вторник', 'среду', 'четверг', 'пятницу', 'субботу', 'воскресенье'];
+const DAY_NAMES_SHORT_RU = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+
+/**
+ * Дата доставки в формате «пн 14.05» по дате подачи заявки и дню недели доставки.
+ * delivery_dow может быть как до, так и после order_dow (на той же или следующей неделе).
+ */
+function rrFormatDeliveryDate($orderDateStr, $orderDow, $deliveryDow, $tz) {
+    if ($deliveryDow < 1 || $deliveryDow > 7) return '';
+    $diff = ($deliveryDow - $orderDow + 7) % 7;
+    if ($diff === 0) $diff = 7; // доставка на следующей неделе, если совпадает с днём подачи
+    $dt = DateTime::createFromFormat('Y-m-d', $orderDateStr, $tz);
+    if (!$dt) return '';
+    $dt->modify("+{$diff} days");
+    return (DAY_NAMES_SHORT_RU[$deliveryDow] ?? '') . ' ' . $dt->format('d.m');
+}
 
 /**
  * Вычисляет, какие слоты напоминаний должны быть отправлены сейчас для одной
@@ -113,9 +167,10 @@ function rrComputeFireSlots($now, $todayDow, $orderDay, $deadlineTime, $reminder
         if ($diffSec < 0 || $diffSec >= 300) continue;
 
         $hh = (int)substr($time, 0, 2);
-        if ($hh === 99) $hh = 23; // не пересекаться с FINAL_RUN_HOUR
+        $mm = (int)substr($time, 3, 2);
+        $minuteSlot = $hh * 60 + $mm; // 0..1439
         $slots[] = [
-            'run_hour'    => $hh,
+            'run_hour'    => $minuteSlot,
             'is_final'    => false,
             'order_date'  => $orderDateStr,
             'order_day'   => $orderDay,
@@ -124,15 +179,29 @@ function rrComputeFireSlots($now, $todayDow, $orderDay, $deadlineTime, $reminder
         ];
     }
 
-    // Финал — за 5 мин до дедлайна, только в день подачи
+    // Финал: pre — за 0..5 мин до дедлайна; expired — 0..60 мин после.
+    // Разные run_hour, чтобы оба сообщения могли уйти.
     if ($todayDow === $orderDay && $deadlineTime) {
         $deadlineDt = DateTime::createFromFormat('Y-m-d H:i:s', $orderDateStr . ' ' . $deadlineTime, $tz);
         if ($deadlineDt) {
             $minutesLeft = ($deadlineDt->getTimestamp() - $now->getTimestamp()) / 60;
-            if ($minutesLeft <= 5 && $minutesLeft >= -60) {
+            if ($minutesLeft > 0 && $minutesLeft <= 5) {
                 $slots[] = [
-                    'run_hour'    => FINAL_RUN_HOUR,
+                    'run_hour'    => FINAL_RUN_HOUR_PRE,
                     'is_final'    => true,
+                    'is_expired'  => false,
+                    'minutes_left'=> (int)round($minutesLeft),
+                    'order_date'  => $orderDateStr,
+                    'order_day'   => $orderDay,
+                    'days_before' => 0,
+                    'time'        => substr($deadlineTime, 0, 5),
+                ];
+            } elseif ($minutesLeft <= 0 && $minutesLeft >= -60) {
+                $slots[] = [
+                    'run_hour'    => FINAL_RUN_HOUR_EXPIRED,
+                    'is_final'    => true,
+                    'is_expired'  => true,
+                    'minutes_left'=> (int)round($minutesLeft),
                     'order_date'  => $orderDateStr,
                     'order_day'   => $orderDay,
                     'days_before' => 0,
@@ -149,7 +218,7 @@ function rrComputeFireSlots($now, $todayDow, $orderDay, $deadlineTime, $reminder
             $minutesLeft = ($deadlineDt->getTimestamp() - $now->getTimestamp()) / 60;
             if ($minutesLeft > 5) {
                 $slots[] = [
-                    'run_hour'    => (int)$now->format('G'),
+                    'run_hour'    => (int)$now->format('G') * 60, // час → минутный слот HH:00
                     'is_final'    => false,
                     'order_date'  => $orderDateStr,
                     'order_day'   => $orderDay,
@@ -179,10 +248,12 @@ function rrWhenLabel($daysBefore, $orderDow) {
 // ──────────────────────────────────────────────────────────────────────────
 // Общие prepared statements
 // ──────────────────────────────────────────────────────────────────────────
-$ackStmt   = $pdo->prepare("SELECT 1 FROM reminder_acknowledgements WHERE restaurant_id = ? AND supplier_id = ? AND target_date = ? AND order_day = ? LIMIT 1");
-$portalIns = $pdo->prepare("INSERT IGNORE INTO reminder_runs (subscription_id, target_date, order_day, run_hour, channel, recipient) VALUES (?, ?, ?, ?, 'portal', '_')");
-$tgRunCheck= $pdo->prepare("SELECT 1 FROM reminder_runs WHERE subscription_id = ? AND target_date = ? AND order_day = ? AND run_hour = ? AND channel = 'telegram' AND recipient = ? LIMIT 1");
-$tgRunIns  = $pdo->prepare("INSERT IGNORE INTO reminder_runs (subscription_id, target_date, order_day, run_hour, channel, recipient) VALUES (?, ?, ?, ?, 'telegram', ?)");
+$ackStmt   = $pdo->prepare("SELECT 1 FROM reminder_acknowledgements WHERE restaurant_id = ? AND reminder_kind = ? AND supplier_id = ? AND target_date = ? AND order_day = ? LIMIT 1");
+$portalIns = $pdo->prepare("INSERT IGNORE INTO reminder_runs (subscription_id, reminder_kind, target_date, order_day, run_hour, channel, recipient) VALUES (?, ?, ?, ?, ?, 'portal', '_')");
+$tgRunCheck= $pdo->prepare("SELECT 1 FROM reminder_runs WHERE subscription_id = ? AND reminder_kind = ? AND target_date = ? AND order_day = ? AND run_hour = ? AND channel = 'telegram' AND recipient = ? LIMIT 1");
+$tgRunIns  = $pdo->prepare("INSERT IGNORE INTO reminder_runs (subscription_id, reminder_kind, target_date, order_day, run_hour, channel, recipient) VALUES (?, ?, ?, ?, ?, 'telegram', ?)");
+$pushRunCheck = $pdo->prepare("SELECT 1 FROM reminder_runs WHERE subscription_id = ? AND reminder_kind = ? AND target_date = ? AND order_day = ? AND run_hour = ? AND channel = 'push' AND recipient = '_' LIMIT 1");
+$pushRunIns   = $pdo->prepare("INSERT IGNORE INTO reminder_runs (subscription_id, reminder_kind, target_date, order_day, run_hour, channel, recipient) VALUES (?, ?, ?, ?, ?, 'push', '_')");
 
 // ──────────────────────────────────────────────────────────────────────────
 // Проход 1: локальные поставщики
@@ -203,7 +274,7 @@ $stmt = $pdo->prepare("
         ss.order_day, ss.delivery_day,
         sub.id AS subscription_id, sub.portal_enabled, sub.telegram_enabled,
         s.id AS supplier_id, s.short_name AS supplier_name,
-        r.id AS restaurant_pk, r.number AS restaurant_number,
+        r.id AS restaurant_pk, r.number AS restaurant_number, r.legal_entity_group,
         sd.deadline_time AS deadline_override,
         sd.reminder_times AS reminder_times_override
     FROM supplier_schedules ss
@@ -250,7 +321,7 @@ foreach ($stmt->fetchAll() as $row) {
 
     foreach ($slots as $slot) {
         // «Сделал заказ»?
-        $ackStmt->execute([$restPk, $supplierId, $slot['order_date'], $orderDay]);
+        $ackStmt->execute([$restPk, 'supplier', $supplierId, $slot['order_date'], $orderDay]);
         if ($ackStmt->fetchColumn()) { $skipped++; continue; }
 
         $deadlineShort = substr($deadline, 0, 5);
@@ -259,23 +330,35 @@ foreach ($stmt->fetchAll() as $row) {
         // PORTAL
         if ((int)$row['portal_enabled'] === 1) {
             try {
-                $portalIns->execute([$subscriptionId, $slot['order_date'], $orderDay, $slot['run_hour']]);
+                $portalIns->execute([$subscriptionId, 'supplier', $slot['order_date'], $orderDay, $slot['run_hour']]);
                 $sentPortal++;
             } catch (Exception $e) { /* ignore */ }
         }
 
         // TELEGRAM
         if ((int)$row['telegram_enabled'] === 1 && $BOT_TOKEN) {
+            $deliveryLabel = rrFormatDeliveryDate($slot['order_date'], $orderDay, $deliveryDay, $tz);
             if ($slot['is_final']) {
-                $text = "🚨 <b>Дедлайн истёк</b>\n"
-                      . "Сегодня заявка поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>"
-                      . " так и не была отмечена как поданная.\n"
-                      . "Крайний срок: <b>{$deadlineShort}</b>.\n"
-                      . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".\n\n"
-                      . "Если заявка всё же была подана — нажмите «Сделал заказ», чтобы зафиксировать.";
+                if (!empty($slot['is_expired'])) {
+                    $text = "🚨 <b>Дедлайн истёк</b>\n"
+                          . "Сегодня заявка поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>"
+                          . " так и не была отмечена как поданная.\n"
+                          . "Крайний срок: <b>{$deadlineShort}</b>.\n"
+                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
+                          . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".\n\n"
+                          . "Если заявка всё же была подана — нажмите «Сделал заказ», чтобы зафиксировать.";
+                } else {
+                    $minLeft = max(1, (int)($slot['minutes_left'] ?? 5));
+                    $text = "🔔 <b>Последнее напоминание</b>\n"
+                          . "До дедлайна осталось <b>{$minLeft} мин</b> — подайте заявку поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>.\n"
+                          . "Крайний срок: <b>{$deadlineShort}</b>.\n"
+                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
+                          . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
+                }
             } else {
                 $text = "⏰ <b>Напоминание</b>\n"
                       . ucfirst($whenLabel) . " до <b>{$deadlineShort}</b> подайте заявку поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>.\n"
+                      . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
                       . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
             }
             $callback = "rrack:{$supplierId}:{$orderDay}:" . $slot['order_date'];
@@ -288,15 +371,45 @@ foreach ($stmt->fetchAll() as $row) {
             $tgList->execute([$subscriptionId]);
             foreach ($tgList->fetchAll() as $tg) {
                 $chatId = (string)$tg['chat_id'];
-                $tgRunCheck->execute([$subscriptionId, $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
+                $tgRunCheck->execute([$subscriptionId, 'supplier', $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
                 if ($tgRunCheck->fetchColumn()) continue;
                 $ok = rtgSend($BOT_TOKEN, (int)$chatId, $text, $markup);
                 if ($ok) {
                     try {
-                        $tgRunIns->execute([$subscriptionId, $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
+                        $tgRunIns->execute([$subscriptionId, 'supplier', $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
                         $sentTg++;
                     } catch (Exception $e) { /* ignore */ }
                 }
+            }
+        }
+
+        // WEB PUSH (если есть подписки и не отправляли ещё)
+        if (function_exists('pushSendToRestaurant')) {
+            $pushRunCheck->execute([$subscriptionId, 'supplier', $slot['order_date'], $orderDay, $slot['run_hour']]);
+            if (!$pushRunCheck->fetchColumn()) {
+                $deliveryLabel = rrFormatDeliveryDate($slot['order_date'], $orderDay, $deliveryDay, $tz);
+                $pushTitle = $slot['is_final']
+                    ? (!empty($slot['is_expired']) ? '🚨 Дедлайн истёк' : '🔔 Последнее напоминание')
+                    : '⏰ Напоминание';
+                $pushBody = ucfirst($whenLabel) . " до {$deadlineShort} — заявка поставщику {$row['supplier_name']}"
+                          . ($deliveryLabel ? " (доставка {$deliveryLabel})" : '');
+                $sent = pushSendToRestaurant($pdo,
+                    (int)$row['restaurant_number'],
+                    $row['legal_entity_group'] ?: 'BK_VM',
+                    [
+                        'title' => $pushTitle,
+                        'body'  => $pushBody,
+                        'url'   => '/restaurant/reminders',
+                        'tag'   => "rem-{$supplierId}-{$slot['order_date']}",
+                    ]
+                );
+                if ($sent > 0) {
+                    try {
+                        $pushRunIns->execute([$subscriptionId, 'supplier', $slot['order_date'], $orderDay, $slot['run_hour']]);
+                        $sentTg += 0; // push не считаем как tg
+                    } catch (Exception $e) { /* ignore */ }
+                }
+                $cronStats['push_sup'] = ($cronStats['push_sup'] ?? 0) + $sent;
             }
         }
     }
@@ -309,7 +422,7 @@ $mainStmt = $pdo->prepare("
     SELECT
         ds.order_day, ds.day_of_week AS delivery_day, ds.order_deadline, ds.reminder_times,
         sub.id AS subscription_id, sub.portal_enabled, sub.telegram_enabled,
-        r.id AS restaurant_pk, r.number AS restaurant_number
+        r.id AS restaurant_pk, r.number AS restaurant_number, r.legal_entity_group
     FROM delivery_schedule ds
     JOIN restaurant_main_delivery_subscriptions sub ON sub.restaurant_id = ds.restaurant_id
     JOIN restaurants r ON r.id = ds.restaurant_id
@@ -331,20 +444,20 @@ $mainTgList = $pdo->prepare("
 $sentMainPortal = 0; $sentMainTg = 0; $skippedMain = 0;
 
 foreach ($mainStmt->fetchAll() as $row) {
-    $restPk    = (int)$row['restaurant_pk'];
-    $orderDay  = (int)$row['order_day'];
-    $deadline  = $row['order_deadline'];
-    $rtimes    = $row['reminder_times'];
+    $restPk      = (int)$row['restaurant_pk'];
+    $orderDay    = (int)$row['order_day'];
+    $deliveryDay = (int)$row['delivery_day'];
+    $deadline    = $row['order_deadline'];
+    $rtimes      = $row['reminder_times'];
 
     $slots = rrComputeFireSlots($now, $todayDow, $orderDay, $deadline, $rtimes, $tz);
     if (!$slots) { $skippedMain++; continue; }
 
     $subscriptionId = (int)$row['subscription_id'];
-    $runSubId = $subscriptionId + MAIN_SUB_OFFSET;
 
     foreach ($slots as $slot) {
         // «Сделал заказ»?
-        $ackStmt->execute([$restPk, MAIN_DELIVERY_SUPPLIER_ID, $slot['order_date'], $orderDay]);
+        $ackStmt->execute([$restPk, 'main_delivery', '', $slot['order_date'], $orderDay]);
         if ($ackStmt->fetchColumn()) { $skippedMain++; continue; }
 
         $deadlineShort = substr($deadline, 0, 5);
@@ -353,26 +466,41 @@ foreach ($mainStmt->fetchAll() as $row) {
         // PORTAL
         if ((int)$row['portal_enabled'] === 1) {
             try {
-                $portalIns->execute([$runSubId, $slot['order_date'], $orderDay, $slot['run_hour']]);
+                $portalIns->execute([$subscriptionId, 'main_delivery', $slot['order_date'], $orderDay, $slot['run_hour']]);
                 $sentMainPortal++;
             } catch (Exception $e) { /* ignore */ }
         }
 
         // TELEGRAM
         if ((int)$row['telegram_enabled'] === 1 && $BOT_TOKEN) {
+            $deliveryLabel = rrFormatDeliveryDate($slot['order_date'], $orderDay, $deliveryDay, $tz);
             if ($slot['is_final']) {
-                $text = "🚨 <b>Дедлайн истёк</b>\n"
-                      . "Сегодня заявка на <b>основную поставку</b> через 1С"
-                      . " так и не была отмечена как поданная.\n"
-                      . "Крайний срок: <b>{$deadlineShort}</b>.\n"
-                      . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".\n\n"
-                      . "Если заявка всё же была подана — нажмите «Сделал заказ», чтобы зафиксировать.";
+                if (!empty($slot['is_expired'])) {
+                    $text = "🚨 <b>Дедлайн истёк</b>\n"
+                          . "Сегодня заявка на <b>основную поставку</b> через 1С"
+                          . " так и не была отмечена как поданная.\n"
+                          . "Крайний срок: <b>{$deadlineShort}</b>.\n"
+                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
+                          . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".\n\n"
+                          . "Если заявка всё же была подана — нажмите «Сделал заказ», чтобы зафиксировать.";
+                } else {
+                    $minLeft = max(1, (int)($slot['minutes_left'] ?? 5));
+                    $text = "🔔 <b>Последнее напоминание</b>\n"
+                          . "До дедлайна осталось <b>{$minLeft} мин</b> — подайте заявку на <b>основную поставку</b> через 1С.\n"
+                          . "Крайний срок: <b>{$deadlineShort}</b>.\n"
+                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
+                          . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
+                }
             } else {
                 $text = "⏰ <b>Напоминание</b>\n"
                       . ucfirst($whenLabel) . " до <b>{$deadlineShort}</b> подайте заявку на <b>основную поставку</b> через 1С.\n"
+                      . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
                       . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
             }
-            $callback = "rrack:" . MAIN_DELIVERY_SUPPLIER_ID . ":{$orderDay}:" . $slot['order_date'];
+            // В callback_data используем legacy-UUID, чтобы старые TG-сообщения
+            // (с уже отправленной кнопкой) тоже работали — handler в боте
+            // конвертирует этот UUID в reminder_kind='main_delivery'.
+            $callback = "rrack:" . MAIN_DELIVERY_LEGACY_UUID . ":{$orderDay}:" . $slot['order_date'];
             $markup = [
                 'inline_keyboard' => [
                     [ ['text' => '✓ Сделал заказ', 'callback_data' => $callback] ],
@@ -382,15 +510,44 @@ foreach ($mainStmt->fetchAll() as $row) {
             $mainTgList->execute([$subscriptionId]);
             foreach ($mainTgList->fetchAll() as $tg) {
                 $chatId = (string)$tg['chat_id'];
-                $tgRunCheck->execute([$runSubId, $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
+                $tgRunCheck->execute([$subscriptionId, 'main_delivery', $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
                 if ($tgRunCheck->fetchColumn()) continue;
                 $ok = rtgSend($BOT_TOKEN, (int)$chatId, $text, $markup);
                 if ($ok) {
                     try {
-                        $tgRunIns->execute([$runSubId, $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
+                        $tgRunIns->execute([$subscriptionId, 'main_delivery', $slot['order_date'], $orderDay, $slot['run_hour'], $chatId]);
                         $sentMainTg++;
                     } catch (Exception $e) { /* ignore */ }
                 }
+            }
+        }
+
+        // WEB PUSH для основной поставки
+        if (function_exists('pushSendToRestaurant')) {
+            $pushRunCheck->execute([$subscriptionId, 'main_delivery', $slot['order_date'], $orderDay, $slot['run_hour']]);
+            if (!$pushRunCheck->fetchColumn()) {
+                $deliveryLabel = rrFormatDeliveryDate($slot['order_date'], $orderDay, $deliveryDay, $tz);
+                $pushTitle = $slot['is_final']
+                    ? (!empty($slot['is_expired']) ? '🚨 Дедлайн истёк' : '🔔 Последнее напоминание')
+                    : '⏰ Напоминание';
+                $pushBody = ucfirst($whenLabel) . " до {$deadlineShort} — заявка на основную поставку через 1С"
+                          . ($deliveryLabel ? " (доставка {$deliveryLabel})" : '');
+                $sent = pushSendToRestaurant($pdo,
+                    (int)$row['restaurant_number'],
+                    $row['legal_entity_group'] ?: 'BK_VM',
+                    [
+                        'title' => $pushTitle,
+                        'body'  => $pushBody,
+                        'url'   => '/restaurant/reminders',
+                        'tag'   => "rem-main-{$slot['order_date']}",
+                    ]
+                );
+                if ($sent > 0) {
+                    try {
+                        $pushRunIns->execute([$subscriptionId, 'main_delivery', $slot['order_date'], $orderDay, $slot['run_hour']]);
+                    } catch (Exception $e) { /* ignore */ }
+                }
+                $cronStats['push_main'] = ($cronStats['push_main'] ?? 0) + $sent;
             }
         }
     }
@@ -398,3 +555,10 @@ foreach ($mainStmt->fetchAll() as $row) {
 
 echo "delivery-reminders: portal={$sentPortal}, tg={$sentTg}, skipped={$skipped}, hour={$nowHour}\n";
 echo "main-delivery-reminders: portal={$sentMainPortal}, tg={$sentMainTg}, skipped={$skippedMain}\n";
+
+$cronStats['sup_portal']  = $sentPortal;
+$cronStats['sup_tg']      = $sentTg;
+$cronStats['sup_skip']    = $skipped;
+$cronStats['main_portal'] = $sentMainPortal;
+$cronStats['main_tg']     = $sentMainTg;
+$cronStats['main_skip']   = $skippedMain;

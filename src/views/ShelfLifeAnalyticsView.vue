@@ -626,7 +626,56 @@ function buildDailyTotals(rows) {
     d.byEntity[r.legal_entity] = (d.byEntity[r.legal_entity] || 0) + cnt;
     d.byType[r.stock_type] = (d.byType[r.stock_type] || 0) + cnt;
   }
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const sorted = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return fillWeekendGaps(sorted);
+}
+
+// Заполняет даты Сб/Вс между минимальной и максимальной датой в массиве,
+// используя ближайший следующий понедельник или, при его отсутствии,
+// ближайшую пятницу до выходных. Логика та же, что в ShelfLifeView/Ячейки.
+function fillWeekendGaps(days) {
+  if (!days.length) return days;
+  const byDate = new Map(days.map(d => [d.date, d]));
+  const ymd = (d) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  const minDate = days[0].date;
+  const maxDate = days[days.length - 1].date;
+  const result = [];
+  for (let d = new Date(minDate + 'T00:00:00'); d <= new Date(maxDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+    const ds = ymd(d);
+    if (byDate.has(ds)) { result.push(byDate.get(ds)); continue; }
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) continue; // только выходные подтягиваем
+    // следующий понедельник
+    const forward = new Date(d);
+    forward.setDate(forward.getDate() + (dow === 0 ? 1 : 2));
+    let src = byDate.get(ymd(forward));
+    // если нет — последний рабочий день до выходных
+    if (!src) {
+      const back = new Date(d);
+      for (let i = 0; i < 7; i++) {
+        back.setDate(back.getDate() - 1);
+        const bd = back.getDay();
+        if (bd === 0 || bd === 6) continue;
+        const candidate = byDate.get(ymd(back));
+        if (candidate) { src = candidate; break; }
+      }
+    }
+    if (!src) continue;
+    // Клонируем строку с новой датой
+    result.push({
+      date: ds,
+      total: src.total,
+      byEntity: { ...src.byEntity },
+      byType: { ...src.byType },
+      fromFallback: true,
+    });
+  }
+  return result;
 }
 
 // ─── Подготовка серий ───

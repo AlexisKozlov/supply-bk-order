@@ -39,6 +39,22 @@
         Никто из сотрудников ресторана ещё не привязал Telegram-бота. Сотрудники могут привязать чат через настройки уведомлений в боте — тогда они появятся в списке для выбора.
       </div>
 
+      <div v-if="push.isSupported.value" class="rrt-push" :class="{ 'is-on': push.isSubscribed.value }">
+        <div class="rrt-push-info">
+          <div class="rrt-push-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+            Push-уведомления в этом браузере
+          </div>
+          <div class="rrt-push-hint">
+            <template v-if="push.isSubscribed.value">Уведомления приходят на этот браузер, даже когда сайт закрыт.</template>
+            <template v-else-if="push.permission.value === 'denied'">Разрешение заблокировано. Откройте настройки браузера и разрешите уведомления для сайта.</template>
+            <template v-else>Включите, чтобы получать напоминания, даже когда вкладка закрыта.</template>
+          </div>
+        </div>
+        <button v-if="push.isSubscribed.value" class="rrt-push-btn rrt-push-btn-off" :disabled="push.busy.value" @click="push.unsubscribe">Отключить</button>
+        <button v-else class="rrt-push-btn rrt-push-btn-on" :disabled="push.busy.value || push.permission.value === 'denied'" @click="push.subscribe">Включить</button>
+      </div>
+
       <div class="rrt-list">
         <div v-if="hasMainDeliveryDays" class="rrt-card rrt-card-main">
           <div class="rrt-card-head">
@@ -144,6 +160,9 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
+import { usePushNotifications } from '@/composables/usePushNotifications.js';
+
+const push = usePushNotifications();
 
 const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components/restaurant/RestaurantTodayReminders.vue'));
 
@@ -413,6 +432,19 @@ onBeforeUnmount(() => {
   .rrt-tut-btn { justify-content: center; padding: 10px 14px; }
 }
 .rrt-tg-warning { font-size: 13px; color: #b35900; background: #fff4e0; border: 1px solid #ffe0b2; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; line-height: 1.5; }
+
+.rrt-push { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 12px; background: #f4f7fb; border: 1px solid #cdd9e8; border-radius: 8px; }
+.rrt-push.is-on { background: #f0f7ed; border-color: #c4e6c8; }
+.rrt-push-info { flex: 1; min-width: 0; }
+.rrt-push-title { font-size: 13px; font-weight: 600; color: #2b2b2b; display: flex; align-items: center; gap: 6px; }
+.rrt-push.is-on .rrt-push-title { color: #2e7d32; }
+.rrt-push-hint { font-size: 12px; color: #666; line-height: 1.4; margin-top: 3px; }
+.rrt-push-btn { padding: 7px 14px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.rrt-push-btn:disabled { opacity: 0.6; cursor: default; }
+.rrt-push-btn-on { background: #1976d2; color: #fff; }
+.rrt-push-btn-on:hover { background: #0d47a1; }
+.rrt-push-btn-off { background: transparent; color: #666; border: 1px solid #ccc; }
+.rrt-push-btn-off:hover { background: #f0f0f0; color: #c62828; border-color: #f6a8a8; }
 
 .rrt-list { display: flex; flex-direction: column; gap: 14px; }
 

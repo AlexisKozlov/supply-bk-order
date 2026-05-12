@@ -130,6 +130,17 @@
                     >{{ getDough(r, d.num) }}</span>
                     <span v-else class="ds-time-empty ds-dough-empty" title="Тесто" @dblclick.stop="isEditing && startEdit(r, d.num, 'dough_time')">—</span>
                   </div>
+                  <button
+                    v-if="getTime(r, d.num)"
+                    class="ds-deadline-btn"
+                    :class="{ 'ds-deadline-btn-set': getDeadline(r, d.num), 'ds-deadline-btn-empty': isEditing && !getDeadline(r, d.num) }"
+                    :title="getDeadline(r, d.num) ? `Заявка: ${DAY_SHORT_LOCAL[getDeadline(r, d.num).order_day]} до ${getDeadline(r, d.num).order_deadline}` : (isEditing ? 'Задать дедлайн заявки' : 'Дедлайн заявки не задан')"
+                    :disabled="!isEditing"
+                    @click.stop="startDeadlineEdit(r, d.num)"
+                  >
+                    <span v-if="getDeadline(r, d.num)" class="ds-deadline-text">{{ DAY_SHORT_LOCAL[getDeadline(r, d.num).order_day] }} {{ getDeadline(r, d.num).order_deadline }}</span>
+                    <span v-else>+ заявка</span>
+                  </button>
                 </template>
                 <template v-else>
                   <span
