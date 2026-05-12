@@ -1,74 +1,13 @@
 <template>
   <div class="krt-wrap">
     <!-- ═══ Список заявок ═══ -->
-    <template v-if="!formMode">
-      <div class="krt-header">
-        <div class="krt-header-title">
-          <span class="krt-header-icon" v-html="iconKegReturn"></span>
-          <div>
-            <h2 class="krt-title">Возврат кег</h2>
-            <p class="krt-sub">Оформление ТТН на возврат пустых кег.</p>
-          </div>
-        </div>
-        <button class="krt-btn primary lg" @click="openNew">
-          <span class="krt-btn-plus">+</span>
-          Новая заявка
-        </button>
-      </div>
-
-      <div v-if="listLoading" class="krt-empty">Загрузка...</div>
-      <template v-else>
-        <div v-if="!rows.length" class="krt-empty-card">
-          <div class="krt-empty-illu" v-html="iconKeg"></div>
-          <h3>Заявок пока нет</h3>
-          <p>Сформируйте заявку и сразу распечатайте ТТН на бланке БСО (до дедлайна) — чтобы убедиться, что бланк не испорчен и номер совпадает с фактическим. Дождитесь уведомления о маршрутизации в Telegram, впишите ОТ РУКИ водителя и машину в распечатанный бланк, возьмите подпись водителя — и передайте ему вместе с кегами.</p>
-          <button class="krt-btn primary" @click="openNew">+ Новая заявка</button>
-        </div>
-        <template v-else>
-          <div class="krt-filter-chips">
-            <button
-              v-for="f in statusFilters"
-              :key="f.key"
-              class="krt-chip"
-              :class="{ active: statusFilter === f.key }"
-              @click="statusFilter = f.key"
-            >
-              {{ f.label }}
-              <span v-if="f.count" class="krt-chip-count">{{ f.count }}</span>
-            </button>
-          </div>
-          <div v-if="!filteredRows.length" class="krt-empty">В этой категории заявок нет</div>
-          <div v-else class="krt-list">
-            <button
-              v-for="row in filteredRows"
-              :key="row.id"
-              type="button"
-              class="krt-card"
-              :class="'krt-card--' + row.status"
-              @click="openEdit(row)"
-            >
-              <span class="krt-card-stripe"></span>
-              <div class="krt-card-body">
-                <div class="krt-card-row1">
-                  <div class="krt-card-date">{{ fmtDate(row.return_date) }}</div>
-                  <span :class="'krt-badge krt-badge-' + row.status">{{ statusLabel(row.status) }}</span>
-                </div>
-                <div class="krt-card-row2">
-                  <span v-if="row.total_kegs" class="krt-card-pill">
-                    <span class="krt-card-pill-num">{{ row.total_kegs }}</span> кег
-                  </span>
-                  <span v-if="row.bso_series || row.bso_number" class="krt-card-meta">
-                    БСО {{ row.bso_series }} {{ row.bso_number }}
-                  </span>
-                  <span v-if="row.driver" class="krt-card-meta">· {{ row.driver }}</span>
-                </div>
-              </div>
-              <span class="krt-card-arrow">›</span>
-            </button>
-          </div>
-        </template>
-      </template>
-    </template>
+    <KegReturnList
+      v-if="!formMode"
+      :rows="rows"
+      :loading="listLoading"
+      @new="openNew"
+      @open="openEdit"
+    />
 
     <!-- ═══ Форма ═══ -->
     <template v-else>
@@ -398,156 +337,44 @@
     </template>
 
     <!-- Просмотр фото кеги -->
-    <div v-if="photoModal.show" class="krt-photo-overlay" @click.self="closePhoto">
-      <div class="krt-photo-modal">
-        <div class="krt-photo-head">
-          <span>{{ photoModal.name }}</span>
-          <button class="krt-photo-close" @click="closePhoto" aria-label="Закрыть">×</button>
-        </div>
-        <img :src="photoModal.url" :alt="photoModal.name" />
-      </div>
-    </div>
+    <KegPhotoModal
+      :show="photoModal.show"
+      :url="photoModal.url"
+      :name="photoModal.name"
+      @close="closePhoto"
+    />
 
     <!-- Подтверждения -->
-    <div v-if="confirmModal.show" class="krt-confirm-overlay" @click.self="confirmCancel">
-      <div class="krt-confirm">
-        <h3>{{ confirmModal.title }}</h3>
-        <p>{{ confirmModal.message }}</p>
-        <div class="krt-confirm-actions">
-          <button class="krt-btn ghost" @click="confirmCancel">{{ confirmModal.cancelText || 'Отмена' }}</button>
-          <button
-            class="krt-btn"
-            :class="confirmModal.danger ? 'danger' : 'primary'"
-            @click="confirmOk"
-          >{{ confirmModal.okText || 'OK' }}</button>
-        </div>
-      </div>
-    </div>
+    <KegConfirmModal
+      :show="confirmModal.show"
+      :title="confirmModal.title"
+      :message="confirmModal.message"
+      :ok-text="confirmModal.okText"
+      :cancel-text="confirmModal.cancelText"
+      :danger="confirmModal.danger"
+      @ok="confirmOk"
+      @cancel="confirmCancel"
+    />
 
     <!-- Модал «Заменить БСО» -->
-    <div v-if="bsoModal.show" class="krt-confirm-overlay" @click.self="closeBsoReplace">
-      <div class="krt-confirm krt-bso-modal">
-        <h3>Заменить БСО</h3>
-        <p class="krt-bso-modal-current">
-          Текущий: <b>{{ form.bso_series }} {{ form.bso_number }}</b>
-        </p>
-
-        <div class="krt-bso-modal-row">
-          <div class="krt-fld krt-fld-bso-series">
-            <label class="krt-fld-label">Новая серия</label>
-            <input
-              :value="bsoModal.newSeries"
-              @input="onModalSeriesInput"
-              type="text"
-              maxlength="2"
-              placeholder="АА"
-              class="krt-input krt-input-mono"
-              autocomplete="off"
-            />
-          </div>
-          <div class="krt-fld krt-fld-bso-number">
-            <label class="krt-fld-label">Новый номер</label>
-            <input
-              :value="bsoModal.newNumber"
-              @input="onModalNumberInput"
-              type="text"
-              inputmode="numeric"
-              maxlength="7"
-              placeholder="0000000"
-              class="krt-input krt-input-mono"
-              autocomplete="off"
-            />
-          </div>
-        </div>
-
-        <div class="krt-fld">
-          <label class="krt-fld-label">Причина замены</label>
-          <select v-model="bsoModal.reasonKey" class="krt-input">
-            <option v-for="r in BSO_REASONS" :key="r.key" :value="r.key">{{ r.label }}</option>
-          </select>
-        </div>
-
-        <div v-if="bsoModal.reasonKey === 'OTHER'" class="krt-fld">
-          <label class="krt-fld-label">Уточните причину</label>
-          <input
-            v-model="bsoModal.reasonOther"
-            type="text"
-            maxlength="200"
-            placeholder="Например: попал в воду"
-            class="krt-input"
-          />
-        </div>
-
-        <p class="krt-bso-modal-warn">
-          Старый номер сохранится в истории заявки. Окно замены до <b>{{ cutoffFormatted }}</b>.
-        </p>
-
-        <div class="krt-confirm-actions">
-          <button class="krt-btn ghost" @click="closeBsoReplace" :disabled="bsoModal.saving">Отмена</button>
-          <button class="krt-btn primary" @click="replaceBsoSubmit" :disabled="bsoModal.saving">
-            {{ bsoModal.saving ? 'Сохраняем...' : 'Заменить' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <KegReplaceBsoModal
+      :show="bsoModal.show"
+      :current-series="form.bso_series"
+      :current-number="form.bso_number"
+      :cutoff-formatted="cutoffFormatted"
+      :saving="bsoModal.saving"
+      @close="closeBsoReplace"
+      @submit="replaceBsoSubmit"
+    />
 
     <!-- Модал «Что дальше» после формирования ТТН -->
-    <div v-if="submittedModal.show" class="krt-submitted-overlay" @click.self="submittedModal.show = false">
-      <div class="krt-submitted">
-        <div class="krt-submitted-icon" aria-hidden="true">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
-        <h3 class="krt-submitted-title">Заявка сформирована</h3>
-        <p v-if="submittedModal.bsoStr" class="krt-submitted-bso">№ {{ submittedModal.bsoStr }}</p>
-
-        <ol class="krt-submitted-steps">
-          <li>
-            <span class="krt-step-num">1</span>
-            <div>
-              <div class="krt-step-title">Заявка создана и отправлена в отдел закупок</div>
-              <div class="krt-step-sub">
-                <template v-if="deadlineFormatted">
-                  Состав ещё можно скорректировать <b>до {{ deadlineFormatted }}</b>.
-                </template>
-              </div>
-            </div>
-          </li>
-          <li class="krt-step-key">
-            <span class="krt-step-num">2</span>
-            <div>
-              <div class="krt-step-title">До дедлайна распечатайте ТТН на бланке БСО</div>
-              <div class="krt-step-sub">
-                Это обязательно — чтобы убедиться, что бланк не испорчен и номер БСО на бланке совпадает с фактическим.
-                <b class="krt-step-warn">Если бланк испортите при печати — успейте заменить БСО (окно замены — до 15:00 того же дня).</b>
-                После маршрутизации поменять номер уже не получится.
-              </div>
-            </div>
-          </li>
-          <li>
-            <span class="krt-step-num">3</span>
-            <div>
-              <div class="krt-step-title">Дождитесь уведомления о маршрутизации</div>
-              <div class="krt-step-sub">Придёт сообщение в Telegram-бот <b>@supplyportal_bot</b> — там будет водитель и машина.</div>
-            </div>
-          </li>
-          <li>
-            <span class="krt-step-num">4</span>
-            <div>
-              <div class="krt-step-title">Впишите ОТ РУКИ и передайте водителю</div>
-              <div class="krt-step-sub">
-                На уже распечатанном бланке заполните ручкой: <b>водителя, машину, «товар принял к перевозке»</b>.
-                <b class="krt-step-warn">Возьмите подпись водителя на возвратной ТТН и передайте бланк ему вместе с кегами.</b>
-              </div>
-            </div>
-          </li>
-        </ol>
-
-        <div class="krt-submitted-actions">
-          <button class="krt-btn ghost" @click="submittedModal.show = false">Закрыть</button>
-          <button class="krt-btn primary" @click="submittedModal.show = false; printTtn()">Распечатать сейчас</button>
-        </div>
-      </div>
-    </div>
+    <KegSubmittedModal
+      :show="submittedModal.show"
+      :bso-str="submittedModal.bsoStr"
+      :deadline-formatted="deadlineFormatted"
+      @close="submittedModal.show = false"
+      @print="submittedModal.show = false; printTtn()"
+    />
   </div>
 </template>
 
@@ -556,6 +383,12 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useToastStore } from '@/stores/toastStore.js';
 import { roFetch } from '@/lib/roUtils.js';
+import { iconKeg, fmtDate, statusLabel } from './keg/kegHelpers.js';
+import KegReturnList from './keg/KegReturnList.vue';
+import KegPhotoModal from './keg/KegPhotoModal.vue';
+import KegConfirmModal from './keg/KegConfirmModal.vue';
+import KegReplaceBsoModal from './keg/KegReplaceBsoModal.vue';
+import KegSubmittedModal from './keg/KegSubmittedModal.vue';
 
 const TOKEN_KEY = 'ro_token';
 const route = useRoute();
@@ -571,30 +404,7 @@ function buildHeaders(json = false) {
   return h;
 }
 
-const iconKeg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="4.5" rx="6" ry="1.7"/><path d="M6 4.5v15c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7v-15"/><path d="M6 9c0 .9 2.7 1.7 6 1.7S18 9.9 18 9"/><path d="M6 14.5c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7"/></svg>';
-// Иконка «Возврат кег» — кега + дугообразная стрелка возврата сверху.
-// В стиле сайдбара (тонкие линии, currentColor → задаётся через CSS).
-const iconKegReturn = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>';
-
 const rows = ref([]);
-const statusFilter = ref('all');
-const STATUS_FILTER_DEFS = [
-  { key: 'all', label: 'Все', match: () => true },
-  { key: 'DRAFT', label: 'Черновики', match: r => r.status === 'DRAFT' },
-  { key: 'SUBMITTED', label: 'Отправлены', match: r => r.status === 'SUBMITTED' },
-  { key: 'ROUTED', label: 'Маршрутизированы', match: r => r.status === 'ROUTED' },
-  { key: 'CANCELLED', label: 'Отменены', match: r => r.status === 'CANCELLED' },
-];
-const statusFilters = computed(() => STATUS_FILTER_DEFS.map(f => ({
-  key: f.key,
-  label: f.label,
-  count: f.key === 'all' ? rows.value.length : rows.value.filter(f.match).length,
-})));
-const filteredRows = computed(() => {
-  const def = STATUS_FILTER_DEFS.find(f => f.key === statusFilter.value) || STATUS_FILTER_DEFS[0];
-  return rows.value.filter(def.match);
-});
-
 const catalog = ref([]);
 const listLoading = ref(false);
 const formMode = ref(false);
@@ -705,74 +515,28 @@ const bsoSectionVisible = computed(() => {
   return false;
 });
 
-// Причины замены
-const BSO_REASONS = [
-  { key: 'PRINT_DAMAGED', label: 'Испорчен при печати' },
-  { key: 'WRONG_FORM',    label: 'Не тот бланк / не та сторона' },
-  { key: 'LOST',          label: 'Утерян' },
-  { key: 'OTHER',         label: 'Другое (указать)' },
-];
-
-// Модалка замены
-const bsoModal = reactive({
-  show: false,
-  newSeries: '',
-  newNumber: '',
-  reasonKey: 'PRINT_DAMAGED',
-  reasonOther: '',
-  saving: false,
-});
+// Модалка замены БСО — состояние полей внутри KegReplaceBsoModal; здесь только show/saving.
+const bsoModal = reactive({ show: false, saving: false });
 
 function openBsoReplace() {
-  bsoModal.show = true;
-  bsoModal.newSeries = form.value.bso_series || '';
-  bsoModal.newNumber = '';
-  bsoModal.reasonKey = 'PRINT_DAMAGED';
-  bsoModal.reasonOther = '';
   bsoModal.saving = false;
+  bsoModal.show = true;
 }
 function closeBsoReplace() {
   if (bsoModal.saving) return;
   bsoModal.show = false;
 }
-function onModalSeriesInput(e) {
-  const raw = String(e.target.value || '');
-  const filtered = raw.replace(/[^А-Яа-яЁё]/g, '').toUpperCase().slice(0, 2);
-  bsoModal.newSeries = filtered;
-  if (e.target.value !== filtered) e.target.value = filtered;
-}
-function onModalNumberInput(e) {
-  const raw = String(e.target.value || '');
-  const filtered = raw.replace(/\D/g, '').slice(0, 7);
-  bsoModal.newNumber = filtered;
-  if (e.target.value !== filtered) e.target.value = filtered;
-}
 
-async function replaceBsoSubmit() {
-  const s = (bsoModal.newSeries || '').trim();
-  const n = (bsoModal.newNumber || '').trim();
-  if (!/^[А-ЯЁ]{2}$/u.test(s)) { toast.error('Серия БСО', 'Две заглавные кириллические буквы.'); return; }
-  if (!/^\d{7}$/.test(n))      { toast.error('Номер БСО', 'Ровно 7 цифр.'); return; }
-  if (s === form.value.bso_series && n === form.value.bso_number) {
-    toast.error('Тот же БСО', 'Новый номер совпадает с текущим.');
-    return;
-  }
-  const reasonDef = BSO_REASONS.find(r => r.key === bsoModal.reasonKey);
-  let reason = reasonDef?.label || '';
-  if (bsoModal.reasonKey === 'OTHER') {
-    const custom = (bsoModal.reasonOther || '').trim();
-    if (!custom) { toast.error('Причина', 'Уточните причину замены.'); return; }
-    reason = 'Другое: ' + custom;
-  }
+async function replaceBsoSubmit(payload) {
   bsoModal.saving = true;
   try {
     await roFetch(`/api/keg-returns/${editingId.value}/replace-bso`, {
       method: 'POST',
-      body: { new_series: s, new_number: n, reason },
+      body: payload,
     });
     bsoModal.show = false;
     await loadFormData(editingId.value);
-    toast.success('БСО заменён', `Новый номер: ${s} ${n}`);
+    toast.success('БСО заменён', `Новый номер: ${payload.new_series} ${payload.new_number}`);
   } catch (e) {
     toast.error('Не удалось заменить БСО', e.message || '');
   } finally {
@@ -1211,18 +975,6 @@ async function printTtn() {
   window.open(url, '_blank');
 }
 
-function fmtDate(d) {
-  if (!d) return '—';
-  const dt = new Date(d);
-  if (isNaN(dt)) return d;
-  return dt.toLocaleDateString('ru-RU');
-}
-
-function statusLabel(s) {
-  const map = { DRAFT: 'Черновик', SUBMITTED: 'Отправлена', ROUTED: 'Маршрутизирована', CANCELLED: 'Отменена' };
-  return map[s] || s;
-}
-
 onMounted(async () => {
   await loadList();
   const qId = route.query.id;
@@ -1240,7 +992,12 @@ onMounted(async () => {
 });
 </script>
 
-<style scoped>
+<!--
+  Стили без scoped: классы .krt-* используют дочерние компоненты
+  (KegReturnList, KegPhotoModal, KegConfirmModal, KegReplaceBsoModal, KegSubmittedModal).
+  Префикс .krt- играет роль namespace — конфликтов нет.
+-->
+<style>
 .krt-wrap {
   padding: 20px 20px 110px;
   max-width: 760px;
