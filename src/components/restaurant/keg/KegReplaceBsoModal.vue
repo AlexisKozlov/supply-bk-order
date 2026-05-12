@@ -69,6 +69,7 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
+import { BSO_REASONS, maskBsoSeries, maskBsoNumber } from './kegHelpers.js';
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -80,13 +81,6 @@ const props = defineProps({
 const emit = defineEmits(['close', 'submit']);
 
 const toast = useToastStore();
-
-const BSO_REASONS = [
-  { key: 'PRINT_DAMAGED', label: 'Испорчен при печати' },
-  { key: 'WRONG_FORM',    label: 'Не тот бланк / не та сторона' },
-  { key: 'LOST',          label: 'Утерян' },
-  { key: 'OTHER',         label: 'Другое (указать)' },
-];
 
 const newSeries = ref('');
 const newNumber = ref('');
@@ -104,14 +98,12 @@ watch(() => props.show, (v) => {
 });
 
 function onSeriesInput(e) {
-  const raw = String(e.target.value || '');
-  const filtered = raw.replace(/[^А-Яа-яЁё]/g, '').toUpperCase().slice(0, 2);
+  const filtered = maskBsoSeries(e.target.value);
   newSeries.value = filtered;
   if (e.target.value !== filtered) e.target.value = filtered;
 }
 function onNumberInput(e) {
-  const raw = String(e.target.value || '');
-  const filtered = raw.replace(/\D/g, '').slice(0, 7);
+  const filtered = maskBsoNumber(e.target.value);
   newNumber.value = filtered;
   if (e.target.value !== filtered) e.target.value = filtered;
 }
