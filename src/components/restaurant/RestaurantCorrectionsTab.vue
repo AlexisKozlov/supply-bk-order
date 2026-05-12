@@ -888,4 +888,97 @@ onBeforeUnmount(() => {
 .rco-comment-label textarea:focus { border-color: #1976d2; }
 
 .rco-submit-row { margin-top: 14px; display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ─────────────── МОБИЛЬНЫЙ АДАПТИВ ─────────────── */
+
+/* Планшет и узкие экраны */
+@media (max-width: 720px) {
+  .rco { padding: 8px 0 20px; gap: 12px; }
+  .rco-intro-row { padding: 9px 12px; }
+  .rco-intro-text { font-size: 13px; }
+  .rco-section-title { font-size: 13px; margin-bottom: 8px; }
+  .rco-deliveries { padding: 10px 12px; }
+  .rco-form { padding: 12px; }
+}
+
+/* Телефон */
+@media (max-width: 520px) {
+  /* Даты — горизонтальный скролл вместо переноса (помещается на одном «листе») */
+  .rco-d-pills {
+    flex-wrap: nowrap; overflow-x: auto;
+    margin: 0 -12px; padding: 4px 12px 6px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rco-d-pill {
+    flex: 0 0 auto; scroll-snap-align: start;
+    min-width: 140px;
+  }
+  .rco-d-pills::-webkit-scrollbar { height: 4px; }
+  .rco-d-pills::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
+  /* Карточки батчей: голова в столбик, действия — полная ширина */
+  .rco-batch { padding: 10px 12px; }
+  .rco-batch-head { flex-direction: column; align-items: stretch; gap: 8px; }
+  .rco-batch-actions { display: flex; gap: 6px; }
+  .rco-batch-actions .rco-btn { flex: 1; padding: 8px 10px; }
+
+  /* Позиции внутри батча: статус+действие сверху, название отдельной строкой, кол-во справа в той же строке */
+  .rco-batch-item {
+    grid-template-columns: auto auto 1fr auto;
+    grid-template-areas:
+      'icon act name qty'
+      'rc   rc  rc   rc';
+    gap: 6px 8px;
+    padding: 8px 10px;
+  }
+  .rco-batch-item-icon { grid-area: icon; }
+  .rco-batch-item-act { grid-area: act; }
+  .rco-batch-item-name { grid-area: name; word-break: break-word; }
+  .rco-batch-item-qty { grid-area: qty; }
+  .rco-batch-item-rc { grid-area: rc; padding-left: 0; }
+
+  /* Форма: продукт во всю ширину, действие/кол-во/единица в одну строку под ним */
+  .rco-form-row {
+    grid-template-columns: 1fr 80px 64px 36px;
+    grid-template-areas:
+      'prod prod prod del'
+      'act  qty  unit unit';
+    gap: 6px;
+    padding: 8px;
+    background: #fafbfc;
+    border: 1px solid #eef0f3;
+    border-radius: 10px;
+  }
+  .rco-form-row > :nth-child(1) { grid-area: act; }
+  .rco-form-row > :nth-child(2) { grid-area: prod; }
+  .rco-form-row > :nth-child(3) { grid-area: qty; }
+  .rco-form-row > :nth-child(4) { grid-area: unit; }
+  .rco-form-row > :nth-child(5) { grid-area: del; }
+
+  /* Кнопка действия — занимает свою ячейку, надпись короткая */
+  .rco-act-btn { padding: 10px 8px; min-height: 40px; }
+  .rco-act-label { font-size: 12px; }
+  .rco-act-sign { font-size: 15px; }
+
+  /* Поля — крупные тапы, читабельный шрифт */
+  .rco-prod-input { padding: 11px 12px; font-size: 14px; min-height: 40px; }
+  .rco-qty { padding: 11px 6px; font-size: 14px; min-height: 40px; text-align: center; }
+  .rco-unit-btn { padding: 11px 4px; min-height: 40px; font-size: 13px; }
+  .rco-row-del { min-height: 40px; height: auto; font-size: 20px; }
+
+  .rco-add-row { padding: 10px 14px; min-height: 38px; font-size: 13px; }
+  .rco-comment-label textarea { padding: 10px 12px; font-size: 14px; min-height: 60px; }
+
+  .rco-submit-row { flex-direction: column-reverse; gap: 8px; }
+  .rco-submit-row .rco-btn { width: 100%; padding: 12px 14px; font-size: 14px; min-height: 44px; }
+
+  /* Переключатель режима — полная ширина */
+  .rco-mode-tabs { width: 100%; }
+  .rco-mode-tab { flex: 1; padding: 9px 12px; font-size: 13px; }
+
+  /* Тулбар истории — компактнее */
+  .rco-history-toolbar { padding: 8px 10px; }
+  .rco-history-chip { padding: 6px 12px; font-size: 12px; min-height: 32px; }
+}
 </style>
