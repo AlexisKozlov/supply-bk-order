@@ -110,6 +110,12 @@
         <span>{{ card.comments }}</span>
       </span>
 
+      <!-- Вложения -->
+      <span v-if="card.attachments" class="meta-icon-stat" :title="'Вложений: ' + card.attachments">
+        <TaskIcon name="paperclip" :size="12"/>
+        <span>{{ card.attachments }}</span>
+      </span>
+
       <!-- Соисполнители (справа). Галочка на bubble — этот исполнитель закрыл свою часть. -->
       <span v-if="card.assignees?.length" class="meta-assignees">
         <span v-for="(n, i) in card.assignees.slice(0,3)" :key="i" class="assignee-bubble"

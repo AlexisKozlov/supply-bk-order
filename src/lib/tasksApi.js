@@ -72,4 +72,49 @@ export const tasksApi = {
   // Поиск и «мои задачи»
   search(q)                          { return call('GET',   '/search?q=' + encodeURIComponent(q)); },
   myCards()                          { return call('GET',   '/my-cards'); },
+
+  // Вложения (живут под /api/upload/task-attachment и /api/uploads/task-attachments/)
+  uploadAttachment(cardId, file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const fd = new FormData();
+      fd.append('card_id', String(cardId));
+      fd.append('file', file);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload/task-attachment');
+      const t = localStorage.getItem('bk_session_token') || '';
+      if (t) xhr.setRequestHeader('X-Session-Token', t);
+      if (typeof onProgress === 'function' && xhr.upload) {
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+      }
+      xhr.onload = () => {
+        let data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (_) {}
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+        else reject(new Error((data && data.error) ? data.error : `HTTP ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error('Сеть недоступна'));
+      xhr.send(fd);
+    });
+  },
+  deleteAttachment(fileId) {
+    return new Promise((resolve, reject) => {
+      const t = localStorage.getItem('bk_session_token') || '';
+      fetch('/api/upload/task-attachment?file_id=' + encodeURIComponent(fileId), {
+        method: 'DELETE',
+        headers: t ? { 'X-Session-Token': t } : {},
+      }).then(async (r) => {
+        let d = null; try { d = await r.json(); } catch (_) {}
+        if (!r.ok) reject(new Error((d && d.error) ? d.error : `HTTP ${r.status}`));
+        else resolve(d);
+      }).catch(reject);
+    });
+  },
+  attachmentUrl(filePath, { download = false } = {}) {
+    const t = localStorage.getItem('bk_session_token') || '';
+    const params = new URLSearchParams();
+    if (download) params.set('download', '1');
+    if (t) params.set('token', t);
+    const q = params.toString();
+    return '/api/uploads/task-attachments/' + encodeURIComponent(filePath) + (q ? ('?' + q) : '');
+  },
 };

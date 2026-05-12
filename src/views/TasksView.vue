@@ -21,12 +21,22 @@
         </div>
       </div>
       <div class="tasks-header-right">
+        <div class="view-toggle" role="group" aria-label="Режим отображения">
+          <button class="view-btn" :class="{ active: viewMode === 'kanban' }" @click="setViewMode('kanban')" title="Канбан">
+            <TaskIcon name="columns" :size="14"/>
+            <span>Канбан</span>
+          </button>
+          <button class="view-btn" :class="{ active: viewMode === 'calendar' }" @click="setViewMode('calendar')" title="Календарь">
+            <TaskIcon name="calendar" :size="14"/>
+            <span>Календарь</span>
+          </button>
+        </div>
         <button class="btn search-btn" @click="openSearch" title="Поиск по карточкам">
           <TaskIcon name="search" :size="14"/>
           <span class="search-btn-label">Поиск</span>
           <kbd class="search-btn-kbd">{{ shortcutSymbol }}K</kbd>
         </button>
-        <div class="sort-wrap">
+        <div class="sort-wrap" v-if="viewMode === 'kanban'">
           <select :value="store.sortMode" @change="store.sortMode = $event.target.value" class="sort-select" title="Сортировка карточек">
             <option value="manual">Вручную</option>
             <option value="due">По сроку</option>
@@ -130,8 +140,8 @@
     <div v-else-if="!store.board" class="tasks-empty">Создайте первую доску</div>
 
     <div v-else class="tasks-board-area">
-      <!-- Колонки -->
-      <div class="tasks-columns" @dragover.prevent>
+      <!-- Колонки (канбан) -->
+      <div v-if="viewMode === 'kanban'" class="tasks-columns" @dragover.prevent>
         <div v-for="(col, i) in store.columns" :key="col.id"
              class="tasks-column-wrap"
              :class="{ 'col-drag-over': colDragOver === i }"
@@ -165,6 +175,12 @@
           <button class="tasks-add-column-btn" @click="addColumnPrompt">+ Добавить колонку</button>
         </div>
       </div>
+
+      <!-- Календарь -->
+      <TaskCalendar v-else
+                    :cards="store.cards"
+                    @open-card="openCard"
+                    @update-due="onCalendarUpdateDue"/>
     </div>
 
     <!-- Сайдбар карточки -->
@@ -254,6 +270,7 @@ import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import TaskColumn from '@/components/tasks/TaskColumn.vue';
+import TaskCalendar from '@/components/tasks/TaskCalendar.vue';
 import TaskCardModal from '@/components/tasks/TaskCardModal.vue';
 import TaskIcon from '@/components/tasks/TaskIcon.vue';
 import ColorPalette from '@/components/tasks/ColorPalette.vue';
@@ -285,6 +302,30 @@ const searchInputRef = ref(null);
 // Drag-and-drop колонок
 const colDragFrom = ref(null);
 const colDragOver = ref(null);
+
+// Режим отображения доски (канбан / календарь). Запоминается в localStorage
+// отдельно для каждой доски — у разных досок разные привычки просмотра.
+const viewMode = ref('kanban');
+function viewModeKey() { return 'bk_tasks_view_mode_' + (store.currentBoardId || 'default'); }
+function setViewMode(mode) {
+  viewMode.value = mode;
+  try { localStorage.setItem(viewModeKey(), mode); } catch (_) {}
+}
+watch(() => store.currentBoardId, (id) => {
+  if (!id) return;
+  try {
+    const v = localStorage.getItem(viewModeKey());
+    viewMode.value = (v === 'calendar') ? 'calendar' : 'kanban';
+  } catch (_) { viewMode.value = 'kanban'; }
+}, { immediate: true });
+
+async function onCalendarUpdateDue(cardId, newIso) {
+  try {
+    await store.updateCard(cardId, { due_date: newIso });
+  } catch (e) {
+    dlg.info('Не удалось перенести задачу', e?.message || String(e), 'error');
+  }
+}
 
 const currentUserName = computed(() => userStore.currentUser?.name || '');
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -706,6 +747,37 @@ function onColDrop(i) {
 .tasks-new-board-btn {
   display: inline-flex; align-items: center; gap: 6px;
   font-weight: var(--tk-fw-semibold);
+}
+
+/* Переключатель режима «Канбан / Календарь» */
+.view-toggle {
+  display: inline-flex; align-items: center;
+  background: var(--tk-n-50);
+  border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-sm);
+  padding: 2px;
+}
+.view-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: none; background: transparent;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: var(--tk-fz-sm, 12px);
+  font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background var(--tk-transition), color var(--tk-transition);
+}
+.view-btn:hover { color: var(--tk-text); }
+.view-btn.active {
+  background: var(--tk-n-0);
+  color: var(--tk-text);
+  box-shadow: 0 1px 2px rgba(9,30,66,0.08);
+}
+@media (max-width: 600px) {
+  .view-btn span { display: none; }
+  .view-btn { padding: 6px 8px; }
 }
 
 /* Кнопка поиска — широкая, как в Linear / Notion */

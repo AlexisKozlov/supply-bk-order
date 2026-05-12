@@ -63,29 +63,10 @@
 
           <!-- Описание -->
           <section class="ts-section">
-            <div class="ts-section-title">
-              Описание
-              <button v-if="full.card.description && !descEditing" class="ts-section-action"
-                      @click="startDescEdit" title="Редактировать">
-                <TaskIcon name="edit" :size="12"/>
-                <span>Редактировать</span>
-              </button>
-            </div>
-            <div v-if="!descEditing && full.card.description" class="ts-md-view"
-                 @click="startDescEdit" v-html="descHtml"></div>
-            <div v-else class="ts-md-edit">
-              <textarea ref="descTextarea" v-model="full.card.description" class="ts-textarea" rows="4"
-                        placeholder="Добавить описание… Поддерживается **жирный** *курсив* `код` [ссылка](url), списки и заголовки."
-                        @blur="finishDescEdit"></textarea>
-              <div class="ts-md-hint">
-                <span><strong>**жирный**</strong></span>
-                <span><em>*курсив*</em></span>
-                <span><code>`код`</code></span>
-                <span>[текст](url)</span>
-                <span>- список</span>
-                <span># заголовок</span>
-              </div>
-            </div>
+            <div class="ts-section-title">Описание</div>
+            <MarkdownEditor v-model="full.card.description"
+                            placeholder="Добавить описание…"
+                            @blur="onDescBlur"/>
           </section>
 
           <!-- Метки -->
@@ -133,6 +114,50 @@
                 <TaskIcon name="plus" :size="14"/>
               </button>
             </div>
+          </section>
+
+          <!-- Файлы / вложения -->
+          <section class="ts-section">
+            <div class="ts-section-title">
+              Файлы
+              <span v-if="full.attachments?.length" class="ts-section-meta">{{ full.attachments.length }}</span>
+            </div>
+            <div class="ts-att-drop"
+                 :class="{ 'is-drag': isDragOver, 'is-upload': uploadingCount > 0 }"
+                 @dragover.prevent="onDragOver"
+                 @dragleave.prevent="onDragLeave"
+                 @drop.prevent="onDrop"
+                 @click="pickFiles">
+              <input ref="fileInputRef" type="file" multiple class="ts-att-input" @change="onFilePick"/>
+              <TaskIcon name="archive" :size="20"/>
+              <span class="ts-att-drop-text">
+                <template v-if="uploadingCount > 0">Загрузка: {{ uploadingDone }}/{{ uploadingCount + uploadingDone }}…</template>
+                <template v-else>Перетащите файлы сюда или нажмите для выбора (до 25 МБ)</template>
+              </span>
+            </div>
+            <ul v-if="full.attachments?.length" class="ts-att-list">
+              <li v-for="a in full.attachments" :key="a.id" class="ts-att-item">
+                <div class="ts-att-thumb" :class="'ts-att-thumb-' + attTypeOf(a)">
+                  <img v-if="attIsImage(a)" :src="tasksApi.attachmentUrl(a.file_path)" :alt="a.file_name"/>
+                  <span v-else>{{ attIconOf(a) }}</span>
+                </div>
+                <div class="ts-att-info">
+                  <a class="ts-att-name" :href="tasksApi.attachmentUrl(a.file_path)" target="_blank" rel="noopener noreferrer">{{ a.file_name }}</a>
+                  <div class="ts-att-meta">
+                    {{ attFormatSize(a.file_size) }} · {{ a.uploaded_by }} · {{ formatDate(a.uploaded_at) }}
+                  </div>
+                </div>
+                <div class="ts-att-actions">
+                  <a class="ts-icon-btn" :href="tasksApi.attachmentUrl(a.file_path, { download: true })"
+                     :download="a.file_name" title="Скачать">
+                    <TaskIcon name="download" :size="14"/>
+                  </a>
+                  <button v-if="canDeleteAttachment(a)" class="ts-icon-btn" @click="deleteAttachment(a)" title="Удалить">
+                    <TaskIcon name="trash" :size="14"/>
+                  </button>
+                </div>
+              </li>
+            </ul>
           </section>
 
           <!-- Подзадачи (только у корневых карточек) -->
@@ -252,7 +277,7 @@
                   <span class="ts-chat-author">{{ c.author_name }}</span>
                   <span class="ts-chat-date">{{ formatDate(c.created_at) }}<span v-if="c.edited_at"> · ред.</span></span>
                 </div>
-                <div class="ts-chat-body">{{ c.body }}</div>
+                <div class="ts-chat-body ts-md-view" v-html="renderMarkdown(c.body)"></div>
                 <div v-if="canEditComment(c)" class="ts-chat-actions">
                   <button class="ts-chat-action" @click="editComment(c)" title="Редактировать">
                     <TaskIcon name="edit" :size="12"/>
@@ -265,8 +290,9 @@
             </div>
           </div>
           <div class="ts-chat-input">
-            <textarea v-model="newComment" rows="2" placeholder="Сообщение… (Ctrl+Enter — отправить)"
-                      @keydown.ctrl.enter.prevent="submitComment"></textarea>
+            <MarkdownEditor v-model="newComment" :compact="true"
+                            placeholder="Сообщение… (Ctrl+Enter — отправить)"
+                            @ctrl-enter="submitComment"/>
             <button class="btn primary" @click="submitComment" :disabled="!newComment.trim()">Отправить</button>
           </div>
         </div>
@@ -297,6 +323,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import { renderMarkdown } from '@/lib/markdown.js';
 import TaskIcon from './TaskIcon.vue';
+import MarkdownEditor from './MarkdownEditor.vue';
 const dlg = useTasksDialogs();
 const showError = (e, prefix = 'Ошибка') => dlg.info(prefix, e?.message || String(e), 'error');
 
@@ -319,17 +346,13 @@ const showRelationPicker = ref(false);
 const relationDraft = ref({ type: '', id: '', label: '' });
 const chatListRef = ref(null);
 const editingChecklistId = ref(null);
-const descEditing = ref(false);
-const descTextarea = ref(null);
-const descHtml = computed(() => renderMarkdown(full.value?.card?.description || ''));
+const fileInputRef = ref(null);
+const isDragOver = ref(false);
+const uploadingCount = ref(0);
+const uploadingDone = ref(0);
 
-function startDescEdit() {
-  descEditing.value = true;
-  nextTick(() => descTextarea.value?.focus());
-}
-function finishDescEdit() {
-  descEditing.value = false;
-  patch({ description: full.value.card.description || '' });
+function onDescBlur() {
+  patch({ description: full.value?.card?.description || '' });
 }
 const editingChecklistTitle = ref('');
 const editingInputRef = ref(null);
@@ -641,6 +664,92 @@ function formatDate(s) {
   if (isNaN(d)) return s;
   return d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) + ' ' +
          d.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' });
+}
+
+// ─── Вложения ───
+const ATT_IMG = ['image/jpeg','image/png','image/webp','image/gif'];
+function attIsImage(a) { return ATT_IMG.includes(a.mime_type); }
+function attTypeOf(a) {
+  if (!a) return 'other';
+  if (ATT_IMG.includes(a.mime_type)) return 'img';
+  if (a.mime_type === 'application/pdf') return 'pdf';
+  if (/spreadsheet|excel/.test(a.mime_type || '')) return 'xls';
+  if (/word|document/.test(a.mime_type || '')) return 'doc';
+  if (/zip/.test(a.mime_type || '')) return 'zip';
+  if (a.mime_type === 'text/plain' || a.mime_type === 'text/csv' || a.mime_type === 'application/csv') return 'txt';
+  return 'other';
+}
+function attIconOf(a) {
+  return ({ pdf: 'PDF', xls: 'XLS', doc: 'DOC', zip: 'ZIP', txt: 'TXT' })[attTypeOf(a)] || 'FILE';
+}
+function attFormatSize(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + ' Б';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' КБ';
+  return (n / 1024 / 1024).toFixed(1) + ' МБ';
+}
+function canDeleteAttachment(a) {
+  if (userStore.currentUser?.role === 'admin') return true;
+  if (a.uploaded_by === currentUserName.value) return true;
+  if (full.value?.card?.owner_name === currentUserName.value) return true;
+  return false;
+}
+
+function pickFiles() { fileInputRef.value?.click(); }
+function onFilePick(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  uploadFiles(files);
+}
+function onDragOver(e) {
+  if (e.dataTransfer?.types?.includes('Files')) isDragOver.value = true;
+}
+function onDragLeave() { isDragOver.value = false; }
+function onDrop(e) {
+  isDragOver.value = false;
+  const files = Array.from(e.dataTransfer?.files || []);
+  uploadFiles(files);
+}
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  const MAX = 25 * 1024 * 1024;
+  const tooBig = files.filter(f => f.size > MAX);
+  if (tooBig.length) {
+    showError({ message: `Слишком большой файл (макс 25 МБ): ${tooBig[0].name}` });
+    files = files.filter(f => f.size <= MAX);
+    if (!files.length) return;
+  }
+  uploadingCount.value += files.length;
+  for (const f of files) {
+    try {
+      const r = await tasksApi.uploadAttachment(props.cardId, f);
+      if (full.value?.attachments) full.value.attachments.unshift({
+        id: r.id, file_name: r.file_name, file_path: r.file_path,
+        file_size: r.file_size, mime_type: r.mime_type,
+        uploaded_by: r.uploaded_by, uploaded_at: r.uploaded_at,
+      });
+      const inList = store.cards.find(c => c.id === props.cardId);
+      if (inList) inList.attachments = (inList.attachments || 0) + 1;
+    } catch (e) {
+      showError(e, `Не удалось загрузить ${f.name}`);
+    } finally {
+      uploadingDone.value++;
+    }
+  }
+  uploadingCount.value -= uploadingDone.value;
+  uploadingDone.value = 0;
+}
+
+async function deleteAttachment(a) {
+  const ok = await dlg.confirm('Удалить файл', `Удалить «${a.file_name}»?`, { okText: 'Удалить', danger: true });
+  if (!ok) return;
+  try {
+    await tasksApi.deleteAttachment(a.id);
+    full.value.attachments = full.value.attachments.filter(x => x.id !== a.id);
+    const inList = store.cards.find(c => c.id === props.cardId);
+    if (inList) inList.attachments = Math.max(0, (inList.attachments || 0) - 1);
+  } catch (e) { showError(e); }
 }
 
 function historyText(h) {
@@ -961,19 +1070,14 @@ function historyText(h) {
 }
 .ts-section-action:hover { background: var(--tk-n-100); color: var(--tk-text); }
 
-/* Markdown — режим просмотра */
+/* Markdown — отображение body комментариев чата */
 .ts-md-view {
   font-size: var(--tk-fz-md, 13px);
   color: var(--tk-text);
   line-height: 1.55;
-  cursor: text;
-  padding: 8px 10px;
-  border-radius: var(--tk-r-sm, 4px);
-  transition: background 120ms ease;
   word-wrap: break-word;
   overflow-wrap: anywhere;
 }
-.ts-md-view:hover { background: var(--tk-n-50, #F7F8F9); }
 .ts-md-view p { margin: 0 0 6px; }
 .ts-md-view p:last-child { margin-bottom: 0; }
 .ts-md-view h3 { margin: 6px 0 4px; font-size: 15px; font-weight: 700; }
@@ -992,21 +1096,6 @@ function historyText(h) {
 .ts-md-view strong { font-weight: 700; }
 .ts-md-view em { font-style: italic; }
 
-/* Markdown — режим редактирования: подсказка под textarea */
-.ts-md-hint {
-  display: flex; flex-wrap: wrap; gap: 10px;
-  margin-top: 6px;
-  font-size: var(--tk-fz-xs, 11px);
-  color: var(--tk-text-muted);
-}
-.ts-md-hint strong { font-weight: 700; }
-.ts-md-hint em { font-style: italic; }
-.ts-md-hint code {
-  background: var(--tk-n-100, #F1F2F4);
-  padding: 0 4px;
-  border-radius: 3px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
 
 /* ═══ Чек-лист ═══ */
 .ts-progress {
@@ -1197,6 +1286,67 @@ function historyText(h) {
 }
 .ts-sub-bubble:first-child { margin-left: 0; }
 
+/* ═══ Вложения ═══ */
+.ts-att-drop {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--tk-s-2);
+  border: 1.5px dashed var(--tk-border);
+  border-radius: var(--tk-r-sm);
+  padding: var(--tk-s-3);
+  color: var(--tk-text-muted);
+  font-size: var(--tk-fz-sm, 12px);
+  cursor: pointer;
+  background: var(--tk-n-50, #F7F8F9);
+  transition: background var(--tk-transition), border-color var(--tk-transition), color var(--tk-transition);
+  user-select: none;
+}
+.ts-att-drop:hover { border-color: var(--tk-accent); color: var(--tk-text); }
+.ts-att-drop.is-drag { background: var(--tk-accent-soft, #FEEFE0); border-color: var(--tk-accent); color: var(--tk-accent-text, #B85A0E); }
+.ts-att-drop.is-upload { opacity: 0.7; pointer-events: none; }
+.ts-att-input { display: none; }
+.ts-att-drop-text { font-weight: var(--tk-fw-semibold); }
+
+.ts-att-list { list-style: none; padding: 0; margin: var(--tk-s-2) 0 0; display: flex; flex-direction: column; gap: var(--tk-s-1); }
+.ts-att-item {
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  padding: var(--tk-s-2);
+  background: var(--tk-n-0);
+  border: 1px solid var(--tk-border-soft);
+  border-radius: var(--tk-r-sm);
+}
+.ts-att-item:hover { border-color: var(--tk-border); }
+.ts-att-thumb {
+  width: 36px; height: 36px;
+  border-radius: var(--tk-r-sm);
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: var(--tk-fw-bold);
+  color: #fff;
+  overflow: hidden;
+}
+.ts-att-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ts-att-thumb-img { background: var(--tk-n-200); }
+.ts-att-thumb-pdf { background: #D44638; }
+.ts-att-thumb-xls { background: #1F8A4C; }
+.ts-att-thumb-doc { background: #2B5797; }
+.ts-att-thumb-zip { background: #7B4F2A; }
+.ts-att-thumb-txt { background: #6B778C; }
+.ts-att-thumb-other { background: #8E9AB0; }
+.ts-att-info { flex: 1; min-width: 0; }
+.ts-att-name {
+  display: block;
+  color: var(--tk-text);
+  text-decoration: none;
+  font-weight: var(--tk-fw-semibold);
+  font-size: var(--tk-fz-md);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ts-att-name:hover { color: var(--tk-accent-text, #B85A0E); text-decoration: underline; }
+.ts-att-meta { font-size: var(--tk-fz-xs, 11px); color: var(--tk-text-muted); }
+.ts-att-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.ts-att-actions .ts-icon-btn { color: var(--tk-text-muted); }
+.ts-att-actions .ts-icon-btn:hover { color: var(--tk-text); }
+
 /* ═══ Метки ═══ */
 .ts-labels { display: flex; flex-wrap: wrap; gap: var(--tk-s-1); }
 .ts-label {
@@ -1358,8 +1508,12 @@ function historyText(h) {
   font-size: var(--tk-fz-md);
   color: inherit;
   line-height: 1.45;
-  white-space: pre-wrap; word-break: break-word;
+  word-break: break-word;
 }
+.ts-chat-body.ts-md-view a { color: var(--tk-accent-text, #B85A0E); }
+.ts-chat-msg.own .ts-chat-body.ts-md-view a { color: var(--tk-prio-medium-fg); }
+.ts-chat-body.ts-md-view code { background: rgba(9,30,66,0.08); }
+.ts-chat-msg.own .ts-chat-body.ts-md-view code { background: rgba(7,71,166,0.12); }
 .ts-chat-actions {
   display: flex; gap: 2px; margin-top: 4px;
   opacity: 0;
@@ -1386,20 +1540,8 @@ function historyText(h) {
   background: var(--tk-n-0);
   flex-shrink: 0;
 }
-.ts-chat-input textarea {
-  flex: 1;
-  border: 1px solid var(--tk-border);
-  border-radius: var(--tk-r-md);
-  padding: var(--tk-s-2) var(--tk-s-3);
-  font-size: var(--tk-fz-md);
-  font-family: inherit; resize: none;
-  min-height: 38px; max-height: 140px;
-  background: var(--tk-n-0);
-  color: var(--tk-text);
-  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
-}
-.ts-chat-input textarea:hover { border-color: var(--tk-n-300); }
-.ts-chat-input textarea:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+.ts-chat-input > :deep(.me) { flex: 1; max-height: 180px; overflow: hidden; }
+.ts-chat-input > :deep(.me .me-content) { max-height: 120px; overflow-y: auto; }
 .ts-chat-input .btn { padding: 0 var(--tk-s-3); height: 36px; font-size: var(--tk-fz-md); flex-shrink: 0; }
 
 /* ═══ История ═══ */

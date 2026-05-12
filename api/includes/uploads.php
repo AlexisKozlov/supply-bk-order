@@ -562,6 +562,123 @@ if ($endpoint === 'upload' && $subpoint === 'bug-screenshot') {
     respond(['success' => true, 'path' => 'uploads/bugs/' . $filename]);
 }
 
+// ═══ UPLOAD TASK ATTACHMENT (POST + DELETE) ═══
+// POST   /api/upload/task-attachment       form-data: card_id, file
+// DELETE /api/upload/task-attachment?file_id=N
+//
+// Доступ к доске проверяется по образцу tCanWorkWithBoard (uploads.php
+// грузится до tasks.php, поэтому функция тут недоступна — логика inline).
+if ($endpoint === 'upload' && $subpoint === 'task-attachment') {
+    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    $su = getSessionUser($pdo);
+    if (!$su) respond(['error' => 'Требуется авторизация'], 401);
+    $p = resolvePermissions($su['role'] ?? 'user', $su['permissions'] ?? null, $ROLE_TEMPLATES);
+    $tasksLvl = $ACCESS_LEVELS[$p['tasks'] ?? 'none'] ?? 0;
+
+    if ($method === 'DELETE') {
+        if ($tasksLvl < $ACCESS_LEVELS['full']) respond(['error' => 'Недостаточно прав'], 403);
+        $fileId = intval($_GET['file_id'] ?? 0);
+        if (!$fileId) respond(['error' => 'Не указан ID файла'], 400);
+        $a = $pdo->prepare("SELECT a.*, b.owner_name FROM tasks_attachments a JOIN tasks_cards c ON c.id=a.card_id JOIN tasks_boards b ON b.id=c.board_id WHERE a.id=?");
+        $a->execute([$fileId]); $a = $a->fetch();
+        if (!$a) respond(['error' => 'Файл не найден'], 404);
+        $isOwner = ($a['owner_name'] === $su['name']);
+        $isUploader = ($a['uploaded_by'] === $su['name']);
+        if (!$isUploader && !$isOwner && ($su['role'] ?? '') !== 'admin') {
+            respond(['error' => 'Удалить может только автор файла, владелец доски или администратор'], 403);
+        }
+        $filepath = __DIR__ . '/../uploads/task-attachments/' . basename($a['file_path']);
+        if (file_exists($filepath)) @unlink($filepath);
+        $pdo->prepare("DELETE FROM tasks_attachments WHERE id=?")->execute([$fileId]);
+        $h = $pdo->prepare("INSERT INTO tasks_history (card_id, user_name, action, details) VALUES (?, ?, ?, ?)");
+        $h->execute([$a['card_id'], $su['name'], 'delete_attachment', json_encode(['file_name' => $a['file_name']], JSON_UNESCAPED_UNICODE)]);
+        respond(['success' => true]);
+    }
+    if ($method !== 'POST') respond(['error' => 'Метод не поддерживается'], 405);
+    if ($tasksLvl < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+    $cardId = intval($_POST['card_id'] ?? 0);
+    if (!$cardId) respond(['error' => 'Не указан ID карточки'], 400);
+    $bsql = $pdo->prepare("SELECT b.* FROM tasks_boards b JOIN tasks_cards c ON c.board_id=b.id WHERE c.id=?");
+    $bsql->execute([$cardId]); $board = $bsql->fetch();
+    if (!$board) respond(['error' => 'Карточка не найдена'], 404);
+    $isMgr = in_array($su['role'] ?? '', ['admin', 'manager'], true);
+    if (!$isMgr && $board['owner_name'] !== $su['name']) respond(['error' => 'Нет доступа к доске'], 403);
+
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) respond(['error' => 'Ошибка загрузки файла'], 400);
+    $file = $_FILES['file'];
+    if ($file['size'] > 25 * 1024 * 1024) respond(['error' => 'Файл слишком большой (макс 25 МБ)'], 400);
+    $allowedMime = [
+        'application/pdf',
+        'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword',
+        'text/plain', 'text/csv', 'application/csv',
+        'application/zip', 'application/x-zip-compressed', 'application/x-zip',
+    ];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    if (!in_array($mime, $allowedMime, true)) respond(['error' => 'Этот тип файла нельзя загружать'], 400);
+    $ext = match($mime) {
+        'application/pdf' => 'pdf',
+        'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+        'application/vnd.ms-excel' => 'xls',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/msword' => 'doc',
+        'text/plain' => 'txt',
+        'text/csv', 'application/csv' => 'csv',
+        'application/zip', 'application/x-zip-compressed', 'application/x-zip' => 'zip',
+        default => 'bin'
+    };
+    $filename = 'task_' . $cardId . '_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $uploadDir = __DIR__ . '/../uploads/task-attachments/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
+    if (!move_uploaded_file($file['tmp_name'], $uploadDir . $filename)) respond(['error' => 'Ошибка сохранения файла'], 500);
+    $origName = mb_substr($file['name'], 0, 255);
+    $pdo->prepare("INSERT INTO tasks_attachments (card_id, file_name, file_path, file_size, mime_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)")
+        ->execute([$cardId, $origName, $filename, $file['size'], $mime, $su['name']]);
+    $newId = intval($pdo->lastInsertId());
+    $h = $pdo->prepare("INSERT INTO tasks_history (card_id, user_name, action, details) VALUES (?, ?, ?, ?)");
+    $h->execute([$cardId, $su['name'], 'upload_attachment', json_encode(['file_name' => $origName], JSON_UNESCAPED_UNICODE)]);
+    respond([
+        'success' => true,
+        'id' => $newId,
+        'file_name' => $origName,
+        'file_path' => $filename,
+        'file_size' => (int)$file['size'],
+        'mime_type' => $mime,
+        'uploaded_by' => $su['name'],
+        'uploaded_at' => date('Y-m-d H:i:s'),
+    ]);
+}
+
+// ═══ DOWNLOAD TASK ATTACHMENT ═══
+// /api/uploads/task-attachments/{filename}?download=1&token=...
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'task-attachments' && isset($parts[2])) {
+    if (isset($_GET['token'])) $_SERVER['HTTP_X_SESSION_TOKEN'] = $_GET['token'];
+    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    $su = getSessionUser($pdo);
+    if (!$su) respond(['error' => 'Требуется авторизация'], 401);
+    $filename = basename($parts[2]);
+    $a = $pdo->prepare("SELECT a.*, b.owner_name FROM tasks_attachments a JOIN tasks_cards c ON c.id=a.card_id JOIN tasks_boards b ON b.id=c.board_id WHERE a.file_path=?");
+    $a->execute([$filename]); $a = $a->fetch();
+    if (!$a) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    $isMgr = in_array($su['role'] ?? '', ['admin', 'manager'], true);
+    if (!$isMgr && $a['owner_name'] !== $su['name']) respond(['error' => 'Нет доступа к файлу'], 403);
+    $filepath = __DIR__ . '/../uploads/task-attachments/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $filepath);
+    finfo_close($finfo);
+    $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($a['file_name']) . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
+
 // ═══ DOWNLOAD BUG SCREENSHOT ═══
 if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'bugs' && isset($parts[2])) {
     if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);

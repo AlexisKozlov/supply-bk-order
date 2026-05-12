@@ -36,6 +36,18 @@ if [ -d dist ]; then mv dist dist.prev; fi
 
 # Сборка фронта в чистый dist + копирование PHP API.
 vite build
+
+# Защита от убитой сборки (например, Stop-hook прибил по таймауту):
+# если vite не дописал sw.js — это не сборка, а полудохлый dist.
+# Откатываем на dist.prev, чтобы прод не остался без воркера и nginx
+# не отдавал 404 на /sw.js.
+if [ ! -f dist/sw.js ]; then
+  echo "[build.sh] ОШИБКА: dist/sw.js не появился — сборка повреждена. Откатываю dist.prev."
+  rm -rf dist
+  if [ -d dist.prev ]; then mv dist.prev dist; fi
+  exit 1
+fi
+
 mkdir -p dist/api
 cp -r api/*.php api/includes api/migrations dist/api/
 

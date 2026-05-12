@@ -96,17 +96,41 @@ window.addEventListener('bk:needs-update', () => {
 async function doUpdate() {
   updating.value = true;
   try {
-    // 1. Если есть waiting SW — даём команду активироваться. Не ждём ответа.
     if ('serviceWorker' in navigator) {
+      let reg = null;
+      try { reg = await navigator.serviceWorker.getRegistration(); } catch (_) {}
+
+      // 1. Принудительно опрашиваем сервер: если за время висения баннера
+      //    вышла ещё более свежая сборка — waiting подменится на неё.
+      if (reg) {
+        try { await reg.update(); } catch (_) { /* offline / sw.js 404 — ок */ }
+      }
+
+      // 2. Активируем waiting SW (если он есть). Не ждём ответа.
       try {
-        const reg = await navigator.serviceWorker.getRegistration();
         if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      } catch (_) { /* игнор */ }
+      } catch (_) {}
+
+      // 3. Сносим все кэши Workbox — чтобы старые JS/CSS-чанки не подсунулись
+      //    при следующей загрузке (аналог Ctrl+Shift+R).
+      try {
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k).catch(() => false)));
+        }
+      } catch (_) {}
+
+      // 4. Снимаем регистрацию SW — следующий заход поставит самый свежий
+      //    sw.js с нуля. Если сборка ещё идёт и sw.js 404 — на следующем
+      //    заходе SW просто не зарегистрируется, страница придёт с сервера.
+      try {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister().catch(() => false)));
+      } catch (_) {}
     }
   } finally {
-    // 2. Жёсткий релоад с cache-bust через короткую паузу. Если новый SW
-    //    успел стать контроллером — ок, отдаст свежий index.html. Если идёт
-    //    сборка на сервере (sw.js 404) — попадём на maintenance, ждём.
+    // 5. Жёсткий релоад с cache-bust. У страницы больше нет контроллера —
+    //    index.html и все ассеты пойдут прямо с сервера.
     setTimeout(() => {
       const u = new URL(window.location.href);
       u.searchParams.set('_v', Date.now().toString(36));
