@@ -143,7 +143,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { roFetch } from '@/lib/roUtils.js';
 
@@ -400,7 +400,26 @@ function dominantStatus(b) {
   return items[0].status;
 }
 
-onMounted(initialLoad);
+// Когда пользователь возвращается во вкладку — освежаем список батчей,
+// чтобы сразу увидеть свежие статусы после approve/reject от закупок.
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible' && selectedDate.value && !busy.value) {
+    loadBatches();
+  }
+}
+function onWindowFocus() {
+  if (selectedDate.value && !busy.value) loadBatches();
+}
+
+onMounted(() => {
+  initialLoad();
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('focus', onWindowFocus);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  window.removeEventListener('focus', onWindowFocus);
+});
 </script>
 
 <style scoped>

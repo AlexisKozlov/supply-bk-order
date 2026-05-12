@@ -2588,12 +2588,12 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
     $st = $pdo->prepare("SELECT * FROM order_corrections WHERE id IN ({$ph}) ORDER BY id");
     $st->execute($batchIds);
     $items = $st->fetchAll();
+    if (!$items) return;
     $restChatId = null;
     foreach ($items as $c) {
         if (!$restChatId) $restChatId = $c['restaurant_chat_id'];
         if ($c['status'] === 'pending' || $c['status'] === 'in_progress') return; // ещё не все
     }
-    if (!$items || !$restChatId) return;
 
     $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
     $first = $items[0];
@@ -2604,14 +2604,17 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
     $prettyFirstRest = formatRestaurantNumber($first['restaurant_number']);
     $text .= "🏪 Ресторан <b>{$prettyFirstRest}</b> | Доставка: {$dateFmt}\n";
     $text .= "─────────────────────\n";
+    $approvedCount = 0; $rejectedCount = 0;
     foreach ($items as $c) {
         $uom = $c['unit_of_measure'] ?: 'кор.';
         $qty = corrFmtQty($c['quantity']) . " {$uom}";
         if ($c['status'] === 'approved') {
+            $approvedCount++;
             $label = $c['action'] === 'add' ? 'Добавлено' : 'Убрано';
             $text .= "✅ <b>{$label}:</b> {$c['product_name']} — {$qty}\n";
             if ($c['review_comment']) $text .= "    💬 {$c['review_comment']}\n";
         } else {
+            $rejectedCount++;
             $label = $c['action'] === 'add' ? 'Добавить' : 'Убрать';
             $text .= "❌ <b>Отклонено</b> ({$label}): {$c['product_name']} — {$qty}\n";
             if ($c['review_comment']) $text .= "    Причина: {$c['review_comment']}\n";
@@ -2623,9 +2626,32 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
     $text .= "─────────────────────\n";
     $text .= "Обработал: {$reviewerName}";
 
-    sendMessage($restChatId, $text);
+    // 1) Telegram-сообщение тому, кто подавал из бота (если был chat_id).
+    if ($restChatId) sendMessage($restChatId, $text);
 
-    // Помечаем result_sent в notify_messages
+    // 2) Web Push на устройства ресторана — работает и для кабинетных корректировок,
+    //    и как дублирование для тех, кто подавал из бота, но открыл PWA.
+    try {
+        require_once __DIR__ . '/push_send.php';
+        $pushTitle = ($rejectedCount === 0)
+            ? '✅ Корректировка принята'
+            : (($approvedCount === 0) ? '❌ Корректировка отклонена' : '📋 Результат корректировки');
+        $shortBody = "Доставка {$dateFmt}: ";
+        if ($approvedCount && $rejectedCount) $shortBody .= "{$approvedCount} принято, {$rejectedCount} отклонено";
+        elseif ($approvedCount) $shortBody .= "принято позиций — {$approvedCount}";
+        else $shortBody .= "отклонено позиций — {$rejectedCount}";
+        if ($finalComment) $shortBody .= '. Комментарий: ' . mb_substr($finalComment, 0, 120);
+        pushSendToRestaurant($pdo, (int)$first['restaurant_number'], (string)($first['legal_entity_group'] ?: 'BK_VM'), [
+            'title' => $pushTitle,
+            'body'  => $shortBody,
+            'url'   => '/restaurant/orders/corrections',
+            'tag'   => 'correction-result-' . ($first['batch_uuid'] ?: $batchIds[0]),
+        ]);
+    } catch (\Throwable $e) {
+        error_log('[corrSendResultToRestaurant] push error: ' . $e->getMessage());
+    }
+
+    // 3) Помечаем result_sent в notify_messages
     $nmSt = $pdo->prepare("SELECT notify_messages FROM order_corrections WHERE id = ?");
     $nmSt->execute([$batchIds[0]]);
     $nmRow = $nmSt->fetch();
@@ -2634,7 +2660,7 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
     $ph2 = implode(',', array_fill(0, count($batchIds), '?'));
     $pdo->prepare("UPDATE order_corrections SET notify_messages = ? WHERE id IN ({$ph2})")->execute(array_merge([json_encode($nm)], $batchIds));
 
-    // Обновляем сообщения отдела закупок — убираем кнопки, добавляем отметку «отправлено»
+    // 4) Обновляем сообщения отдела закупок — убираем кнопки, добавляем отметку «отправлено»
     corrUpdateAllReviewMessages($pdo, $batchIds);
 }
 
