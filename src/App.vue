@@ -17,7 +17,7 @@
   <Transition name="server-banner">
     <div v-if="restaurantSessionExpired" class="ro-session-banner" role="alert">
       <span class="server-down-icon">&#9888;</span>
-      <span class="ro-session-text">Сессия завершена. Сохраните данные и войдите заново.</span>
+      <span class="ro-session-text">Сессия завершена. Черновик заказа сохранён — войдите заново, чтобы продолжить.</span>
       <button class="ro-session-btn" @click="goToRestaurantLogin">Войти заново</button>
       <button class="ro-session-close" @click="restaurantSessionExpired = false" aria-label="Закрыть">×</button>
     </div>
@@ -58,7 +58,10 @@ const restaurantSessionExpired = ref(false);
 function onRestaurantSessionExpired() { restaurantSessionExpired.value = true; }
 function goToRestaurantLogin() {
   restaurantSessionExpired.value = false;
-  window.location.href = '/restaurant/login';
+  // Сохраняем текущий путь как redirect, чтобы после входа вернуться сюда же
+  const cur = window.location.pathname + window.location.search;
+  const redirect = cur && /^\/restaurant(\/|$)/.test(cur) ? cur : '/restaurant';
+  window.location.href = '/restaurant/login?redirect=' + encodeURIComponent(redirect);
 }
 
 onMounted(async () => {

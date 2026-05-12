@@ -48,6 +48,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
+import { roFetch } from '@/lib/roUtils.js';
 
 const props = defineProps({
   compact: { type: Boolean, default: false }, // компактный режим для дашборда
@@ -55,20 +56,11 @@ const props = defineProps({
 
 const emit = defineEmits(['updated']);
 
-const TOKEN_KEY = 'ro_token';
 const toast = useToastStore();
 const items = ref([]);
 const busy = reactive({});
 let pollTimer = null;
 const allDone = computed(() => items.value.length > 0 && items.value.every(it => it.is_acknowledged));
-
-function buildHeaders(json = false) {
-  const h = {};
-  const t = localStorage.getItem(TOKEN_KEY);
-  if (t) h['X-RO-Token'] = t;
-  if (json) h['Content-Type'] = 'application/json';
-  return h;
-}
 
 function itemKey(it) { return it.supplier_id + '-' + it.order_day + '-' + (it.order_date || ''); }
 function fmtTime(t) { return t ? String(t).slice(0, 5) : ''; }
@@ -130,12 +122,7 @@ function formatAckTime(iso) {
 
 async function load() {
   try {
-    const res = await fetch('/api/restaurant-reminders/today', { headers: buildHeaders() });
-    const data = await res.json();
-    if (!res.ok) {
-      items.value = [];
-      return;
-    }
+    const data = await roFetch('/api/restaurant-reminders/today');
     // Показываем только подписанные позиции (включён мастер-тумблер)
     items.value = (data.items || []).filter(it => it.is_subscribed);
     emit('updated', items.value);
@@ -148,17 +135,14 @@ async function onAck(it) {
   const key = itemKey(it);
   busy[key] = true;
   try {
-    const res = await fetch('/api/restaurant-reminders/acknowledge', {
-      method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify({ supplier_id: it.supplier_id, order_day: it.order_day, order_date: it.order_date }),
+    await roFetch('/api/restaurant-reminders/acknowledge', {
+      method: 'POST',
+      body: { supplier_id: it.supplier_id, order_day: it.order_day, order_date: it.order_date },
     });
-    const data = await res.json();
-    if (!res.ok) { toast.error(data.error || 'Ошибка'); return; }
     toast.success('Отмечено');
-    // Перегружаем — чтобы время отображалось из БД (корректный TZ)
     await load();
   } catch (e) {
-    toast.error('Ошибка сети');
+    toast.error(e.message || 'Ошибка');
   } finally {
     busy[key] = false;
   }
@@ -168,16 +152,14 @@ async function onUnack(it) {
   const key = itemKey(it);
   busy[key] = true;
   try {
-    const res = await fetch('/api/restaurant-reminders/unacknowledge', {
-      method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify({ supplier_id: it.supplier_id, order_day: it.order_day, order_date: it.order_date }),
+    await roFetch('/api/restaurant-reminders/unacknowledge', {
+      method: 'POST',
+      body: { supplier_id: it.supplier_id, order_day: it.order_day, order_date: it.order_date },
     });
-    const data = await res.json();
-    if (!res.ok) { toast.error(data.error || 'Ошибка'); return; }
     toast.success('Отметка снята');
     await load();
   } catch (e) {
-    toast.error('Ошибка сети');
+    toast.error(e.message || 'Ошибка');
   } finally {
     busy[key] = false;
   }

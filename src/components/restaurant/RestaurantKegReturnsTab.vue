@@ -555,11 +555,14 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useToastStore } from '@/stores/toastStore.js';
+import { roFetch } from '@/lib/roUtils.js';
 
 const TOKEN_KEY = 'ro_token';
 const route = useRoute();
 const toast = useToastStore();
 
+// Локальный buildHeaders оставлен для оставшихся низкоуровневых вызовов
+// (например, скачивание Excel-бинарника через прямой fetch с blob ответом).
 function buildHeaders(json = false) {
   const h = {};
   const t = localStorage.getItem(TOKEN_KEY);
@@ -763,13 +766,10 @@ async function replaceBsoSubmit() {
   }
   bsoModal.saving = true;
   try {
-    const res = await fetch(`/api/keg-returns/${editingId.value}/replace-bso`, {
+    await roFetch(`/api/keg-returns/${editingId.value}/replace-bso`, {
       method: 'POST',
-      headers: buildHeaders(true),
-      body: JSON.stringify({ new_series: s, new_number: n, reason }),
+      body: { new_series: s, new_number: n, reason },
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Не удалось заменить БСО');
     bsoModal.show = false;
     await loadFormData(editingId.value);
     toast.success('БСО заменён', `Новый номер: ${s} ${n}`);
@@ -918,9 +918,7 @@ const submitMissingHint = computed(() => {
 async function loadList() {
   listLoading.value = true;
   try {
-    const res = await fetch('/api/keg-returns', { headers: buildHeaders() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Ошибка загрузки');
+    const data = await roFetch('/api/keg-returns');
     rows.value = Array.isArray(data) ? data : [];
   } catch (e) {
     toast.error('Ошибка загрузки', e.message || '');
@@ -933,8 +931,7 @@ async function loadCatalog() {
   if (catalog.value.length) return;
   catalogLoading.value = true;
   try {
-    const res = await fetch('/api/keg-catalog', { headers: buildHeaders() });
-    const data = await res.json();
+    const data = await roFetch('/api/keg-catalog');
     catalog.value = Array.isArray(data) ? data : [];
   } catch {}
   catalogLoading.value = false;
@@ -944,9 +941,7 @@ async function loadFormData(id) {
   formLoading.value = true;
   formError.value = '';
   try {
-    const res = await fetch(`/api/keg-returns/${id}`, { headers: buildHeaders() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Ошибка загрузки');
+    const data = await roFetch(`/api/keg-returns/${id}`);
     form.value = data;
     kegQties.value = {};
     for (const item of data.items || []) {
@@ -977,9 +972,7 @@ async function loadFormData(id) {
 async function loadRestaurantInfo() {
   restaurantInfoLoaded.value = false;
   try {
-    const res = await fetch('/api/keg-returns/restaurant-info', { headers: buildHeaders() });
-    if (!res.ok) return;
-    const data = await res.json();
+    const data = await roFetch('/api/keg-returns/restaurant-info');
     if (data.pickup_weekdays) {
       form.value.restaurant_pickup_weekdays = data.pickup_weekdays;
     }
@@ -1073,21 +1066,9 @@ async function saveDraft() {
   saving.value = true;
   try {
     if (editingId.value) {
-      const res = await fetch(`/api/keg-returns/${editingId.value}`, {
-        method: 'PATCH',
-        headers: buildHeaders(true),
-        body: JSON.stringify(buildBody()),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Ошибка сохранения');
+      await roFetch(`/api/keg-returns/${editingId.value}`, { method: 'PATCH', body: buildBody() });
     } else {
-      const res = await fetch('/api/keg-returns', {
-        method: 'POST',
-        headers: buildHeaders(true),
-        body: JSON.stringify(buildBody()),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Ошибка создания');
+      const data = await roFetch('/api/keg-returns', { method: 'POST', body: buildBody() });
       editingId.value = data.id;
       await loadFormData(data.id);
     }
@@ -1117,29 +1098,12 @@ async function submit() {
   saving.value = true;
   try {
     if (editingId.value) {
-      const res = await fetch(`/api/keg-returns/${editingId.value}`, {
-        method: 'PATCH',
-        headers: buildHeaders(true),
-        body: JSON.stringify(buildBody()),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Ошибка сохранения');
+      await roFetch(`/api/keg-returns/${editingId.value}`, { method: 'PATCH', body: buildBody() });
     } else {
-      const res = await fetch('/api/keg-returns', {
-        method: 'POST',
-        headers: buildHeaders(true),
-        body: JSON.stringify(buildBody()),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Ошибка создания');
+      const d = await roFetch('/api/keg-returns', { method: 'POST', body: buildBody() });
       editingId.value = d.id;
     }
-    const res2 = await fetch(`/api/keg-returns/${editingId.value}/submit`, {
-      method: 'POST',
-      headers: buildHeaders(),
-    });
-    const data2 = await res2.json();
-    if (!res2.ok) throw new Error(data2.error || 'Ошибка отправки');
+    await roFetch(`/api/keg-returns/${editingId.value}/submit`, { method: 'POST' });
     await loadFormData(editingId.value);
     submittedModal.show = true;
     submittedModal.bsoStr = ((form.value.bso_series || '') + ' ' + (form.value.bso_number || '')).trim();
@@ -1161,12 +1125,7 @@ async function cancelReturn() {
   if (!ok) return;
   saving.value = true;
   try {
-    const res = await fetch(`/api/keg-returns/${editingId.value}/cancel`, {
-      method: 'POST',
-      headers: buildHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Не удалось отменить заявку');
+    await roFetch(`/api/keg-returns/${editingId.value}/cancel`, { method: 'POST' });
     await loadFormData(editingId.value);
     toast.success('Заявка отменена', '');
   } catch (e) {
@@ -1187,9 +1146,7 @@ async function deleteDraft() {
   if (!ok) return;
   saving.value = true;
   try {
-    const res = await fetch(`/api/keg-returns/${editingId.value}`, { method: 'DELETE', headers: buildHeaders() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Не удалось удалить черновик');
+    await roFetch(`/api/keg-returns/${editingId.value}`, { method: 'DELETE' });
     editingId.value = null;
     formMode.value = false;
     await loadList();

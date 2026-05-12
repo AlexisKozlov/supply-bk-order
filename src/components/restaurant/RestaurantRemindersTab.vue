@@ -161,6 +161,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { usePushNotifications } from '@/composables/usePushNotifications.js';
+import { roFetch } from '@/lib/roUtils.js';
 
 const push = usePushNotifications();
 
@@ -214,14 +215,6 @@ function onTutorialEsc(e) {
   if (e.key === 'Escape' && showTutorial.value) dismissTutorial();
 }
 
-function buildHeaders(json = false) {
-  const h = {};
-  const t = localStorage.getItem(TOKEN_KEY);
-  if (t) h['X-RO-Token'] = t;
-  if (json) h['Content-Type'] = 'application/json';
-  return h;
-}
-
 const WEEKDAYS_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 function weekdayShort(d) { return WEEKDAYS_SHORT[d] || ''; }
 function fmtTime(t) { return t ? String(t).slice(0, 5) : ''; }
@@ -243,20 +236,13 @@ function isSelected(group, tgId) {
 async function loadGroups() {
   loading.value = true;
   try {
-    const res = await fetch('/api/restaurant-reminders/list', { headers: buildHeaders() });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || 'Не удалось загрузить напоминания');
-      groups.value = [];
-      availableTg.value = [];
-      return;
-    }
+    const data = await roFetch('/api/restaurant-reminders/list');
     groups.value = data.groups || [];
     availableTg.value = data.available_tg || [];
     mainDelivery.value = data.main_delivery || { days: [], subscription: null, selected_tg_ids: [] };
     if (!mainDelivery.value.selected_tg_ids) mainDelivery.value.selected_tg_ids = [];
   } catch (e) {
-    toast.error('Ошибка сети');
+    toast.error(e.message || 'Не удалось загрузить напоминания');
     groups.value = [];
     availableTg.value = [];
     mainDelivery.value = { days: [], subscription: null, selected_tg_ids: [] };
@@ -274,12 +260,7 @@ async function saveMainSubscription(patch) {
       telegram_enabled: sub.telegram_enabled ? 1 : 0,
       ...patch,
     };
-    const res = await fetch('/api/restaurant-reminders/main-set', {
-      method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) { toast.error(data.error || 'Ошибка'); return false; }
+    await roFetch('/api/restaurant-reminders/main-set', { method: 'POST', body: payload });
     mainDelivery.value.subscription = {
       ...(mainDelivery.value.subscription || {}),
       is_enabled: !!payload.is_enabled,
@@ -288,7 +269,7 @@ async function saveMainSubscription(patch) {
     };
     return true;
   } catch (e) {
-    toast.error('Ошибка сети');
+    toast.error(e.message || 'Ошибка');
     return false;
   } finally {
     savingMain.value = false;
@@ -311,19 +292,17 @@ async function toggleMainTg(tgId, checked) {
   const newIds = Array.from(current);
   savingMainTg.value = true;
   try {
-    const res = await fetch('/api/restaurant-reminders/main-tg-set', {
-      method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify({ ro_tg_sub_ids: newIds }),
+    await roFetch('/api/restaurant-reminders/main-tg-set', {
+      method: 'POST',
+      body: { ro_tg_sub_ids: newIds },
     });
-    const data = await res.json();
-    if (!res.ok) { toast.error(data.error || 'Ошибка'); return; }
     mainDelivery.value.selected_tg_ids = newIds;
     if (newIds.length && !mainDelivery.value.subscription?.telegram_enabled) {
       if (!mainDelivery.value.subscription) mainDelivery.value.subscription = { is_enabled: true, portal_enabled: true, telegram_enabled: true };
       mainDelivery.value.subscription.telegram_enabled = true;
     }
   } catch (e) {
-    toast.error('Ошибка сети');
+    toast.error(e.message || 'Ошибка');
   } finally {
     savingMainTg.value = false;
   }
@@ -339,12 +318,7 @@ async function saveSubscription(group, patch) {
       telegram_enabled: group.subscription?.telegram_enabled ? 1 : 0,
       ...patch,
     };
-    const res = await fetch('/api/restaurant-reminders/set', {
-      method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) { toast.error(data.error || 'Ошибка'); return false; }
+    await roFetch('/api/restaurant-reminders/set', { method: 'POST', body: payload });
     if (!group.subscription) group.subscription = { is_enabled: 0, portal_enabled: 1, telegram_enabled: 0 };
     group.subscription = {
       ...group.subscription,
@@ -354,7 +328,7 @@ async function saveSubscription(group, patch) {
     };
     return true;
   } catch (e) {
-    toast.error('Ошибка сети');
+    toast.error(e.message || 'Ошибка');
     return false;
   } finally {
     saving[group.supplier_id] = false;
@@ -378,15 +352,10 @@ async function toggleTg(group, tgId, checked) {
   const newIds = Array.from(current);
   savingTg[group.supplier_id] = true;
   try {
-    const res = await fetch('/api/restaurant-reminders/tg-set', {
-      method: 'POST', headers: buildHeaders(true),
-      body: JSON.stringify({ supplier_id: group.supplier_id, ro_tg_sub_ids: newIds }),
+    await roFetch('/api/restaurant-reminders/tg-set', {
+      method: 'POST',
+      body: { supplier_id: group.supplier_id, ro_tg_sub_ids: newIds },
     });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error || 'Ошибка');
-      return;
-    }
     group.selected_tg_ids = newIds;
     // Если выбрали хотя бы одного — телеграм-канал включается на сервере
     if (newIds.length && !group.subscription?.telegram_enabled) {
@@ -394,7 +363,7 @@ async function toggleTg(group, tgId, checked) {
       group.subscription.telegram_enabled = true;
     }
   } catch (e) {
-    toast.error('Ошибка сети');
+    toast.error(e.message || 'Ошибка');
   } finally {
     savingTg[group.supplier_id] = false;
   }

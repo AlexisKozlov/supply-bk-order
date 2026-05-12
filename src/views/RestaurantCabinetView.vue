@@ -1259,6 +1259,7 @@ import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime 
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
 import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg } from '@/lib/cabinetIcons.js';
 import { usePushNotifications } from '@/composables/usePushNotifications.js';
+import { roFetch } from '@/lib/roUtils.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
@@ -1680,10 +1681,7 @@ const stockCollectionUnfilledCount = computed(() => {
 const kegReturnsEnabled = ref(false);
 async function loadKegReturnsAvailability() {
   try {
-    const t = localStorage.getItem('ro_token') || '';
-    const res = await fetch('/api/keg-returns/restaurant-info', { headers: t ? { 'X-RO-Token': t } : {} });
-    if (!res.ok) { kegReturnsEnabled.value = false; return; }
-    const data = await res.json();
+    const data = await roFetch('/api/keg-returns/restaurant-info');
     // Видимость модуля = глобальный тумблер «keg_returns_enabled» (включает закупка)
     // И наличие хотя бы одного дня вывоза «pickup_weekdays» у конкретного ресторана.
     const moduleOn = !!data.keg_returns_enabled;
@@ -3068,16 +3066,15 @@ async function loadCabinetData() {
 
 function startCabinetBackgroundLoading() {
   const runId = ++cabinetBackgroundRunId;
-  // Очередь приоритетов: сверху — что нужно для дашборда и заметно пользователю,
-  // снизу — что нужно при переключении на отдельную вкладку.
+  // На старте грузим только то, что нужно дашборду (бейджи, баннеры,
+  // карточка «Сегодня»). Тяжёлое (история, telegram-привязка) — только
+  // при переходе на соответствующую вкладку (в applyRouteToState).
   const tasks = [
     ['important-posts', () => importantPosts.value.length ? loadImportantImagePreviews(1) : loadImportantPostsWithOptions({ previewAll: false })],
-    ['previous-orders', () => loadPreviousDeliveryOrders()],
     ['stock-status',    () => checkStockCollection()],
     ['broadcasts',      () => loadRestaurantBroadcasts()],
-    ['history',         () => historyOrders.value.length ? null : loadHistory()],
-    ['telegram',        () => loadTgStatus()],
     ['surveys',         () => surveyItems.value.length ? null : loadSurveyList()],
+    ['previous-orders', () => loadPreviousDeliveryOrders()],
   ];
   // Запускаем 2 параллельно — не спамим сеть, но и не тормозим
   const CONCURRENCY = 2;
@@ -3111,8 +3108,17 @@ async function retryCabinetLoad() {
   }
 }
 
+// Сессия истекла во время заполнения заказа — немедленно сохраняем черновик,
+// чтобы не потерять введённые данные (обычный watch с debounce 800мс может
+// не успеть до того, как пользователь нажмёт «Войти заново» и страница уйдёт).
+function onSessionExpiredFlushDraft() {
+  if (delDraftSaveTimer) { clearTimeout(delDraftSaveTimer); delDraftSaveTimer = null; }
+  delSaveDraft();
+}
+
 onMounted(async () => {
   window.addEventListener('beforeunload', onBeforeUnload);
+  window.addEventListener('bk:ro-session-expired', onSessionExpiredFlushDraft);
   // Если в URL есть tg_token — это переход из бота, надо переавторизоваться
   // (важно когда кликают «Через сайт» для другого ресторана)
   const tgTokenParam = route.query.tg_token;
@@ -3158,6 +3164,7 @@ onUnmounted(() => {
   if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
   for (const url of Object.values(importantPreviewUrls)) URL.revokeObjectURL(url);
   window.removeEventListener('beforeunload', onBeforeUnload);
+  window.removeEventListener('bk:ro-session-expired', onSessionExpiredFlushDraft);
 });
 </script>
 
