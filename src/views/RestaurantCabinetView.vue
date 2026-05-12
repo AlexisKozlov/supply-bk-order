@@ -1258,8 +1258,8 @@ import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
 import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg } from '@/lib/cabinetIcons.js';
-import { usePushNotifications } from '@/composables/usePushNotifications.js';
 import { roFetch } from '@/lib/roUtils.js';
+import { useCabinetDashboard } from '@/composables/useCabinetDashboard.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
@@ -1481,81 +1481,20 @@ const dashOrdersPending = computed(() => {
   return total;
 });
 
-// ═══ PWA push онбординг ═══
-const push = usePushNotifications();
-const PUSH_ONBOARDING_KEY = 'ro_push_onboarding_seen_v1';
-const pushOnboardingDismissed = ref(false);
-const isStandalonePwa = ref(false);
-try {
-  isStandalonePwa.value = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
-    // iOS Safari устаревший флаг
-    || window.navigator?.standalone === true;
-  pushOnboardingDismissed.value = localStorage.getItem(PUSH_ONBOARDING_KEY) === '1';
-} catch (e) { /* ignore */ }
-
-const showPushOnboarding = computed(() => {
-  if (!isStandalonePwa.value) return false;
-  if (pushOnboardingDismissed.value) return false;
-  if (!push.isSupported.value) return false;
-  if (push.permission.value === 'denied') return false;
-  if (push.isSubscribed.value) return false;
-  return true;
-});
-
-function dismissPushOnboarding() {
-  pushOnboardingDismissed.value = true;
-  try { localStorage.setItem(PUSH_ONBOARDING_KEY, '1'); } catch (e) { /* ignore */ }
-}
-
-async function enablePushOnboarding() {
-  const ok = await push.subscribe();
-  if (ok) {
-    toastStore.success('Уведомления включены');
-    dismissPushOnboarding();
-  } else if (push.error.value) {
-    toastStore.error(push.error.value);
-  }
-}
-
-// ═══ Сводка «Сегодня нужно сделать» ═══
-// Собирает три ключевых сигнала: дедлайны заявок, незаполненный сбор остатков, новые опросы.
-const todayReminderItems = ref([]);
-function onTodayRemindersUpdated(items) {
-  // Учитываем только сегодняшние неотмеченные. Advance-items (is_advance) показываем
-  // отдельно, чтобы не считать «завтрашнюю заявку» как «сегодня надо сделать».
-  todayReminderItems.value = (items || []).filter(it => !it.is_acknowledged && !it.is_advance);
-}
-const todaySignals = computed(() => {
-  const out = [];
-  const remindersCount = todayReminderItems.value.length;
-  if (remindersCount > 0) {
-    out.push({
-      key: 'reminders',
-      count: remindersCount,
-      label: remindersCount === 1 ? 'заявка к поставщику ждёт подачи' : `заявки к поставщикам (${remindersCount})`,
-      tone: 'warn',
-      action: () => switchTab('orders', 'reminders'),
-    });
-  }
-  if (stockCollection.active && stockCollectionUnfilledCount.value > 0) {
-    out.push({
-      key: 'stock',
-      count: stockCollectionUnfilledCount.value,
-      label: 'позиций не заполнено в сборе остатков',
-      tone: 'alert',
-      action: () => switchTab('stock'),
-    });
-  }
-  if (surveyPendingCount.value > 0) {
-    out.push({
-      key: 'surveys',
-      count: surveyPendingCount.value,
-      label: surveyPendingCount.value === 1 ? 'новый опрос ждёт ответа' : `новых опросов (${surveyPendingCount.value})`,
-      tone: 'info',
-      action: () => switchTab('surveys'),
-    });
-  }
-  return out;
+// ═══ PWA push онбординг + Сводка «Сегодня нужно сделать» (см. composable) ═══
+const {
+  push,
+  showPushOnboarding,
+  dismissPushOnboarding,
+  enablePushOnboarding,
+  onTodayRemindersUpdated,
+  todaySignals,
+} = useCabinetDashboard({
+  stockCollection,
+  stockCollectionUnfilledCount,
+  surveyPendingCount,
+  switchTab: (tab, sub) => switchTab(tab, sub),
+  toast: toastStore,
 });
 
 const urgentItems = computed(() => {
