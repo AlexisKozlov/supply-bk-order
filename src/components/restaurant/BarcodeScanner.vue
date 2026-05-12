@@ -55,7 +55,7 @@
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 
 const emit = defineEmits(['detected']);
 
@@ -182,6 +182,12 @@ function resetLastCode() {
   lastCodeAt = 0;
 }
 defineExpose({ stopCamera, startCamera, resetLastCode });
+
+// Стартуем камеру сразу при монтировании компонента. Если разрешение
+// заблокировано или произошла ошибка — пользователь увидит экран ошибки
+// с кнопкой «Попробовать снова», и/или может перейти на ручной ввод.
+// Cleanup на unmount уже определён ниже.
+onMounted(() => { startCamera(); });
 
 function beep() {
   try {

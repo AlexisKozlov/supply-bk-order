@@ -277,6 +277,14 @@
                 </div>
                 <span class="dash-tile-arrow">›</span>
               </button>
+              <button class="dash-tile dash-tile--corrections" @click="switchTab('orders', 'corrections')">
+                <span class="dash-tile-icon" v-html="tileIconSvg.corrections"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Корректировки <span class="dash-tile-beta">BETA</span></div>
+                  <div class="dash-tile-sub">Изменить заказ основной поставки</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
+              </button>
               <button class="dash-tile dash-tile--reminders" @click="switchTab('orders', 'reminders')">
                 <span class="dash-tile-icon" v-html="tileIconSvg.reminders"></span>
                 <div class="dash-tile-text">
@@ -4394,6 +4402,7 @@ tr.del-err { background: #fef2f2; }
 }
 .dash-tile--cards .dash-tile-icon { background: #E0F2FE; color: #1D4ED8; }
 .dash-tile--reminders .dash-tile-icon { background: #FEEFCB; color: #B45309; }
+.dash-tile--corrections .dash-tile-icon { background: #FFE9D6; color: #8B4513; }
 
 @media (max-width: 640px) {
   .dash-tiles { grid-template-columns: 1fr; gap: 8px; }
