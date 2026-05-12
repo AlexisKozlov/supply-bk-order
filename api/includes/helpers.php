@@ -13,6 +13,76 @@ require_once __DIR__ . '/legal_entities.php';
  */
 define('RO_AUTH_TOKEN_TTL_MINUTES', 10);
 
+// ═══ Сессия ресторана: HttpOnly-cookie (миграция с X-RO-Token) ═══
+//
+// Цель миграции: токен пропуска ресторана живёт в HttpOnly-cookie, а не в
+// localStorage. XSS до куки добраться не может, в URL-ах токен больше не
+// светится.
+//
+// Фаза 1 (текущая): сервер принимает И cookie, И заголовок X-RO-Token.
+// Параллельно на каждом успешном входе/проверке выставляет cookie. Фронт
+// пока не меняем — старый поток работает, как работал.
+//
+// Фаза 2: фронт перестаёт слать заголовок. Кто не успел получить cookie —
+// войдёт заново по ссылке из Telegram.
+//
+// Фаза 3: убираем поддержку заголовка из бэкенда.
+
+/**
+ * HTTPS ли текущий запрос (с учётом обратного прокси).
+ * Используется для атрибута Secure у cookie.
+ */
+function roIsHttps() {
+    if (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') return true;
+    if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') return true;
+    if (!empty($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443) return true;
+    return false;
+}
+
+/**
+ * Достать токен ресторана из cookie (приоритет) или из заголовка (legacy).
+ * Все места, которые раньше читали $_SERVER['HTTP_X_RO_TOKEN'], должны
+ * переехать на эту функцию.
+ */
+function roGetSessionToken() {
+    if (!empty($_COOKIE['ro_session'])) return (string)$_COOKIE['ro_session'];
+    if (!empty($_SERVER['HTTP_X_RO_TOKEN'])) return (string)$_SERVER['HTTP_X_RO_TOKEN'];
+    return '';
+}
+
+/**
+ * Выставить/освежить HttpOnly-cookie с токеном.
+ * Вызываем на каждом успешном входе и при продлении сессии — это даёт
+ * незаметный апгрейд старых клиентов с localStorage на cookie.
+ *
+ * @param string   $token        Токен сессии (тот же, что и в ro_users.session_token).
+ * @param int|null $expiresUnix  Unix-таймштамп истечения. null — +3 часа.
+ */
+function roSetSessionCookie($token, $expiresUnix = null) {
+    if (!$token) return;
+    if (!$expiresUnix) $expiresUnix = time() + 3 * 3600;
+    setcookie('ro_session', $token, [
+        'expires'  => (int)$expiresUnix,
+        'path'     => '/',
+        'secure'   => roIsHttps(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+/**
+ * Удалить cookie сессии (logout, отзыв сессии).
+ */
+function roClearSessionCookie() {
+    setcookie('ro_session', '', [
+        'expires'  => time() - 3600,
+        'path'     => '/',
+        'secure'   => roIsHttps(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
 // ═══ Telegram уведомления ═══
 
 /**

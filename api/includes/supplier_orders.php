@@ -42,7 +42,7 @@ function soRespond($data, $code = 200) {
 }
 
 function soGetRestaurantSession($pdo) {
-    $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
+    $token = roGetSessionToken();
     if (!$token) return null;
     $s = $pdo->prepare("
         SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.session_active_until

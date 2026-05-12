@@ -63,7 +63,7 @@ function roGetRestaurantRow($pdo, $restaurantNumber, $group = null) {
 }
 
 function roGetRestaurantSession($pdo) {
-    $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
+    $token = roGetSessionToken();
     if (!$token) return null;
     $s = $pdo->prepare("
         SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group,
@@ -87,12 +87,17 @@ function roGetRestaurantSession($pdo) {
             // (даже с этим токеном) уже ничего не возвращали.
             $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
                 ->execute([$user['id']]);
+            roClearSessionCookie();
             return null;
         }
     }
     // Продлеваем сессию при каждом запросе (сброс таймера неактивности).
+    $newActiveUntil = strtotime('+3 hours');
     $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
-        ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
+        ->execute([date('Y-m-d H:i:s', $newActiveUntil), $user['id']]);
+    // Параллельно — освежаем cookie. Это незаметно мигрирует старых клиентов
+    // с localStorage-токеном на cookie: на первом же запросе они получат куку.
+    roSetSessionCookie($token, $newActiveUntil);
     $rest = roGetRestaurantRow($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
     $user['region'] = $rest['region'] ?? '';
     $user['city'] = $rest['city'] ?? '';
@@ -1684,6 +1689,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
+    roSetSessionCookie($token, strtotime($activeUntil));
     recordPortalConsent($pdo, 'restaurant', $restGroup . ':' . $restNum, 'Ресторан ' . $restNum . ' ' . $restGroup);
 
     $rest = roGetRestaurantRow($pdo, $restNum, $restGroup);
@@ -1767,6 +1773,7 @@ if ($roAction === 'login' && $method === 'POST') {
     $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
+    roSetSessionCookie($token, strtotime($activeUntil));
     recordPortalConsent($pdo, 'restaurant', $restGroup . ':' . $restNum, 'Ресторан ' . $restNum . ' ' . $restGroup);
 
     // Инфо о ресторане
@@ -1812,6 +1819,9 @@ if ($roAction === 'logout' && $method === 'POST') {
         $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
             ->execute([$rest['id']]);
     }
+    // Cookie стираем безусловно: даже если сессия в БД уже была отозвана,
+    // в браузере мог остаться устаревший cookie.
+    roClearSessionCookie();
     roRespond(['success' => true]);
 }
 

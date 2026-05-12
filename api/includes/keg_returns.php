@@ -108,12 +108,12 @@ function kegCalcCutoff(string $returnDate): DateTime {
 }
 
 /**
- * Сессия ресторана через X-RO-Token (аналогично restaurant_orders.php).
+ * Сессия ресторана через cookie ro_session или legacy X-RO-Token.
  * Включает абсолютный потолок 24 часа от last_login_at — иначе утёкший
  * токен живёт неограниченно, пока кто-то стучит в API.
  */
 function krGetRestaurantSession($pdo) {
-    $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
+    $token = roGetSessionToken();
     if (!$token) return null;
     $s = $pdo->prepare("
         SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group,

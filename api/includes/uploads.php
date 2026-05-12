@@ -21,7 +21,7 @@ function canDownloadRestaurantInfoFile($pdo, $fileId) {
             if (($ACCESS_LEVELS[$p['restaurant-orders'] ?? 'none'] ?? 0) >= $ACCESS_LEVELS['view']) return true;
         }
     }
-    $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
+    $token = roGetSessionToken();
     if (!$token) return false;
     $s = $pdo->prepare("
         SELECT restaurant_number, legal_entity_group, session_active_until
