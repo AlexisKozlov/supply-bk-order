@@ -5,10 +5,8 @@ const API_BASE = '/api/so';
 
 function buildHeaders() {
   const h = { 'Content-Type': 'application/json' };
-  // Для ресторанов
-  const roToken = localStorage.getItem('ro_token');
-  if (roToken) h['X-RO-Token'] = roToken;
-  // Для отдела закупок
+  // Авторизация ресторана идёт через HttpOnly-cookie ro_session (браузер
+  // прикладывает её автоматически). Здесь оставляем только токен сотрудника.
   const st = localStorage.getItem('bk_session_token');
   if (st) h['X-Session-Token'] = st;
   return h;

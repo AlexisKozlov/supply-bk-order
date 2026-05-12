@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
+import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 
 const APP_TITLE = 'Портал закупок';
 
@@ -221,16 +222,18 @@ router.beforeEach(async (to) => {
   // навигацию до завершения validate_session.
   await userStore.restoreSession();
   // Защита кабинета ресторана: пути /restaurant/* (кроме /restaurant/login)
-  // требуют ro_token. Без него интерфейс не должен рендериться вообще.
-  // Серверная валидация токена остаётся в RestaurantCabinetView.onMounted.
+  // требуют залогиненного ресторана. Сам токен живёт в HttpOnly-cookie и
+  // из JS не виден, поэтому ориентируемся на кэш ресторана в сторе:
+  // если ресторан сохранён — пускаем (cookie долетит к серверу), иначе
+  // редиректим на форму входа. Серверная валидация делается в кабинете.
   if (to.path.startsWith('/restaurant/') && to.path !== '/restaurant/login' && to.path !== '/restaurant/reset-password') {
-    const roToken = localStorage.getItem('ro_token');
-    if (!roToken) {
+    const roStore = useRestaurantOrderStore();
+    if (!roStore.isAuthenticated) {
       return { path: '/restaurant/login', query: { redirect: to.fullPath } };
     }
   } else if (to.path === '/restaurant') {
-    const roToken = localStorage.getItem('ro_token');
-    if (!roToken) {
+    const roStore = useRestaurantOrderStore();
+    if (!roStore.isAuthenticated) {
       return { path: '/restaurant/login' };
     }
   }

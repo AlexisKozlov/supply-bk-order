@@ -233,7 +233,6 @@ const push = usePushNotifications();
 
 const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components/restaurant/RestaurantTodayReminders.vue'));
 
-const TOKEN_KEY = 'ro_token';
 const TUTORIAL_KEY = 'reminders_tutorial_seen_v1';
 const toast = useToastStore();
 

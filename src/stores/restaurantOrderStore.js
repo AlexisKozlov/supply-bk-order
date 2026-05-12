@@ -2,15 +2,15 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
 const API_BASE = '/api/ro';
-const TOKEN_KEY = 'ro_token';
+// LEGACY_TOKEN_KEY — старый ключ в localStorage (до миграции на HttpOnly-cookie).
+// Оставлен только для чистки на logout/401 (на случай, если у клиента
+// в localStorage ещё лежит мусор после Фазы 1).
+const LEGACY_TOKEN_KEY = 'ro_token';
 const REST_KEY = 'ro_restaurant';
 
-function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function buildHeaders() {
   const h = { 'Content-Type': 'application/json' };
-  const t = getToken();
-  if (t) h['X-RO-Token'] = t;
-  // Для admin-запросов нужен основной токен
+  // Для admin-запросов нужен основной токен сотрудника
   const st = localStorage.getItem('bk_session_token');
   if (st) h['X-Session-Token'] = st;
   return h;
@@ -18,20 +18,18 @@ function buildHeaders() {
 
 function buildAuthHeaders() {
   const h = {};
-  const t = getToken();
-  if (t) h['X-RO-Token'] = t;
   const st = localStorage.getItem('bk_session_token');
   if (st) h['X-Session-Token'] = st;
   return h;
 }
 
-// Обработка 401: чистим токен и сигналим UI. БЕЗ автоматического редиректа —
-// иначе во время кратковременного 401 при деплое пользователь теряет
-// несохранённые данные. Кабинет показывает баннер «Войти заново», пользователь
-// сам решает, когда уйти на логин.
+// Обработка 401: чистим клиентский кэш и сигналим UI. БЕЗ автоматического
+// редиректа — иначе во время кратковременного 401 при деплое пользователь
+// теряет несохранённые данные. Кабинет показывает баннер «Войти заново»,
+// пользователь сам решает, когда уйти на логин.
 let session401Notified = false;
 function handle401() {
-  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
   localStorage.removeItem(REST_KEY);
   if (typeof window !== 'undefined' && !session401Notified) {
     session401Notified = true;
@@ -84,7 +82,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   // === Состояние ресторана ===
   // Битый JSON в localStorage не должен ронять весь стор и интерфейс.
   const restaurant = ref(safeParseJson(localStorage.getItem(REST_KEY), null));
-  const isAuthenticated = computed(() => !!restaurant.value && !!getToken());
+  // Авторизация: с миграцией на HttpOnly-cookie токен из JS недоступен,
+  // поэтому индикатор «залогинен» — это просто наличие сохранённого ресторана.
+  // На 401 сервер сам пометит ситуацию и handle401 очистит REST_KEY.
+  const isAuthenticated = computed(() => !!restaurant.value);
 
   const sessionInfo = ref(null);
   const deliveryDays = ref([]);
@@ -102,7 +103,8 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
       body: JSON.stringify({ tg_token: tgToken, accepted_data_rules: acceptedDataRules }),
     });
     if (data.success) {
-      localStorage.setItem(TOKEN_KEY, data.token);
+      // Токен теперь живёт в HttpOnly-cookie, которую сервер выставил
+      // в этом же ответе. Здесь храним только info о ресторане для UI.
       localStorage.setItem(REST_KEY, JSON.stringify(data.restaurant));
       restaurant.value = data.restaurant;
     }
@@ -115,7 +117,6 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
       body: JSON.stringify({ restaurant_number: restaurantNumber, password, legal_entity_group: legalEntityGroup, force, accepted_data_rules: acceptedDataRules }),
     });
     if (data.success) {
-      localStorage.setItem(TOKEN_KEY, data.token);
       localStorage.setItem(REST_KEY, JSON.stringify(data.restaurant));
       restaurant.value = data.restaurant;
     }
@@ -152,7 +153,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   // Нужен при входе по tg_token — чтобы не убить активную сессию того же ресторана
   // на другом устройстве (сервер сам перезапишет session_token в tg-auth).
   function logoutLocal() {
-    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
     localStorage.removeItem(REST_KEY);
     // Чистим все локальные черновики формы заказа: они привязаны к ресторану,
     // и оставлять их — это утечка данных предыдущего юзера.
@@ -208,8 +209,6 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
       fd.append('photo', photo);
       const url = `${API_BASE}/report-missing-gtin`;
       const headers = {};
-      const t = getToken();
-      if (t) headers['X-RO-Token'] = t;
       const st = localStorage.getItem('bk_session_token');
       if (st) headers['X-Session-Token'] = st;
       const res = await fetch(url, { method: 'POST', headers, body: fd });

@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 
-const TOKEN_KEY = 'ro_token';
+// Авторизация запросов /api/push/* — через HttpOnly-cookie ro_session
+// (для ресторанов) или сессию сотрудника. Браузер прикладывает их сам.
 
 // Конвертация base64url-публичного ключа в Uint8Array для pushManager.subscribe
 function urlBase64ToUint8Array(base64String) {
@@ -12,13 +13,7 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-function buildHeaders(json = false) {
-  const h = {};
-  const t = localStorage.getItem(TOKEN_KEY);
-  if (t) h['X-RO-Token'] = t;
-  if (json) h['Content-Type'] = 'application/json';
-  return h;
-}
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export function usePushNotifications() {
   const isSupported = computed(() => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
@@ -51,7 +46,7 @@ export function usePushNotifications() {
       }
 
       // Получаем публичный VAPID-ключ от сервера
-      const keyRes = await fetch('/api/push/key', { headers: buildHeaders() });
+      const keyRes = await fetch('/api/push/key');
       const keyData = await keyRes.json();
       if (!keyRes.ok || !keyData.publicKey) {
         error.value = keyData.error || 'Не удалось получить ключ';
@@ -67,7 +62,7 @@ export function usePushNotifications() {
       // Отправляем подписку на сервер
       const subRes = await fetch('/api/push/subscribe', {
         method: 'POST',
-        headers: buildHeaders(true),
+        headers: JSON_HEADERS,
         body: JSON.stringify({
           subscription: sub.toJSON(),
           user_agent: navigator.userAgent,
@@ -100,7 +95,7 @@ export function usePushNotifications() {
       await sub.unsubscribe();
       await fetch('/api/push/unsubscribe', {
         method: 'POST',
-        headers: buildHeaders(true),
+        headers: JSON_HEADERS,
         body: JSON.stringify({ endpoint }),
       });
       isSubscribed.value = false;

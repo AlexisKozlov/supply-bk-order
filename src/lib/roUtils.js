@@ -64,12 +64,11 @@ export const EXCEL_TRACEABLE_STYLE = {
 
 // ═══ Общий fetch для кабинета ресторана ═══
 // Оборачивает fetch:
-//  - подставляет токен ресторана (X-RO-Token из localStorage)
+//  - авторизация через HttpOnly-cookie ro_session (браузер шлёт сам)
 //  - ставит Content-Type когда передаётся объект как body
 //  - таймаут по умолчанию 15 сек (через AbortController)
 //  - бросает Error при HTTP-ошибках и таймаутах (для удобной try/catch)
 
-const RO_TOKEN_KEY = 'ro_token';
 const DEFAULT_TIMEOUT = 15000;
 
 export async function roFetch(url, opts = {}) {
@@ -77,8 +76,6 @@ export async function roFetch(url, opts = {}) {
   const timeout = opts.timeout ?? DEFAULT_TIMEOUT;
 
   const headers = { ...(opts.headers || {}) };
-  const tok = localStorage.getItem(RO_TOKEN_KEY);
-  if (tok && !headers['X-RO-Token']) headers['X-RO-Token'] = tok;
 
   let body = opts.body;
   if (body && typeof body === 'object' && !(body instanceof FormData) && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) {

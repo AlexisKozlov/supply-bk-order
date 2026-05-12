@@ -17,7 +17,9 @@ import {
   pluralKegs,
 } from './kegHelpers.js';
 
-const TOKEN_KEY = 'ro_token';
+// Авторизация ресторана идёт через HttpOnly-cookie ro_session —
+// для всех запросов (включая печать ТТН и скачивание Excel) браузер
+// автоматически прикладывает её.
 
 export function useKegForm(initialIdRef, emit) {
   const toast = useToastStore();
@@ -444,18 +446,10 @@ export function useKegForm(initialIdRef, emit) {
     return true;
   }
 
-  // Локальный buildHeaders — нужен только для blob-загрузки Excel (там roFetch не подходит).
-  function buildHeaders() {
-    const h = {};
-    const t = localStorage.getItem(TOKEN_KEY);
-    if (t) h['X-RO-Token'] = t;
-    return h;
-  }
-
   async function downloadExcel() {
     if (!await checkRoutedWarning()) return;
     try {
-      const res = await fetch(`/api/keg-returns/${localId.value}/excel`, { headers: buildHeaders() });
+      const res = await fetch(`/api/keg-returns/${localId.value}/excel`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Ошибка скачивания');
@@ -476,9 +470,8 @@ export function useKegForm(initialIdRef, emit) {
 
   async function printTtn() {
     if (!await checkRoutedWarning()) return;
-    const t = localStorage.getItem(TOKEN_KEY) || '';
-    const url = `/api/keg-returns/${localId.value}/print?ro_token=${encodeURIComponent(t)}`;
-    window.open(url, '_blank');
+    // Cookie ro_session уходит в новую вкладку автоматически (same-origin).
+    window.open(`/api/keg-returns/${localId.value}/print`, '_blank');
   }
 
   // ─── Жизненный цикл
