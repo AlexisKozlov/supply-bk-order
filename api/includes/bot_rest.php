@@ -2383,18 +2383,21 @@ function corrSubmitBatch($chatId) {
     else sendMessage($chatId, $doneText, $doneBtns);
 
     // Уведомляем отдел закупок — одно сообщение со всеми позициями
-    corrNotifyPurchasersBatch($pdo, $corrIds, $state, $submitterName);
+    corrNotifyPurchasersBatch($pdo, $corrIds, $state['rest'], $state['date'], $submitterName);
 }
 
-// Уведомление отделу закупок (пакетное)
-function corrNotifyPurchasersBatch($pdo, $corrIds, $state, $submitterName) {
+// Уведомление отделу закупок (пакетное).
+// Вызывается и из бота (corrSubmitBatch), и из веб-эндпоинтов кабинета —
+// поэтому принимает простые аргументы, без зависимости от temp-стейта бота.
+function corrNotifyPurchasersBatch($pdo, $corrIds, $restNum, $deliveryDate, $submitterName) {
     global $BOT_TOKEN;
+    if (empty($corrIds)) return;
     $st = $pdo->query("SELECT u.telegram_chat_id, u.name FROM telegram_settings ts JOIN users u ON u.name = ts.user_name WHERE ts.correction_notifications = 1 AND u.telegram_chat_id IS NOT NULL");
     $recipients = $st->fetchAll();
     if (!$recipients) return;
 
     // Генерируем сообщение и кнопки
-    $msgData = corrBuildReviewMessage($pdo, $corrIds, $state['rest'], $state['date'], $submitterName);
+    $msgData = corrBuildReviewMessage($pdo, $corrIds, $restNum, $deliveryDate, $submitterName);
 
     $sentMessages = [];
     foreach ($recipients as $r) {
