@@ -192,10 +192,32 @@
               </span>
               <span v-if="!full.assignees.length" class="ts-empty">Никого</span>
             </div>
-            <select v-if="canEditStructure" v-model="newAssignee" @change="addAssignee" class="ts-assignee-add">
-              <option value="">+ Добавить…</option>
-              <option v-for="u in availableUsers" :key="u.name" :value="u.name">{{ u.name }}</option>
-            </select>
+            <div v-if="canEditStructure" class="ts-assignee-add-wrap">
+              <button type="button" class="ts-assignee-add-btn"
+                      :class="{ 'is-open': assigneePopoverOpen }"
+                      @click.stop="toggleAssigneePopover">
+                <TaskIcon name="plus" :size="13"/>
+                <span>Добавить соисполнителя</span>
+              </button>
+              <div v-if="assigneePopoverOpen" class="ts-pop ts-pop-assignee" v-click-outside-pop="closeAssigneePopover">
+                <input ref="assigneeSearchRef"
+                       v-model="assigneeSearch"
+                       class="ts-pop-search"
+                       type="text" placeholder="Поиск по имени…"
+                       @keydown.esc="closeAssigneePopover"/>
+                <div class="ts-pop-list">
+                  <button v-for="u in filteredAvailableUsers" :key="u.name"
+                          type="button" class="ts-pop-item"
+                          @click="pickAssignee(u.name)">
+                    <span class="ts-pop-item-bubble">{{ initials(u.name) }}</span>
+                    <span class="ts-pop-item-label">{{ u.name }}</span>
+                  </button>
+                  <div v-if="!filteredAvailableUsers.length" class="ts-pop-empty">
+                    {{ assigneeSearch ? 'Никого не нашли' : 'Все уже добавлены' }}
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <!-- Связи -->
@@ -545,6 +567,32 @@ const availableUsers = computed(() => {
   taken.add(store.board?.owner_name);
   return store.users.filter(u => !taken.has(u.name));
 });
+
+// Поповер «+ Добавить соисполнителя»
+const assigneePopoverOpen = ref(false);
+const assigneeSearch = ref('');
+const assigneeSearchRef = ref(null);
+function toggleAssigneePopover() {
+  assigneePopoverOpen.value = !assigneePopoverOpen.value;
+  if (assigneePopoverOpen.value) {
+    assigneeSearch.value = '';
+    nextTick(() => assigneeSearchRef.value?.focus?.());
+  }
+}
+function closeAssigneePopover() {
+  assigneePopoverOpen.value = false;
+  assigneeSearch.value = '';
+}
+const filteredAvailableUsers = computed(() => {
+  const q = assigneeSearch.value.trim().toLowerCase();
+  if (!q) return availableUsers.value;
+  return availableUsers.value.filter(u => u.name.toLowerCase().includes(q));
+});
+async function pickAssignee(name) {
+  newAssignee.value = name;
+  await addAssignee();
+  closeAssigneePopover();
+}
 
 const canDelete = computed(() => {
   if (!full.value) return false;
@@ -1245,6 +1293,73 @@ button.ts-pill { appearance: none; -webkit-appearance: none; }
 .ts-pop-item-dot.prio-bg-low    { background: var(--tk-prio-low-fg); }
 .ts-pop-item-label { flex: 1; }
 .ts-pop-item-check { color: var(--tk-accent, #E87A1E); }
+
+/* Поповер выбора соисполнителя */
+.ts-assignee-add-wrap { position: relative; display: inline-block; margin-top: 6px; }
+.ts-assignee-add-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border: 1px dashed var(--tk-border);
+  background: transparent;
+  border-radius: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--tk-text-muted);
+  cursor: pointer;
+  transition: background var(--tk-transition), border-color var(--tk-transition), color var(--tk-transition);
+}
+.ts-assignee-add-btn:hover {
+  background: var(--tk-accent-soft);
+  border-color: var(--tk-accent);
+  border-style: solid;
+  color: var(--tk-accent-text);
+}
+.ts-assignee-add-btn.is-open {
+  border-style: solid;
+  border-color: var(--tk-accent);
+  color: var(--tk-accent-text);
+  background: var(--tk-accent-soft);
+}
+.ts-pop-assignee {
+  min-width: 240px; max-width: 320px;
+  max-height: 320px;
+  padding: 6px;
+  display: flex; flex-direction: column; gap: 0;
+}
+.ts-pop-search {
+  width: 100%; box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-n-50, #FAF9F5);
+  color: var(--tk-text);
+  font-family: inherit; font-size: 12.5px;
+  margin-bottom: 4px;
+}
+.ts-pop-search:focus {
+  outline: none;
+  border-color: var(--tk-accent);
+  box-shadow: var(--tk-focus-ring);
+  background: #fff;
+}
+.ts-pop-list {
+  overflow-y: auto;
+  max-height: 240px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.ts-pop-empty {
+  padding: 14px 10px; text-align: center;
+  color: var(--tk-text-muted); font-size: 12px; font-style: italic;
+}
+.ts-pop-item-bubble {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--tk-accent), #F4A261);
+  color: #fff;
+  font-size: 10px; font-weight: 700;
+  border: 1.5px solid var(--tk-bg-card, #fff);
+}
 
 /* Приоритет — цвета по уровню */
 .ts-pill-prio-urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
