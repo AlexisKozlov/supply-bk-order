@@ -67,18 +67,12 @@
       <div class="task-card-title">{{ card.title }}</div>
     </div>
 
-    <!-- Прогресс чек-листа — тонкая заполняющаяся линия (Yougile-стиль) -->
+    <!-- Прогресс чек-листа — тонкая заполняющаяся линия (Yougile-стиль).
+         Подзадачи показывают свой прогресс прямо в заголовке «Подзадачи». -->
     <div v-if="card.checklist?.total" class="task-card-progress"
          :title="'Чек-лист: ' + card.checklist.done + ' из ' + card.checklist.total"
          :class="{ done: card.checklist.done === card.checklist.total }">
       <div class="task-card-progress-fill" :style="{ width: checklistPct + '%' }"></div>
-    </div>
-
-    <!-- Прогресс подзадач — тоже заполняющаяся линия, если подзадач больше одной -->
-    <div v-if="card.subtasks_total" class="task-card-progress task-card-progress-sub"
-         :title="'Подзадачи: ' + (card.subtasks_done || 0) + ' из ' + (card.subtasks_total || 0)"
-         :class="{ done: card.subtasks_done === card.subtasks_total }">
-      <div class="task-card-progress-fill" :style="{ width: subtasksPct + '%' }"></div>
     </div>
 
 
@@ -136,8 +130,12 @@
       </span>
     </div>
 
-    <!-- Раскрывалка подзадач (только если есть подзадачи) -->
-    <div v-if="hasSubtasks" class="subtasks-toggle" @click.stop="toggleSubtasks">
+    <!-- Раскрывалка подзадач (только если есть подзадачи).
+         Прогресс-бар встроен в строку как полупрозрачная заливка снизу. -->
+    <div v-if="hasSubtasks" class="subtasks-toggle"
+         :class="{ done: card.subtasks_done === card.subtasks_total }"
+         @click.stop="toggleSubtasks">
+      <div class="subtasks-progress-fill" :style="{ width: subtasksPct + '%' }" aria-hidden="true"></div>
       <TaskIcon :name="subtasksOpen ? 'chevronDown' : 'chevronRight'" :size="12" class="subtasks-chevron"/>
       <span class="subtasks-label">Подзадачи</span>
       <span class="subtasks-counter">{{ card.subtasks_done || 0 }}/{{ card.subtasks_total || 0 }}</span>
@@ -599,7 +597,6 @@ const vClickOutsideCard = {
   margin: 0;
   position: relative;
 }
-.task-card-progress-sub { margin-top: 2px; }
 .task-card-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--tk-accent, #E87A1E), #F4A261);
@@ -610,13 +607,6 @@ const vClickOutsideCard = {
 .task-card-progress.done .task-card-progress-fill {
   background: linear-gradient(90deg, var(--tk-success, #16A364), #4BCE97);
   box-shadow: 0 0 0 1px rgba(22,163,100,0.15);
-}
-.task-card-progress-sub .task-card-progress-fill {
-  background: linear-gradient(90deg, #635BFF, #7B82FF);
-  box-shadow: 0 0 0 1px rgba(99,91,255,0.15);
-}
-.task-card-progress-sub.done .task-card-progress-fill {
-  background: linear-gradient(90deg, var(--tk-success, #16A364), #4BCE97);
 }
 
 /* Круглый чекбокс «Готово + в архив» */
@@ -916,22 +906,38 @@ const vClickOutsideCard = {
   padding: var(--tk-s-2, 8px) var(--tk-s-1, 4px);
 }
 
-/* ═══ Раскрывалка подзадач — заголовок секции (корень дерева) ═══ */
+/* ═══ Раскрывалка подзадач — заголовок секции + встроенный прогресс ═══ */
 .subtasks-toggle {
+  position: relative;
   display: flex; align-items: center; gap: 6px;
   margin: 4px 0 0;
   padding: 6px 10px;
-  background: transparent;
+  background: var(--tk-n-100, #F3F0E8);
   border-radius: 8px;
   cursor: pointer;
   font-size: 11.5px;
   color: var(--tk-text-secondary, #534D40);
   font-weight: var(--tk-fw-semibold, 600);
   user-select: none;
+  overflow: hidden;
   transition: background var(--tk-transition, 140ms ease), color var(--tk-transition, 140ms ease);
 }
-.subtasks-toggle:hover { background: var(--tk-n-100, #F3F0E8); color: var(--tk-text, #1A1814); }
-.subtasks-chevron { color: var(--tk-text-muted); }
+.subtasks-toggle:hover { background: var(--tk-n-200, #E6E1D7); color: var(--tk-text, #1A1814); }
+.subtasks-chevron { color: var(--tk-text-muted); position: relative; z-index: 1; }
+.subtasks-label, .subtasks-counter { position: relative; z-index: 1; }
+
+/* Сам бар — полупрозрачная заливка по ширине прогресса */
+.subtasks-progress-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, rgba(99,91,255,0.20), rgba(123,130,255,0.18));
+  border-radius: inherit;
+  transition: width 280ms cubic-bezier(0.16, 1, 0.3, 1), background 200ms ease;
+  z-index: 0;
+}
+.subtasks-toggle.done .subtasks-progress-fill {
+  background: linear-gradient(90deg, rgba(22,163,100,0.22), rgba(75,206,151,0.20));
+}
 .subtasks-counter {
   margin-left: auto;
   font-weight: var(--tk-fw-semibold, 600);
