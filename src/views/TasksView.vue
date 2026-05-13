@@ -1089,7 +1089,9 @@ function onColDrop(i) {
   position: fixed; inset: 0;
   background: rgba(20, 24, 32, 0.45);
   backdrop-filter: blur(4px);
-  z-index: 10010;
+  /* z-index такой же, как у глобального .modal (10000) — чтобы ConfirmModal,
+     открываясь поверх через Teleport позже, оказывался сверху благодаря DOM-порядку. */
+  z-index: 10000;
   display: flex; align-items: center; justify-content: center;
   padding: 16px;
 }
