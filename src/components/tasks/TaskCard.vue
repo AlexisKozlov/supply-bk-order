@@ -536,11 +536,11 @@ const vClickOutsideCard = {
 }
 .task-card-title {
   flex: 1;
-  font-size: 14.5px;
+  font-size: 13.5px;
   font-weight: var(--tk-fw-semibold, 600);
   color: var(--tk-text, #1A1814);
-  line-height: 1.35;
-  letter-spacing: -0.01em;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
   word-break: break-word;
   min-width: 0;
 }
@@ -668,10 +668,10 @@ const vClickOutsideCard = {
 
 /* Универсальная плашка метаданных */
 .meta-pill {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px;
   font-weight: var(--tk-fw-semibold, 600);
-  padding: 3px 9px;
+  padding: 2px 8px;
   border-radius: var(--tk-r-pill, 999px);
   border: none; cursor: pointer;
   background: var(--tk-n-100, #F3F0E8);
@@ -732,22 +732,14 @@ const vClickOutsideCard = {
 .meta-icon-stat.done { color: var(--tk-success, #1F8F4E); }
 .meta-icon-stat[role="button"], .meta-icon-stat:not(.done):hover { cursor: default; }
 
-/* Срок горит — мягкая подсветка карточки */
-.task-card.due-fire { border-color: var(--tk-warning, #B65E03); }
-.task-card.due-fire::after {
-  content: '';
-  position: absolute; inset: -1px;
-  border-radius: var(--tk-r-md, 8px);
-  border: 1px solid var(--tk-warning, #B65E03);
-  pointer-events: none;
+/* Срок горит / просрочено — мягкое тонирование рамки без второго ободка.
+   Информативную нагрузку несёт также красная/жёлтая капсула срока внизу. */
+.task-card.due-fire {
+  border-color: color-mix(in srgb, var(--tk-warning, #BB6A0A) 35%, var(--tk-border, #E6E1D7) 65%);
 }
-.task-card.due-overdue, .task-card.is-overdue { border-color: var(--tk-danger, #C9372C); }
-.task-card.due-overdue::after, .task-card.is-overdue::after {
-  content: '';
-  position: absolute; inset: -1px;
-  border-radius: var(--tk-r-md, 8px);
-  border: 1px solid var(--tk-danger, #C9372C);
-  pointer-events: none;
+.task-card.due-overdue,
+.task-card.is-overdue {
+  border-color: color-mix(in srgb, var(--tk-danger, #D33A2C) 40%, var(--tk-border, #E6E1D7) 60%);
 }
 
 /* ═══ Соисполнители ═══ */
@@ -869,82 +861,89 @@ const vClickOutsideCard = {
   padding: var(--tk-s-2, 8px) var(--tk-s-1, 4px);
 }
 
-/* ═══ Раскрывалка подзадач ═══ */
+/* ═══ Раскрывалка подзадач — заголовок секции с прогрессом справа ═══ */
 .subtasks-toggle {
-  display: flex; align-items: center; gap: var(--tk-s-1, 4px);
-  margin-top: var(--tk-s-2, 8px);
-  padding: var(--tk-s-1, 4px) var(--tk-s-2, 8px);
-  background: rgba(9,30,66,0.05);
-  border-radius: var(--tk-r-sm, 4px);
+  display: flex; align-items: center; gap: 6px;
+  margin: 2px -4px 0;
+  padding: 6px 10px;
+  background: transparent;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: var(--tk-fz-xs, 11px);
-  color: var(--tk-text-secondary, #44546F);
+  font-size: 11.5px;
+  color: var(--tk-text-secondary, #534D40);
   font-weight: var(--tk-fw-semibold, 600);
   user-select: none;
-  transition: background var(--tk-transition, 120ms ease);
+  transition: background var(--tk-transition, 140ms ease), color var(--tk-transition, 140ms ease);
 }
-.subtasks-toggle:hover { background: rgba(9,30,66,0.09); color: var(--tk-text, #172B4D); }
+.subtasks-toggle:hover { background: var(--tk-n-100, #F3F0E8); color: var(--tk-text, #1A1814); }
 .subtasks-chevron { color: var(--tk-text-muted); }
 .subtasks-counter {
   margin-left: auto;
-  font-weight: var(--tk-fw-bold, 700);
-  background: var(--tk-prio-medium-bg);
-  color: var(--tk-prio-medium-fg);
-  padding: 1px var(--tk-s-2, 8px);
-  border-radius: var(--tk-r-sm, 4px);
+  font-weight: var(--tk-fw-semibold, 600);
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text-secondary, #534D40);
+  padding: 1px 8px;
+  border-radius: 999px;
   font-size: 10.5px;
   font-feature-settings: 'tnum';
 }
 
+/* Список подзадач — каждая полноценная мини-карточка как в Yougile */
 .subtasks-list {
-  margin-top: var(--tk-s-1, 4px);
-  display: flex; flex-direction: column; gap: var(--tk-s-1, 4px);
-  padding: var(--tk-s-1, 4px) 0;
+  margin-top: 6px;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 0;
 }
 .subtask-mini {
-  display: flex; align-items: center; gap: var(--tk-s-2, 8px);
+  display: flex; align-items: center; gap: 10px;
   background: var(--tk-bg-card, #fff);
-  border: 1px solid var(--tk-border-soft, #E1E4E8);
-  border-radius: var(--tk-r-sm, 4px);
-  padding: 6px var(--tk-s-2, 8px);
-  font-size: var(--tk-fz-sm, 12px);
-  transition: border-color var(--tk-transition, 120ms ease), background var(--tk-transition, 120ms ease);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 10px;
+  padding: 9px 12px;
+  min-height: 38px;
+  font-size: 12.5px;
+  transition: border-color var(--tk-transition, 140ms ease), box-shadow var(--tk-transition, 140ms ease);
 }
-.subtask-mini:hover { border-color: var(--tk-border, #DCDFE4); background: var(--tk-n-50, #F7F8F9); }
-.subtask-mini.done { background: var(--tk-n-50, #F7F8F9); }
+.subtask-mini:hover {
+  border-color: var(--tk-border, #E6E1D7);
+  box-shadow: 0 2px 6px rgba(15,23,42,0.06);
+}
+.subtask-mini.done { opacity: 0.6; }
 .subtask-mini.done .subtask-mini-title { text-decoration: line-through; color: var(--tk-text-muted); }
-.subtask-mini.overdue .subtask-mini-due { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
+.subtask-mini.overdue { border-color: color-mix(in srgb, var(--tk-danger, #D33A2C) 35%, var(--tk-border, #E6E1D7) 65%); }
 
-/* ═══ Круглый чекбокс подзадачи ═══ */
+/* ═══ Круглый чекбокс подзадачи (как кружок-радио в Yougile) ═══ */
 .round-chk {
   appearance: none; -webkit-appearance: none;
-  width: 18px; height: 18px;
-  border: 2px solid var(--tk-n-300, #B3B9C4);
+  width: 20px; height: 20px;
+  border: 1.5px solid var(--tk-n-300, #C8C1B2);
   border-radius: 50%;
   background: var(--tk-n-0, #fff);
   cursor: pointer;
   flex-shrink: 0; margin: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: all var(--tk-transition, 120ms ease);
+  transition: all var(--tk-transition, 140ms ease);
   position: relative;
 }
-.round-chk:hover { border-color: var(--tk-success, #1F8F4E); }
+.round-chk:hover { border-color: var(--tk-success, #16A364); }
 .round-chk:checked {
-  background: var(--tk-success, #1F8F4E);
-  border-color: var(--tk-success, #1F8F4E);
+  background: var(--tk-success, #16A364);
+  border-color: var(--tk-success, #16A364);
 }
 .round-chk:checked::after {
   content: ''; display: block;
-  width: 8px; height: 4px;
+  width: 9px; height: 5px;
   border-left: 2px solid #fff; border-bottom: 2px solid #fff;
   transform: rotate(-45deg) translate(1px, -1px);
 }
+
 .subtask-mini-title {
   flex: 1; min-width: 0; cursor: pointer;
-  color: var(--tk-text, #172B4D);
+  color: var(--tk-text, #1A1814);
+  font-weight: var(--tk-fw-medium, 500);
   line-height: 1.3;
   display: flex; align-items: center; justify-content: space-between;
-  gap: var(--tk-s-2, 8px);
+  gap: 8px;
   word-break: break-word;
 }
 .subtask-mini-title:hover { color: var(--tk-accent-text, #B85A0E); }
@@ -952,11 +951,12 @@ const vClickOutsideCard = {
   flex-shrink: 0;
   font-size: 10.5px;
   font-weight: var(--tk-fw-semibold, 600);
-  padding: 1px var(--tk-s-2, 8px);
-  border-radius: var(--tk-r-sm, 4px);
+  padding: 2px 8px;
+  border-radius: 999px;
   background: var(--tk-success-soft);
   color: var(--tk-success);
 }
+.subtask-mini.overdue .subtask-mini-due { background: var(--tk-danger-soft); color: var(--tk-danger); }
 
 .subtask-add-form {
   display: flex; flex-direction: column; gap: var(--tk-s-1, 4px);

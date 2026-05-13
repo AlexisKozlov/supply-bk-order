@@ -8,7 +8,6 @@
     @drop="onColumnDrop"
   >
     <div class="task-column-header">
-      <span v-if="!column.is_archive_column" class="task-column-color-dot" :style="{ background: column.color || '#9E9E9E' }"></span>
       <TaskIcon v-if="column.is_archive_column" name="archive" :size="14" class="archive-icon"/>
       <div class="task-column-title-wrap">
         <span v-if="!editingTitle || column.is_archive_column" class="task-column-title"
@@ -342,10 +341,15 @@ defineExpose({});
   display: flex;
   flex-direction: column;
   max-height: 100%;
-  border: 1px solid var(--tk-border-soft, #EAEDF4);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  /* Цветная полоска сверху — отдельный border-top, не клипуется
+     скруглением, не ломает popovers внутри колонки. */
+  border-top: 3px solid var(--col-color, #C8C1B2);
   box-shadow: 0 1px 2px rgba(15,23,42,0.04);
   transition: border-color var(--tk-transition, 140ms ease), background var(--tk-transition, 140ms ease);
 }
+.task-column.is-archive { border-top-color: var(--tk-n-300, #C8C1B2); }
+.task-column.wip-exceeded { border-top-color: var(--tk-danger, #D33A2C); }
 .task-column.is-drop-target {
   border-color: var(--tk-accent, #E87A1E);
   background: var(--tk-accent-soft, rgba(232,122,30,0.10));
@@ -367,12 +371,6 @@ defineExpose({});
   margin-right: 2px;
 }
 .task-column { position: relative; }
-.task-column-color-dot {
-  flex-shrink: 0;
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  background: var(--col-color, #9E9E9E);
-}
 
 .task-column-header {
   padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-2, 8px);
@@ -382,9 +380,9 @@ defineExpose({});
 .task-column-title-wrap { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .task-column-title {
   font-weight: var(--tk-fw-semibold, 600);
-  font-size: 14.5px;
+  font-size: 13.5px;
   color: var(--tk-text, #1A1814);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   cursor: text;
 }
@@ -402,7 +400,7 @@ defineExpose({});
 .task-column-count {
   background: var(--tk-n-100, #F3F0E8);
   color: var(--tk-text-muted, #6E6657);
-  font-size: 11.5px; font-weight: var(--tk-fw-semibold, 600);
+  font-size: 11px; font-weight: var(--tk-fw-semibold, 600);
   padding: 2px 8px; border-radius: 999px;
   font-feature-settings: 'tnum';
   display: inline-flex; align-items: center; gap: 4px;
@@ -599,10 +597,6 @@ defineExpose({});
 .task-column.wip-exceeded {
   box-shadow: 0 0 0 2px rgba(201,55,44,0.35) inset;
 }
-.task-column.wip-exceeded .task-column-color-dot {
-  background: var(--tk-danger, #D33A2C) !important;
-}
-
 .task-column-body {
   flex: 1;
   overflow-y: auto;
