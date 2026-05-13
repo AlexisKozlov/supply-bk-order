@@ -80,9 +80,18 @@ const editor = useEditor({
   ],
   editorProps: {
     handleKeyDown(_view, event) {
-      if (event.key === 'Enter' && event.ctrlKey) {
-        emit('ctrl-enter');
-        return true;
+      if (event.key === 'Enter') {
+        // Ctrl+Enter — отправка (классическое сочетание)
+        if (event.ctrlKey || event.metaKey) {
+          emit('ctrl-enter');
+          return true;
+        }
+        // В compact-режиме (чат) Enter без модификаторов тоже отправляет;
+        // для переноса строки — Shift+Enter.
+        if (props.compact && !event.shiftKey) {
+          emit('ctrl-enter');
+          return true;
+        }
       }
       return false;
     },

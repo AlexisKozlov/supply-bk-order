@@ -145,12 +145,24 @@
                   <TaskIcon name="close" :size="12"/>
                 </button>
               </span>
-              <span v-if="!full.assignees.length" class="ts-empty">Никого</span>
+              <span v-if="!full.assignees.length && !(full.protocol_co_assignees?.length)" class="ts-empty">Никого</span>
             </div>
             <select v-if="canEditStructure" v-model="newAssignee" @change="addAssignee" class="ts-assignee-add">
               <option value="">+ Добавить…</option>
               <option v-for="u in availableUsers" :key="u.name" :value="u.name">{{ u.name }}</option>
             </select>
+
+            <!-- Соисполнители из протокола (read-only) — у каждого своя копия задачи на своей доске. -->
+            <div v-if="full.protocol_co_assignees?.length" class="ts-protocol-coass">
+              <div class="ts-protocol-coass-title">Также ответственны по протоколу:</div>
+              <div class="ts-assignees">
+                <span v-for="n in full.protocol_co_assignees" :key="'pco-' + n" class="ts-chip ts-chip-ghost"
+                      :title="'У ' + n + ' своя копия задачи на их доске'">
+                  <span class="ts-chip-bubble">{{ initials(n) }}</span>
+                  <span class="ts-chip-name">{{ n }}</span>
+                </span>
+              </div>
+            </div>
           </section>
 
           <!-- Связи -->
@@ -317,7 +329,7 @@
           </div>
           <div class="ts-chat-input">
             <MarkdownEditor v-model="newComment" :compact="true"
-                            placeholder="Сообщение… (Ctrl+Enter — отправить)"
+                            placeholder="Сообщение… (Enter — отправить, Shift+Enter — перенос строки)"
                             @ctrl-enter="submitComment"/>
             <button class="btn primary" @click="submitComment" :disabled="!newComment.trim()">Отправить</button>
           </div>
@@ -1360,7 +1372,8 @@ function historyText(h) {
 }
 .ts-chk-group-title-input:focus { border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 .ts-chk-group-del {
-  margin-left: auto;
+  /* margin-left убрали: section-meta уже отжата вправо через margin-left:auto,
+     корзина сидит сразу за счётчиком (тоже справа). */
   opacity: 0;
   transition: opacity var(--tk-transition);
 }
@@ -1577,6 +1590,28 @@ function historyText(h) {
   font-weight: 900;
   font-size: 12px;
   margin-left: 2px;
+}
+
+/* Read-only «протокольные» соисполнители: у них своя копия задачи на своей доске */
+.ts-chip-ghost {
+  background: transparent;
+  border: 1px dashed var(--tk-border);
+  color: var(--tk-text-muted);
+}
+.ts-chip-ghost .ts-chip-bubble {
+  background: var(--tk-n-200);
+  color: var(--tk-text-secondary);
+}
+.ts-protocol-coass {
+  margin-top: var(--tk-s-3);
+  padding-top: var(--tk-s-2);
+  border-top: 1px dashed var(--tk-border-soft);
+}
+.ts-protocol-coass-title {
+  font-size: 11px; font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-muted);
+  margin-bottom: 6px;
+  text-transform: none;
 }
 
 .ts-assignee-add {

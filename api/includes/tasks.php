@@ -852,6 +852,21 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             $parentInfo = $s->fetch() ?: null;
         }
 
+        // Соисполнители из протокола: если карточка пришла из решения протокола,
+        // у каждого ответственного — своя копия на своей доске. На текущей карточке
+        // покажем имена ОСТАЛЬНЫХ ответственных по тому же решению (read-only).
+        $protocolCoAssignees = [];
+        try {
+            $pca = $pdo->prepare("
+                SELECT DISTINCT pdc2.user_name
+                FROM protocol_decision_cards pdc1
+                JOIN protocol_decision_cards pdc2 ON pdc2.decision_id = pdc1.decision_id
+                WHERE pdc1.card_id = ? AND pdc2.user_name != COALESCE((SELECT b.owner_name FROM tasks_cards c JOIN tasks_boards b ON b.id = c.board_id WHERE c.id = pdc1.card_id), '')
+            ");
+            $pca->execute([$cardId]);
+            $protocolCoAssignees = array_column($pca->fetchAll(), 'user_name');
+        } catch (\Throwable $e) { /* таблицы протоколов могут отсутствовать в части окружений */ }
+
         tRespond([
             'card'        => $card,
             'checklist'   => $checklist,           // плоский (для обратной совместимости)
@@ -865,6 +880,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             'attachments' => $attachments,
             'subtasks'    => $subtasks,
             'parent'      => $parentInfo,
+            'protocol_co_assignees' => $protocolCoAssignees,
         ]);
     }
 
