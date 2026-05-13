@@ -49,10 +49,19 @@ export const tasksApi = {
   deleteLabel(id)               { return call('DELETE', `/labels/${id}`); },
   setCardLabels(cardId, labelIds) { return call('POST', `/cards/${cardId}/labels`, { label_ids: labelIds }); },
 
-  // Чек-лист
-  addChecklist(cardId, title)        { return call('POST',  `/cards/${cardId}/checklist`, { title }); },
+  // Чек-лист (пункты)
+  addChecklist(cardId, title, checklistId = null) {
+    const body = { title };
+    if (checklistId) body.checklist_id = checklistId;
+    return call('POST', `/cards/${cardId}/checklist`, body);
+  },
   updateChecklistItem(id, payload)   { return call('PATCH', `/checklist/${id}`, payload); },
   deleteChecklistItem(id)            { return call('DELETE',`/checklist/${id}`); },
+
+  // Чек-листы как группы (несколько на карточку)
+  addChecklistGroup(cardId, title)   { return call('POST',  `/cards/${cardId}/checklists`, { title }); },
+  updateChecklistGroup(id, payload)  { return call('PATCH', `/checklists/${id}`, payload); },
+  deleteChecklistGroup(id)           { return call('DELETE',`/checklists/${id}`); },
 
   // Комментарии
   addComment(cardId, body)           { return call('POST',  `/cards/${cardId}/comments`, { body }); },

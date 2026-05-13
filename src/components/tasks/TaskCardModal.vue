@@ -49,16 +49,22 @@
           </label>
         </div>
 
-        <!-- Вкладки -->
+        <!-- Вкладки (Yougile-стиль: тематически разделено) -->
         <div class="ts-tabs">
           <button class="ts-tab" :class="{ active: tab === 'main' }" @click="tab = 'main'">Описание</button>
+          <button v-if="!full.parent" class="ts-tab" :class="{ active: tab === 'subs' }" @click="tab = 'subs'">
+            Подзадачи
+            <span v-if="subtasksTotal || checklistTotal" class="ts-tab-badge">
+              {{ (subtasksDone + checklistDone) }}/{{ (subtasksTotal + checklistTotal) }}
+            </span>
+          </button>
           <button class="ts-tab" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">
             Чат <span v-if="full.comments?.length" class="ts-tab-badge">{{ full.comments.length }}</span>
           </button>
           <button class="ts-tab" :class="{ active: tab === 'history' }" @click="tab = 'history'">История</button>
         </div>
 
-        <!-- ВКЛАДКА «ОПИСАНИЕ» -->
+        <!-- ВКЛАДКА «ОПИСАНИЕ» — только описание, метки, файлы, связи -->
         <div v-if="tab === 'main'" class="ts-pane">
 
           <!-- Описание -->
@@ -78,41 +84,6 @@
                       :style="{ background: full.label_ids.includes(l.id) ? l.color : 'transparent', borderColor: l.color, color: full.label_ids.includes(l.id) ? '#fff' : l.color }"
                       @click="toggleLabel(l)">{{ l.title }}</button>
               <button class="ts-label add-label" @click="addNewLabel">+ Метка</button>
-            </div>
-          </section>
-
-          <!-- Чек-лист -->
-          <section class="ts-section">
-            <div class="ts-section-title">
-              Чек-лист
-              <span v-if="checklistTotal" class="ts-section-meta">{{ checklistDone }}/{{ checklistTotal }}</span>
-            </div>
-            <div v-if="checklistTotal" class="ts-progress">
-              <div class="ts-progress-bar" :style="{ width: checklistPct + '%' }"></div>
-            </div>
-            <ul class="ts-checklist">
-              <li v-for="item in full.checklist" :key="item.id" class="ts-chk-item">
-                <input type="checkbox" class="ts-chk-box" :checked="!!item.is_done" @change="toggleChecklist(item)" />
-                <span v-if="editingChecklistId !== item.id" class="ts-chk-text"
-                      :class="{ done: item.is_done }"
-                      @click="startEditChecklist(item)">{{ item.title || '(пусто)' }}</span>
-                <input v-else type="text" class="ts-chk-input"
-                       :ref="el => editingInputRef = el"
-                       v-model="editingChecklistTitle"
-                       @blur="saveEditChecklist(item)"
-                       @keydown.enter.prevent="saveEditChecklist(item)"
-                       @keydown.esc="cancelEditChecklist" />
-                <button class="ts-icon-btn" @click="deleteChecklist(item)" title="Удалить">
-                  <TaskIcon name="close" :size="14"/>
-                </button>
-              </li>
-            </ul>
-            <div class="ts-chk-add">
-              <input v-model="newChecklistTitle" type="text" placeholder="Новый пункт…"
-                     @keydown.enter="addChecklistItem" />
-              <button class="btn primary ts-btn-sm" @click="addChecklistItem" :disabled="!newChecklistTitle.trim()">
-                <TaskIcon name="plus" :size="14"/>
-              </button>
             </div>
           </section>
 
@@ -158,42 +129,6 @@
                 </div>
               </li>
             </ul>
-          </section>
-
-          <!-- Подзадачи (только у корневых карточек) -->
-          <section v-if="!full.parent" class="ts-section">
-            <div class="ts-section-title">
-              Подзадачи
-              <span v-if="subtasksTotal" class="ts-section-meta">{{ subtasksDone }}/{{ subtasksTotal }}</span>
-            </div>
-            <div v-if="subtasksTotal" class="ts-progress">
-              <div class="ts-progress-bar" :style="{ width: subtasksPct + '%', background: '#42A5F5' }"></div>
-            </div>
-            <ul class="ts-subtasks">
-              <li v-for="st in full.subtasks" :key="st.id" class="ts-sub-item">
-                <input type="checkbox" class="ts-round-chk" :checked="!!st.is_done" @change="toggleSubtaskDone(st)" />
-                <button class="ts-sub-text" :class="{ done: st.is_done }" @click="$emit('open-card', st.id)">
-                  <span class="ts-sub-title">{{ st.title }}</span>
-                  <span class="ts-sub-meta">
-                    <span v-if="st.priority && st.priority !== 'medium'" class="ts-sub-prio" :class="'prio-bg-' + st.priority">{{ priorityShort(st.priority) }}</span>
-                    <span v-if="st.due_date" class="ts-sub-due" :class="{ overdue: isSubOverdue(st) }">{{ formatSubDue(st.due_date) }}</span>
-                    <span v-if="st.assignees?.length" class="ts-sub-assignees">
-                      <span v-for="(n, i) in st.assignees.slice(0,2)" :key="i" class="ts-sub-bubble" :title="n">{{ initials(n) }}</span>
-                    </span>
-                  </span>
-                </button>
-                <button class="ts-icon-btn" @click="deleteSubtask(st)" title="Удалить">
-                  <TaskIcon name="close" :size="14"/>
-                </button>
-              </li>
-            </ul>
-            <div class="ts-chk-add">
-              <input v-model="newSubtaskTitle" type="text" placeholder="Новая подзадача…"
-                     @keydown.enter="addSubtask" />
-              <button class="btn primary ts-btn-sm" @click="addSubtask" :disabled="!newSubtaskTitle.trim()">
-                <TaskIcon name="plus" :size="14"/>
-              </button>
-            </div>
           </section>
 
           <!-- Соисполнители -->
@@ -264,6 +199,97 @@
           </section>
         </div>
 
+        <!-- ВКЛАДКА «ПОДЗАДАЧИ» — подзадачи + чек-лист. Только у корневых карточек. -->
+        <div v-if="tab === 'subs' && !full.parent" class="ts-pane">
+
+          <!-- Подзадачи -->
+          <section class="ts-section">
+            <div class="ts-section-title">
+              Подзадачи
+              <span v-if="subtasksTotal" class="ts-section-meta">{{ subtasksDone }}/{{ subtasksTotal }}</span>
+            </div>
+            <div v-if="subtasksTotal" class="ts-progress">
+              <div class="ts-progress-bar" :style="{ width: subtasksPct + '%', background: '#635BFF' }"></div>
+            </div>
+            <ul class="ts-subtasks">
+              <li v-for="st in full.subtasks" :key="st.id" class="ts-sub-item">
+                <input type="checkbox" class="ts-round-chk" :checked="!!st.is_done" @change="toggleSubtaskDone(st)" />
+                <button class="ts-sub-text" :class="{ done: st.is_done }" @click="$emit('open-card', st.id)">
+                  <span class="ts-sub-title">{{ st.title }}</span>
+                  <span class="ts-sub-meta">
+                    <span v-if="st.priority && st.priority !== 'medium'" class="ts-sub-prio" :class="'prio-bg-' + st.priority">{{ priorityShort(st.priority) }}</span>
+                    <span v-if="st.due_date" class="ts-sub-due" :class="{ overdue: isSubOverdue(st) }">{{ formatSubDue(st.due_date) }}</span>
+                    <span v-if="st.assignees?.length" class="ts-sub-assignees">
+                      <span v-for="(n, i) in st.assignees.slice(0,2)" :key="i" class="ts-sub-bubble" :title="n">{{ initials(n) }}</span>
+                    </span>
+                  </span>
+                </button>
+                <button class="ts-icon-btn" @click="deleteSubtask(st)" title="Удалить">
+                  <TaskIcon name="close" :size="14"/>
+                </button>
+              </li>
+            </ul>
+            <div class="ts-chk-add">
+              <input v-model="newSubtaskTitle" type="text" placeholder="Новая подзадача…"
+                     @keydown.enter="addSubtask" />
+              <button class="btn primary ts-btn-sm" @click="addSubtask" :disabled="!newSubtaskTitle.trim()">
+                <TaskIcon name="plus" :size="14"/>
+              </button>
+            </div>
+          </section>
+
+          <!-- Чек-листы (несколько групп на карточку) -->
+          <section v-for="g in full.checklists" :key="'g' + g.id" class="ts-section ts-chk-group">
+            <div class="ts-section-title">
+              <input v-if="editingGroupId === g.id" ref="groupTitleInputRef"
+                     v-model="editingGroupTitle"
+                     class="ts-chk-group-title-input"
+                     @blur="saveGroupTitle(g)"
+                     @keydown.enter.prevent="saveGroupTitle(g)"
+                     @keydown.esc="cancelEditGroup" />
+              <span v-else class="ts-chk-group-title"
+                    @click="startEditGroup(g)" title="Переименовать">{{ g.title || 'Чек-лист' }}</span>
+              <span v-if="groupItemsTotal(g)" class="ts-section-meta">{{ groupItemsDone(g) }}/{{ groupItemsTotal(g) }}</span>
+              <button class="ts-icon-btn ts-chk-group-del" @click="deleteGroup(g)" title="Удалить чек-лист">
+                <TaskIcon name="trash" :size="13"/>
+              </button>
+            </div>
+            <div v-if="groupItemsTotal(g)" class="ts-progress">
+              <div class="ts-progress-bar" :style="{ width: groupItemsPct(g) + '%' }"></div>
+            </div>
+            <ul class="ts-checklist">
+              <li v-for="item in (g.items || [])" :key="item.id" class="ts-chk-item">
+                <input type="checkbox" class="ts-chk-box" :checked="!!item.is_done" @change="toggleChecklist(item)" />
+                <span v-if="editingChecklistId !== item.id" class="ts-chk-text"
+                      :class="{ done: item.is_done }"
+                      @click="startEditChecklist(item)">{{ item.title || '(пусто)' }}</span>
+                <input v-else type="text" class="ts-chk-input"
+                       :ref="el => editingInputRef = el"
+                       v-model="editingChecklistTitle"
+                       @blur="saveEditChecklist(item)"
+                       @keydown.enter.prevent="saveEditChecklist(item)"
+                       @keydown.esc="cancelEditChecklist" />
+                <button class="ts-icon-btn" @click="deleteChecklist(item)" title="Удалить">
+                  <TaskIcon name="close" :size="14"/>
+                </button>
+              </li>
+            </ul>
+            <div class="ts-chk-add">
+              <input v-model="newItemByGroup[g.id]" type="text" placeholder="Новый пункт…"
+                     @keydown.enter="addItemToGroup(g)" />
+              <button class="btn primary ts-btn-sm" @click="addItemToGroup(g)" :disabled="!(newItemByGroup[g.id] || '').trim()">
+                <TaskIcon name="plus" :size="14"/>
+              </button>
+            </div>
+          </section>
+
+          <!-- Кнопка добавить новый чек-лист -->
+          <button class="ts-add-checklist-btn" @click="createChecklistGroup">
+            <TaskIcon name="plus" :size="14"/>
+            <span>Новый чек-лист</span>
+          </button>
+        </div>
+
         <!-- ВКЛАДКА «ЧАТ» -->
         <div v-if="tab === 'chat'" class="ts-pane ts-chat-pane">
           <div class="ts-chat-list" ref="chatListRef">
@@ -316,7 +342,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -367,9 +393,23 @@ const columnTitle = computed(() => {
   return columns.value.find(c => c.id === full.value.card.column_id)?.title || '';
 });
 
-const checklistTotal = computed(() => full.value?.checklist?.length || 0);
-const checklistDone = computed(() => full.value?.checklist?.filter(i => i.is_done).length || 0);
+const checklistTotal = computed(() => {
+  let n = 0;
+  for (const g of (full.value?.checklists || [])) n += (g.items || []).length;
+  return n || (full.value?.checklist?.length || 0);
+});
+const checklistDone = computed(() => {
+  let n = 0;
+  for (const g of (full.value?.checklists || [])) for (const i of (g.items || [])) if (i.is_done) n++;
+  if (!full.value?.checklists?.length) return full.value?.checklist?.filter(i => i.is_done).length || 0;
+  return n;
+});
 const checklistPct = computed(() => checklistTotal.value ? Math.round(checklistDone.value / checklistTotal.value * 100) : 0);
+
+// Хелперы для отдельной группы чек-листа
+function groupItemsTotal(g) { return (g?.items || []).length; }
+function groupItemsDone(g)  { return (g?.items || []).filter(i => i.is_done).length; }
+function groupItemsPct(g)   { const t = groupItemsTotal(g); return t ? Math.round(groupItemsDone(g) / t * 100) : 0; }
 
 const subtasksTotal = computed(() => full.value?.subtasks?.length || 0);
 const subtasksDone = computed(() => full.value?.subtasks?.filter(s => s.is_done).length || 0);
@@ -453,14 +493,32 @@ function onDueChange(e) {
   patch({ due_date: v.replace('T', ' ') + ':00' });
 }
 
-// ─── Чек-лист ───
-async function addChecklistItem() {
-  const t = newChecklistTitle.value.trim();
+// ─── Чек-листы (несколько групп) ───
+// Состояние ввода/редактирования на уровне групп
+const newItemByGroup = reactive({});                  // { [groupId]: 'текст нового пункта' }
+const editingGroupId = ref(null);
+const editingGroupTitle = ref('');
+const groupTitleInputRef = ref(null);
+
+function findItemRef(itemId) {
+  // Возвращает { group, item } для пункта чек-листа в текущих группах
+  for (const g of (full.value?.checklists || [])) {
+    const it = (g.items || []).find(i => i.id === itemId);
+    if (it) return { group: g, item: it };
+  }
+  return null;
+}
+
+async function addItemToGroup(group) {
+  const t = (newItemByGroup[group.id] || '').trim();
   if (!t) return;
   try {
-    const r = await tasksApi.addChecklist(props.cardId, t);
-    full.value.checklist.push({ id: r.id, title: t, is_done: 0 });
-    newChecklistTitle.value = '';
+    const r = await tasksApi.addChecklist(props.cardId, t, group.id);
+    if (!group.items) group.items = [];
+    group.items.push({ id: r.id, title: t, is_done: 0, checklist_id: group.id });
+    // Поддерживаем плоский checklist для счётчика в таб-бейдже
+    if (full.value.checklist) full.value.checklist.push({ id: r.id, title: t, is_done: 0, checklist_id: group.id });
+    newItemByGroup[group.id] = '';
     refreshCardSummary();
   } catch (e) { showError(e); }
 }
@@ -469,6 +527,9 @@ async function toggleChecklist(item) {
   try {
     await tasksApi.updateChecklistItem(item.id, { is_done: newVal });
     item.is_done = newVal;
+    // Зеркалим в плоский массив
+    const flat = (full.value.checklist || []).find(i => i.id === item.id);
+    if (flat) flat.is_done = newVal;
     refreshCardSummary();
   } catch (e) { showError(e); }
 }
@@ -484,6 +545,8 @@ async function saveEditChecklist(item) {
   try {
     await tasksApi.updateChecklistItem(item.id, { title: t });
     item.title = t;
+    const flat = (full.value.checklist || []).find(i => i.id === item.id);
+    if (flat) flat.title = t;
   } catch (e) { showError(e); }
   editingChecklistTitle.value = '';
 }
@@ -491,7 +554,58 @@ function cancelEditChecklist() { editingChecklistId.value = null; editingCheckli
 async function deleteChecklist(item) {
   try {
     await tasksApi.deleteChecklistItem(item.id);
-    full.value.checklist = full.value.checklist.filter(i => i.id !== item.id);
+    const ref = findItemRef(item.id);
+    if (ref) ref.group.items = (ref.group.items || []).filter(i => i.id !== item.id);
+    if (full.value.checklist) full.value.checklist = full.value.checklist.filter(i => i.id !== item.id);
+    refreshCardSummary();
+  } catch (e) { showError(e); }
+}
+
+// ─── Группы чек-листа ───
+async function createChecklistGroup() {
+  try {
+    const title = 'Чек-лист';
+    const r = await tasksApi.addChecklistGroup(props.cardId, title);
+    if (!full.value.checklists) full.value.checklists = [];
+    full.value.checklists.push({ id: r.id, title: r.title || title, sort_order: r.sort_order || 0, items: [] });
+    // Сразу вход в редактирование названия
+    nextTick(() => startEditGroup(full.value.checklists[full.value.checklists.length - 1]));
+  } catch (e) { showError(e); }
+}
+function startEditGroup(g) {
+  editingGroupId.value = g.id;
+  editingGroupTitle.value = g.title || '';
+  nextTick(() => {
+    const ref = groupTitleInputRef.value;
+    const el = Array.isArray(ref) ? ref[ref.length - 1] : ref;
+    el?.focus?.();
+    el?.select?.();
+  });
+}
+function cancelEditGroup() { editingGroupId.value = null; editingGroupTitle.value = ''; }
+async function saveGroupTitle(g) {
+  const t = (editingGroupTitle.value || '').trim() || 'Чек-лист';
+  editingGroupId.value = null;
+  if (t === g.title) { editingGroupTitle.value = ''; return; }
+  try {
+    await tasksApi.updateChecklistGroup(g.id, { title: t });
+    g.title = t;
+  } catch (e) { showError(e); }
+  editingGroupTitle.value = '';
+}
+async function deleteGroup(g) {
+  const total = groupItemsTotal(g);
+  const ok = total === 0 ? true : await dlg.confirm(
+    'Удалить чек-лист',
+    `В этом чек-листе ${total} пункт(ов). Удалить вместе со всеми пунктами?`,
+    { okText: 'Удалить', danger: true }
+  );
+  if (!ok) return;
+  try {
+    await tasksApi.deleteChecklistGroup(g.id);
+    full.value.checklists = (full.value.checklists || []).filter(x => x.id !== g.id);
+    // Чистим плоский checklist от пунктов этой группы
+    if (full.value.checklist) full.value.checklist = full.value.checklist.filter(i => i.checklist_id !== g.id);
     refreshCardSummary();
   } catch (e) { showError(e); }
 }
@@ -1223,6 +1337,53 @@ function historyText(h) {
   font-size: var(--tk-fz-md);
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 36px;
+}
+
+/* Группа чек-листа: заголовок редактируется, есть кнопка удаления группы */
+.ts-chk-group { position: relative; }
+.ts-chk-group-title {
+  cursor: text;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background var(--tk-transition);
+}
+.ts-chk-group-title:hover { background: var(--tk-n-100, #F3F0E8); }
+.ts-chk-group-title-input {
+  flex: 1; min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-n-0);
+  color: var(--tk-text);
+  font-family: inherit; font-size: inherit; font-weight: inherit;
+  outline: none;
+}
+.ts-chk-group-title-input:focus { border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+.ts-chk-group-del {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--tk-transition);
+}
+.ts-chk-group:hover .ts-chk-group-del { opacity: 1; }
+
+/* Кнопка «+ Новый чек-лист» */
+.ts-add-checklist-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 4px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px dashed var(--tk-border);
+  border-radius: 8px;
+  color: var(--tk-text-muted);
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--tk-transition), border-color var(--tk-transition), color var(--tk-transition);
+}
+.ts-add-checklist-btn:hover {
+  background: var(--tk-accent-soft);
+  border-color: var(--tk-accent);
+  border-style: solid;
+  color: var(--tk-accent-text);
 }
 
 /* ═══ Подзадачи ═══ */

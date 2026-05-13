@@ -778,9 +778,24 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
     if ($method === 'GET') {
         if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет доступа'], 403);
         // Полная карточка: + чек-лист, комментарии, история, метки, соисполнители, связи, вложения
-        $s = $pdo->prepare("SELECT id, title, is_done, sort_order FROM tasks_checklist WHERE card_id = ? ORDER BY sort_order, id");
+        $s = $pdo->prepare("SELECT id, title, is_done, sort_order, checklist_id FROM tasks_checklist WHERE card_id = ? ORDER BY sort_order, id");
         $s->execute([$cardId]);
         $checklist = $s->fetchAll();
+
+        // Группы чек-листов и их пункты (новая модель: несколько чек-листов на карточке)
+        $gs = $pdo->prepare("SELECT id, title, sort_order FROM tasks_checklists WHERE card_id = ? ORDER BY sort_order, id");
+        $gs->execute([$cardId]);
+        $checklistGroups = $gs->fetchAll();
+        $itemsByGroup = [];
+        foreach ($checklist as $it) {
+            $g = $it['checklist_id'] ? (int)$it['checklist_id'] : 0;
+            if (!isset($itemsByGroup[$g])) $itemsByGroup[$g] = [];
+            $itemsByGroup[$g][] = $it;
+        }
+        foreach ($checklistGroups as &$g) {
+            $g['items'] = $itemsByGroup[(int)$g['id']] ?? [];
+        }
+        unset($g);
 
         $s = $pdo->prepare("SELECT id, author_name, body, created_at, edited_at FROM tasks_comments WHERE card_id = ? ORDER BY created_at, id");
         $s->execute([$cardId]);
@@ -839,7 +854,8 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
 
         tRespond([
             'card'        => $card,
-            'checklist'   => $checklist,
+            'checklist'   => $checklist,           // плоский (для обратной совместимости)
+            'checklists'  => $checklistGroups,     // группы с items[] — новый формат
             'comments'    => $comments,
             'history'     => $history,
             'label_ids'   => $labelIds,
@@ -978,12 +994,79 @@ if ($action === 'cards' && $id && $action2 === 'checklist') {
     if ($method === 'POST') {
         $title = trim($body['title'] ?? '');
         if ($title === '') tRespond(['error' => 'title обязателен'], 400);
-        $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_checklist WHERE card_id = ?");
+        // Опционально: явно указанная группа. Иначе кладём в первую группу карточки
+        // (если групп нет — создаём дефолтную «Чек-лист»).
+        $groupId = isset($body['checklist_id']) ? (int)$body['checklist_id'] : 0;
+        if (!$groupId) {
+            $gs = $pdo->prepare("SELECT id FROM tasks_checklists WHERE card_id = ? ORDER BY sort_order, id LIMIT 1");
+            $gs->execute([$cardId]);
+            $groupId = (int)($gs->fetchColumn() ?: 0);
+            if (!$groupId) {
+                $pdo->prepare("INSERT INTO tasks_checklists (card_id, title, sort_order) VALUES (?, 'Чек-лист', 0)")
+                    ->execute([$cardId]);
+                $groupId = (int)$pdo->lastInsertId();
+            }
+        } else {
+            // Проверка: группа принадлежит этой карточке
+            $chk = $pdo->prepare("SELECT 1 FROM tasks_checklists WHERE id = ? AND card_id = ?");
+            $chk->execute([$groupId, $cardId]);
+            if (!$chk->fetchColumn()) tRespond(['error' => 'Группа не принадлежит карточке'], 400);
+        }
+        $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_checklist WHERE checklist_id = ?");
+        $s->execute([$groupId]);
+        $so = (int)$s->fetchColumn();
+        $pdo->prepare("INSERT INTO tasks_checklist (card_id, checklist_id, title, sort_order) VALUES (?, ?, ?, ?)")
+            ->execute([$cardId, $groupId, mb_substr($title, 0, 255), $so]);
+        tRespond(['id' => (int)$pdo->lastInsertId(), 'checklist_id' => $groupId]);
+    }
+}
+
+// ─── CHECKLIST GROUPS (несколько чек-листов на карточке) ───
+if ($action === 'cards' && $id && $action2 === 'checklists') {
+    $cardId = (int)$id;
+    $card = tGetCard($pdo, $cardId);
+    if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
+    $board = tGetBoard($pdo, $card['board_id']);
+    if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
+
+    if ($method === 'GET') {
+        $s = $pdo->prepare("SELECT id, title, sort_order FROM tasks_checklists WHERE card_id = ? ORDER BY sort_order, id");
+        $s->execute([$cardId]);
+        tRespond(['groups' => $s->fetchAll()]);
+    }
+    if ($method === 'POST') {
+        $title = trim($body['title'] ?? 'Чек-лист');
+        if ($title === '') $title = 'Чек-лист';
+        $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_checklists WHERE card_id = ?");
         $s->execute([$cardId]);
         $so = (int)$s->fetchColumn();
-        $pdo->prepare("INSERT INTO tasks_checklist (card_id, title, sort_order) VALUES (?, ?, ?)")
+        $pdo->prepare("INSERT INTO tasks_checklists (card_id, title, sort_order) VALUES (?, ?, ?)")
             ->execute([$cardId, mb_substr($title, 0, 255), $so]);
-        tRespond(['id' => (int)$pdo->lastInsertId()]);
+        tRespond(['id' => (int)$pdo->lastInsertId(), 'title' => mb_substr($title, 0, 255), 'sort_order' => $so]);
+    }
+}
+
+if ($action === 'checklists' && $id) {
+    $groupId = (int)$id;
+    $s = $pdo->prepare("SELECT cg.*, b.owner_name FROM tasks_checklists cg JOIN tasks_cards c ON c.id = cg.card_id JOIN tasks_boards b ON b.id = c.board_id WHERE cg.id = ?");
+    $s->execute([$groupId]);
+    $group = $s->fetch();
+    if (!$group) tRespond(['error' => 'Группа не найдена'], 404);
+    $board = ['id' => null, 'owner_name' => $group['owner_name']];
+    if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
+    if ($method === 'PATCH') {
+        $sets = []; $params = [];
+        if (isset($body['title']))      { $sets[] = 'title = ?';      $params[] = mb_substr(trim($body['title']) ?: 'Чек-лист', 0, 255); }
+        if (isset($body['sort_order'])) { $sets[] = 'sort_order = ?'; $params[] = (int)$body['sort_order']; }
+        if (!$sets) tRespond(['error' => 'Нет полей для обновления'], 400);
+        $params[] = $groupId;
+        $pdo->prepare("UPDATE tasks_checklists SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+        tRespond(['success' => true]);
+    }
+    if ($method === 'DELETE') {
+        // FK ON DELETE CASCADE сам уберёт пункты группы
+        $pdo->prepare("DELETE FROM tasks_checklists WHERE id = ?")->execute([$groupId]);
+        tRespond(['success' => true]);
     }
 }
 
