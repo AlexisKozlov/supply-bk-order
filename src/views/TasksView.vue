@@ -27,15 +27,6 @@
       </nav>
 
       <div class="tasks-header-actions">
-        <div class="sort-wrap" v-if="viewMode === 'kanban'">
-          <select :value="store.sortMode" @change="store.sortMode = $event.target.value" class="sort-select" title="Сортировка карточек">
-            <option value="manual">Вручную</option>
-            <option value="due">По сроку</option>
-            <option value="priority">По приоритету</option>
-            <option value="created">По дате создания</option>
-          </select>
-          <TaskIcon name="chevronDown" :size="12" class="sort-select-chev"/>
-        </div>
         <button class="btn search-btn" @click="openSearch" title="Поиск по карточкам">
           <TaskIcon name="search" :size="14"/>
           <span class="search-btn-label">Поиск</span>
@@ -1087,15 +1078,6 @@ function onColDrop(i) {
   white-space: nowrap;
 }
 
-/* Сортировка — компактнее, с chevron */
-.sort-wrap { position: relative; display: inline-flex; align-items: center; }
-.sort-select-chev {
-  position: absolute; right: 8px; top: 50%;
-  transform: translateY(-50%);
-  pointer-events: none;
-  color: var(--tk-text-muted);
-}
-
 .tasks-loading, .tasks-error, .tasks-empty {
   padding: 40px; text-align: center; color: var(--tk-text-muted);
   font-size: var(--tk-fz-md);
@@ -1632,20 +1614,6 @@ function onColDrop(i) {
   transition: background var(--tk-transition), color var(--tk-transition);
 }
 .ts-icon-btn:hover { color: var(--tk-danger); background: var(--tk-danger-soft); }
-
-/* ═══ Сортировка ═══ */
-.sort-select {
-  appearance: none; -webkit-appearance: none; -moz-appearance: none;
-  padding: 0 24px 0 var(--tk-s-3); height: 32px;
-  font-size: var(--tk-fz-sm);
-  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
-  background: var(--tk-n-0); color: var(--tk-text);
-  font-family: inherit; font-weight: var(--tk-fw-medium);
-  cursor: pointer;
-  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
-}
-.sort-select:hover { border-color: var(--tk-n-300); }
-.sort-select:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 
 /* ═══ Поиск ═══
    Teleport-ится в body — токены с .tasks-view не наследуются. Дублируем минимум локально. */

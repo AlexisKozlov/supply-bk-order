@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { tasksApi } from '@/lib/tasksApi.js';
 
 export const useTasksStore = defineStore('tasks', () => {
@@ -15,10 +15,11 @@ export const useTasksStore = defineStore('tasks', () => {
   const error = ref('');
   const users = ref([]);
 
-  // ═══ ФИЛЬТРЫ И СОРТИРОВКА ═══
+  // ═══ ФИЛЬТРЫ И СОРТИРОВКА ПО КОЛОНКАМ ═══
   // Фильтры по колонкам: { [columnId]: { assignees, labels, priorities, dueState, text } }
   const filtersByColumn = ref({});
-  const sortMode = ref('manual'); // manual | due | priority | created
+  // Сортировка по колонкам: { [columnId]: 'manual' | 'due' | 'priority' | 'created' }
+  const sortByColumn = ref({});
 
   function emptyFilter() {
     return { assignees: [], labels: [], priorities: [], dueState: '', text: '' };
@@ -35,8 +36,47 @@ export const useTasksStore = defineStore('tasks', () => {
     return !!(f.assignees.length || f.labels.length || f.priorities.length || f.dueState || f.text);
   }
 
+  function activeFilterCount(colId) {
+    const f = filtersByColumn.value[colId];
+    if (!f) return 0;
+    let n = 0;
+    if (f.assignees.length)  n += f.assignees.length;
+    if (f.labels.length)     n += f.labels.length;
+    if (f.priorities.length) n += f.priorities.length;
+    if (f.dueState)          n += 1;
+    if (f.text)              n += 1;
+    return n;
+  }
+
   function resetColumnFilters(colId) {
     filtersByColumn.value[colId] = emptyFilter();
+  }
+
+  function getColumnSort(colId) {
+    return sortByColumn.value[colId] || 'manual';
+  }
+  function setColumnSort(colId, mode) {
+    sortByColumn.value = { ...sortByColumn.value, [colId]: mode };
+  }
+  function columnHasCustomSort(colId) {
+    const m = sortByColumn.value[colId];
+    return !!(m && m !== 'manual');
+  }
+
+  // Скопировать настройки одной колонки во все остальные обычные колонки доски
+  function applyColumnSettingsToAll(srcColId) {
+    const src = filtersByColumn.value[srcColId];
+    const srcSort = sortByColumn.value[srcColId] || 'manual';
+    const nextF = { ...filtersByColumn.value };
+    const nextS = { ...sortByColumn.value };
+    for (const col of columns.value) {
+      if (col.id === srcColId) continue;
+      if (col.is_archive_column) continue;
+      nextF[col.id] = src ? JSON.parse(JSON.stringify(src)) : emptyFilter();
+      nextS[col.id] = srcSort;
+    }
+    filtersByColumn.value = nextF;
+    sortByColumn.value = nextS;
   }
 
   function cardMatchesFilters(c) {
@@ -63,18 +103,19 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   const PRIO_RANK = { urgent: 4, high: 3, medium: 2, low: 1 };
-  function sortCards(arr) {
+  function sortCards(arr, colId) {
+    const mode = getColumnSort(colId);
     const a = arr.slice();
-    if (sortMode.value === 'due') {
+    if (mode === 'due') {
       a.sort((x, y) => {
         if (!x.due_date && !y.due_date) return 0;
         if (!x.due_date) return 1;
         if (!y.due_date) return -1;
         return new Date(x.due_date) - new Date(y.due_date);
       });
-    } else if (sortMode.value === 'priority') {
+    } else if (mode === 'priority') {
       a.sort((x, y) => (PRIO_RANK[y.priority] || 0) - (PRIO_RANK[x.priority] || 0));
-    } else if (sortMode.value === 'created') {
+    } else if (mode === 'created') {
       a.sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
     } else {
       a.sort((x, y) => (x.sort_order ?? 0) - (y.sort_order ?? 0));
@@ -90,7 +131,7 @@ export const useTasksStore = defineStore('tasks', () => {
       if (!map[c.column_id]) map[c.column_id] = [];
       map[c.column_id].push(c);
     }
-    for (const k of Object.keys(map)) map[k] = sortCards(map[k]);
+    for (const k of Object.keys(map)) map[k] = sortCards(map[k], k);
     return map;
   });
 
@@ -107,14 +148,37 @@ export const useTasksStore = defineStore('tasks', () => {
     }
   }
 
+  const BOARD_STATE_KEY = (id) => 'bk_tasks_state_' + id;
+  function loadBoardState(id) {
+    try {
+      const raw = localStorage.getItem(BOARD_STATE_KEY(id));
+      if (!raw) { filtersByColumn.value = {}; sortByColumn.value = {}; return; }
+      const obj = JSON.parse(raw);
+      filtersByColumn.value = obj && obj.filters ? obj.filters : {};
+      sortByColumn.value    = obj && obj.sort    ? obj.sort    : {};
+    } catch { filtersByColumn.value = {}; sortByColumn.value = {}; }
+  }
+  function saveBoardState() {
+    const id = currentBoardId.value;
+    if (!id) return;
+    try {
+      localStorage.setItem(BOARD_STATE_KEY(id), JSON.stringify({
+        filters: filtersByColumn.value,
+        sort:    sortByColumn.value,
+      }));
+    } catch { /* localStorage недоступен — игнорируем */ }
+  }
+  // Автосейв при любом изменении фильтров/сортировки
+  watch([filtersByColumn, sortByColumn], () => saveBoardState(), { deep: true });
+
   async function loadBoard(id) {
     if (!id) return;
     loading.value = true;
     error.value = '';
     try {
       const r = await tasksApi.loadBoard(id);
-      // При смене доски сбрасываем фильтры предыдущей
-      if (currentBoardId.value !== id) filtersByColumn.value = {};
+      // При смене доски восстанавливаем сохранённые фильтры/сортировку этой доски
+      if (currentBoardId.value !== id) loadBoardState(id);
       board.value = r.board;
       columns.value = r.columns || [];
       cards.value = r.cards || [];
@@ -271,8 +335,10 @@ export const useTasksStore = defineStore('tasks', () => {
   return {
     boards, currentBoardId, board, columns, cards, labels, users,
     canEditStructure, isOwner, loading, error, cardsByColumn,
-    filtersByColumn, sortMode,
-    getColumnFilters, columnHasActiveFilters, resetColumnFilters,
+    filtersByColumn, sortByColumn,
+    getColumnFilters, columnHasActiveFilters, activeFilterCount, resetColumnFilters,
+    getColumnSort, setColumnSort, columnHasCustomSort,
+    applyColumnSettingsToAll,
     fetchBoards, loadBoard, reload, createBoard, updateBoard, deleteBoard,
     createColumn, updateColumn, deleteColumn, reorderColumns,
     createCard, updateCard, deleteCard, moveCard,

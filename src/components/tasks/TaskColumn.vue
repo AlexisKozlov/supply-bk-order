@@ -20,10 +20,13 @@
           <span v-if="column.wip_limit" class="wip-suffix">· {{ totalCount }}/{{ column.wip_limit }}</span>
         </span>
       </div>
-      <button class="task-column-filter-btn" :class="{ active: hasActiveFilters }"
-              @click.stop="filterOpen = !filterOpen" title="Фильтр колонки">
+      <button class="task-column-filter-btn"
+              :class="{ active: hasActiveFilters || hasCustomSort }"
+              @click.stop="filterOpen = !filterOpen"
+              :title="customizationTitle">
         <TaskIcon name="filter" :size="14"/>
-        <span v-if="hasActiveFilters" class="filter-dot"></span>
+        <TaskIcon v-if="hasCustomSort" :name="sortIcon" :size="11" class="filter-sort-mark"/>
+        <span v-if="filterCount > 0" class="filter-badge">{{ filterCount }}</span>
       </button>
       <button v-if="canEditStructure && !column.is_archive_column" class="task-column-menu-btn" @click="menuOpen = !menuOpen" title="Меню колонки">
         <TaskIcon name="more" :size="16"/>
@@ -63,8 +66,43 @@
         </div>
       </div>
 
-      <!-- Поповер фильтров для этой колонки -->
+      <!-- Поповер «Фильтр и сортировка» для этой колонки -->
+      <Transition name="tcf-pop">
       <div v-if="filterOpen" v-click-outside="closeFilter" class="task-column-filter-pop">
+        <header class="tcf-head">
+          <div class="tcf-head-left">
+            <span class="tcf-head-dot" :style="{ background: column.color || '#9E9E9E' }"></span>
+            <div class="tcf-head-text">
+              <div class="tcf-head-label">Колонка</div>
+              <div class="tcf-head-name" :title="column.title">{{ column.title }}</div>
+            </div>
+          </div>
+          <button class="tcf-head-close" @click="filterOpen = false" title="Закрыть">
+            <TaskIcon name="close" :size="14"/>
+          </button>
+        </header>
+
+        <!-- Сортировка -->
+        <div class="tcf-row">
+          <div class="tcf-label">
+            <TaskIcon name="arrowRight" :size="10" class="tcf-label-icon" style="transform: rotate(90deg);"/>
+            Сортировка
+          </div>
+          <div class="tcf-segments">
+            <button v-for="s in SORT_OPTS" :key="s.value" type="button"
+                    class="tcf-segment"
+                    :class="{ active: sortMode === s.value }"
+                    @click="setSort(s.value)"
+                    :title="s.label">
+              <TaskIcon :name="s.icon" :size="11"/>
+              <span>{{ s.label }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="tcf-sep"></div>
+
+        <!-- Фильтры -->
         <div class="tcf-row">
           <div class="tcf-label">Приоритет</div>
           <div class="tcf-chips">
@@ -102,11 +140,17 @@
           <div class="tcf-label">Текст</div>
           <input v-model="filters.text" type="text" class="tcf-text" placeholder="Содержит…" />
         </div>
+
         <div class="tcf-actions">
-          <button v-if="hasActiveFilters" class="tcf-reset" @click="resetFilters">Сбросить</button>
-          <button class="tcf-close" @click="filterOpen = false">Закрыть</button>
+          <button class="tcf-apply-all" @click="applyToAll" title="Скопировать эти настройки во все остальные колонки доски">
+            <TaskIcon name="copy" :size="12"/>
+            <span>Ко всем колонкам</span>
+          </button>
+          <span class="tcf-spacer"></span>
+          <button v-if="hasActiveFilters || hasCustomSort" class="tcf-reset" @click="resetAll">Сбросить</button>
         </div>
       </div>
+      </Transition>
     </div>
 
     <div class="task-column-body">
@@ -170,6 +214,22 @@ const store = useTasksStore();
 const filterOpen = ref(false);
 const filters = computed(() => store.getColumnFilters(props.column.id));
 const hasActiveFilters = computed(() => store.columnHasActiveFilters(props.column.id));
+const filterCount = computed(() => store.activeFilterCount(props.column.id));
+const sortMode = computed(() => store.getColumnSort(props.column.id));
+const hasCustomSort = computed(() => store.columnHasCustomSort(props.column.id));
+const sortIcon = computed(() => {
+  const m = sortMode.value;
+  if (m === 'due')      return 'calendar';
+  if (m === 'priority') return 'flame';
+  if (m === 'created')  return 'arrowUpRight';
+  return 'list';
+});
+const customizationTitle = computed(() => {
+  if (hasActiveFilters.value && hasCustomSort.value) return 'Фильтр и сортировка активны';
+  if (hasActiveFilters.value) return 'Фильтр колонки активен';
+  if (hasCustomSort.value)    return 'Сортировка отличается от ручной';
+  return 'Фильтр и сортировка колонки';
+});
 const totalCount = computed(() => props.allItems.length || props.items.length);
 const columnAssignees = computed(() => {
   const set = new Set();
@@ -189,6 +249,12 @@ const DUE_OPTS = [
   { value: 'week',    label: '🟢 На неделе' },
   { value: 'no-due',  label: 'Без срока' },
 ];
+const SORT_OPTS = [
+  { value: 'manual',   label: 'Вручную',     icon: 'list' },
+  { value: 'due',      label: 'По сроку',    icon: 'calendar' },
+  { value: 'priority', label: 'Приоритет',   icon: 'flame' },
+  { value: 'created',  label: 'Создание',    icon: 'arrowUpRight' },
+];
 
 function togglePrio(p) {
   const arr = filters.value.priorities;
@@ -205,7 +271,20 @@ function toggleAssignee(n) {
   const i = arr.indexOf(n);
   if (i >= 0) arr.splice(i, 1); else arr.push(n);
 }
+function setSort(mode) { store.setColumnSort(props.column.id, mode); }
 function resetFilters() { store.resetColumnFilters(props.column.id); }
+function resetAll() {
+  store.resetColumnFilters(props.column.id);
+  store.setColumnSort(props.column.id, 'manual');
+}
+async function applyToAll() {
+  const ok = await dlg.confirm(
+    'Применить ко всем колонкам',
+    'Скопировать фильтр и сортировку этой колонки во все остальные колонки доски? Текущие настройки других колонок будут перезаписаны.',
+    { okText: 'Применить', cancelText: 'Отмена' }
+  );
+  if (ok) store.applyColumnSettingsToAll(props.column.id);
+}
 function closeFilter() { filterOpen.value = false; }
 const emit = defineEmits([
   'open-card', 'open-subtask', 'subtasks-changed', 'add-card', 'move-card',
@@ -434,24 +513,131 @@ defineExpose({});
   width: 5px; height: 5px; border-radius: 50%;
   background: var(--tk-accent, #E87A1E);
 }
+.task-column-filter-btn .filter-badge {
+  position: absolute; top: -3px; right: -3px;
+  min-width: 14px; height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--tk-accent, #E87A1E);
+  color: #fff;
+  font-size: 9px; font-weight: var(--tk-fw-bold, 700);
+  line-height: 14px; text-align: center;
+  box-shadow: 0 0 0 2px var(--tk-bg-column, #fff);
+  font-feature-settings: 'tnum';
+  letter-spacing: -0.02em;
+}
+.task-column-filter-btn .filter-sort-mark {
+  position: absolute; bottom: 1px; right: 1px;
+  color: var(--tk-accent, #E87A1E);
+  background: var(--tk-bg-column, #fff);
+  border-radius: 50%;
+  padding: 1px;
+}
 
-/* ═══ Поповер фильтров колонки ═══ */
+/* ═══ Поповер «Фильтр и сортировка» колонки ═══ */
 .task-column-filter-pop {
   position: absolute; top: 40px; right: var(--tk-s-1, 4px); z-index: 30;
   background: var(--tk-bg-popover, #fff);
   border: 1px solid var(--tk-border, #DCDFE4);
-  border-radius: var(--tk-r-md, 8px);
-  box-shadow: var(--tk-shadow-popover, 0 8px 24px rgba(9,30,66,0.18));
+  border-radius: var(--tk-r-md, 10px);
+  box-shadow: var(--tk-shadow-popover, 0 12px 32px rgba(9,30,66,0.20));
   padding: var(--tk-s-3, 12px);
-  width: 290px;
+  width: 300px;
   display: flex; flex-direction: column; gap: var(--tk-s-2, 8px);
+  transform-origin: top right;
 }
+/* Анимация открытия поповера */
+.tcf-pop-enter-active, .tcf-pop-leave-active {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.tcf-pop-enter-from, .tcf-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+}
+
+/* Шапка поповера */
+.tcf-head {
+  display: flex; align-items: center; gap: var(--tk-s-2, 8px);
+  padding-bottom: var(--tk-s-2, 8px);
+  border-bottom: 1px solid var(--tk-border-soft, #EFEAE0);
+  margin: -2px 0 var(--tk-s-1, 4px);
+}
+.tcf-head-left { display: flex; align-items: center; gap: var(--tk-s-2, 8px); flex: 1; min-width: 0; }
+.tcf-head-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(9,30,66,0.10);
+}
+.tcf-head-text { flex: 1; min-width: 0; }
+.tcf-head-label {
+  font-size: 9.5px; font-weight: var(--tk-fw-bold, 700);
+  color: var(--tk-text-muted, #758195);
+  text-transform: uppercase; letter-spacing: .5px;
+  line-height: 1;
+}
+.tcf-head-name {
+  font-size: var(--tk-fz-md, 13px); font-weight: var(--tk-fw-semibold, 600);
+  color: var(--tk-text, #172B4D);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.tcf-head-close {
+  background: none; border: none; cursor: pointer;
+  width: 22px; height: 22px;
+  border-radius: var(--tk-r-sm, 4px);
+  color: var(--tk-text-muted, #758195);
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--tk-transition, 120ms ease), color var(--tk-transition, 120ms ease);
+}
+.tcf-head-close:hover { background: rgba(9,30,66,0.08); color: var(--tk-text, #172B4D); }
+
 .tcf-row { display: flex; flex-direction: column; gap: var(--tk-s-1, 4px); }
 .tcf-label {
   font-size: var(--tk-fz-xs, 11px); font-weight: var(--tk-fw-bold, 700);
   color: var(--tk-text-muted, #758195);
   text-transform: uppercase; letter-spacing: .4px;
+  display: inline-flex; align-items: center; gap: 4px;
 }
+.tcf-label-icon { color: var(--tk-text-muted, #758195); }
+.tcf-sep {
+  height: 1px;
+  background: var(--tk-border-soft, #EFEAE0);
+  margin: 2px -4px;
+}
+
+/* Сегментированный переключатель сортировки */
+.tcf-segments {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 2px;
+  background: var(--tk-n-100, #F3F0E8);
+  border-radius: var(--tk-r-md, 8px);
+}
+.tcf-segment {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border: none;
+  border-radius: var(--tk-r-sm, 6px);
+  background: transparent;
+  color: var(--tk-text-muted, #6E6657);
+  font-size: 10.5px;
+  font-weight: var(--tk-fw-semibold, 600);
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--tk-transition, 120ms ease),
+              color var(--tk-transition, 120ms ease),
+              box-shadow var(--tk-transition, 120ms ease);
+}
+.tcf-segment:hover { color: var(--tk-text, #1A1814); background: rgba(9,30,66,0.04); }
+.tcf-segment.active {
+  background: var(--tk-n-0, #fff);
+  color: var(--tk-accent-text, #B85A0E);
+  box-shadow: 0 1px 2px rgba(15,23,42,0.06), inset 0 0 0 1px rgba(232,122,30,0.25);
+}
+.tcf-segment.active :deep(svg) { color: var(--tk-accent, #E87A1E); }
 .tcf-chips { display: flex; flex-wrap: wrap; gap: var(--tk-s-1, 4px); }
 .tcf-chip {
   padding: 3px var(--tk-s-2, 8px);
@@ -486,24 +672,43 @@ defineExpose({});
 }
 .tcf-text:focus { outline: none; border-color: var(--tk-accent, #E87A1E); box-shadow: var(--tk-focus-ring, 0 0 0 2px rgba(232,122,30,0.35)); }
 .tcf-actions {
-  display: flex; gap: var(--tk-s-2, 8px); justify-content: flex-end;
+  display: flex; gap: var(--tk-s-2, 8px); align-items: center;
   padding-top: var(--tk-s-2, 8px);
   border-top: 1px solid var(--tk-border-soft, #E1E4E8);
 }
-.tcf-reset, .tcf-close {
-  padding: 5px var(--tk-s-3, 12px);
+.tcf-spacer { flex: 1; }
+.tcf-apply-all {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px var(--tk-s-2, 8px);
   font-size: var(--tk-fz-sm, 12px);
-  border-radius: var(--tk-r-sm, 4px);
+  font-weight: var(--tk-fw-semibold, 600);
+  font-family: inherit;
+  border-radius: var(--tk-r-sm, 6px);
   border: 1px solid var(--tk-border, #DCDFE4);
   background: var(--tk-n-0, #fff);
-  cursor: pointer; font-family: inherit;
-  color: var(--tk-text, #172B4D);
-  font-weight: var(--tk-fw-medium, 500);
-  transition: background var(--tk-transition, 120ms ease), border-color var(--tk-transition, 120ms ease);
+  color: var(--tk-text-muted, #6E6657);
+  cursor: pointer;
+  transition: background var(--tk-transition, 120ms ease),
+              color var(--tk-transition, 120ms ease),
+              border-color var(--tk-transition, 120ms ease);
 }
-.tcf-reset { color: var(--tk-danger, #C9372C); border-color: var(--tk-danger, #C9372C); }
+.tcf-apply-all:hover {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  color: var(--tk-accent-text, #B85A0E);
+  border-color: var(--tk-accent, #E87A1E);
+}
+.tcf-reset {
+  padding: 5px var(--tk-s-3, 12px);
+  font-size: var(--tk-fz-sm, 12px);
+  border-radius: var(--tk-r-sm, 6px);
+  border: 1px solid var(--tk-danger, #C9372C);
+  background: var(--tk-n-0, #fff);
+  cursor: pointer; font-family: inherit;
+  color: var(--tk-danger, #C9372C);
+  font-weight: var(--tk-fw-semibold, 600);
+  transition: background var(--tk-transition, 120ms ease);
+}
 .tcf-reset:hover { background: var(--tk-danger-soft, rgba(201,55,44,0.08)); }
-.tcf-close:hover { background: var(--tk-n-100, #F1F2F4); }
 
 .task-column-menu {
   position: absolute; top: 38px; right: var(--tk-s-2, 8px); z-index: 10;
