@@ -138,12 +138,28 @@
     <!-- Список подзадач (раскрытый) -->
     <div v-if="hasSubtasks && subtasksOpen" class="subtasks-list" @click.stop>
       <div v-for="st in card.subtasks || []" :key="st.id" class="subtask-mini"
-           :class="{ done: st.is_done, overdue: isSubOverdue(st) }">
+           :class="{ done: st.is_done, overdue: isSubOverdue(st) }"
+           @click.stop="$emit('open-subtask', { parent: card, subtask: st })">
         <input type="checkbox" :checked="!!st.is_done" @click.stop @change="toggleSubtaskDone(st)" class="round-chk" />
-        <span class="subtask-mini-title" @click.stop="$emit('open-subtask', { parent: card, subtask: st })">
-          {{ st.title }}
-          <span v-if="st.due_date" class="subtask-mini-due">{{ formatSubDue(st.due_date) }}</span>
-        </span>
+        <div class="subtask-mini-body">
+          <div class="subtask-mini-title">{{ st.title }}</div>
+          <div v-if="subtaskHasMeta(st)" class="subtask-mini-meta">
+            <span v-if="st.priority && st.priority !== 'medium'" class="subtask-chip subtask-chip-prio" :class="'prio-bg-' + st.priority">
+              {{ shortPrio(st.priority) }}
+            </span>
+            <span v-if="st.due_date" class="subtask-chip subtask-chip-due" :class="{ overdue: isSubOverdue(st) }">
+              <TaskIcon name="calendar" :size="10"/> {{ formatSubDue(st.due_date) }}
+            </span>
+            <span v-for="l in subtaskLabels(st)" :key="'l-' + l.id" class="subtask-chip subtask-chip-label" :style="{ '--lbl-color': l.color }">
+              {{ l.title }}
+            </span>
+          </div>
+        </div>
+        <button v-if="canEditCard" class="subtask-add-sticker"
+                @click.stop="$emit('open-subtask', { parent: card, subtask: st })"
+                title="Добавить стикер (приоритет, срок, метку)">
+          <TaskIcon name="plus" :size="12"/>
+        </button>
       </div>
     </div>
 
@@ -232,6 +248,20 @@ const labelsMap = computed(() => {
 const cardLabels = computed(() => {
   return (props.card.label_ids || []).map(id => labelsMap.value.get(id)).filter(Boolean);
 });
+
+// Хелперы для подзадач — возвращают стикеры, аналогичные карточечным
+function subtaskLabels(st) {
+  return (st.label_ids || []).map(id => labelsMap.value.get(id)).filter(Boolean);
+}
+function shortPrio(p) {
+  return ({ urgent: 'Срочно', high: 'Высокий', medium: 'Средний', low: 'Низкий' })[p] || '';
+}
+function subtaskHasMeta(st) {
+  if (st.priority && st.priority !== 'medium') return true;
+  if (st.due_date) return true;
+  if ((st.label_ids || []).length) return true;
+  return false;
+}
 const priorityClass = computed(() => 'prio-' + (props.card.priority || 'medium'));
 const priorityLabel = computed(() => (priorities.find(p => p.value === props.card.priority)?.label) || 'Средний');
 const checklistPct = computed(() => {
@@ -895,13 +925,14 @@ const vClickOutsideCard = {
   padding: 0;
 }
 .subtask-mini {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   background: var(--tk-bg-card, #fff);
   border: 1px solid var(--tk-border-soft, #EFEAE0);
   border-radius: 10px;
-  padding: 9px 12px;
+  padding: 9px 10px 9px 12px;
   min-height: 38px;
   font-size: 12.5px;
+  cursor: pointer;
   transition: border-color var(--tk-transition, 140ms ease), box-shadow var(--tk-transition, 140ms ease);
 }
 .subtask-mini:hover {
@@ -911,6 +942,12 @@ const vClickOutsideCard = {
 .subtask-mini.done { opacity: 0.6; }
 .subtask-mini.done .subtask-mini-title { text-decoration: line-through; color: var(--tk-text-muted); }
 .subtask-mini.overdue { border-color: color-mix(in srgb, var(--tk-danger, #D33A2C) 35%, var(--tk-border, #E6E1D7) 65%); }
+
+.round-chk { margin-top: 1px; }
+.subtask-mini-body {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
 
 /* ═══ Круглый чекбокс подзадачи (как кружок-радио в Yougile) ═══ */
 .round-chk {
@@ -938,25 +975,57 @@ const vClickOutsideCard = {
 }
 
 .subtask-mini-title {
-  flex: 1; min-width: 0; cursor: pointer;
   color: var(--tk-text, #1A1814);
   font-weight: var(--tk-fw-medium, 500);
-  line-height: 1.3;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.35;
   word-break: break-word;
 }
-.subtask-mini-title:hover { color: var(--tk-accent-text, #B85A0E); }
-.subtask-mini-due {
-  flex-shrink: 0;
+
+/* Стикеры подзадачи: те же типы что у карточки — приоритет, срок, метка */
+.subtask-mini-meta {
+  display: flex; gap: 5px; flex-wrap: wrap; align-items: center;
+}
+.subtask-chip {
+  display: inline-flex; align-items: center; gap: 4px;
   font-size: 10.5px;
   font-weight: var(--tk-fw-semibold, 600);
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--tk-success-soft);
-  color: var(--tk-success);
+  letter-spacing: 0;
+  white-space: nowrap;
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis;
 }
-.subtask-mini.overdue .subtask-mini-due { background: var(--tk-danger-soft); color: var(--tk-danger); }
+.subtask-chip-prio.prio-bg-low    { background: var(--tk-prio-low-bg);    color: var(--tk-prio-low-fg); }
+.subtask-chip-prio.prio-bg-high   { background: var(--tk-prio-high-bg);   color: var(--tk-prio-high-fg); }
+.subtask-chip-prio.prio-bg-urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
+.subtask-chip-due { background: var(--tk-success-soft); color: var(--tk-success); }
+.subtask-chip-due.overdue { background: var(--tk-danger-soft); color: var(--tk-danger); }
+.subtask-chip-label {
+  --lbl-color: var(--tk-n-400);
+  color: color-mix(in srgb, var(--lbl-color) 65%, #0E1320 35%);
+  background: color-mix(in srgb, var(--lbl-color) 20%, #ffffff 80%);
+}
+
+/* Кнопка «+ стикер» — появляется на ховере, открывает редактирование подзадачи */
+.subtask-add-sticker {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  border: 1px dashed var(--tk-n-300, #C8C1B2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tk-text-muted, #6E6657);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--tk-transition, 140ms ease), border-color var(--tk-transition, 140ms ease), color var(--tk-transition, 140ms ease), background var(--tk-transition, 140ms ease);
+}
+.subtask-mini:hover .subtask-add-sticker { opacity: 1; }
+.subtask-add-sticker:hover {
+  border-color: var(--tk-accent, #E87A1E);
+  color: var(--tk-accent-text, #B85A0E);
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+}
 
 .subtask-add-form {
   display: flex; flex-direction: column; gap: var(--tk-s-1, 4px);
