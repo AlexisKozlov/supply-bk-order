@@ -761,44 +761,14 @@ try {
     error_log('[cron_telegram] stock collection reminder error: ' . $e->getMessage());
 }
 
-// ═══ ПРОТОКОЛЫ: напоминания о дедлайнах решений ═══
+// ═══ ПРОТОКОЛЫ: автостатус «просрочено» для решений ═══
+// Напоминания о дедлайнах сюда не входят — они идут через модуль «Задачи»
+// (cron_tasks_deadlines.php), т.к. каждое решение протокола уже создаёт
+// карточку (protocol_decisions.tasks_card_id). Здесь — только статус.
 try {
-    // Автоматически ставим "просрочено" если дедлайн прошёл
     $pdo->exec("UPDATE protocol_decisions SET status = 'overdue' WHERE status = 'pending' AND deadline IS NOT NULL AND deadline < CURDATE()");
-
-    // Напоминания: дедлайн через 1 день или сегодня
-    $decStmt = $pdo->query("SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, p.topic, p.meeting_date FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.status = 'pending' AND d.deadline IS NOT NULL AND d.deadline BETWEEN CURDATE() AND CURDATE() + INTERVAL 1 DAY AND d.responsible_person != ''");
-    $decisions = $decStmt->fetchAll();
-    foreach ($decisions as $dec) {
-        $isToday = $dec['deadline'] === date('Y-m-d');
-        $deadlinePhase = $isToday ? 'today' : 'tomorrow';
-        $dedupKey = "protocol_deadline:decision_{$dec['id']}:{$deadlinePhase}";
-        if (wasNotifiedByKey($pdo, $dedupKey, 86400)) continue;
-
-        // responsible_person может содержать несколько имён через запятую
-        $responsibles = array_map('trim', explode(',', $dec['responsible_person']));
-        $deadlineDate = date('d.m', strtotime($dec['deadline']));
-        $urgency = $isToday ? '🔴 Сегодня' : '🟡 Завтра';
-        $notified = false;
-        foreach ($responsibles as $respName) {
-            if (!$respName) continue;
-            $uStmt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
-            $uStmt->execute([$respName]);
-            $chatId = $uStmt->fetchColumn();
-            if (!$chatId) continue;
-            $text = "{$urgency} <b>Дедлайн по решению</b>\n";
-            $text .= "─────────────────────\n";
-            $text .= "📋 Совещание: {$dec['topic']}\n";
-            $text .= "📝 {$dec['text']}\n";
-            $text .= "📅 Срок: {$deadlineDate}\n";
-            tgSend($chatId, $text);
-            $notified = true;
-            $sent++;
-        }
-        if ($notified) logNotificationByKey($pdo, 'protocol_deadline', $dedupKey);
-    }
 } catch (Exception $e) {
-    error_log('[cron_telegram] protocol deadline reminders error: ' . $e->getMessage());
+    error_log('[cron_telegram] protocol overdue status update error: ' . $e->getMessage());
 }
 
 // ═══ ЗАКАЗЫ РЕСТОРАНОВ: напоминания о дедлайнах ═══

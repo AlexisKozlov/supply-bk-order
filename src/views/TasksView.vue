@@ -63,7 +63,7 @@
                 </span>
                 <div class="notif-body">
                   <div class="notif-line">
-                    <span class="notif-author">{{ n.source_user || 'Система' }}</span>
+                    <span v-if="n.source_user" class="notif-author">{{ n.source_user }}</span>
                     <span class="notif-action">{{ notifTypeText(n) }}</span>
                   </div>
                   <div v-if="n.card_title" class="notif-card-title">{{ n.card_title }}</div>
@@ -750,6 +750,9 @@ function notifTypeIcon(t) {
     reopened: 'edit',
     due_changed: 'calendar',
     mention: 'chat',
+    due_soon: 'calendar',
+    due_today: 'calendar',
+    overdue: 'calendar',
   })[t] || 'chat';
 }
 function notifTypeText(n) {
@@ -760,6 +763,14 @@ function notifTypeText(n) {
     case 'reopened':    return 'вернул(а) в работу';
     case 'due_changed': return 'изменил(а) срок задачи';
     case 'mention':     return 'упомянул(а) вас';
+    case 'due_soon':    return 'срок задачи завтра';
+    case 'due_today':   return 'срок задачи сегодня';
+    case 'overdue': {
+      const d = Number(n.payload?.overdue_days || 0);
+      if (!d) return 'задача просрочена';
+      const word = d === 1 ? 'день' : (d >= 2 && d <= 4 ? 'дня' : 'дней');
+      return `задача просрочена на ${d} ${word}`;
+    }
     default: return n.type;
   }
 }
@@ -1255,6 +1266,9 @@ function onColDrop(i) {
 .notif-icon-reopened    { background: #E87A1E; }
 .notif-icon-due_changed { background: #F59E0B; }
 .notif-icon-mention     { background: #8B5CF6; }
+.notif-icon-due_soon    { background: #F59E0B; }
+.notif-icon-due_today   { background: #DC2626; }
+.notif-icon-overdue     { background: #991B1B; }
 
 .notif-body { flex: 1; min-width: 0; }
 .notif-line {

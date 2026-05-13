@@ -49,7 +49,9 @@
  *   GET    tasks/users                 — список пользователей-исполнителей (для выпадашки)
  */
 
-if ($endpoint !== 'tasks') return;
+// Файл подключают и из api/index.php (для роутинга /tasks/...), и из cron-скриптов
+// (нужны только хелперы taskPushNotif / tCardRecipients и т.п.).
+// Проверка $endpoint срабатывает позже — после объявлений функций, перед роутингом.
 
 // ─── Хелперы ───
 function tRespond($data, $code = 200) {
@@ -235,6 +237,15 @@ function taskPushNotif($pdo, $toUser, $type, $cardId, $boardId, $sourceUser, $ex
                 $msg = "🗓 Срок задачи «<b>{$titleEsc}</b>» {$due}{$boardLine}"; break;
             case 'mention':
                 $msg = "👤 <b>{$by}</b> упомянул(а) вас в «<b>{$titleEsc}</b>»{$boardLine}"; break;
+            case 'due_soon':
+                $due = $extra['due_date'] ? date('d.m.Y', strtotime($extra['due_date'])) : '';
+                $msg = "🟡 Завтра срок задачи «<b>{$titleEsc}</b>»" . ($due ? " ({$due})" : '') . $boardLine; break;
+            case 'due_today':
+                $msg = "🔴 Сегодня срок задачи «<b>{$titleEsc}</b>»{$boardLine}"; break;
+            case 'overdue':
+                $days = max(1, (int)($extra['overdue_days'] ?? 1));
+                $word = ($days === 1) ? 'день' : (($days >= 2 && $days <= 4) ? 'дня' : 'дней');
+                $msg = "⚠️ Просрочена задача «<b>{$titleEsc}</b>» на {$days} {$word}{$boardLine}"; break;
             default:
                 $msg = "🔔 Событие по задаче «<b>{$titleEsc}</b>»{$boardLine}";
         }
@@ -270,6 +281,9 @@ function taskParseMentions($pdo, $text) {
     $s->execute($candidates);
     return array_column($s->fetchAll(), 'name');
 }
+
+// Здесь начинается роутинг: вне контекста /tasks/... файл просто отдал свои хелперы.
+if (!isset($endpoint) || $endpoint !== 'tasks') return;
 
 // Аутентификация — все маршруты требуют сессию
 $tUser = tRequireUser($pdo);
