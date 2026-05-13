@@ -918,11 +918,38 @@ const vClickOutsideCard = {
   font-feature-settings: 'tnum';
 }
 
-/* Список подзадач — каждая полноценная мини-карточка как в Yougile */
+/* Список подзадач — каждая полноценная мини-карточка как в Yougile.
+   Слева — «дерево»: вертикальная линия с горизонтальными ответвлениями
+   к каждой подзадаче. У первой линия идёт от центра, у последней —
+   до центра, чтобы не было «висящих хвостов». */
 .subtasks-list {
   margin-top: 6px;
   display: flex; flex-direction: column; gap: 6px;
-  padding: 0;
+  padding: 0 0 0 18px;
+  position: relative;
+}
+.subtask-mini { position: relative; }
+.subtask-mini::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0; bottom: 0;
+  width: 1.5px;
+  background: var(--tk-border, #E6E1D7);
+  border-radius: 1px;
+}
+.subtask-mini:first-child::before { top: 20px; }
+.subtask-mini:last-child::before  { bottom: calc(100% - 20px); height: auto; }
+.subtask-mini:only-child::before  { top: 20px; bottom: auto; height: 0; }
+.subtask-mini::after {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 20px;
+  width: 12px;
+  height: 1.5px;
+  background: var(--tk-border, #E6E1D7);
+  border-radius: 1px;
 }
 .subtask-mini {
   display: flex; align-items: flex-start; gap: 10px;
