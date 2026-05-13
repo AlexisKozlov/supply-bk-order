@@ -7,8 +7,8 @@
     @dragleave="onColumnDragLeave"
     @drop="onColumnDrop"
   >
-    <div class="task-column-color-bar"></div>
     <div class="task-column-header">
+      <span v-if="!column.is_archive_column" class="task-column-color-dot" :style="{ background: column.color || '#9E9E9E' }"></span>
       <TaskIcon v-if="column.is_archive_column" name="archive" :size="14" class="archive-icon"/>
       <div class="task-column-title-wrap">
         <span v-if="!editingTitle || column.is_archive_column" class="task-column-title"
@@ -334,7 +334,7 @@ defineExpose({});
 
 <style scoped>
 .task-column {
-  background: var(--tk-bg-column, #EEF0F5);
+  background: var(--tk-bg-column, #fff);
   border-radius: var(--tk-r-lg, 14px);
   padding: 0;
   width: 288px;
@@ -342,8 +342,8 @@ defineExpose({});
   display: flex;
   flex-direction: column;
   max-height: 100%;
-  border: 1px solid transparent;
-  box-shadow: var(--tk-shadow-column);
+  border: 1px solid var(--tk-border-soft, #EAEDF4);
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04);
   transition: border-color var(--tk-transition, 140ms ease), background var(--tk-transition, 140ms ease);
 }
 .task-column.is-drop-target {
@@ -367,17 +367,16 @@ defineExpose({});
   margin-right: 2px;
 }
 .task-column { position: relative; }
-.task-column-color-bar {
-  height: 3px;
+.task-column-color-dot {
+  flex-shrink: 0;
+  width: 10px; height: 10px;
+  border-radius: 50%;
   background: var(--col-color, #9E9E9E);
-  border-radius: var(--tk-r-lg, 14px) var(--tk-r-lg, 14px) 0 0;
-  opacity: 0.9;
 }
-.task-column.is-archive .task-column-color-bar { background: var(--tk-n-300); opacity: 0.5; }
 
 .task-column-header {
-  padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-1, 4px);
-  display: flex; align-items: center; gap: var(--tk-s-1, 4px);
+  padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-2, 8px);
+  display: flex; align-items: center; gap: var(--tk-s-2, 8px);
   position: relative;
 }
 .task-column-title-wrap { flex: 1; display: flex; align-items: center; gap: var(--tk-s-2, 8px); min-width: 0; }

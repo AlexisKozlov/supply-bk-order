@@ -618,9 +618,9 @@ function onColDrop(i) {
   --tk-s-6: 24px;
 
   /* Тени — мягче и тоньше (Yougile/Linear) */
-  --tk-shadow-card: 0 1px 1px rgba(15,23,42,0.04), 0 0 0 1px rgba(15,23,42,0.04);
-  --tk-shadow-card-hover: 0 6px 16px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.06);
-  --tk-shadow-column: none;
+  --tk-shadow-card: 0 1px 2px rgba(15,23,42,0.05), 0 1px 4px rgba(15,23,42,0.04);
+  --tk-shadow-card-hover: 0 4px 12px rgba(15,23,42,0.10), 0 1px 3px rgba(15,23,42,0.06);
+  --tk-shadow-column: 0 1px 2px rgba(15,23,42,0.04);
   --tk-shadow-popover: 0 12px 32px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
 
   /* Типографика */
@@ -647,13 +647,15 @@ function onColDrop(i) {
   --tk-n-800: #283044;
   --tk-n-900: #131A2A;
 
-  /* Поверхности */
-  --tk-bg-board: #F5F6FA;
-  --tk-bg-column: #EEF0F5;
+  /* Поверхности: фон чуть холодный серый, колонки — белые с тонкой
+     границей (как в Yougile), карточки тоже белые, но с очень
+     лёгким верхним хайлайтом, отличающим их от колонки. */
+  --tk-bg-board: #F4F6FB;
+  --tk-bg-column: #FFFFFF;
   --tk-bg-card: #FFFFFF;
   --tk-bg-popover: #FFFFFF;
   --tk-border: #E4E7EE;
-  --tk-border-soft: #EEF0F4;
+  --tk-border-soft: #EAEDF4;
 
   /* Акцент бренда (оранжевый, сохраняем) */
   --tk-accent: #E87A1E;

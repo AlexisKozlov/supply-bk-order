@@ -484,7 +484,6 @@ const vClickOutsideCard = {
 .task-card:hover {
   box-shadow: var(--tk-shadow-card-hover);
   border-color: var(--tk-border, #E4E7EE);
-  transform: translateY(-1px);
 }
 .task-card.is-dragging { opacity: 0.45; transform: rotate(1deg); }
 .task-card.is-done { opacity: 0.6; }
