@@ -67,12 +67,9 @@
       <div class="task-card-title">{{ card.title }}</div>
     </div>
 
-    <!-- Прогресс-бар чек-листа (виден, только если есть пункты) -->
-    <div v-if="card.checklist?.total" class="task-card-progress"
-         :title="'Чек-лист: ' + card.checklist.done + ' из ' + card.checklist.total"
-         :class="{ done: card.checklist.done === card.checklist.total }">
-      <div class="task-card-progress-fill" :style="{ width: checklistPct + '%' }"></div>
-    </div>
+    <!-- Прогресс чек-листа отображается только как счётчик внизу карточки
+         в блоке meta — отдельная полоса не рисуется. -->
+
 
     <!-- Метаданные снизу -->
     <div class="task-card-meta">
@@ -891,10 +888,10 @@ const vClickOutsideCard = {
   padding: var(--tk-s-2, 8px) var(--tk-s-1, 4px);
 }
 
-/* ═══ Раскрывалка подзадач — заголовок секции с прогрессом справа ═══ */
+/* ═══ Раскрывалка подзадач — заголовок секции (корень дерева) ═══ */
 .subtasks-toggle {
   display: flex; align-items: center; gap: 6px;
-  margin: 2px -4px 0;
+  margin: 4px 0 0;
   padding: 6px 10px;
   background: transparent;
   border-radius: 8px;
@@ -919,21 +916,20 @@ const vClickOutsideCard = {
 }
 
 /* Список подзадач — каждая полноценная мини-карточка как в Yougile.
-   Слева — «дерево»: единая непрерывная вертикальная линия на родителе
-   (от центра первой подзадачи до центра последней) и горизонтальные
-   отводы у каждой подзадачи. */
+   Дерево: непрерывная вертикаль идёт от заголовка «Подзадачи»
+   (через top: -22px) до центра последней подзадачи. */
 .subtasks-list {
-  margin-top: 6px;
+  margin-top: 4px;
   display: flex; flex-direction: column; gap: 6px;
-  padding: 0 0 0 18px;
+  padding: 0 0 0 22px;
   position: relative;
 }
 .subtasks-list::before {
   content: '';
   position: absolute;
-  left: 6px;
-  top: 20px;
-  bottom: 20px;
+  left: 10px;
+  top: -22px;   /* линия начинается из строки «Подзадачи» */
+  bottom: 20px; /* и заканчивается у центра последней подзадачи */
   width: 1.5px;
   background: var(--tk-border, #E6E1D7);
   border-radius: 1px;
