@@ -52,19 +52,35 @@
 
       <!-- Меню настроек доски -->
       <div v-if="boardMenuOpen && store.board" class="board-menu" v-click-outside-board="() => boardMenuOpen = false">
-        <div class="board-menu-title">Настройки доски «{{ store.board.title }}»</div>
-        <button v-if="store.canEditStructure" class="board-menu-item" @click="renameBoard">
-          <TaskIcon name="edit" :size="16"/> Переименовать
-        </button>
-        <button class="board-menu-item" @click="openLabelsManager">
-          <TaskIcon name="tag" :size="16"/> Метки доски ({{ store.labels.length }})
-        </button>
-        <button v-if="store.canEditStructure" class="board-menu-item" @click="archiveBoard">
-          <TaskIcon name="archive" :size="16"/> {{ store.board.is_archived ? 'Вернуть из архива' : 'Архивировать' }}
-        </button>
-        <button v-if="store.canEditStructure" class="board-menu-item danger" @click="deleteBoard">
-          <TaskIcon name="trash" :size="16"/> Удалить доску
-        </button>
+        <header class="board-menu-head">
+          <span class="board-menu-head-icon"><TaskIcon name="gear" :size="14"/></span>
+          <div class="board-menu-head-text">
+            <div class="board-menu-head-label">Настройки доски</div>
+            <div class="board-menu-head-name" :title="store.board.title">{{ store.board.title }}</div>
+          </div>
+        </header>
+        <div class="board-menu-group">
+          <button v-if="store.canEditStructure" class="board-menu-item" @click="renameBoard">
+            <TaskIcon name="edit" :size="14" class="board-menu-icon"/>
+            <span>Переименовать</span>
+          </button>
+          <button class="board-menu-item" @click="openLabelsManager">
+            <TaskIcon name="tag" :size="14" class="board-menu-icon"/>
+            <span>Метки доски</span>
+            <span class="board-menu-badge">{{ store.labels.length }}</span>
+          </button>
+        </div>
+        <div v-if="store.canEditStructure" class="board-menu-sep"></div>
+        <div v-if="store.canEditStructure" class="board-menu-group">
+          <button class="board-menu-item" @click="archiveBoard">
+            <TaskIcon name="archive" :size="14" class="board-menu-icon"/>
+            <span>{{ store.board.is_archived ? 'Вернуть из архива' : 'Архивировать' }}</span>
+          </button>
+          <button class="board-menu-item is-danger" @click="deleteBoard">
+            <TaskIcon name="trash" :size="14" class="board-menu-icon"/>
+            <span>Удалить доску</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -1019,31 +1035,103 @@ function onColDrop(i) {
 
 .board-menu {
   position: absolute; top: 56px; right: var(--tk-s-5); z-index: 100;
-  background: var(--tk-bg-popover);
-  border: 1px solid var(--tk-border);
-  border-radius: var(--tk-r-md);
-  box-shadow: var(--tk-shadow-popover);
-  min-width: 240px; padding: var(--tk-s-1);
+  background: #fff;
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
+  min-width: 280px;
+  padding: 6px;
 }
-.board-menu-title {
-  padding: var(--tk-s-2) var(--tk-s-3) var(--tk-s-1);
-  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-bold);
-  color: var(--tk-text-muted); text-transform: uppercase; letter-spacing: .5px;
-  border-bottom: 1px solid var(--tk-border-soft);
-  margin-bottom: var(--tk-s-1);
+
+/* Шапка меню: иконка + заголовок + имя доски */
+.board-menu-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 10px 12px;
+  border-bottom: 1px solid var(--tk-border-soft, #EFEAE0);
+  margin-bottom: 6px;
 }
+.board-menu-head-icon {
+  flex-shrink: 0;
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  background: var(--tk-accent-soft, rgba(232,122,30,0.12));
+  color: var(--tk-accent-text, #B85A0E);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.board-menu-head-text {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.board-menu-head-label {
+  font-size: 10.5px; font-weight: 700;
+  color: var(--tk-text-muted, #9C9384);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.board-menu-head-name {
+  font-size: 13px; font-weight: 700;
+  color: var(--tk-text, #1A1814);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Группа пунктов */
+.board-menu-group {
+  display: flex; flex-direction: column; gap: 0;
+}
+.board-menu-sep {
+  height: 1px;
+  background: var(--tk-border-soft, #EFEAE0);
+  margin: 4px 8px;
+}
+
+/* Пункт меню */
 .board-menu-item {
-  display: flex; align-items: center; gap: var(--tk-s-2); width: 100%;
-  padding: var(--tk-s-2) var(--tk-s-3);
-  border: none; background: none; cursor: pointer;
-  font-size: var(--tk-fz-md); color: var(--tk-text);
-  border-radius: var(--tk-r-sm);
-  font-family: inherit; text-align: left;
-  transition: background var(--tk-transition);
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  color: var(--tk-text, #1A1814);
+  border-radius: 7px;
+  text-align: left;
+  transition: background 140ms ease, color 140ms ease;
 }
-.board-menu-item:hover { background: var(--tk-n-100); }
-.board-menu-item.danger { color: var(--tk-danger); }
-.board-menu-item.danger:hover { background: var(--tk-danger-soft); }
+.board-menu-item:hover {
+  background: var(--tk-n-100, #F3F0E8);
+}
+.board-menu-icon {
+  flex-shrink: 0;
+  color: var(--tk-text-muted, #9C9384);
+}
+.board-menu-item:hover .board-menu-icon { color: inherit; }
+.board-menu-item > span:not(.board-menu-badge):not(.board-menu-icon) { flex: 1; }
+
+/* Бейдж со счётчиком (метки) */
+.board-menu-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px;
+  padding: 0 6px;
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text-secondary, #534D40);
+  border-radius: 999px;
+  font-size: 10.5px; font-weight: 700;
+  flex-shrink: 0;
+}
+.board-menu-item:hover .board-menu-badge {
+  background: #fff;
+}
+
+/* Опасное действие */
+.board-menu-item.is-danger {
+  color: var(--tk-danger, #B23B16);
+}
+.board-menu-item.is-danger .board-menu-icon {
+  color: var(--tk-danger, #B23B16);
+}
+.board-menu-item.is-danger:hover {
+  background: var(--tk-danger-soft, rgba(178,59,22,0.10));
+  color: var(--tk-danger, #B23B16);
+}
 
 /* ═══ Менеджер меток ═══ */
 :deep(.modal) {
