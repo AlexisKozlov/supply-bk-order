@@ -32,8 +32,9 @@ const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 // Маркер «однократного автохила» — чтобы не зацикливаться при сбоях.
 const AUTO_HEAL_KEY = 'bk_sw_auto_healed';
 // Сколько ждать активации waiting SW после postMessage SKIP_WAITING прежде
-// чем сделать релоад. Хватает с запасом, страница не зависает.
-const SW_ACTIVATE_DELAY_MS = 800;
+// чем сделать релоад. 300 мс достаточно — postMessage синхронный, SW обычно
+// активируется за <100 мс; запас на медленные устройства.
+const SW_ACTIVATE_DELAY_MS = 300;
 
 const updating = ref(false);
 const autoHealing = ref(false);
@@ -100,36 +101,39 @@ async function doUpdate() {
       let reg = null;
       try { reg = await navigator.serviceWorker.getRegistration(); } catch (_) {}
 
-      // 1. Принудительно опрашиваем сервер: если за время висения баннера
-      //    вышла ещё более свежая сборка — waiting подменится на неё.
-      if (reg) {
-        try { await reg.update(); } catch (_) { /* offline / sw.js 404 — ок */ }
+      // 1. Если waiting SW уже есть — сразу пинаем SKIP_WAITING (не ждём
+      //    лишний reg.update — он тянется секунду на медленном инете).
+      //    Если waiting нет — спросим у сервера однократно.
+      if (reg?.waiting) {
+        try { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch (_) {}
+      } else if (reg) {
+        try {
+          await reg.update();
+          if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        } catch (_) { /* offline / sw.js 404 — ок */ }
       }
 
-      // 2. Активируем waiting SW (если он есть). Не ждём ответа.
-      try {
-        if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      } catch (_) {}
-
-      // 3. Сносим все кэши Workbox — чтобы старые JS/CSS-чанки не подсунулись
-      //    при следующей загрузке (аналог Ctrl+Shift+R).
-      try {
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(k => caches.delete(k).catch(() => false)));
-        }
-      } catch (_) {}
-
-      // 4. Снимаем регистрацию SW — следующий заход поставит самый свежий
-      //    sw.js с нуля. Если сборка ещё идёт и sw.js 404 — на следующем
-      //    заходе SW просто не зарегистрируется, страница придёт с сервера.
-      try {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map(r => r.unregister().catch(() => false)));
-      } catch (_) {}
+      // 2. Параллельно: чистим Workbox-кэши И снимаем все SW. Друг от друга
+      //    не зависят, держать последовательно нет смысла.
+      const tasks = [];
+      if ('caches' in window) {
+        tasks.push((async () => {
+          try {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k).catch(() => false)));
+          } catch (_) {}
+        })());
+      }
+      tasks.push((async () => {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister().catch(() => false)));
+        } catch (_) {}
+      })());
+      await Promise.all(tasks);
     }
   } finally {
-    // 5. Жёсткий релоад с cache-bust. У страницы больше нет контроллера —
+    // 3. Жёсткий релоад с cache-bust. У страницы больше нет контроллера —
     //    index.html и все ассеты пойдут прямо с сервера.
     setTimeout(() => {
       const u = new URL(window.location.href);

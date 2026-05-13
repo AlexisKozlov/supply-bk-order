@@ -348,11 +348,15 @@ import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import TaskColumn from '@/components/tasks/TaskColumn.vue';
-import TaskCalendar from '@/components/tasks/TaskCalendar.vue';
-import TaskCardModal from '@/components/tasks/TaskCardModal.vue';
 import TaskIcon from '@/components/tasks/TaskIcon.vue';
 import ColorPalette from '@/components/tasks/ColorPalette.vue';
-import TasksTemplatesDialog from '@/components/tasks/TasksTemplatesDialog.vue';
+
+// Тяжёлые компоненты — lazy-чанк. Грузятся только когда реально нужны:
+// календарь — при переключении вкладки; модалка карточки — при клике;
+// шаблоны — при клике по иконке. Снижает первый чанк TasksView на ~40%.
+const TaskCalendar         = defineAsyncComponent(() => import('@/components/tasks/TaskCalendar.vue'));
+const TaskCardModal        = defineAsyncComponent(() => import('@/components/tasks/TaskCardModal.vue'));
+const TasksTemplatesDialog = defineAsyncComponent(() => import('@/components/tasks/TasksTemplatesDialog.vue'));
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const InfoModal    = defineAsyncComponent(() => import('@/components/modals/InfoModal.vue'));
