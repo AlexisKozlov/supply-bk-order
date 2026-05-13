@@ -189,13 +189,11 @@
       </button>
     </div>
 
-    <!-- Поповер: срок -->
-    <div v-if="popover === 'due'" class="card-popover" @click.stop v-click-outside-card="closePopover">
-      <div class="popover-title">Срок</div>
-      <input type="datetime-local" :value="dueLocal" @change="setDue" class="popover-input" />
-      <div class="popover-actions">
-        <button v-if="card.due_date" class="popover-clear" @click="setDue({ target: { value: '' } })">Убрать срок</button>
-      </div>
+    <!-- Поповер: срок — кастомный календарь -->
+    <div v-if="popover === 'due'" class="card-popover card-popover-flat" @click.stop v-click-outside-card="closePopover">
+      <DatetimePicker :model-value="card.due_date || ''"
+                      @update:model-value="onCardDuePicked"
+                      @cancel="closePopover"/>
     </div>
 
     <!-- Поповер: метки -->
@@ -215,6 +213,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import TaskIcon from './TaskIcon.vue';
+import DatetimePicker from './DatetimePicker.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
@@ -484,6 +483,16 @@ async function setDue(e) {
   try {
     await tasksApi.updateCard(props.card.id, { due_date: due });
     props.card.due_date = due;
+  } catch (er) { showError(er); }
+}
+
+// Колбэк нового календаря (DatetimePicker отдаёт уже отформатированное
+// «YYYY-MM-DD HH:MM:SS» или null).
+async function onCardDuePicked(iso) {
+  closePopover();
+  try {
+    await tasksApi.updateCard(props.card.id, { due_date: iso || null });
+    props.card.due_date = iso || null;
   } catch (er) { showError(er); }
 }
 
@@ -833,6 +842,14 @@ const vClickOutsideCard = {
   box-shadow: var(--tk-shadow-popover, 0 8px 24px rgba(9,30,66,0.18));
   padding: var(--tk-s-2, 8px);
   cursor: default;
+}
+/* Flat-вариант: содержимое (наш DatetimePicker) само рисует контейнер */
+.card-popover-flat {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  right: auto; width: max-content;
 }
 .popover-title {
   font-size: var(--tk-fz-xs, 11px); font-weight: var(--tk-fw-bold, 700);

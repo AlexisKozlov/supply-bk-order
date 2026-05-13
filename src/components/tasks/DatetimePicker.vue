@@ -1,12 +1,5 @@
 <template>
   <div class="dtp" @click.stop>
-    <!-- Быстрые пресеты -->
-    <div class="dtp-presets">
-      <button type="button" class="dtp-preset" @click="applyPreset('today-evening')">Сегодня вечером</button>
-      <button type="button" class="dtp-preset" @click="applyPreset('tomorrow-morning')">Завтра утром</button>
-      <button type="button" class="dtp-preset" @click="applyPreset('next-week')">Через неделю</button>
-    </div>
-
     <!-- Навигация по месяцам -->
     <div class="dtp-nav">
       <button type="button" class="dtp-nav-btn" @click="prevMonth" title="Предыдущий месяц">‹</button>
@@ -135,16 +128,6 @@ function onTimeInput() {
   mm.value = Math.max(0, Math.min(59, mm.value | 0));
 }
 
-function applyPreset(p) {
-  const d = new Date(today);
-  if (p === 'today-evening') { hh.value = 18; mm.value = 0; }
-  else if (p === 'tomorrow-morning') { d.setDate(d.getDate() + 1); hh.value = 9; mm.value = 0; }
-  else if (p === 'next-week') { d.setDate(d.getDate() + 7); hh.value = 9; mm.value = 0; }
-  selectedDayIso.value = isoOf(d);
-  viewDate.value = new Date(d.getFullYear(), d.getMonth(), 1);
-  apply();
-}
-
 function apply() {
   if (!selectedDayIso.value) return;
   const [Y, M, D] = selectedDayIso.value.split('-').map(Number);
@@ -170,24 +153,6 @@ function clear() {
   color: #1A1814;
   user-select: none;
 }
-
-/* Пресеты */
-.dtp-presets {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  margin-bottom: 10px;
-}
-.dtp-preset {
-  flex: 1; min-width: 0;
-  padding: 5px 8px;
-  font-family: inherit; font-size: 11.5px; font-weight: 600;
-  background: #F3F0E8; color: #534D40;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 140ms ease, color 140ms ease;
-}
-.dtp-preset:hover { background: #E6E1D7; color: #1A1814; }
 
 /* Навигация */
 .dtp-nav {

@@ -476,9 +476,15 @@ function selectPriority(p) {
   patch({ priority: p });
   closePropPopover();
 }
-function selectColumn(colId) {
-  patch({ column_id: colId });
+async function selectColumn(colId) {
   closePropPopover();
+  if (!colId || colId === full.value.card.column_id) return;
+  try {
+    // У PATCH /cards/:id нет поля column_id — для смены колонки используем
+    // отдельный move-эндпоинт (через стор).
+    await store.moveCard(props.cardId, colId, 0);
+    await load();
+  } catch (e) { showError(e); }
 }
 function onPickerChange(iso) {
   patch({ due_date: iso || null });
