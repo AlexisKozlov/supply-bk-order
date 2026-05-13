@@ -5405,12 +5405,23 @@ if ($endpoint === 'rpc') {
                 $existing[$userName] = $cardId;
             }
             if ($firstCardId === null) $firstCardId = $existing[$userName];
-            // У протокольной карточки уже есть персональная копия на доске каждого
-            // ответственного (через protocol_decision_cards). Соисполнители в
-            // tasks_assignees тут не нужны: иначе запрос «внешние карточки, где я
-            // соисполнитель» в api/includes/tasks.php подтянет копии с досок коллег
-            // на мою доску — итог: одна задача показывается N раз.
-            $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ?")->execute([$existing[$userName]]);
+        }
+        // Соисполнители: на каждой карточке записываем ОСТАЛЬНЫХ ответственных
+        // по этому решению. Дубли на досках предотвращены фильтром в
+        // tasks.php (external cards): если у пользователя уже есть СВОЯ копия
+        // карточки по этому же protocol_decision_id, то «внешняя» копия с
+        // чужой доски НЕ подтягивается.
+        $allCardIds = array_values($existing);
+        if ($allCardIds) {
+            $phC = implode(',', array_fill(0, count($allCardIds), '?'));
+            $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id IN ($phC)")->execute($allCardIds);
+            foreach ($existing as $ownerName => $cardId) {
+                foreach ($users as $other) {
+                    if ($other === $ownerName) continue;
+                    $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)")
+                        ->execute([$cardId, $other]);
+                }
+            }
         }
         if ($firstCardId) {
             $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = ? WHERE id = ?")->execute([$firstCardId, $decId]);

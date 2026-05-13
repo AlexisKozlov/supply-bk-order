@@ -145,24 +145,12 @@
                   <TaskIcon name="close" :size="12"/>
                 </button>
               </span>
-              <span v-if="!full.assignees.length && !(full.protocol_co_assignees?.length)" class="ts-empty">Никого</span>
+              <span v-if="!full.assignees.length" class="ts-empty">Никого</span>
             </div>
             <select v-if="canEditStructure" v-model="newAssignee" @change="addAssignee" class="ts-assignee-add">
               <option value="">+ Добавить…</option>
               <option v-for="u in availableUsers" :key="u.name" :value="u.name">{{ u.name }}</option>
             </select>
-
-            <!-- Соисполнители из протокола (read-only) — у каждого своя копия задачи на своей доске. -->
-            <div v-if="full.protocol_co_assignees?.length" class="ts-protocol-coass">
-              <div class="ts-protocol-coass-title">Также ответственны по протоколу:</div>
-              <div class="ts-assignees">
-                <span v-for="n in full.protocol_co_assignees" :key="'pco-' + n" class="ts-chip ts-chip-ghost"
-                      :title="'У ' + n + ' своя копия задачи на их доске'">
-                  <span class="ts-chip-bubble">{{ initials(n) }}</span>
-                  <span class="ts-chip-name">{{ n }}</span>
-                </span>
-              </div>
-            </div>
           </section>
 
           <!-- Связи -->

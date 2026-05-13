@@ -418,6 +418,9 @@ if ($action === 'board' && $id && $method === 'GET') {
     }
     $myColIds = array_map(fn($c) => (int)$c['id'], $columns);
     if ($board['owner_name'] === $tUserName && $firstNormalColId !== null) {
+        // Внешние карточки, где я соисполнитель — НО исключаем «протокольные»
+        // копии, если у меня уже есть собственная карточка по тому же решению
+        // (иначе на моей доске был бы дубль).
         $s = $pdo->prepare("
             SELECT c.*, ta.column_id AS assignee_column_id, ta.sort_order AS assignee_sort_order,
                    ta.is_done AS assignee_is_done, ta.done_at AS assignee_done_at,
@@ -429,8 +432,14 @@ if ($action === 'board' && $id && $method === 'GET') {
               AND c.board_id != ?
               AND c.parent_card_id IS NULL
               AND b.is_archived = 0
+              AND NOT EXISTS (
+                SELECT 1
+                FROM protocol_decision_cards pdc1
+                JOIN protocol_decision_cards pdc2 ON pdc2.decision_id = pdc1.decision_id AND pdc2.card_id != pdc1.card_id
+                WHERE pdc1.card_id = c.id AND pdc2.user_name = ?
+              )
         ");
-        $s->execute([$tUserName, $boardId]);
+        $s->execute([$tUserName, $boardId, $tUserName]);
         foreach ($s->fetchAll() as $extCard) {
             $assignedCol = $extCard['assignee_column_id'] !== null ? (int)$extCard['assignee_column_id'] : null;
             $isDoneForMe = (int)$extCard['assignee_is_done'];
