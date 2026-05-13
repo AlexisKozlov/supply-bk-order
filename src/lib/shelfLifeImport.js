@@ -166,7 +166,7 @@ function parseModernStockSheet(rows, sheetName, options = {}) {
     const product = findCol(headers, ['товар']);
     const production = findCol(headers, ['дата производства', 'дата выработки', 'дата изготовления']);
     const expiry = findCol(headers, ['годен до', 'срок годности', 'дата окончания']);
-    const quantity = findCol(headers, ['итог', 'остатки', 'остаток', 'количество', 'кол-во', 'кол.']);
+    const quantity = findCol(headers, ['итог', 'остатки', 'остаток', 'количество', 'кол-во', 'кол.', 'штуки', 'штук', 'шт.', 'шт']);
 
     if (owner >= 0 && cell >= 0 && product >= 0 && expiry >= 0 && quantity >= 0) {
       headerIdx = i;
@@ -253,7 +253,7 @@ export async function parseStockMalling(file, options = {}) {
     expiry_date: findCol(headers, ['годен до', 'срок годности', 'дата окончания']),
     block_reason: findCol(headers, ['причина блокировк', 'блокировк']),
     expiry_status: findCol(headers, ['статус годности', 'статус годн']),
-    quantity: findCol(headers, ['остатки', 'остаток', 'количество', 'кол-во', 'кол.']),
+    quantity: findCol(headers, ['остатки', 'остаток', 'количество', 'кол-во', 'кол.', 'штуки', 'штук', 'шт.', 'шт', 'итог']),
   };
 
   if (colMap.product_name < 0) return [];
