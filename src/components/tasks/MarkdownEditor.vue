@@ -1,16 +1,21 @@
 <template>
-  <div class="me" :class="{ 'me-compact': compact, 'me-focused': focused }">
-    <!-- Поповер @упоминаний -->
-    <div v-if="mentionOpen && filteredMentions.length" class="me-mention-pop" @mousedown.prevent>
-      <button v-for="(u, i) in filteredMentions" :key="u.name" type="button"
-              class="me-mention-item"
-              :class="{ 'is-active': i === mentionIndex }"
-              @mouseenter="mentionIndex = i"
-              @click="selectMention(u)">
-        <span class="me-mention-avatar">{{ initialsOf(u.name) }}</span>
-        <span class="me-mention-name">{{ u.name }}</span>
-      </button>
-    </div>
+  <div ref="rootRef" class="me" :class="{ 'me-compact': compact, 'me-focused': focused }">
+    <!-- Поповер @упоминаний — Teleport в body, чтобы не резался overflow -->
+    <Teleport to="body">
+      <div v-if="mentionOpen && filteredMentions.length"
+           class="me-mention-pop"
+           :style="{ left: mentionPos.left + 'px', top: mentionPos.top + 'px' }"
+           @mousedown.prevent>
+        <button v-for="(u, i) in filteredMentions" :key="u.name" type="button"
+                class="me-mention-item"
+                :class="{ 'is-active': i === mentionIndex }"
+                @mouseenter="mentionIndex = i"
+                @click="selectMention(u)">
+          <span class="me-mention-avatar">{{ initialsOf(u.name) }}</span>
+          <span class="me-mention-name">{{ u.name }}</span>
+        </button>
+      </div>
+    </Teleport>
     <div class="me-toolbar" @mousedown.prevent>
       <button type="button" class="me-btn" :class="{ active: isActive('bold') }"
               title="Жирный (Ctrl+B)" @click="cmd('toggleBold')"><strong>B</strong></button>
@@ -69,10 +74,24 @@ const canUndo = ref(false);
 const canRedo = ref(false);
 
 // ─── @упоминания ───
+const rootRef = ref(null);
 const mentionOpen = ref(false);
 const mentionQuery = ref('');
 const mentionStart = ref(0); // позиция в редакторе сразу после @
 const mentionIndex = ref(0);
+const mentionPos = ref({ left: 0, top: 0 });
+
+function recalcMentionPos() {
+  const el = rootRef.value;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  // Высота поповера примерно ≤ 280px; рисуем над редактором, если хватает места
+  const popH = Math.min(280, 44 * Math.min(8, filteredMentions.value.length) + 12);
+  const above = r.top - popH - 6;
+  const below = r.bottom + 6;
+  const top = above > 8 ? above : below;
+  mentionPos.value = { left: Math.max(8, r.left), top };
+}
 
 const filteredMentions = computed(() => {
   if (!mentionOpen.value) return [];
@@ -100,6 +119,7 @@ function openMention(pos) {
   mentionQuery.value = '';
   mentionIndex.value = 0;
   mentionOpen.value = true;
+  recalcMentionPos();
 }
 
 function selectMention(u) {
@@ -128,6 +148,7 @@ function updateMentionQuery() {
   // Если ничего не подходит — закрываем
   if (!filteredMentions.value.length) closeMention();
   else if (mentionIndex.value >= filteredMentions.value.length) mentionIndex.value = 0;
+  recalcMentionPos();
 }
 
 const editor = useEditor({
@@ -261,51 +282,7 @@ onBeforeUnmount(() => { editor.value?.destroy(); });
 }
 .me:hover { border-color: var(--tk-n-300); }
 
-/* Поповер @-упоминаний */
-.me-mention-pop {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  min-width: 220px;
-  max-width: 320px;
-  max-height: 240px;
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid var(--tk-border, #E6E1D7);
-  border-radius: 10px;
-  box-shadow: 0 12px 28px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
-  padding: 4px;
-  z-index: 50;
-  display: flex; flex-direction: column; gap: 1px;
-}
-.me-mention-item {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  background: transparent;
-  border: none;
-  border-radius: 7px;
-  font-family: inherit; font-size: 12.5px; font-weight: 500;
-  color: var(--tk-text, #1A1814);
-  text-align: left;
-  cursor: pointer;
-  transition: background 100ms ease;
-}
-.me-mention-item.is-active,
-.me-mention-item:hover {
-  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
-  color: var(--tk-accent-text, #B85A0E);
-}
-.me-mention-avatar {
-  flex-shrink: 0;
-  width: 24px; height: 24px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--tk-accent, #E87A1E), #F4A261);
-  color: #fff;
-  font-size: 10.5px; font-weight: 700;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.me-mention-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Поповер @-упоминаний — стили ниже в неscoped-блоке (Teleport в body) */
 .me.me-focused { border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 
 .me-toolbar {
@@ -402,5 +379,58 @@ onBeforeUnmount(() => { editor.value?.destroy(); });
   color: var(--tk-text-muted, #6B778C);
   pointer-events: none;
   height: 0;
+}
+</style>
+
+<!-- Глобальный блок: поповер @-упоминаний живёт в body через Teleport,
+     поэтому scoped-стили на него не действуют. -->
+<style>
+.me-mention-pop {
+  position: fixed;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #E6E1D7;
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
+  padding: 4px;
+  z-index: 10020;
+  display: flex; flex-direction: column; gap: 1px;
+  font-family: inherit;
+}
+.me-mention-pop .me-mention-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  color: #1A1814;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+.me-mention-pop .me-mention-item.is-active,
+.me-mention-pop .me-mention-item:hover {
+  background: rgba(232,122,30,0.10);
+  color: #B85A0E;
+}
+.me-mention-pop .me-mention-avatar {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #E87A1E, #F4A261);
+  color: #fff;
+  font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.me-mention-pop .me-mention-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
