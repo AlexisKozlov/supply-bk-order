@@ -242,7 +242,8 @@ watch(() => props.modelValue, async (val) => {
     mode.value = 'list';
     await loadTemplates();
     if (!usersList.value.length) {
-      try { usersList.value = await tasksApi.listUsers(); } catch (_) {}
+      try { usersList.value = unwrap(await tasksApi.listUsers(), 'users', 'items'); }
+      catch (_) {}
     }
     if (!boardsFull.value.length) await loadBoardsFull();
   }
@@ -251,16 +252,23 @@ watch(() => props.modelValue, async (val) => {
 function close() { emit('update:modelValue', false); }
 function goBack() { mode.value = 'list'; current.value = null; previews.value = {}; loadTemplates(); }
 
+// Универсальная распаковка: бэк отдаёт {items: [...]} | {boards: [...]} | {users: [...]} | сам массив
+function unwrap(r, ...keys) {
+  if (Array.isArray(r)) return r;
+  for (const k of keys) if (Array.isArray(r?.[k])) return r[k];
+  return [];
+}
+
 async function loadTemplates() {
   loading.value = true;
-  try { templates.value = (await tasksApi.listTemplates()).items || []; }
+  try { templates.value = unwrap(await tasksApi.listTemplates(), 'items', 'templates'); }
   catch (e) { alert('Не удалось загрузить шаблоны: ' + e.message); }
   finally { loading.value = false; }
 }
 
 async function loadBoardsFull() {
   try {
-    const boards = (await tasksApi.listBoards()).items || [];
+    const boards = unwrap(await tasksApi.listBoards(), 'boards', 'items');
     const ownBoards = boards.filter(b => !b.is_archived);
     const detailed = await Promise.all(ownBoards.map(async b => {
       try {
