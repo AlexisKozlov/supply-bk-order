@@ -1,5 +1,16 @@
 <template>
   <div class="me" :class="{ 'me-compact': compact, 'me-focused': focused }">
+    <!-- Поповер @упоминаний -->
+    <div v-if="mentionOpen && filteredMentions.length" class="me-mention-pop" @mousedown.prevent>
+      <button v-for="(u, i) in filteredMentions" :key="u.name" type="button"
+              class="me-mention-item"
+              :class="{ 'is-active': i === mentionIndex }"
+              @mouseenter="mentionIndex = i"
+              @click="selectMention(u)">
+        <span class="me-mention-avatar">{{ initialsOf(u.name) }}</span>
+        <span class="me-mention-name">{{ u.name }}</span>
+      </button>
+    </div>
     <div class="me-toolbar" @mousedown.prevent>
       <button type="button" class="me-btn" :class="{ active: isActive('bold') }"
               title="Жирный (Ctrl+B)" @click="cmd('toggleBold')"><strong>B</strong></button>
@@ -37,7 +48,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -49,12 +60,75 @@ const props = defineProps({
   modelValue: { type: String, default: '' },
   compact: { type: Boolean, default: false },
   placeholder: { type: String, default: '' },
+  mentions: { type: Array, default: () => [] }, // [{ name }]
 });
 const emit = defineEmits(['update:modelValue', 'blur', 'ctrl-enter']);
 
 const focused = ref(false);
 const canUndo = ref(false);
 const canRedo = ref(false);
+
+// ─── @упоминания ───
+const mentionOpen = ref(false);
+const mentionQuery = ref('');
+const mentionStart = ref(0); // позиция в редакторе сразу после @
+const mentionIndex = ref(0);
+
+const filteredMentions = computed(() => {
+  if (!mentionOpen.value) return [];
+  const q = (mentionQuery.value || '').toLowerCase();
+  const list = props.mentions || [];
+  if (!q) return list.slice(0, 8);
+  return list.filter(u => (u.name || '').toLowerCase().includes(q)).slice(0, 8);
+});
+
+function initialsOf(name) {
+  if (!name) return '?';
+  const parts = String(name).trim().split(/\s+/);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?';
+}
+
+function closeMention() {
+  mentionOpen.value = false;
+  mentionQuery.value = '';
+  mentionIndex.value = 0;
+}
+
+function openMention(pos) {
+  if (!props.mentions || !props.mentions.length) return;
+  mentionStart.value = pos;
+  mentionQuery.value = '';
+  mentionIndex.value = 0;
+  mentionOpen.value = true;
+}
+
+function selectMention(u) {
+  const ed = editor.value;
+  if (!ed) return;
+  // Пробелы в имени заменяем на '_' — для надёжного парсинга на бэке
+  // и подсветки на фронте (при выводе вернём пробелы обратно)
+  const safe = (u.name || '').replace(/\s+/g, '_');
+  const from = mentionStart.value - 1; // позиция @
+  const to = mentionStart.value + mentionQuery.value.length;
+  ed.chain().focus()
+    .insertContentAt({ from, to }, '@' + safe + ' ')
+    .run();
+  closeMention();
+}
+
+function updateMentionQuery() {
+  const ed = editor.value;
+  if (!ed || !mentionOpen.value) return;
+  const { from } = ed.state.selection;
+  if (from < mentionStart.value) { closeMention(); return; }
+  const text = ed.state.doc.textBetween(mentionStart.value, from, ' ');
+  // Если в тексте появился пробел/перенос — закрываем
+  if (/\s/.test(text)) { closeMention(); return; }
+  mentionQuery.value = text;
+  // Если ничего не подходит — закрываем
+  if (!filteredMentions.value.length) closeMention();
+  else if (mentionIndex.value >= filteredMentions.value.length) mentionIndex.value = 0;
+}
 
 const editor = useEditor({
   content: props.modelValue || '',
@@ -79,7 +153,34 @@ const editor = useEditor({
     }),
   ],
   editorProps: {
-    handleKeyDown(_view, event) {
+    handleKeyDown(view, event) {
+      // Управление поповером @-упоминаний
+      if (mentionOpen.value) {
+        const list = filteredMentions.value;
+        if (event.key === 'ArrowDown') {
+          mentionIndex.value = (mentionIndex.value + 1) % Math.max(1, list.length);
+          return true;
+        }
+        if (event.key === 'ArrowUp') {
+          mentionIndex.value = (mentionIndex.value - 1 + list.length) % Math.max(1, list.length);
+          return true;
+        }
+        if (event.key === 'Enter') {
+          if (list[mentionIndex.value]) { selectMention(list[mentionIndex.value]); return true; }
+          closeMention();
+        }
+        if (event.key === 'Escape') { closeMention(); return true; }
+      }
+      // Открытие поповера на @ (только если есть список пользователей)
+      if (event.key === '@' && props.mentions && props.mentions.length) {
+        // Поставим запуск после вставки @
+        setTimeout(() => {
+          const ed = editor.value;
+          if (!ed) return;
+          openMention(ed.state.selection.from);
+        }, 0);
+      }
+
       if (event.key === 'Enter') {
         // Ctrl+Enter — отправка (классическое сочетание)
         if (event.ctrlKey || event.metaKey) {
@@ -101,6 +202,7 @@ const editor = useEditor({
     emit('update:modelValue', md);
     canUndo.value = editor.can().undo();
     canRedo.value = editor.can().redo();
+    updateMentionQuery();
   },
   onSelectionUpdate: ({ editor }) => {
     canUndo.value = editor.can().undo();
@@ -155,8 +257,55 @@ onBeforeUnmount(() => { editor.value?.destroy(); });
   border-radius: var(--tk-r-sm);
   background: var(--tk-n-0);
   transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
+  position: relative;
 }
 .me:hover { border-color: var(--tk-n-300); }
+
+/* Поповер @-упоминаний */
+.me-mention-pop {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
+  padding: 4px;
+  z-index: 50;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.me-mention-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  color: var(--tk-text, #1A1814);
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+.me-mention-item.is-active,
+.me-mention-item:hover {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  color: var(--tk-accent-text, #B85A0E);
+}
+.me-mention-avatar {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--tk-accent, #E87A1E), #F4A261);
+  color: #fff;
+  font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.me-mention-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .me.me-focused { border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 
 .me-toolbar {

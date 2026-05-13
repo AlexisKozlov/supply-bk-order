@@ -142,6 +142,7 @@
             <div class="ts-section-title">Описание</div>
             <MarkdownEditor v-model="full.card.description"
                             placeholder="Добавить описание…"
+                            :mentions="mentionUsers"
                             @blur="onDescBlur"/>
           </section>
 
@@ -465,6 +466,7 @@
           <div class="ts-chat-input">
             <MarkdownEditor v-model="newComment" :compact="true"
                             placeholder="Сообщение… (Enter — отправить, Shift+Enter — перенос строки)"
+                            :mentions="mentionUsers"
                             @ctrl-enter="submitComment"/>
             <button class="ts-chat-send" @click="submitComment"
                     :disabled="!newComment.trim()" title="Отправить (Enter)">
@@ -688,6 +690,12 @@ const availableUsers = computed(() => {
   const taken = new Set(full.value?.assignees || []);
   taken.add(store.board?.owner_name);
   return store.users.filter(u => !taken.has(u.name));
+});
+
+// Все пользователи для @-упоминаний (включая владельца и текущих соисполнителей)
+const mentionUsers = computed(() => {
+  const me = userStore.currentUser?.name || '';
+  return (store.users || []).filter(u => u.name !== me);
 });
 
 // Поповер «+ Добавить соисполнителя»
@@ -2014,6 +2022,17 @@ a.ts-rel-chip:hover {
 }
 .ts-md-view strong { font-weight: 700; }
 .ts-md-view em { font-style: italic; }
+.ts-md-view :deep(.md-mention),
+.ts-md-view .md-mention {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px;
+  background: var(--tk-accent-soft, rgba(232,122,30,0.14));
+  color: var(--tk-accent-text, #B85A0E);
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.92em;
+  line-height: 1.4;
+}
 
 
 /* ═══ Чек-лист ═══ */

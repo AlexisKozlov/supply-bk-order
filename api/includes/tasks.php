@@ -256,6 +256,21 @@ function tCardRecipients($pdo, $cardId, array $exclude = []) {
     return array_values(array_diff($all, $exclude));
 }
 
+// Парсер @упоминаний.
+// Регулярка ловит «@<имя>» где имя — буквы/цифры/подчёркивания.
+// При выборе из поповера фронт заменяет пробелы на «_»; здесь обратно.
+function taskParseMentions($pdo, $text) {
+    if (!$text) return [];
+    $re = '/(?:^|[\s,.!?;:(\[])@([A-Za-zА-Яа-яЁё0-9_]+)/u';
+    if (!preg_match_all($re, (string)$text, $m)) return [];
+    $candidates = array_unique(array_map(fn($n) => str_replace('_', ' ', $n), $m[1]));
+    if (!$candidates) return [];
+    $ph = implode(',', array_fill(0, count($candidates), '?'));
+    $s = $pdo->prepare("SELECT name FROM users WHERE name IN ($ph)");
+    $s->execute($candidates);
+    return array_column($s->fetchAll(), 'name');
+}
+
 // Аутентификация — все маршруты требуют сессию
 $tUser = tRequireUser($pdo);
 $tUserName = $tUser['name'];
@@ -1062,6 +1077,16 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         }
         // Уведомления: смена дедлайна и закрытие/возврат через чекбокс
         $extraBase = ['card_title' => $card['title'], 'board_title' => $board['title'] ?? ''];
+        // @упоминания в описании — только новые (которых не было в старом тексте)
+        if (array_key_exists('description', $body)) {
+            $oldM = taskParseMentions($pdo, (string)$card['description']);
+            $newM = taskParseMentions($pdo, (string)$body['description']);
+            $added = array_values(array_diff($newM, $oldM, [$tUserName]));
+            $extraM = $extraBase + ['preview' => 'упомянул(а) вас в описании'];
+            foreach ($added as $m) {
+                taskPushNotif($pdo, $m, 'mention', $cardId, $card['board_id'], $tUserName, $extraM);
+            }
+        }
         if (isset($changes['due_date'])) {
             $extra = $extraBase + ['due_date' => $changes['due_date']['to']];
             foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
@@ -1288,13 +1313,20 @@ if ($action === 'cards' && $id && $action2 === 'comments') {
         $pdo->prepare("INSERT INTO tasks_comments (card_id, author_name, body) VALUES (?, ?, ?)")
             ->execute([$cardId, $tUserName, mb_substr($body_text, 0, 5000)]);
         tHistory($pdo, $cardId, $tUserName, 'comment', ['preview' => mb_substr($body_text, 0, 80)]);
-        // Уведомление автору карточки и соисполнителям (кроме себя)
-        $targets = tCardRecipients($pdo, $cardId, [$tUserName]);
+        // @упоминания: точечные уведомления, не дублируются с обычным «comment»
+        $mentions = taskParseMentions($pdo, $body_text);
+        $mentionSet = array_flip($mentions);
+        unset($mentionSet[$tUserName]);
         $extra = [
             'card_title'  => $card['title'],
             'board_title' => $board['title'] ?? '',
             'preview'     => mb_substr($body_text, 0, 200),
         ];
+        foreach (array_keys($mentionSet) as $m) {
+            taskPushNotif($pdo, $m, 'mention', $cardId, $card['board_id'], $tUserName, $extra);
+        }
+        // Уведомление автору карточки и соисполнителям (кроме себя и уже упомянутых)
+        $targets = tCardRecipients($pdo, $cardId, array_merge([$tUserName], array_keys($mentionSet)));
         foreach ($targets as $t) taskPushNotif($pdo, $t, 'comment', $cardId, $card['board_id'], $tUserName, $extra);
         tRespond(['id' => (int)$pdo->lastInsertId()]);
     }
