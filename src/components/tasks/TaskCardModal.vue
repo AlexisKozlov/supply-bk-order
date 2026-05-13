@@ -26,44 +26,72 @@
           </button>
         </header>
 
-        <!-- Свойства карточки — пилюли в Yougile-стиле -->
+        <!-- Свойства карточки — пилюли с кастомными поповерами -->
         <div class="ts-props">
-          <!-- Приоритет: пилюля с цветом, кликабельная (native <select> прозрачный поверх) -->
-          <label class="ts-pill" :class="'ts-pill-prio-' + (full.card.priority || 'medium')" :title="'Приоритет: ' + priorityLabel(full.card.priority)">
-            <span class="ts-pill-icon"><span class="ts-pill-dot"></span></span>
-            <span class="ts-pill-text">{{ priorityLabel(full.card.priority) }}</span>
-            <select class="ts-pill-native" :value="full.card.priority" @change="patch({ priority: $event.target.value })">
-              <option value="low">Низкий</option>
-              <option value="medium">Средний</option>
-              <option value="high">Высокий</option>
-              <option value="urgent">Срочно</option>
-            </select>
-          </label>
+          <!-- Приоритет -->
+          <div class="ts-pill-wrap">
+            <button type="button"
+                    class="ts-pill" :class="['ts-pill-prio-' + (full.card.priority || 'medium'), { 'is-open': propPopover === 'priority' }]"
+                    :title="'Приоритет: ' + priorityLabel(full.card.priority)"
+                    @click.stop="togglePropPopover('priority')">
+              <span class="ts-pill-icon"><span class="ts-pill-dot"></span></span>
+              <span class="ts-pill-text">{{ priorityLabel(full.card.priority) }}</span>
+              <TaskIcon name="chevronDown" :size="11" class="ts-pill-chev"/>
+            </button>
+            <div v-if="propPopover === 'priority'" class="ts-pop" v-click-outside-pop="closePropPopover">
+              <button v-for="p in PRIORITIES" :key="p.value"
+                      type="button" class="ts-pop-item"
+                      :class="{ 'is-active': (full.card.priority || 'medium') === p.value }"
+                      @click="selectPriority(p.value)">
+                <span class="ts-pop-item-dot" :class="'prio-bg-' + p.value"></span>
+                <span class="ts-pop-item-label">{{ p.label }}</span>
+                <TaskIcon v-if="(full.card.priority || 'medium') === p.value" name="check" :size="13" class="ts-pop-item-check"/>
+              </button>
+            </div>
+          </div>
 
-          <!-- Срок: пилюля с датой. Native datetime-local поверх (прозрачный)
-               не открывает picker сам — кликаем по пилюле и зовём showPicker(). -->
-          <button type="button" class="ts-pill ts-pill-due"
-                  :class="dueStateClass(full.card.due_date, full.card.is_done)"
-                  :title="full.card.due_date ? 'Срок: ' + full.card.due_date : 'Установить срок'"
-                  @click="openDuePicker">
-            <TaskIcon name="calendar" :size="13" class="ts-pill-icon"/>
-            <span class="ts-pill-text">{{ full.card.due_date ? formatDueShort(full.card.due_date) : 'Установить срок' }}</span>
-            <span v-if="full.card.due_date" class="ts-pill-clear"
-                  role="button" tabindex="0"
-                  @click.stop.prevent="patch({ due_date: null })" title="Убрать срок">
-              <TaskIcon name="close" :size="11"/>
-            </span>
-            <input ref="dueInputRef" type="datetime-local" class="ts-pill-native" :value="dueDateLocal" @change="onDueChange" />
-          </button>
+          <!-- Срок -->
+          <div class="ts-pill-wrap">
+            <button type="button"
+                    class="ts-pill ts-pill-due" :class="[dueStateClass(full.card.due_date, full.card.is_done), { 'is-open': propPopover === 'due' }]"
+                    :title="full.card.due_date ? 'Срок: ' + full.card.due_date : 'Установить срок'"
+                    @click.stop="togglePropPopover('due')">
+              <TaskIcon name="calendar" :size="13" class="ts-pill-icon"/>
+              <span class="ts-pill-text">{{ full.card.due_date ? formatDueShort(full.card.due_date) : 'Установить срок' }}</span>
+              <span v-if="full.card.due_date" class="ts-pill-clear"
+                    role="button" tabindex="0"
+                    @click.stop.prevent="patch({ due_date: null })" title="Убрать срок">
+                <TaskIcon name="close" :size="11"/>
+              </span>
+            </button>
+            <div v-if="propPopover === 'due'" class="ts-pop ts-pop-flat" v-click-outside-pop="closePropPopover">
+              <DatetimePicker :model-value="full.card.due_date || ''"
+                              @update:model-value="onPickerChange"
+                              @cancel="closePropPopover"/>
+            </div>
+          </div>
 
-          <!-- Колонка: пилюля с цветной точкой -->
-          <label class="ts-pill ts-pill-col" :title="'Колонка: ' + columnTitle">
-            <span class="ts-pill-icon"><span class="ts-pill-col-dot" :style="{ background: currentColumnColor }"></span></span>
-            <span class="ts-pill-text">{{ columnTitle }}</span>
-            <select class="ts-pill-native" :value="full.card.column_id" @change="onColumnChange">
-              <option v-for="col in columns" :key="col.id" :value="col.id">{{ col.title }}</option>
-            </select>
-          </label>
+          <!-- Колонка -->
+          <div class="ts-pill-wrap">
+            <button type="button"
+                    class="ts-pill ts-pill-col" :class="{ 'is-open': propPopover === 'column' }"
+                    :title="'Колонка: ' + columnTitle"
+                    @click.stop="togglePropPopover('column')">
+              <span class="ts-pill-icon"><span class="ts-pill-col-dot" :style="{ background: currentColumnColor }"></span></span>
+              <span class="ts-pill-text">{{ columnTitle }}</span>
+              <TaskIcon name="chevronDown" :size="11" class="ts-pill-chev"/>
+            </button>
+            <div v-if="propPopover === 'column'" class="ts-pop" v-click-outside-pop="closePropPopover">
+              <button v-for="col in columns" :key="col.id"
+                      type="button" class="ts-pop-item"
+                      :class="{ 'is-active': full.card.column_id === col.id }"
+                      @click="selectColumn(col.id)">
+                <span class="ts-pop-item-dot" :style="{ background: col.color || '#9E9E9E' }"></span>
+                <span class="ts-pop-item-label">{{ col.title }}</span>
+                <TaskIcon v-if="full.card.column_id === col.id" name="check" :size="13" class="ts-pop-item-check"/>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Вкладки (Yougile-стиль: тематически разделено) -->
@@ -367,6 +395,7 @@ import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import { renderMarkdown } from '@/lib/markdown.js';
 import TaskIcon from './TaskIcon.vue';
 import MarkdownEditor from './MarkdownEditor.vue';
+import DatetimePicker from './DatetimePicker.vue';
 const dlg = useTasksDialogs();
 const showError = (e, prefix = 'Ошибка') => dlg.info(prefix, e?.message || String(e), 'error');
 
@@ -431,18 +460,39 @@ function formatDueShort(s) {
   if (day.getTime() === tomorrow.getTime()) return 'Завтра' + timeStr;
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }) + timeStr;
 }
-const dueInputRef = ref(null);
-function openDuePicker(e) {
-  // Не перехватываем клик по крестику-очистке внутри пилюли
-  if (e?.target?.closest?.('.ts-pill-clear')) return;
-  const el = dueInputRef.value;
-  if (!el) return;
-  if (typeof el.showPicker === 'function') {
-    try { el.showPicker(); return; } catch (_) { /* fallback ниже */ }
-  }
-  // Запасной путь — фокус (Chrome <99, Safari): хотя бы откроет клавиатуру/поле
-  el.focus();
+// Управление поповерами свойств
+const PRIORITIES = [
+  { value: 'urgent', label: 'Срочно' },
+  { value: 'high',   label: 'Высокий' },
+  { value: 'medium', label: 'Средний' },
+  { value: 'low',    label: 'Низкий' },
+];
+const propPopover = ref(null); // 'priority' | 'due' | 'column' | null
+function togglePropPopover(name) {
+  propPopover.value = propPopover.value === name ? null : name;
 }
+function closePropPopover() { propPopover.value = null; }
+function selectPriority(p) {
+  patch({ priority: p });
+  closePropPopover();
+}
+function selectColumn(colId) {
+  patch({ column_id: colId });
+  closePropPopover();
+}
+function onPickerChange(iso) {
+  patch({ due_date: iso || null });
+  closePropPopover();
+}
+
+// Click-outside для поповеров свойств
+const vClickOutsidePop = {
+  mounted(el, binding) {
+    el.__co = (e) => { if (!el.contains(e.target)) binding.value(e); };
+    setTimeout(() => document.addEventListener('mousedown', el.__co), 0);
+  },
+  unmounted(el) { document.removeEventListener('mousedown', el.__co); },
+};
 function dueStateClass(due, isDone) {
   if (!due || isDone) return '';
   const d = new Date(due);
@@ -1134,19 +1184,61 @@ button.ts-pill { appearance: none; -webkit-appearance: none; }
   width: 10px; height: 10px; border-radius: 50%;
   margin: auto;
 }
-/* Прозрачный native контрол поверх пилюли — ловит клик и открывает picker */
-.ts-pill-native {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  opacity: 0; cursor: pointer;
-  border: none; background: transparent;
-  font-family: inherit;
-  appearance: none; -webkit-appearance: none;
-}
-.ts-pill:focus-within {
+.ts-pill.is-open {
   border-color: var(--tk-accent, #E87A1E);
   box-shadow: var(--tk-focus-ring, 0 0 0 3px rgba(232,122,30,0.25));
 }
+.ts-pill-chev {
+  flex-shrink: 0; margin-left: 2px;
+  opacity: 0.55;
+}
+
+/* Обёртка пилюли (для абсолютного позиционирования поповера) */
+.ts-pill-wrap { position: relative; display: inline-flex; }
+
+/* Поповер: либо список (.ts-pop), либо flat-контейнер (.ts-pop-flat) под кастомный пикер */
+.ts-pop {
+  position: absolute;
+  top: calc(100% + 6px); left: 0;
+  z-index: 1100;
+  min-width: 200px; max-width: 320px;
+  background: var(--tk-bg-popover, #fff);
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 10px;
+  box-shadow: var(--tk-shadow-popover, 0 12px 32px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06));
+  padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.ts-pop-flat {
+  padding: 0; border: none; background: transparent;
+  box-shadow: none;
+  min-width: 0; max-width: none;
+}
+.ts-pop-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border: none; background: transparent;
+  border-radius: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  color: var(--tk-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.ts-pop-item:hover { background: var(--tk-n-100); }
+.ts-pop-item.is-active { background: var(--tk-accent-soft); color: var(--tk-accent-text); font-weight: 600; }
+.ts-pop-item-dot {
+  flex-shrink: 0;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--tk-n-400);
+}
+.ts-pop-item-dot.prio-bg-urgent { background: var(--tk-prio-urgent-fg); }
+.ts-pop-item-dot.prio-bg-high   { background: var(--tk-prio-high-fg); }
+.ts-pop-item-dot.prio-bg-medium { background: var(--tk-prio-medium-fg); }
+.ts-pop-item-dot.prio-bg-low    { background: var(--tk-prio-low-fg); }
+.ts-pop-item-label { flex: 1; }
+.ts-pop-item-check { color: var(--tk-accent, #E87A1E); }
 
 /* Приоритет — цвета по уровню */
 .ts-pill-prio-urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
