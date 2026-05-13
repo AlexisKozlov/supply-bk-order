@@ -550,6 +550,19 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.broadcasts || [];
   }
 
+  // Heartbeat: показывает в /admin → «Рестораны онлайн», на какой странице
+  // сейчас ресторан. Зовётся таймером в RestaurantCabinetView каждые 15 сек.
+  async function heartbeat(page) {
+    try {
+      await api('heartbeat', {
+        method: 'POST',
+        body: JSON.stringify({ page: page || '' }),
+      });
+    } catch (e) {
+      // Молча — heartbeat не должен спамить ошибками, если сеть моргнула.
+    }
+  }
+
   async function loadCabinetPosts(limit = 50) {
     const data = await api(`cabinet-posts?limit=${encodeURIComponent(limit)}`);
     return data.posts || [];
@@ -685,7 +698,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     serverTimeOffset, nowFromServer,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
-    loadBroadcasts, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
+    loadBroadcasts, heartbeat, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,
     loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection, loadWarehouseStock,

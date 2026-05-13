@@ -614,7 +614,10 @@
               <div class="adm-user-name">
                 {{ r.city || '—' }}<span v-if="r.address"> · {{ r.address }}</span>
               </div>
-              <div class="adm-user-meta">{{ shortLegalEntityAdm(r.legal_entity) }}</div>
+              <div class="adm-user-meta">
+                {{ r.last_page || '—' }}
+                <span style="opacity:.6;"> · {{ shortLegalEntityAdm(r.legal_entity) }}</span>
+              </div>
             </div>
             <div class="adm-online-time">{{ formatOnlineTime(r.last_activity) }}</div>
           </div>

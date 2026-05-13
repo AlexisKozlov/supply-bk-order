@@ -1384,6 +1384,7 @@ const warehouseStockLoading = ref(false);
 const warehouseStockError = ref('');
 const restaurantBroadcasts = ref([]);
 let restaurantBroadcastTimer = null;
+let heartbeatTimer = null;
 const currentBroadcast = computed(() => restaurantBroadcasts.value[0] || null);
 const importantPosts = ref([]);
 const importantLoading = ref(false);
@@ -2396,6 +2397,8 @@ async function switchTab(tab, subTab) {
   } else if (subTab) {
     orderSubTab.value = subTab;
   }
+  // Сразу шлём heartbeat, чтобы в /admin страница обновилась без задержки таймера.
+  if (heartbeatTimer) sendHeartbeat();
   if (tab === 'orders') {
     const sub = nextSub || orderSubTab.value;
     if (sub === 'delivery') {
@@ -2771,6 +2774,46 @@ function startRestaurantBroadcastPolling() {
   }, 45000);
 }
 
+// Имя страницы для heartbeat — то же, что показывается в шапке кабинета.
+function currentPageLabel() {
+  const tab = activeTab.value;
+  if (tab === 'orders') {
+    const sub = orderSubTab.value || '';
+    if (sub === 'delivery') return 'Заказы — Основная поставка';
+    if (sub === 'corrections') return 'Заказы — Корректировки';
+    if (sub === 'history') return 'Заказы — История';
+    if (sub === 'reminders') return 'Заказы — Напоминания';
+    if (sub.startsWith('sup_')) {
+      const supId = sub.slice(4);
+      const sup = (roStore.suppliers || []).find(s => String(s.id) === String(supId));
+      return sup ? `Заказы — ${sup.short_name || sup.name || ''}`.trim() : 'Заказы — поставщик';
+    }
+    return 'Заказы';
+  }
+  const titles = {
+    dashboard: 'Главная',
+    info: 'Важная информация',
+    surveys: 'Опросы',
+    stock: 'Сбор остатков',
+    'warehouse-stock': 'Остатки склада',
+    scanner: 'Сканер товаров',
+    'keg-returns': 'Возврат кег',
+    profile: 'Профиль',
+  };
+  return titles[tab] || tab || '';
+}
+
+function sendHeartbeat() {
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+  roStore.heartbeat(currentPageLabel());
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  sendHeartbeat();
+  heartbeatTimer = setInterval(sendHeartbeat, 15000);
+}
+
 async function tgGetCode() {
   tgError.value = '';
   tgLinkLoading.value = true;
@@ -3071,6 +3114,7 @@ async function retryCabinetLoad() {
   try {
     await loadCabinetData();
     startRestaurantBroadcastPolling();
+    startHeartbeat();
   } catch (e) {
     globalError.value = e.message || 'Ошибка загрузки кабинета';
   } finally {
@@ -3121,6 +3165,7 @@ onMounted(async () => {
     await loadCabinetData();
     loadKegReturnsAvailability();
     startRestaurantBroadcastPolling();
+    startHeartbeat();
     ensureSupDeadlineTimer();
   } catch (e) {
     globalError.value = e.message || 'Ошибка загрузки кабинета';
@@ -3132,6 +3177,7 @@ onUnmounted(() => {
   clearInterval(delEditTimerInterval);
   stopSupDeadlineTimer();
   if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
   for (const url of Object.values(importantPreviewUrls)) URL.revokeObjectURL(url);
   window.removeEventListener('beforeunload', onBeforeUnload);
   window.removeEventListener('bk:ro-session-expired', onSessionExpiredFlushDraft);

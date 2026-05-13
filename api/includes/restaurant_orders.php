@@ -1825,6 +1825,17 @@ if ($roAction === 'logout' && $method === 'POST') {
     roRespond(['success' => true]);
 }
 
+// --- Heartbeat: где сейчас ресторан в кабинете (для /admin → «Рестораны онлайн») ---
+if ($roAction === 'heartbeat' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['success' => false], 401);
+    $page = trim((string)($body['page'] ?? ''));
+    if (mb_strlen($page) > 120) $page = mb_substr($page, 0, 120);
+    $pdo->prepare("UPDATE ro_users SET last_page = ?, last_seen_at = NOW() WHERE id = ?")
+        ->execute([$page !== '' ? $page : null, $rest['id']]);
+    roRespond(['success' => true]);
+}
+
 // --- Смена пароля ---
 if ($roAction === 'change-password' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);

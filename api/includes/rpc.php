@@ -1222,25 +1222,26 @@ if ($endpoint === 'rpc') {
         respond($s->fetchAll());
     }
     if ($fn === 'get_online_restaurants') {
-        // Список ресторанов «онлайн»: активность за последние 15 минут.
-        // session_active_until из-за рассинхрона TZ (PHP=UTC, MySQL=+03:00)
-        // на практике хранит время последнего запроса с кабинета, а не +3 часа.
+        // Список ресторанов «онлайн»: heartbeat-таймер кабинета шлёт ro/heartbeat
+        // каждые 15с и кладёт в ro_users.last_seen_at = NOW() и last_page = текущая
+        // страница. Считаем онлайном тех, у кого last_seen_at за последние 15 минут.
         requireAdmin($authUser);
         $s = $pdo->query("
             SELECT ru.restaurant_number,
                    ru.legal_entity,
                    ru.legal_entity_group,
+                   ru.last_page,
                    r.city,
                    r.address,
-                   ru.session_active_until AS last_activity
+                   ru.last_seen_at AS last_activity
             FROM ro_users ru
             LEFT JOIN restaurants r
               ON r.number = ru.restaurant_number
              AND r.legal_entity = ru.legal_entity COLLATE utf8mb4_general_ci
             WHERE ru.is_active = 1
-              AND ru.session_active_until IS NOT NULL
-              AND ru.session_active_until > NOW() - INTERVAL 15 MINUTE
-            ORDER BY ru.session_active_until DESC
+              AND ru.last_seen_at IS NOT NULL
+              AND ru.last_seen_at > NOW() - INTERVAL 15 MINUTE
+            ORDER BY ru.last_seen_at DESC
         ");
         respond($s->fetchAll());
     }
