@@ -600,7 +600,7 @@ defineExpose({});
 .task-column-body {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 10px 0;
+  padding: 4px 10px 10px;
   display: flex; flex-direction: column; gap: 8px;
   min-height: 40px;
   scrollbar-width: thin;

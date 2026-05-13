@@ -738,12 +738,12 @@ function onColDrop(i) {
 }
 .tasks-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: var(--tk-s-2) var(--tk-s-4);
+  padding: 6px var(--tk-s-4);
   gap: var(--tk-s-3);
   background: var(--tk-n-0);
   border-bottom: 1px solid var(--tk-border);
   flex-wrap: wrap;
-  min-height: 56px;
+  min-height: 44px;
 }
 .tasks-header-left { display: flex; align-items: center; gap: var(--tk-s-3); flex: 1; min-width: 0; }
 .tasks-title {
@@ -871,16 +871,23 @@ function onColDrop(i) {
 
 .tasks-board-area {
   flex: 1; overflow: hidden;
-  padding: var(--tk-s-4) 0 var(--tk-s-4) var(--tk-s-4);
+  padding: var(--tk-s-3) 0 4px var(--tk-s-3);
 }
 .tasks-columns {
   display: flex; gap: var(--tk-s-3); align-items: flex-start;
-  height: 100%; overflow-x: auto;
-  padding-bottom: var(--tk-s-2);
+  height: 100%; overflow-x: auto; overflow-y: hidden;
+  padding-bottom: 0;
   padding-right: var(--tk-s-4);
   cursor: grab;
   user-select: text;
+  /* Тонкий горизонтальный скроллбар внизу полотна */
+  scrollbar-width: thin;
+  scrollbar-color: var(--tk-n-200) transparent;
 }
+.tasks-columns::-webkit-scrollbar { height: 8px; }
+.tasks-columns::-webkit-scrollbar-thumb { background: var(--tk-n-200); border-radius: 4px; }
+.tasks-columns::-webkit-scrollbar-thumb:hover { background: var(--tk-n-300); }
+.tasks-columns::-webkit-scrollbar-track { background: transparent; }
 .tasks-columns.is-panning {
   cursor: grabbing;
   user-select: none;
