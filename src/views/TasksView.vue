@@ -238,24 +238,28 @@
         <div v-else class="search-results">
           <div v-for="(r, i) in searchResults" :key="r.id"
                class="search-result"
-               :class="{ hover: i === searchHover, 'is-done': r.is_done }"
+               :class="{ hover: i === searchHover, 'is-done': r.is_done, 'is-archived': r.is_archived }"
                @click="goToSearchResult(r)"
                @mouseenter="searchHover = i">
+            <span class="sr-icon" :class="'prio-' + (r.priority || 'medium')">
+              <TaskIcon v-if="r.is_done || r.is_done_column" name="check" :size="14"/>
+              <span v-else class="sr-icon-dot"></span>
+            </span>
             <div class="sr-main">
-              <div class="sr-title">
-                {{ r.title }}
-                <span v-if="r.is_done_column || r.is_done" class="sr-tag">✓ готово</span>
-                <span v-if="r.priority === 'urgent'" class="sr-tag urgent">срочно</span>
-                <span v-if="r.priority === 'high'" class="sr-tag high">высокий</span>
+              <div class="sr-row">
+                <span class="sr-title" v-html="highlightQuery(r.title)"></span>
+                <span class="sr-time">{{ formatRelativeTime(r.updated_at) }}</span>
               </div>
-              <div v-if="r.description" class="sr-desc">{{ r.description }}</div>
-              <div class="sr-meta">
+              <div class="sr-row sr-sub">
                 <span class="sr-board">{{ r.board_title }}</span>
-                <span class="sr-col">· {{ r.column_title }}</span>
+                <span class="sr-dot">·</span>
+                <span class="sr-col">{{ r.column_title }}</span>
+                <span v-if="r.is_archived" class="sr-tag-mini archived">архив</span>
+                <span v-if="r.priority === 'urgent'" class="sr-tag-mini urgent">срочно</span>
+                <span v-else-if="r.priority === 'high'" class="sr-tag-mini high">высокий</span>
                 <span v-if="r.due_date" class="sr-due">· до {{ formatShortDue(r.due_date) }}</span>
               </div>
             </div>
-            <div class="sr-arrow"><TaskIcon name="arrowRight" :size="16"/></div>
           </div>
         </div>
         </div>
@@ -462,6 +466,34 @@ function formatShortDue(s) {
   if (!s) return '';
   const d = new Date(s);
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+function formatRelativeTime(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return '';
+  const now = new Date();
+  const ms = now - d;
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'только что';
+  if (min < 60) return min + ' мин';
+  const h = Math.floor(min / 60);
+  if (h < 24 && d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'вчера';
+  const days = Math.floor(ms / 86400000);
+  if (days < 7) return days + ' дн.';
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+}
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
+function highlightQuery(text) {
+  const q = String(searchQuery.value || '').trim();
+  const html = escapeHtml(text);
+  if (q.length < 2) return html;
+  const safe = q.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  return html.replace(new RegExp('(' + safe + ')', 'gi'), '<mark>$1</mark>');
 }
 
 async function addCardToFirstColumn() {
@@ -1038,7 +1070,10 @@ function onColDrop(i) {
 }
 .labels-mgr-add .btn { padding: 0 var(--tk-s-3); height: 28px; }
 
-/* ── Новая структура менеджера меток (карточный вид) ── */
+/* ── Новая структура менеджера меток (карточный вид) ──
+   Перебиваем глобальные .modal-box input { width:100% !important; margin-bottom: 6px }
+   из assets/style.css, иначе инпут метки раздвигает соседние элементы и
+   при ховере карточки выглядит «прыжком». */
 .labels-mgr-box {
   max-width: 560px; width: 92vw;
   padding: var(--tk-s-4);
@@ -1052,14 +1087,17 @@ function onColDrop(i) {
 .labels-mgr-list {
   display: flex; flex-direction: column; gap: 8px;
   max-height: 50vh; overflow-y: auto;
+  /* лёгкая внутренняя обёртка, чтобы карточки не сливались с фоном модалки */
+  padding: 2px;
 }
 .labels-mgr-card {
-  background: var(--tk-bg-card, #fff);
+  background: var(--tk-bg-card, #fff) !important;
   border: 1px solid var(--tk-border-soft, #EFEAE0);
   border-radius: 10px;
   padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px;
   transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
+  margin: 0;
 }
 .labels-mgr-card:hover { border-color: var(--tk-border); box-shadow: 0 2px 6px rgba(15,23,42,0.06); }
 .labels-mgr-card.open { border-color: var(--tk-accent); box-shadow: 0 0 0 3px var(--tk-accent-soft); }
@@ -1067,6 +1105,7 @@ function onColDrop(i) {
   display: flex; align-items: center; gap: 8px;
 }
 .labels-mgr-pill {
+  flex-shrink: 0;
   display: inline-flex; align-items: center;
   padding: 3px 10px; border-radius: 999px;
   font-size: 11.5px; font-weight: var(--tk-fw-semibold);
@@ -1075,7 +1114,31 @@ function onColDrop(i) {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-shadow: 0 1px 0 rgba(15,23,42,0.20);
 }
+
+/* Перебиваем глобальный .modal-box input */
+.labels-mgr-input {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+  margin: 0 !important;
+  padding: 6px 10px !important;
+  font-size: var(--tk-fz-md, 13px) !important;
+  border: 1px solid var(--tk-border) !important;
+  border-radius: 6px !important;
+  background: var(--tk-n-0, #fff) !important;
+  color: var(--tk-text) !important;
+  font-family: inherit;
+  height: auto;
+  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
+}
+.labels-mgr-input:focus {
+  outline: none;
+  border-color: var(--tk-accent) !important;
+  box-shadow: var(--tk-focus-ring) !important;
+}
+
 .labels-mgr-edit-btn {
+  flex-shrink: 0;
   width: 28px; height: 28px;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: 1px solid var(--tk-border);
@@ -1106,7 +1169,7 @@ function onColDrop(i) {
 .labels-mgr-add-row {
   display: flex; gap: 8px; align-items: center;
 }
-.labels-mgr-add-row .labels-mgr-input.flex-grow { flex: 1; }
+.labels-mgr-add-row .labels-mgr-input.flex-grow { flex: 1 1 auto !important; }
 .labels-mgr-add-palette {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
@@ -1219,37 +1282,74 @@ function onColDrop(i) {
   padding: var(--tk-s-6); text-align: center;
   color: var(--tk-text-muted); font-size: var(--tk-fz-md);
 }
+/* Yougile-style: компактные строки 48px, иконка слева + заголовок + время справа,
+   на второй строке подзаголовок (доска · колонка · теги). */
 .search-result {
-  display: flex; align-items: center; gap: var(--tk-s-3);
-  padding: var(--tk-s-3) var(--tk-s-4);
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 14px;
   cursor: pointer;
   border-bottom: 1px solid var(--tk-border-soft);
   transition: background var(--tk-transition);
+  min-height: 44px;
 }
 .search-result:last-child { border-bottom: none; }
 .search-result.hover, .search-result:hover { background: var(--tk-n-100); }
 .search-result.is-done { opacity: 0.55; }
-.sr-main { flex: 1; min-width: 0; }
+.search-result.is-archived { opacity: 0.65; }
+
+.sr-icon {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--tk-n-100);
+  color: var(--tk-text-muted);
+  margin-top: 1px;
+}
+.sr-icon-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.sr-icon.prio-urgent { color: var(--tk-prio-urgent-fg); background: var(--tk-prio-urgent-bg); }
+.sr-icon.prio-high   { color: var(--tk-prio-high-fg);   background: var(--tk-prio-high-bg); }
+.sr-icon.prio-medium { color: var(--tk-text-muted);     background: var(--tk-n-100); }
+.sr-icon.prio-low    { color: var(--tk-text-muted);     background: var(--tk-n-100); }
+.search-result.is-done .sr-icon { background: var(--tk-success-soft); color: var(--tk-success); }
+
+.sr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sr-row {
+  display: flex; align-items: baseline; gap: 8px;
+  min-width: 0;
+}
 .sr-title {
-  font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-semibold); color: var(--tk-text);
-  display: flex; align-items: center; gap: var(--tk-s-1); flex-wrap: wrap;
+  flex: 1; min-width: 0;
+  font-size: 13.5px; font-weight: var(--tk-fw-semibold); color: var(--tk-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.sr-tag {
-  font-size: 10px; font-weight: var(--tk-fw-bold);
-  padding: 1px var(--tk-s-1); border-radius: var(--tk-r-sm);
-  background: var(--tk-n-100); color: var(--tk-text-muted);
-  text-transform: uppercase; letter-spacing: .3px;
+.sr-title mark {
+  background: transparent;
+  color: var(--tk-accent-text, #B85A0E);
+  font-weight: var(--tk-fw-bold);
 }
-.sr-tag.urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
-.sr-tag.high   { background: var(--tk-prio-high-bg);   color: var(--tk-prio-high-fg); }
-.sr-desc {
-  font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
-  margin-top: var(--tk-s-1); line-height: 1.4;
-  overflow: hidden; text-overflow: ellipsis;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+.sr-time {
+  flex-shrink: 0;
+  font-size: 11px; color: var(--tk-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.sr-meta { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); margin-top: var(--tk-s-1); }
-.sr-board { font-weight: var(--tk-fw-semibold); color: var(--tk-accent-text); }
+.sr-sub {
+  font-size: 11.5px;
+  color: var(--tk-text-muted);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.sr-board { font-weight: var(--tk-fw-semibold); color: var(--tk-text-secondary); }
+.sr-col { color: var(--tk-text-muted); }
+.sr-dot { color: var(--tk-text-muted); opacity: 0.6; }
+.sr-tag-mini {
+  font-size: 9.5px; font-weight: var(--tk-fw-bold);
+  padding: 1px 6px; border-radius: 999px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.sr-tag-mini.archived { background: var(--tk-n-200); color: var(--tk-text-muted); }
+.sr-tag-mini.urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
+.sr-tag-mini.high   { background: var(--tk-prio-high-bg);   color: var(--tk-prio-high-fg); }
 .sr-due { font-weight: var(--tk-fw-semibold); color: var(--tk-success); }
-.sr-arrow { color: var(--tk-text-muted); font-size: var(--tk-fz-h1); }
 </style>

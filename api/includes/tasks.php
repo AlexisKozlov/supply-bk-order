@@ -235,13 +235,13 @@ if ($method === 'GET' && $action === 'search') {
     // Карточки + название доски + соисполнители
     $sql = "
         SELECT c.id, c.board_id, c.parent_card_id, c.title, c.description, c.priority,
-               c.due_date, c.is_done, c.column_id, b.title AS board_title, b.owner_name,
+               c.due_date, c.is_done, c.is_archived, c.column_id, c.updated_at,
+               b.title AS board_title, b.owner_name,
                col.title AS column_title, col.is_done_column
         FROM tasks_cards c
         JOIN tasks_boards b ON b.id = c.board_id
         LEFT JOIN tasks_columns col ON col.id = c.column_id
         WHERE (c.title LIKE ? OR c.description LIKE ?)
-          AND c.is_archived = 0
     ";
     $params = [$like, $like];
     if (!$isMgr) {
