@@ -2,24 +2,24 @@
   <div class="tc">
     <!-- Шапка с навигацией -->
     <div class="tc-toolbar">
-      <button class="tc-nav-btn" @click="navPrev" :title="viewMode === 'week' ? 'Предыдущая неделя' : 'Предыдущий месяц'">
-        <TaskIcon name="chevronRight" :size="16" style="transform: rotate(180deg)"/>
-      </button>
-      <button class="tc-today-btn" @click="goToday">Сегодня</button>
-      <button class="tc-nav-btn" @click="navNext" :title="viewMode === 'week' ? 'Следующая неделя' : 'Следующий месяц'">
-        <TaskIcon name="chevronRight" :size="16"/>
-      </button>
+      <div class="tc-nav-group">
+        <button class="tc-nav-btn" @click="navPrev" :title="viewMode === 'week' ? 'Предыдущая неделя' : 'Предыдущий месяц'">
+          <TaskIcon name="chevronRight" :size="16" style="transform: rotate(180deg)"/>
+        </button>
+        <button class="tc-today-btn" @click="goToday">Сегодня</button>
+        <button class="tc-nav-btn" @click="navNext" :title="viewMode === 'week' ? 'Следующая неделя' : 'Следующий месяц'">
+          <TaskIcon name="chevronRight" :size="16"/>
+        </button>
+      </div>
       <div class="tc-title">{{ viewMode === 'week' ? weekLabel : monthLabel }}</div>
+      <div class="tc-spacer"></div>
+      <div class="tc-counter" v-if="totalCardsInPeriod">
+        <TaskIcon name="calendar" :size="13"/>
+        <span>{{ totalCardsInPeriod }} {{ plural(totalCardsInPeriod, ['задача','задачи','задач']) }}</span>
+      </div>
       <div class="tc-mode-toggle" role="group" aria-label="Режим календаря">
         <button class="tc-mode-btn" :class="{ active: viewMode === 'month' }" @click="setViewMode('month')">Месяц</button>
         <button class="tc-mode-btn" :class="{ active: viewMode === 'week' }" @click="setViewMode('week')">Неделя</button>
-      </div>
-      <div class="tc-spacer"></div>
-      <div class="tc-legend">
-        <span class="tc-legend-item"><span class="tc-legend-dot tc-prio-urgent"></span> Срочно</span>
-        <span class="tc-legend-item"><span class="tc-legend-dot tc-prio-high"></span> Высокий</span>
-        <span class="tc-legend-item"><span class="tc-legend-dot tc-prio-medium"></span> Средний</span>
-        <span class="tc-legend-item"><span class="tc-legend-dot tc-prio-low"></span> Низкий</span>
       </div>
     </div>
 
@@ -63,6 +63,7 @@
                @click.stop="$emit('open-card', card.id)"
                @dragstart="onCardDragStart($event, card)"
                @dragend="onCardDragEnd">
+            <span class="tc-card-dot" :class="'tc-card-dot-' + (card.priority || 'medium')"></span>
             <span class="tc-card-title">{{ card.title }}</span>
             <span v-if="card.assignees?.length" class="tc-card-bubble" :title="card.assignees.join(', ')">{{ initials(card.assignees[0]) }}</span>
           </div>
@@ -255,6 +256,20 @@ const weekGrid = computed(() => {
   return days;
 });
 
+const totalCardsInPeriod = computed(() => {
+  if (viewMode.value === 'week') {
+    return weekGrid.value.reduce((sum, d) => sum + d.cards.length, 0);
+  }
+  return monthGrid.value.filter(d => d.inMonth).reduce((sum, d) => sum + d.cards.length, 0);
+});
+
+function plural(n, forms) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return forms[0];
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return forms[1];
+  return forms[2];
+}
+
 function navPrev() {
   if (viewMode.value === 'week') {
     const a = new Date(weekAnchor.value);
@@ -351,105 +366,139 @@ function onUndatedDrop(e) {
 <style scoped>
 .tc {
   display: flex; flex-direction: column;
-  gap: var(--tk-s-2);
-  padding: 0 var(--tk-s-4) var(--tk-s-3) 0;
+  gap: 10px;
+  padding: 0 16px 12px 0;
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
 }
 
+/* Шапка-тулбар */
 .tc-toolbar {
-  display: flex; align-items: center; gap: var(--tk-s-2);
+  display: flex; align-items: center; gap: 10px;
   flex-wrap: wrap;
   flex-shrink: 0;
+  padding: 4px 0;
+}
+.tc-nav-group {
+  display: inline-flex; align-items: center;
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
 }
 .tc-title {
   font-size: 17px;
-  font-weight: var(--tk-fw-bold);
-  color: var(--tk-text);
+  font-weight: 700;
+  color: var(--tk-text, #1A1814);
   text-transform: capitalize;
-  letter-spacing: 0.02em;
-  min-width: 160px;
+  letter-spacing: 0.01em;
+  min-width: 180px;
+  padding-left: 4px;
 }
 .tc-nav-btn, .tc-today-btn {
-  height: 30px; min-width: 30px;
-  padding: 0 var(--tk-s-2);
+  height: 28px; min-width: 28px;
+  padding: 0 10px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: var(--tk-n-0); border: 1px solid var(--tk-border);
-  border-radius: var(--tk-r-sm);
+  background: transparent; border: none;
+  border-radius: 6px;
   cursor: pointer;
-  color: var(--tk-text);
-  font-family: inherit; font-size: var(--tk-fz-sm, 12px);
-  font-weight: var(--tk-fw-semibold);
-  transition: background var(--tk-transition), border-color var(--tk-transition);
+  color: var(--tk-text-secondary, #534D40);
+  font-family: inherit; font-size: 12px;
+  font-weight: 600;
+  transition: background 140ms ease, color 140ms ease;
 }
-.tc-nav-btn:hover, .tc-today-btn:hover { background: var(--tk-n-100); border-color: var(--tk-n-300); }
+.tc-nav-btn:hover, .tc-today-btn:hover {
+  background: #fff;
+  color: var(--tk-text, #1A1814);
+}
+.tc-today-btn { padding: 0 12px; }
 .tc-spacer { flex: 1; }
-.tc-legend { display: flex; gap: 10px; font-size: 11px; color: var(--tk-text-muted); flex-wrap: wrap; }
-.tc-legend-item { display: inline-flex; align-items: center; gap: 4px; }
-.tc-legend-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  display: inline-block;
-}
-.tc-prio-urgent { background: var(--tk-prio-urgent, #D44638); }
-.tc-prio-high { background: var(--tk-prio-high, #E87A1E); }
-.tc-prio-medium { background: var(--tk-prio-medium, #2B5797); }
-.tc-prio-low { background: var(--tk-prio-low, #6B778C); }
 
+/* Счётчик задач периода */
+.tc-counter {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  background: var(--tk-n-100, #F3F0E8);
+  border-radius: 999px;
+  font-size: 11.5px; font-weight: 600;
+  color: var(--tk-text-secondary, #534D40);
+}
+.tc-counter :deep(svg) { color: var(--tk-accent, #E87A1E); }
+
+/* Шапка дней недели */
 .tc-weekdays {
   display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
-  font-size: 11px;
-  font-weight: var(--tk-fw-semibold);
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--tk-text-muted);
+  letter-spacing: 0.06em;
+  color: var(--tk-text-muted, #9C9384);
   flex-shrink: 0;
 }
-.tc-weekday { padding: 4px 6px; min-width: 0; }
-.tc-weekday.tc-weekend { color: var(--tk-prio-urgent, #D44638); }
+.tc-weekday {
+  padding: 6px 8px;
+  min-width: 0;
+}
+.tc-weekday.tc-weekend { color: #B23B16; }
 .tc-weekdays-week .tc-weekday {
   display: flex; flex-direction: column; gap: 2px;
   font-size: 12px;
   align-items: flex-start;
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--tk-n-50, #FAF9F5);
 }
 .tc-weekdays-week .tc-weekday-today {
-  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  background: var(--tk-accent-soft, rgba(232,122,30,0.12));
   color: var(--tk-accent-text, #B85A0E);
 }
-.tc-weekday-name { font-weight: var(--tk-fw-semibold, 600); }
-.tc-weekday-date { font-size: 11px; color: var(--tk-text-muted, #6E6657); }
+.tc-weekday-name {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.tc-weekday-date {
+  font-size: 14px; font-weight: 700;
+  color: var(--tk-text, #1A1814);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.tc-weekdays-week .tc-weekday-today .tc-weekday-date {
+  color: var(--tk-accent-text, #B85A0E);
+}
 
 /* Недельный грид */
 .tc-week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 .tc-week-col {
-  background: var(--tk-n-0, #fff);
+  background: #fff;
   border: 1px solid var(--tk-border-soft, #EFEAE0);
-  border-radius: 10px;
-  padding: 8px 8px 10px;
+  border-radius: 12px;
+  padding: 10px;
   display: flex; flex-direction: column; gap: 6px;
   overflow-y: auto;
   min-width: 0;
-  transition: background 140ms ease, border-color 140ms ease;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
+.tc-week-col:hover { box-shadow: 0 2px 6px rgba(15,23,42,0.05); }
 .tc-week-col.tc-day-today {
-  background: linear-gradient(180deg, var(--tk-accent-soft, rgba(232,122,30,0.10)) 0%, transparent 50%);
-  border-color: color-mix(in srgb, var(--tk-accent) 35%, var(--tk-border) 65%);
+  background: linear-gradient(180deg, var(--tk-accent-soft, rgba(232,122,30,0.10)) 0%, #fff 100%);
+  border-color: color-mix(in srgb, var(--tk-accent, #E87A1E) 35%, var(--tk-border, #E6E1D7) 65%);
 }
 .tc-week-col.tc-day-weekend { background: var(--tk-n-50, #FAF9F5); }
 .tc-week-col.tc-day-drop {
-  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  background: var(--tk-accent-soft, rgba(232,122,30,0.12));
   border-color: var(--tk-accent, #E87A1E);
+  border-style: dashed;
 }
 .tc-week-col-empty {
   font-size: 11px;
@@ -459,7 +508,7 @@ function onUndatedDrop(e) {
   font-style: italic;
 }
 .tc-card-week {
-  padding: 8px 10px;
+  padding: 7px 10px;
   font-size: 12.5px;
 }
 
@@ -473,106 +522,136 @@ function onUndatedDrop(e) {
 }
 .tc-mode-btn {
   border: none; background: transparent;
-  padding: 5px 12px; border-radius: 6px;
-  font-family: inherit; font-size: 12px; font-weight: var(--tk-fw-semibold, 600);
+  padding: 5px 14px; border-radius: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
   color: var(--tk-text-muted, #6E6657); cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
 }
 .tc-mode-btn:hover { color: var(--tk-text, #1A1814); }
 .tc-mode-btn.active {
-  background: var(--tk-n-0, #fff);
-  color: var(--tk-text, #1A1814);
+  background: #fff;
+  color: var(--tk-accent-text, #B85A0E);
   box-shadow: 0 1px 2px rgba(15,23,42,0.08);
 }
 
+/* Сетка месяца */
 .tc-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  grid-auto-rows: minmax(72px, 1fr);
-  gap: 4px;
+  grid-auto-rows: minmax(78px, 1fr);
+  gap: 6px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 .tc-day {
-  background: var(--tk-n-0);
-  border: 1px solid var(--tk-border-soft);
-  border-radius: var(--tk-r-sm);
-  padding: 4px 6px 6px;
+  background: #fff;
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 10px;
+  padding: 6px 8px 8px;
   display: flex; flex-direction: column;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
+.tc-day:hover { box-shadow: 0 2px 6px rgba(15,23,42,0.05); }
 .tc-day-other {
   background: transparent;
-  color: var(--tk-text-muted);
   border-color: transparent;
+  color: var(--tk-text-muted, #9C9384);
 }
-.tc-day-other .tc-day-num { opacity: 0.55; }
-.tc-day-weekend:not(.tc-day-other) { background: var(--tk-n-50, #F7F8F9); }
+.tc-day-other .tc-day-num { opacity: 0.5; }
+.tc-day-other:hover { box-shadow: none; }
+.tc-day-weekend:not(.tc-day-other) { background: var(--tk-n-50, #FAF9F5); }
 .tc-day-today {
-  border-color: var(--tk-accent, #E87A1E);
-  box-shadow: 0 0 0 1px var(--tk-accent, #E87A1E);
+  background: linear-gradient(180deg, var(--tk-accent-soft, rgba(232,122,30,0.10)) 0%, #fff 60%);
+  border-color: color-mix(in srgb, var(--tk-accent, #E87A1E) 35%, var(--tk-border, #E6E1D7) 65%);
 }
 .tc-day-today .tc-day-num {
   background: var(--tk-accent, #E87A1E);
   color: #fff;
   border-radius: 999px;
-  padding: 1px 7px;
-  display: inline-block;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700;
 }
-.tc-day-drop { background: var(--tk-accent-soft, #FEEFE0); border-color: var(--tk-accent); }
+.tc-day-drop {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.12)) !important;
+  border-color: var(--tk-accent, #E87A1E) !important;
+  border-style: dashed !important;
+}
 
 .tc-day-head {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 12px; font-weight: var(--tk-fw-semibold);
-  color: var(--tk-text);
-  margin-bottom: 3px;
+  font-size: 12px; font-weight: 700;
+  color: var(--tk-text, #1A1814);
+  margin-bottom: 4px;
+  min-height: 22px;
 }
-.tc-day-other .tc-day-head { color: var(--tk-text-muted); }
+.tc-day-weekend:not(.tc-day-other):not(.tc-day-today) .tc-day-num {
+  color: #B23B16;
+}
+.tc-day-other .tc-day-head { color: var(--tk-text-muted, #9C9384); }
 .tc-day-more {
-  font-size: 10px; font-weight: var(--tk-fw-semibold);
-  color: var(--tk-text-muted);
+  font-size: 10.5px; font-weight: 700;
+  color: var(--tk-accent-text, #B85A0E);
   cursor: pointer;
-  padding: 1px 5px;
+  padding: 1px 7px;
   border-radius: 999px;
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  transition: background 140ms ease;
 }
-.tc-day-more:hover { background: var(--tk-n-100); color: var(--tk-text); }
+.tc-day-more:hover { background: color-mix(in srgb, var(--tk-accent, #E87A1E) 20%, transparent); }
 
 .tc-day-cards {
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 3px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
 }
 .tc-day-cards::-webkit-scrollbar { width: 4px; }
-.tc-day-cards::-webkit-scrollbar-thumb { background: var(--tk-n-300); border-radius: 4px; }
+.tc-day-cards::-webkit-scrollbar-thumb { background: var(--tk-border, #E6E1D7); border-radius: 4px; }
 
+/* Карточка-пилюля в ячейке дня */
 .tc-card {
-  display: flex; align-items: center; gap: 4px;
-  background: var(--tk-n-0);
-  border-left: 3px solid var(--tk-n-300);
-  padding: 2px 6px;
+  display: flex; align-items: center; gap: 5px;
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  padding: 4px 7px;
   font-size: 11px;
-  font-weight: var(--tk-fw-semibold);
-  border-radius: 3px;
+  font-weight: 600;
+  border-radius: 6px;
   cursor: pointer;
   user-select: none;
-  box-shadow: 0 1px 2px rgba(9,30,66,0.08);
-  transition: transform 100ms ease, box-shadow 100ms ease;
+  color: var(--tk-text, #1A1814);
+  transition: background 140ms ease, transform 100ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
-.tc-card:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(9,30,66,0.15); }
-.tc-card.prio-bg-urgent { border-left-color: var(--tk-prio-urgent); background: rgba(212,70,56,0.06); }
-.tc-card.prio-bg-high   { border-left-color: var(--tk-prio-high);   background: rgba(232,122,30,0.06); }
-.tc-card.prio-bg-medium { border-left-color: var(--tk-prio-medium); background: rgba(43,87,151,0.05); }
-.tc-card.prio-bg-low    { border-left-color: var(--tk-prio-low);    background: rgba(107,119,140,0.06); }
-.tc-card-done { opacity: 0.55; text-decoration: line-through; }
+.tc-card:hover {
+  background: #fff;
+  border-color: var(--tk-border, #E6E1D7);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(15,23,42,0.08);
+}
+.tc-card-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--tk-text-muted, #9C9384);
+}
+.tc-card-dot-urgent { background: #D44638; }
+.tc-card-dot-high   { background: #E87A1E; }
+.tc-card-dot-medium { background: #2B5797; }
+.tc-card-dot-low    { background: #6B778C; }
+
+.tc-card-done { opacity: 0.5; text-decoration: line-through; }
 .tc-card-overdue {
-  outline: 1.5px solid var(--tk-prio-urgent, #D44638);
+  border-color: #D44638;
+  background: rgba(212,70,56,0.04);
 }
+.tc-card-overdue .tc-card-dot { box-shadow: 0 0 0 2px rgba(212,70,56,0.25); }
+
 .tc-card-title {
   flex: 1; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -580,18 +659,20 @@ function onUndatedDrop(e) {
 .tc-card-bubble {
   width: 16px; height: 16px;
   border-radius: 50%;
-  background: var(--tk-n-300);
+  background: linear-gradient(135deg, #B0AAA0, #6E6657);
   color: #fff;
-  font-size: 9px; font-weight: var(--tk-fw-bold);
+  font-size: 9px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center;
   flex-shrink: 0;
+  border: 1.5px solid #fff;
 }
 
+/* Блок «Без срока» */
 .tc-undated {
-  border: 1px solid var(--tk-border);
-  border-radius: var(--tk-r-sm);
-  background: var(--tk-n-0);
-  transition: background 120ms ease, border-color 120ms ease;
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 12px;
+  background: #fff;
+  transition: background 140ms ease, border-color 140ms ease;
   flex-shrink: 0;
   max-height: 30%;
   overflow: hidden;
@@ -599,26 +680,43 @@ function onUndatedDrop(e) {
   flex-direction: column;
 }
 .tc-undated.open .tc-undated-list { overflow-y: auto; }
-.tc-undated.tc-day-drop { background: var(--tk-accent-soft, #FEEFE0); border-color: var(--tk-accent); }
-.tc-undated-head {
-  display: flex; align-items: center; gap: 6px;
-  padding: var(--tk-s-2) var(--tk-s-3);
-  cursor: pointer;
-  font-size: 13px; font-weight: var(--tk-fw-semibold);
-  color: var(--tk-text);
-  user-select: none;
+.tc-undated.tc-day-drop {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.12));
+  border-color: var(--tk-accent, #E87A1E);
+  border-style: dashed;
 }
-.tc-undated-hint { margin-left: auto; font-size: 11px; color: var(--tk-text-muted); font-weight: normal; }
+.tc-undated-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--tk-text, #1A1814);
+  user-select: none;
+  transition: background 140ms ease;
+}
+.tc-undated-head:hover { background: var(--tk-n-50, #FAF9F5); }
+.tc-undated-hint {
+  margin-left: auto;
+  font-size: 11px; color: var(--tk-text-muted, #9C9384);
+  font-weight: 500;
+}
 .tc-undated-list {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  padding: 0 var(--tk-s-3) var(--tk-s-3);
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 0 14px 12px;
 }
 .tc-undated-list .tc-card { width: 220px; flex-shrink: 0; }
 
+/* Адаптив */
 @media (max-width: 760px) {
-  .tc-legend { display: none; }
-  .tc-day { min-height: 70px; padding: 3px 4px; }
-  .tc-grid { grid-auto-rows: minmax(70px, auto); }
-  .tc-card { font-size: 10px; padding: 1px 4px; }
+  .tc-counter { display: none; }
+  .tc-title { min-width: 140px; font-size: 15px; }
+  .tc-day { padding: 4px 5px 5px; }
+  .tc-grid {
+    grid-auto-rows: minmax(64px, auto);
+    gap: 4px;
+  }
+  .tc-card { font-size: 10.5px; padding: 3px 5px; }
+  .tc-card-bubble { display: none; }
+  .tc-day-today .tc-day-num { width: 20px; height: 20px; font-size: 11px; }
 }
 </style>
