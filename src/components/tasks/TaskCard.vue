@@ -919,29 +919,29 @@ const vClickOutsideCard = {
 }
 
 /* Список подзадач — каждая полноценная мини-карточка как в Yougile.
-   Слева — «дерево»: вертикальная линия с горизонтальными ответвлениями
-   к каждой подзадаче. У первой линия идёт от центра, у последней —
-   до центра, чтобы не было «висящих хвостов». */
+   Слева — «дерево»: единая непрерывная вертикальная линия на родителе
+   (от центра первой подзадачи до центра последней) и горизонтальные
+   отводы у каждой подзадачи. */
 .subtasks-list {
   margin-top: 6px;
   display: flex; flex-direction: column; gap: 6px;
   padding: 0 0 0 18px;
   position: relative;
 }
-.subtask-mini { position: relative; }
-.subtask-mini::before {
+.subtasks-list::before {
   content: '';
   position: absolute;
-  left: -12px;
-  top: 0; bottom: 0;
+  left: 6px;
+  top: 20px;
+  bottom: 20px;
   width: 1.5px;
   background: var(--tk-border, #E6E1D7);
   border-radius: 1px;
+  pointer-events: none;
 }
-.subtask-mini:first-child::before { top: 20px; }
-.subtask-mini:last-child::before  { bottom: calc(100% - 20px); height: auto; }
-.subtask-mini:only-child::before  { top: 20px; bottom: auto; height: 0; }
-.subtask-mini::after {
+.subtask-mini { position: relative; }
+/* Горизонтальный отвод к каждой подзадаче */
+.subtask-mini::before {
   content: '';
   position: absolute;
   left: -12px;
