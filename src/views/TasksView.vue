@@ -141,15 +141,18 @@
 
     <div v-else class="tasks-board-area">
       <!-- Колонки (канбан) -->
-      <div v-if="viewMode === 'kanban'" class="tasks-columns" @dragover.prevent>
+      <div v-if="viewMode === 'kanban'" class="tasks-columns"
+           :class="{ 'is-panning': panActive }"
+           @dragover.prevent
+           @mousedown="onBoardPanStart">
         <div v-for="(col, i) in store.columns" :key="col.id"
              class="tasks-column-wrap"
              :class="{ 'col-drag-over': colDragOver === i }"
              draggable="true"
-             @dragstart.self="onColDragStart(i, $event)"
-             @dragover.self.prevent="onColDragOver(i)"
-             @drop.self="onColDrop(i)"
-             @dragend.self="colDragFrom = null; colDragOver = null">
+             @dragstart="onColDragStart(i, $event)"
+             @dragover.prevent="onColDragOver(i)"
+             @drop="onColDrop(i)"
+             @dragend="colDragFrom = null; colDragOver = null">
           <TaskColumn
             :column="col"
             :items="store.cardsByColumn[col.id] || []"
@@ -302,6 +305,39 @@ const searchInputRef = ref(null);
 // Drag-and-drop колонок
 const colDragFrom = ref(null);
 const colDragOver = ref(null);
+
+// «Хват» доски — горизонтальная панорама без скроллбара. Срабатывает на:
+// 1) средней кнопке мыши в любом месте полотна
+// 2) левой кнопке в пустой области полотна (между/под колонками)
+// 3) Shift + левая кнопка где угодно
+const panActive = ref(false);
+function onBoardPanStart(e) {
+  const middleBtn = e.button === 1;
+  const leftBtn = e.button === 0;
+  const shift = e.shiftKey;
+  // Левый клик: только если попали прямо в контейнер (пустое место)
+  // или удерживается Shift.
+  if (leftBtn && !shift && e.target !== e.currentTarget) return;
+  if (!middleBtn && !leftBtn) return;
+  e.preventDefault();
+  const el = e.currentTarget;
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const startScrollLeft = el.scrollLeft;
+  const startScrollTop = el.scrollTop;
+  panActive.value = true;
+  const onMove = (ev) => {
+    el.scrollLeft = startScrollLeft - (ev.clientX - startX);
+    el.scrollTop  = startScrollTop  - (ev.clientY - startY);
+  };
+  const onUp = () => {
+    panActive.value = false;
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  };
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+}
 
 // Режим отображения доски (канбан / календарь). Запоминается в localStorage
 // отдельно для каждой доски — у разных досок разные привычки просмотра.
@@ -842,7 +878,14 @@ function onColDrop(i) {
   height: 100%; overflow-x: auto;
   padding-bottom: var(--tk-s-2);
   padding-right: var(--tk-s-4);
+  cursor: grab;
+  user-select: text;
 }
+.tasks-columns.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+.tasks-columns.is-panning * { cursor: inherit !important; }
 .tasks-column-wrap {
   height: 100%;
   display: flex;

@@ -67,8 +67,19 @@
       <div class="task-card-title">{{ card.title }}</div>
     </div>
 
-    <!-- Прогресс чек-листа отображается только как счётчик внизу карточки
-         в блоке meta — отдельная полоса не рисуется. -->
+    <!-- Прогресс чек-листа — тонкая заполняющаяся линия (Yougile-стиль) -->
+    <div v-if="card.checklist?.total" class="task-card-progress"
+         :title="'Чек-лист: ' + card.checklist.done + ' из ' + card.checklist.total"
+         :class="{ done: card.checklist.done === card.checklist.total }">
+      <div class="task-card-progress-fill" :style="{ width: checklistPct + '%' }"></div>
+    </div>
+
+    <!-- Прогресс подзадач — тоже заполняющаяся линия, если подзадач больше одной -->
+    <div v-if="card.subtasks_total" class="task-card-progress task-card-progress-sub"
+         :title="'Подзадачи: ' + (card.subtasks_done || 0) + ' из ' + (card.subtasks_total || 0)"
+         :class="{ done: card.subtasks_done === card.subtasks_total }">
+      <div class="task-card-progress-fill" :style="{ width: subtasksPct + '%' }"></div>
+    </div>
 
 
     <!-- Метаданные снизу -->
@@ -264,6 +275,12 @@ const priorityLabel = computed(() => (priorities.find(p => p.value === props.car
 const checklistPct = computed(() => {
   const total = props.card.checklist?.total || 0;
   const done = props.card.checklist?.done || 0;
+  if (!total) return 0;
+  return Math.round(done / total * 100);
+});
+const subtasksPct = computed(() => {
+  const total = props.card.subtasks_total || 0;
+  const done = props.card.subtasks_done || 0;
   if (!total) return 0;
   return Math.round(done / total * 100);
 });
@@ -573,22 +590,33 @@ const vClickOutsideCard = {
 }
 .task-card.is-done .task-card-title { /* перебивает .is-done из ранее */ }
 
-/* Прогресс-бар чек-листа */
+/* Прогресс-бар — тонкая заполняющаяся линия (Yougile-стиль) */
 .task-card-progress {
-  height: 3px;
+  height: 5px;
   background: var(--tk-n-100, #F3F0E8);
   border-radius: 999px;
   overflow: hidden;
   margin: 0;
+  position: relative;
 }
+.task-card-progress-sub { margin-top: 2px; }
 .task-card-progress-fill {
   height: 100%;
-  background: var(--tk-accent, #E87A1E);
+  background: linear-gradient(90deg, var(--tk-accent, #E87A1E), #F4A261);
   border-radius: inherit;
-  transition: width 200ms ease, background 200ms ease;
+  transition: width 280ms cubic-bezier(0.16, 1, 0.3, 1), background 200ms ease;
+  box-shadow: 0 0 0 1px rgba(232,122,30,0.12);
 }
 .task-card-progress.done .task-card-progress-fill {
-  background: #36B37E;
+  background: linear-gradient(90deg, var(--tk-success, #16A364), #4BCE97);
+  box-shadow: 0 0 0 1px rgba(22,163,100,0.15);
+}
+.task-card-progress-sub .task-card-progress-fill {
+  background: linear-gradient(90deg, #635BFF, #7B82FF);
+  box-shadow: 0 0 0 1px rgba(99,91,255,0.15);
+}
+.task-card-progress-sub.done .task-card-progress-fill {
+  background: linear-gradient(90deg, var(--tk-success, #16A364), #4BCE97);
 }
 
 /* Круглый чекбокс «Готово + в архив» */
