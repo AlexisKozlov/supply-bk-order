@@ -1222,9 +1222,9 @@ if ($endpoint === 'rpc') {
         respond($s->fetchAll());
     }
     if ($fn === 'get_online_restaurants') {
-        // Список ресторанов «онлайн» в кабинете: активность за последние 15 минут.
-        // session_active_until продлевается на +3ч при каждом запросе ro-API,
-        // поэтому «активен 15 мин назад» = session_active_until > NOW() + 2ч45м.
+        // Список ресторанов «онлайн»: активность за последние 15 минут.
+        // session_active_until из-за рассинхрона TZ (PHP=UTC, MySQL=+03:00)
+        // на практике хранит время последнего запроса с кабинета, а не +3 часа.
         requireAdmin($authUser);
         $s = $pdo->query("
             SELECT ru.restaurant_number,
@@ -1232,14 +1232,14 @@ if ($endpoint === 'rpc') {
                    ru.legal_entity_group,
                    r.city,
                    r.address,
-                   (ru.session_active_until - INTERVAL 3 HOUR) AS last_activity
+                   ru.session_active_until AS last_activity
             FROM ro_users ru
             LEFT JOIN restaurants r
               ON r.number = ru.restaurant_number
-             AND r.legal_entity = ru.legal_entity
+             AND r.legal_entity = ru.legal_entity COLLATE utf8mb4_general_ci
             WHERE ru.is_active = 1
               AND ru.session_active_until IS NOT NULL
-              AND ru.session_active_until > NOW() + INTERVAL 2 HOUR + INTERVAL 45 MINUTE
+              AND ru.session_active_until > NOW() - INTERVAL 15 MINUTE
             ORDER BY ru.session_active_until DESC
         ");
         respond($s->fetchAll());
