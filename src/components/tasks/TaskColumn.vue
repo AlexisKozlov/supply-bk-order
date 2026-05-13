@@ -379,11 +379,12 @@ defineExpose({});
   display: flex; align-items: center; gap: var(--tk-s-2, 8px);
   position: relative;
 }
-.task-column-title-wrap { flex: 1; display: flex; align-items: center; gap: var(--tk-s-2, 8px); min-width: 0; }
+.task-column-title-wrap { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .task-column-title {
   font-weight: var(--tk-fw-semibold, 600);
-  font-size: var(--tk-fz-lg, 14px);
-  color: var(--tk-text, #172B4D);
+  font-size: 14.5px;
+  color: var(--tk-text, #1A1814);
+  letter-spacing: -0.01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   cursor: text;
 }
@@ -399,9 +400,10 @@ defineExpose({});
 }
 .task-column-title-input:focus { outline: none; border-color: var(--tk-accent, #E87A1E); box-shadow: var(--tk-focus-ring, 0 0 0 2px rgba(232,122,30,0.35)); }
 .task-column-count {
-  background: rgba(9,30,66,0.08); color: var(--tk-text-muted, #758195);
-  font-size: var(--tk-fz-xs, 11px); font-weight: var(--tk-fw-semibold, 600);
-  padding: 1px 7px; border-radius: 10px;
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text-muted, #6E6657);
+  font-size: 11.5px; font-weight: var(--tk-fw-semibold, 600);
+  padding: 2px 8px; border-radius: 999px;
   font-feature-settings: 'tnum';
   display: inline-flex; align-items: center; gap: 4px;
 }
@@ -597,22 +599,22 @@ defineExpose({});
 .task-column.wip-exceeded {
   box-shadow: 0 0 0 2px rgba(201,55,44,0.35) inset;
 }
-.task-column.wip-exceeded .task-column-color-bar {
-  background: #C9372C !important;
+.task-column.wip-exceeded .task-column-color-dot {
+  background: var(--tk-danger, #D33A2C) !important;
 }
 
 .task-column-body {
   flex: 1;
   overflow-y: auto;
-  padding: var(--tk-s-1, 4px) var(--tk-s-2, 8px) 0;
-  display: flex; flex-direction: column; gap: var(--tk-s-2, 8px);
+  padding: 4px 10px 0;
+  display: flex; flex-direction: column; gap: 8px;
   min-height: 40px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(9,30,66,0.20) transparent;
+  scrollbar-color: var(--tk-n-200) transparent;
 }
-.task-column-body::-webkit-scrollbar { width: 8px; }
-.task-column-body::-webkit-scrollbar-thumb { background: rgba(9,30,66,0.20); border-radius: 4px; }
-.task-column-body::-webkit-scrollbar-thumb:hover { background: rgba(9,30,66,0.30); }
+.task-column-body::-webkit-scrollbar { width: 6px; }
+.task-column-body::-webkit-scrollbar-thumb { background: var(--tk-n-200); border-radius: 3px; }
+.task-column-body::-webkit-scrollbar-thumb:hover { background: var(--tk-n-300); }
 .task-column-body::-webkit-scrollbar-track { background: transparent; }
 
 .card-slot { position: relative; }
@@ -643,28 +645,28 @@ defineExpose({});
   box-shadow: 0 0 0 2px rgba(232,122,30,0.15);
 }
 
-.task-column-footer { padding: var(--tk-s-2, 8px); }
+.task-column-footer { padding: 8px 10px 10px; }
 .task-column-add-btn {
   width: 100%;
   display: flex; align-items: center; gap: 6px;
   background: none;
   border: none;
-  color: var(--tk-text-muted, #758195);
+  color: var(--tk-text-muted, #6E6657);
   font-size: var(--tk-fz-md, 13px);
   font-weight: var(--tk-fw-medium, 500);
-  padding: var(--tk-s-2, 8px) var(--tk-s-3, 12px);
-  border-radius: var(--tk-r-md, 8px);
+  padding: 9px 12px;
+  border-radius: var(--tk-r-md, 10px);
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  transition: background var(--tk-transition, 120ms ease), color var(--tk-transition, 120ms ease);
+  transition: background var(--tk-transition, 140ms ease), color var(--tk-transition, 140ms ease);
 }
-.task-column-add-btn:hover { background: rgba(9,30,66,0.08); color: var(--tk-text, #172B4D); }
+.task-column-add-btn:hover { background: var(--tk-n-100, #F3F0E8); color: var(--tk-text, #1A1814); }
 .task-column-add-btn:focus-visible {
   outline: none;
-  background: rgba(9,30,66,0.06);
-  color: var(--tk-text, #172B4D);
-  box-shadow: var(--tk-focus-ring, 0 0 0 2px rgba(232,122,30,0.35));
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text, #1A1814);
+  box-shadow: var(--tk-focus-ring, 0 0 0 3px rgba(232,122,30,0.25));
 }
 
 .task-column-add-form { display: flex; flex-direction: column; gap: var(--tk-s-2, 8px); }

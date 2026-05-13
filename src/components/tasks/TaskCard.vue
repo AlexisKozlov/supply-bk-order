@@ -472,18 +472,19 @@ const vClickOutsideCard = {
 <style scoped>
 .task-card {
   background: var(--tk-bg-card, #fff);
-  border: 1px solid var(--tk-border-soft, #EEF0F4);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
   border-radius: var(--tk-r-card, 12px);
-  padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-4, 16px);
+  padding: 14px 14px 12px;
   box-shadow: var(--tk-shadow-card);
   cursor: pointer;
   user-select: none;
   position: relative;
-  transition: box-shadow var(--tk-transition, 140ms ease), transform var(--tk-transition, 140ms ease), border-color var(--tk-transition, 140ms ease);
+  display: flex; flex-direction: column; gap: 10px;
+  transition: box-shadow var(--tk-transition, 140ms ease), border-color var(--tk-transition, 140ms ease);
 }
 .task-card:hover {
   box-shadow: var(--tk-shadow-card-hover);
-  border-color: var(--tk-border, #E4E7EE);
+  border-color: var(--tk-border, #E6E1D7);
 }
 .task-card.is-dragging { opacity: 0.45; transform: rotate(1deg); }
 .task-card.is-done { opacity: 0.6; }
@@ -498,25 +499,16 @@ const vClickOutsideCard = {
 }
 .task-card-external svg { color: #B58A2E; }
 
-/* Левая полоска по приоритету — узкая, плотно прижата к левому краю */
-.task-card::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 8px; bottom: 8px;
-  width: 4px;
-  border-radius: 4px;
-  background: transparent;
-}
-.task-card.prio-low::before    { background: var(--tk-n-300); }
-.task-card.prio-medium::before { background: transparent; }
-.task-card.prio-high::before   { background: var(--tk-warning, #BB6A0A); }
-.task-card.prio-urgent::before { background: var(--tk-danger, #D33A2C); }
+/* Приоритет — без полоски слева. Подсветка идёт через цветной meta-pill
+   в футере карточки. Срочно/высокий дополнительно тонируют border-color. */
+.task-card.prio-urgent { border-color: color-mix(in srgb, var(--tk-danger) 35%, var(--tk-border-soft) 65%); }
+.task-card.prio-high   { border-color: color-mix(in srgb, var(--tk-warning) 30%, var(--tk-border-soft) 70%); }
 
 /* ═══ Метки сверху ═══ */
 .task-card-labels {
-  display: flex; gap: var(--tk-s-1, 4px);
+  display: flex; gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: var(--tk-s-2, 8px);
+  margin: 0;
 }
 .label-pill {
   /* В Yougile метки — пастельная подложка + тёмный шрифт того же оттенка.
@@ -538,16 +530,17 @@ const vClickOutsideCard = {
 
 /* ═══ Заголовок ═══ */
 .task-card-title-row {
-  display: flex; align-items: flex-start; gap: var(--tk-s-2, 8px);
-  margin-bottom: var(--tk-s-2, 8px);
-  padding-right: 22px;
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 0;
+  padding-right: 24px;
 }
 .task-card-title {
   flex: 1;
-  font-size: var(--tk-fz-lg, 14px);
-  font-weight: var(--tk-fw-medium, 500);
-  color: var(--tk-text, #172B4D);
-  line-height: 1.4;
+  font-size: 14.5px;
+  font-weight: var(--tk-fw-semibold, 600);
+  color: var(--tk-text, #1A1814);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
   word-break: break-word;
   min-width: 0;
 }
@@ -555,11 +548,11 @@ const vClickOutsideCard = {
 
 /* Прогресс-бар чек-листа */
 .task-card-progress {
-  height: 4px;
-  background: var(--tk-n-100, #EBECF0);
+  height: 3px;
+  background: var(--tk-n-100, #F3F0E8);
   border-radius: 999px;
   overflow: hidden;
-  margin: -2px 0 var(--tk-s-2, 8px);
+  margin: 0;
 }
 .task-card-progress-fill {
   height: 100%;
@@ -668,24 +661,26 @@ const vClickOutsideCard = {
 
 /* ═══ Метаданные карточки ═══ */
 .task-card-meta {
-  display: flex; gap: var(--tk-s-1, 4px);
+  display: flex; gap: 6px;
   flex-wrap: wrap; align-items: center;
+  margin-top: 2px;
 }
 
 /* Универсальная плашка метаданных */
 .meta-pill {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: var(--tk-fz-xs, 11px);
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px;
   font-weight: var(--tk-fw-semibold, 600);
-  padding: 2px var(--tk-s-2, 8px);
-  border-radius: var(--tk-r-sm, 4px);
+  padding: 3px 9px;
+  border-radius: var(--tk-r-pill, 999px);
   border: none; cursor: pointer;
-  background: var(--tk-n-100, #F1F2F4);
-  color: var(--tk-text-secondary, #44546F);
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text-secondary, #3D382E);
   font-family: inherit;
-  transition: background var(--tk-transition, 120ms ease);
+  letter-spacing: 0;
+  transition: background var(--tk-transition, 140ms ease);
 }
-.meta-pill:hover { background: var(--tk-n-200, #DCDFE4); }
+.meta-pill:hover { background: var(--tk-n-200, #E6E1D7); }
 .meta-pill-ghost {
   background: transparent;
   color: var(--tk-text-muted, #758195);
