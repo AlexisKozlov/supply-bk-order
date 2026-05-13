@@ -82,6 +82,25 @@ export const tasksApi = {
   search(q)                          { return call('GET',   '/search?q=' + encodeURIComponent(q)); },
   myCards()                          { return call('GET',   '/my-cards'); },
 
+  // Шаблоны повторяющихся карточек
+  listTemplates()                    { return call('GET',    '/templates'); },
+  createTemplate(payload)            { return call('POST',   '/templates', payload); },
+  loadTemplate(id)                   { return call('GET',    `/templates/${id}`); },
+  updateTemplate(id, payload)        { return call('PATCH',  `/templates/${id}`, payload); },
+  deleteTemplate(id)                 { return call('DELETE', `/templates/${id}`); },
+  setTemplateAssignees(id, names)    { return call('POST',   `/templates/${id}/assignees`, { user_names: names }); },
+  setTemplateChecklist(id, items)    { return call('POST',   `/templates/${id}/checklist`, { items }); },
+
+  // Расписания (1-N на шаблон)
+  createSchedule(tplId, payload)     { return call('POST',   `/templates/${tplId}/schedules`, payload); },
+  updateSchedule(id, payload)        { return call('PATCH',  `/template-schedules/${id}`, payload); },
+  deleteSchedule(id)                 { return call('DELETE', `/template-schedules/${id}`); },
+  previewSchedule(id)                { return call('GET',    `/template-schedules/${id}/preview`); },
+  runScheduleNow(id)                 { return call('POST',   `/template-schedules/${id}/run-now`); },
+
+  // Сохранить открытую карточку как шаблон
+  saveCardAsTemplate(cardId)         { return call('POST',   `/cards/${cardId}/save-as-template`); },
+
   // Уведомления
   listNotifications(limit = 30)      { return call('GET',   '/notifications?limit=' + limit); },
   markNotificationsRead(ids)         { return call('POST',  '/notifications/mark-read', { ids }); },

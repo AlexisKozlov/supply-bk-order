@@ -79,6 +79,11 @@
           </div>
         </div>
 
+        <!-- Мои шаблоны (повторяющиеся задачи) -->
+        <button class="btn icon-btn" @click="templatesOpen = true" title="Мои шаблоны">
+          <TaskIcon name="calendar" :size="16"/>
+        </button>
+
         <button v-if="store.board" class="btn icon-btn" @click="boardMenuOpen = !boardMenuOpen" title="Настройки доски">
           <TaskIcon name="gear" :size="16"/>
         </button>
@@ -242,6 +247,9 @@
                    @deleted="onCardDeleted"
                    @refresh="store.loadBoard(store.currentBoardId)" />
 
+    <!-- Мои шаблоны -->
+    <TasksTemplatesDialog v-model="templatesOpen"/>
+
     <!-- Глобальные диалоги модуля (один раз на странице) -->
     <ConfirmModal v-if="dlg.confirmModal.value.show"
                   :title="dlg.confirmModal.value.title"
@@ -344,6 +352,7 @@ import TaskCalendar from '@/components/tasks/TaskCalendar.vue';
 import TaskCardModal from '@/components/tasks/TaskCardModal.vue';
 import TaskIcon from '@/components/tasks/TaskIcon.vue';
 import ColorPalette from '@/components/tasks/ColorPalette.vue';
+import TasksTemplatesDialog from '@/components/tasks/TasksTemplatesDialog.vue';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const InfoModal    = defineAsyncComponent(() => import('@/components/modals/InfoModal.vue'));
@@ -360,6 +369,7 @@ const openedCardId = computed(() => cardStack.value[cardStack.value.length - 1] 
 const draggedCard = ref(null);
 const boardMenuOpen = ref(false);
 const notifOpen = ref(false);
+const templatesOpen = ref(false);
 const notifList = ref([]);
 const notifUnread = ref(0);
 const notifLoading = ref(false);

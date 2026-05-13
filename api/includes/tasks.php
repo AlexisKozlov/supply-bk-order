@@ -267,6 +267,169 @@ function tCardRecipients($pdo, $cardId, array $exclude = []) {
     return array_values(array_diff($all, $exclude));
 }
 
+// ─── Хелперы повторяющихся задач (этап 6) ───
+
+// Считает следующую дату срабатывания строго ПОСЛЕ $fromDate (YYYY-MM-DD).
+// Используется и при сохранении расписания, и в cron после успешного создания.
+function tCalcNextRunDate($kind, $weekday, $dayOfMonth, $fromDate) {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $from = DateTime::createFromFormat('Y-m-d', $fromDate, $tz);
+    if (!$from) $from = new DateTime('now', $tz);
+    if ($kind === 'daily') {
+        $from->modify('+1 day');
+        return $from->format('Y-m-d');
+    }
+    if ($kind === 'weekly') {
+        $w = max(1, min(7, (int)$weekday));
+        // PHP: 1=Mon..7=Sun (формат N) — совпадает с нашим хранением.
+        $cur = (int)$from->format('N');
+        $diff = $w - $cur;
+        if ($diff <= 0) $diff += 7;
+        $from->modify("+{$diff} day");
+        return $from->format('Y-m-d');
+    }
+    if ($kind === 'monthly') {
+        $d = max(1, min(31, (int)$dayOfMonth));
+        $from->modify('+1 day'); // строго после fromDate
+        // Ищем ближайший день месяца. Если в текущем месяце он уже прошёл —
+        // переходим на следующий, и так пока не найдём подходящий.
+        while (true) {
+            $lastDay = (int)$from->format('t');
+            $target = min($d, $lastDay);
+            $curDay = (int)$from->format('j');
+            if ($curDay <= $target) {
+                $from->setDate(
+                    (int)$from->format('Y'),
+                    (int)$from->format('n'),
+                    $target
+                );
+                return $from->format('Y-m-d');
+            }
+            // Перескакиваем на 1-е следующего месяца.
+            $from->modify('first day of next month');
+        }
+    }
+    return $from->format('Y-m-d');
+}
+
+// Атомарно создаёт карточку из шаблона+расписания со всем содержимым.
+// Возвращает id новой карточки, либо null при ошибке (с лог-записью).
+// Источник sourceUser=null → уведомления 'assigned' рассылает «от системы».
+function tCreateCardFromTemplate($pdo, $templateId, $schedule, $ownerName) {
+    // Подгружаем шаблон + связанные сущности
+    $t = $pdo->prepare("SELECT * FROM tasks_card_templates WHERE id = ?");
+    $t->execute([(int)$templateId]);
+    $tpl = $t->fetch();
+    if (!$tpl) return null;
+
+    $a = $pdo->prepare("SELECT user_name FROM tasks_template_assignees WHERE template_id = ?");
+    $a->execute([(int)$templateId]);
+    $assignees = array_column($a->fetchAll(), 'user_name');
+
+    $c = $pdo->prepare("SELECT title, sort_order FROM tasks_template_checklist WHERE template_id = ? ORDER BY sort_order, id");
+    $c->execute([(int)$templateId]);
+    $checklist = $c->fetchAll();
+
+    $l = $pdo->prepare("SELECT label_id FROM tasks_template_schedule_labels WHERE schedule_id = ?");
+    $l->execute([(int)$schedule['id']]);
+    $labels = array_column($l->fetchAll(), 'label_id');
+
+    $boardId  = (int)$schedule['target_board_id'];
+    $columnId = (int)$schedule['target_column_id'];
+    $due = null;
+    if ((int)$schedule['due_offset_days'] >= 0) {
+        $tz = new DateTimeZone('Europe/Minsk');
+        $dueDt = new DateTime('now', $tz);
+        $dueDt->modify('+' . (int)$schedule['due_offset_days'] . ' day');
+        $dueDt->setTime(23, 59, 59);
+        $due = $dueDt->format('Y-m-d H:i:s');
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id IS NULL");
+        $s->execute([$columnId]);
+        $so = (int)$s->fetchColumn();
+
+        $pdo->prepare("INSERT INTO tasks_cards (board_id, parent_card_id, column_id, title, description, priority, due_date, sort_order, created_by) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([
+                $boardId,
+                $columnId,
+                mb_substr($tpl['title'], 0, 255),
+                $tpl['description'],
+                $tpl['priority'],
+                $due,
+                $so,
+                $ownerName,
+            ]);
+        $cardId = (int)$pdo->lastInsertId();
+
+        // Ассайни: для каждого находим его первую неархивную доску и колонку
+        // (как в /tasks/cards/:id/assignees) — чтобы карточка сразу легла к нему.
+        if ($assignees) {
+            $boardSt = $pdo->prepare("SELECT id FROM tasks_boards WHERE owner_name = ? AND is_archived = 0 ORDER BY sort_order, id LIMIT 1");
+            $colSt   = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND (is_archive_column = 0 OR is_archive_column IS NULL) ORDER BY sort_order, id LIMIT 1");
+            $insSt   = $pdo->prepare("INSERT INTO tasks_assignees (card_id, user_name, column_id, sort_order, is_done) VALUES (?, ?, ?, 0, 0)");
+            foreach ($assignees as $u) {
+                $boardSt->execute([$u]);
+                $bId = $boardSt->fetchColumn();
+                $colId = null;
+                if ($bId) { $colSt->execute([(int)$bId]); $colId = $colSt->fetchColumn() ?: null; }
+                $insSt->execute([$cardId, $u, $colId]);
+            }
+        }
+
+        // Метки: только те, что реально принадлежат целевой доске
+        // (фильтр на случай если за время существования расписания что-то
+        // удалилось каскадом и осталось в schedule_labels рассогласованным).
+        if ($labels) {
+            $ph = implode(',', array_fill(0, count($labels), '?'));
+            $validSt = $pdo->prepare("SELECT id FROM tasks_labels WHERE board_id = ? AND id IN ($ph)");
+            $validSt->execute(array_merge([$boardId], $labels));
+            $valid = array_column($validSt->fetchAll(), 'id');
+            if ($valid) {
+                $insL = $pdo->prepare("INSERT IGNORE INTO tasks_card_labels (card_id, label_id) VALUES (?, ?)");
+                foreach ($valid as $lid) $insL->execute([$cardId, (int)$lid]);
+            }
+        }
+
+        // Чек-лист (без групп — кладём в дефолтную)
+        if ($checklist) {
+            $insC = $pdo->prepare("INSERT INTO tasks_checklist (card_id, title, sort_order) VALUES (?, ?, ?)");
+            foreach ($checklist as $i => $item) {
+                $insC->execute([$cardId, mb_substr($item['title'], 0, 255), (int)$item['sort_order']]);
+            }
+        }
+
+        tHistory($pdo, $cardId, $ownerName, 'created', [
+            'title' => $tpl['title'],
+            'from_template' => (int)$templateId,
+            'schedule_id' => (int)$schedule['id'],
+        ]);
+
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log('[tasks] tCreateCardFromTemplate error: ' . $e->getMessage());
+        return null;
+    }
+
+    // Уведомления исполнителям (assigned) — best-effort, вне транзакции
+    $extra = [
+        'card_title'  => $tpl['title'],
+        'board_title' => '',
+    ];
+    $b = $pdo->prepare("SELECT title FROM tasks_boards WHERE id = ?");
+    $b->execute([$boardId]);
+    $extra['board_title'] = (string)$b->fetchColumn();
+    foreach ($assignees as $u) {
+        if ($u && $u !== $ownerName) {
+            taskPushNotif($pdo, $u, 'assigned', $cardId, $boardId, $ownerName, $extra);
+        }
+    }
+    return $cardId;
+}
+
 // Парсер @упоминаний.
 // Регулярка ловит «@<имя>» где имя — буквы/цифры/подчёркивания.
 // При выборе из поповера фронт заменяет пробелы на «_»; здесь обратно.
@@ -1492,6 +1655,419 @@ if ($action === 'relations' && $id && $method === 'DELETE') {
     if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
     $pdo->prepare("DELETE FROM tasks_relations WHERE id = ?")->execute([$relId]);
     tRespond(['success' => true]);
+}
+
+// ═══════════════════════════════════════════════════════
+// ПОВТОРЯЮЩИЕСЯ ЗАДАЧИ — ШАБЛОНЫ И РАСПИСАНИЯ
+// ═══════════════════════════════════════════════════════
+
+// Маленькие хелперы маршрутов
+function tplLoadOwned($pdo, $tplId, $userName, $isAdmin) {
+    $s = $pdo->prepare("SELECT * FROM tasks_card_templates WHERE id = ?");
+    $s->execute([(int)$tplId]);
+    $tpl = $s->fetch();
+    if (!$tpl) tRespond(['error' => 'Шаблон не найден'], 404);
+    if (!$isAdmin && $tpl['owner_name'] !== $userName) tRespond(['error' => 'Нет прав на чужой шаблон'], 403);
+    return $tpl;
+}
+
+function tplScheduleLoadOwned($pdo, $schedId, $userName, $isAdmin) {
+    $s = $pdo->prepare("SELECT sch.*, tpl.owner_name FROM tasks_template_schedules sch JOIN tasks_card_templates tpl ON tpl.id = sch.template_id WHERE sch.id = ?");
+    $s->execute([(int)$schedId]);
+    $row = $s->fetch();
+    if (!$row) tRespond(['error' => 'Расписание не найдено'], 404);
+    if (!$isAdmin && $row['owner_name'] !== $userName) tRespond(['error' => 'Нет прав'], 403);
+    return $row;
+}
+
+// Валидирует пару (board, column) для расписания шаблона:
+// 1) доска существует и не архивирована;
+// 2) колонка относится к этой доске и НЕ архивная;
+// 3) владелец шаблона имеет права работать с доской (а не текущий пользователь —
+//    важно для случая, когда админ редактирует чужой шаблон).
+// При ошибке валидации сам делает tRespond(...) и не возвращает управление.
+function tplValidateTarget($pdo, $boardId, $columnId, $ownerName) {
+    $board = tGetBoard($pdo, $boardId);
+    if (!$board) tRespond(['error' => 'Доска не найдена'], 404);
+    if ($board['is_archived']) tRespond(['error' => 'Доска в архиве'], 400);
+    $owner = null;
+    $ownU = $pdo->prepare("SELECT name, role FROM users WHERE name = ? LIMIT 1");
+    $ownU->execute([$ownerName]);
+    $owner = $ownU->fetch();
+    if (!$owner || !tCanWorkWithBoard($pdo, $owner, $board)) {
+        tRespond(['error' => 'У владельца шаблона нет прав на эту доску'], 403);
+    }
+    $col = tGetColumn($pdo, $columnId);
+    if (!$col || (int)$col['board_id'] !== (int)$boardId) tRespond(['error' => 'Колонка не относится к доске'], 400);
+    if (!empty($col['is_archive_column'])) tRespond(['error' => 'Нельзя направлять расписание в архивную колонку'], 400);
+    return [$board, $col];
+}
+
+$isAdmin = ($tUser['role'] ?? '') === 'admin';
+
+// ─── GET /tasks/templates — мои шаблоны (с краткой инфой по расписаниям) ───
+if ($action === 'templates' && !$id && $method === 'GET') {
+    $s = $pdo->prepare("SELECT id, title, priority, is_archived, created_at, updated_at FROM tasks_card_templates WHERE owner_name = ? AND is_archived = 0 ORDER BY updated_at DESC, id DESC");
+    $s->execute([$tUserName]);
+    $rows = $s->fetchAll();
+    if ($rows) {
+        $ids = array_column($rows, 'id');
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        // Кол-во расписаний и активных
+        $sc = $pdo->prepare("SELECT template_id, COUNT(*) AS total, SUM(is_active) AS active FROM tasks_template_schedules WHERE template_id IN ($ph) GROUP BY template_id");
+        $sc->execute($ids);
+        $by = [];
+        foreach ($sc->fetchAll() as $r) $by[(int)$r['template_id']] = $r;
+        // Кол-во ассайни
+        $ac = $pdo->prepare("SELECT template_id, COUNT(*) AS cnt FROM tasks_template_assignees WHERE template_id IN ($ph) GROUP BY template_id");
+        $ac->execute($ids);
+        $byA = [];
+        foreach ($ac->fetchAll() as $r) $byA[(int)$r['template_id']] = (int)$r['cnt'];
+        foreach ($rows as &$r) {
+            $tid = (int)$r['id'];
+            $r['schedules_total']  = isset($by[$tid]) ? (int)$by[$tid]['total']  : 0;
+            $r['schedules_active'] = isset($by[$tid]) ? (int)$by[$tid]['active'] : 0;
+            $r['assignees_count']  = $byA[$tid] ?? 0;
+        }
+    }
+    tRespond(['items' => $rows]);
+}
+
+// ─── POST /tasks/templates — создать пустой шаблон ───
+if ($action === 'templates' && !$id && $method === 'POST') {
+    $title = trim($body['title'] ?? '');
+    if ($title === '') tRespond(['error' => 'title обязателен'], 400);
+    $priority = in_array($body['priority'] ?? '', ['low','medium','high','urgent']) ? $body['priority'] : 'medium';
+    $desc = isset($body['description']) ? mb_substr((string)$body['description'], 0, 5000) : null;
+    $pdo->prepare("INSERT INTO tasks_card_templates (owner_name, title, description, priority) VALUES (?, ?, ?, ?)")
+        ->execute([$tUserName, mb_substr($title, 0, 255), $desc, $priority]);
+    tRespond(['id' => (int)$pdo->lastInsertId()]);
+}
+
+// ─── GET /tasks/templates/:id — детальная карточка ───
+if ($action === 'templates' && $id && !$action2 && $method === 'GET') {
+    $tpl = tplLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $a = $pdo->prepare("SELECT user_name FROM tasks_template_assignees WHERE template_id = ?");
+    $a->execute([(int)$id]);
+    $tpl['assignees'] = array_column($a->fetchAll(), 'user_name');
+    $c = $pdo->prepare("SELECT id, title, sort_order FROM tasks_template_checklist WHERE template_id = ? ORDER BY sort_order, id");
+    $c->execute([(int)$id]);
+    $tpl['checklist'] = $c->fetchAll();
+    $sch = $pdo->prepare("SELECT * FROM tasks_template_schedules WHERE template_id = ? ORDER BY id");
+    $sch->execute([(int)$id]);
+    $schedules = $sch->fetchAll();
+    if ($schedules) {
+        $schedIds = array_column($schedules, 'id');
+        $ph = implode(',', array_fill(0, count($schedIds), '?'));
+        $ll = $pdo->prepare("SELECT schedule_id, label_id FROM tasks_template_schedule_labels WHERE schedule_id IN ($ph)");
+        $ll->execute($schedIds);
+        $labelsBySched = [];
+        foreach ($ll->fetchAll() as $r) {
+            $labelsBySched[(int)$r['schedule_id']][] = (int)$r['label_id'];
+        }
+        foreach ($schedules as &$s) {
+            $s['label_ids'] = $labelsBySched[(int)$s['id']] ?? [];
+        }
+    }
+    $tpl['schedules'] = $schedules;
+    tRespond($tpl);
+}
+
+// ─── PATCH /tasks/templates/:id — обновить тело ───
+if ($action === 'templates' && $id && !$action2 && $method === 'PATCH') {
+    tplLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $sets = []; $params = [];
+    if (array_key_exists('title', $body)) {
+        $t = trim((string)$body['title']);
+        if ($t === '') tRespond(['error' => 'title не может быть пустым'], 400);
+        $sets[] = 'title = ?'; $params[] = mb_substr($t, 0, 255);
+    }
+    if (array_key_exists('description', $body)) {
+        $sets[] = 'description = ?';
+        $params[] = $body['description'] !== null ? mb_substr((string)$body['description'], 0, 5000) : null;
+    }
+    if (array_key_exists('priority', $body)) {
+        if (!in_array($body['priority'], ['low','medium','high','urgent'])) tRespond(['error' => 'неверный priority'], 400);
+        $sets[] = 'priority = ?'; $params[] = $body['priority'];
+    }
+    if (array_key_exists('is_archived', $body)) {
+        $sets[] = 'is_archived = ?'; $params[] = $body['is_archived'] ? 1 : 0;
+    }
+    if (!$sets) tRespond(['success' => true]);
+    $params[] = (int)$id;
+    $pdo->prepare("UPDATE tasks_card_templates SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+    tRespond(['success' => true]);
+}
+
+// ─── DELETE /tasks/templates/:id ───
+if ($action === 'templates' && $id && !$action2 && $method === 'DELETE') {
+    tplLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $pdo->prepare("DELETE FROM tasks_card_templates WHERE id = ?")->execute([(int)$id]);
+    tRespond(['success' => true]);
+}
+
+// ─── POST /tasks/templates/:id/assignees — заменить состав ассайни ───
+if ($action === 'templates' && $id && $action2 === 'assignees' && $method === 'POST') {
+    tplLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $names = array_values(array_unique(array_filter(array_map('strval', $body['user_names'] ?? []))));
+    if ($names) {
+        $ph = implode(',', array_fill(0, count($names), '?'));
+        $chk = $pdo->prepare("SELECT name FROM users WHERE name IN ($ph)");
+        $chk->execute($names);
+        $names = array_column($chk->fetchAll(), 'name');
+    }
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("DELETE FROM tasks_template_assignees WHERE template_id = ?")->execute([(int)$id]);
+        if ($names) {
+            $ins = $pdo->prepare("INSERT INTO tasks_template_assignees (template_id, user_name) VALUES (?, ?)");
+            foreach ($names as $u) $ins->execute([(int)$id, $u]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        tRespond(['error' => 'Ошибка сохранения исполнителей'], 500);
+    }
+    tRespond(['success' => true]);
+}
+
+// ─── POST /tasks/templates/:id/checklist — заменить весь чек-лист ───
+if ($action === 'templates' && $id && $action2 === 'checklist' && $method === 'POST') {
+    tplLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $items = is_array($body['items'] ?? null) ? $body['items'] : [];
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("DELETE FROM tasks_template_checklist WHERE template_id = ?")->execute([(int)$id]);
+        $ins = $pdo->prepare("INSERT INTO tasks_template_checklist (template_id, title, sort_order) VALUES (?, ?, ?)");
+        foreach ($items as $i => $it) {
+            $t = trim((string)($it['title'] ?? ''));
+            if ($t === '') continue;
+            $ins->execute([(int)$id, mb_substr($t, 0, 255), $i]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        tRespond(['error' => 'Ошибка сохранения чек-листа'], 500);
+    }
+    tRespond(['success' => true]);
+}
+
+// ─── POST /tasks/templates/:id/schedules — создать расписание ───
+if ($action === 'templates' && $id && $action2 === 'schedules' && $method === 'POST') {
+    $tpl = tplLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $boardId  = (int)($body['target_board_id'] ?? 0);
+    $columnId = (int)($body['target_column_id'] ?? 0);
+    $kind     = $body['recurrence_kind'] ?? '';
+    if (!in_array($kind, ['daily','weekly','monthly'])) tRespond(['error' => 'recurrence_kind должен быть daily/weekly/monthly'], 400);
+    $weekday  = $kind === 'weekly' ? max(1, min(7, (int)($body['weekday'] ?? 1))) : null;
+    $dayOfM   = $kind === 'monthly' ? max(1, min(31, (int)($body['day_of_month'] ?? 1))) : null;
+    $leadD    = max(0, (int)($body['lead_days'] ?? 0));
+    $dueOff   = max(0, (int)($body['due_offset_days'] ?? 0));
+    if (!$boardId || !$columnId) tRespond(['error' => 'target_board_id и target_column_id обязательны'], 400);
+
+    // Проверяем права ВЛАДЕЛЬЦА шаблона (важно когда админ редактирует чужой)
+    // и валидируем целевую колонку (не архивная, относится к доске).
+    [$board, $col] = tplValidateTarget($pdo, $boardId, $columnId, $tpl['owner_name']);
+
+    $tz = new DateTimeZone('Europe/Minsk');
+    $today = (new DateTime('now', $tz))->format('Y-m-d');
+    $next = tCalcNextRunDate($kind, $weekday, $dayOfM, $today);
+
+    $labels = is_array($body['label_ids'] ?? null) ? array_map('intval', $body['label_ids']) : [];
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("INSERT INTO tasks_template_schedules (template_id, target_board_id, target_column_id, recurrence_kind, weekday, day_of_month, lead_days, due_offset_days, next_run_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)")
+            ->execute([(int)$id, $boardId, $columnId, $kind, $weekday, $dayOfM, $leadD, $dueOff, $next]);
+        $schedId = (int)$pdo->lastInsertId();
+        if ($labels) {
+            // Только метки целевой доски
+            $ph = implode(',', array_fill(0, count($labels), '?'));
+            $vl = $pdo->prepare("SELECT id FROM tasks_labels WHERE board_id = ? AND id IN ($ph)");
+            $vl->execute(array_merge([$boardId], $labels));
+            $valid = array_column($vl->fetchAll(), 'id');
+            if ($valid) {
+                $ins = $pdo->prepare("INSERT IGNORE INTO tasks_template_schedule_labels (schedule_id, label_id) VALUES (?, ?)");
+                foreach ($valid as $lid) $ins->execute([$schedId, (int)$lid]);
+            }
+        }
+        $pdo->commit();
+        tRespond(['id' => $schedId]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        tRespond(['error' => 'Ошибка создания расписания'], 500);
+    }
+}
+
+// ─── PATCH /tasks/template-schedules/:id ───
+if ($action === 'template-schedules' && $id && !$action2 && $method === 'PATCH') {
+    $sch = tplScheduleLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $sets = []; $params = [];
+    $needRecalc = false;
+    $kind = $sch['recurrence_kind'];
+    $weekday = $sch['weekday'];
+    $dayOfM = $sch['day_of_month'];
+
+    if (array_key_exists('recurrence_kind', $body)) {
+        if (!in_array($body['recurrence_kind'], ['daily','weekly','monthly'])) tRespond(['error' => 'неверный recurrence_kind'], 400);
+        $kind = $body['recurrence_kind'];
+        $sets[] = 'recurrence_kind = ?'; $params[] = $kind;
+        $needRecalc = true;
+    }
+    if (array_key_exists('weekday', $body)) {
+        $weekday = $body['weekday'] !== null ? max(1, min(7, (int)$body['weekday'])) : null;
+        $sets[] = 'weekday = ?'; $params[] = $weekday;
+        $needRecalc = true;
+    }
+    if (array_key_exists('day_of_month', $body)) {
+        $dayOfM = $body['day_of_month'] !== null ? max(1, min(31, (int)$body['day_of_month'])) : null;
+        $sets[] = 'day_of_month = ?'; $params[] = $dayOfM;
+        $needRecalc = true;
+    }
+    if (array_key_exists('lead_days', $body))       { $sets[] = 'lead_days = ?';       $params[] = max(0, (int)$body['lead_days']); }
+    if (array_key_exists('due_offset_days', $body)) { $sets[] = 'due_offset_days = ?'; $params[] = max(0, (int)$body['due_offset_days']); }
+    if (array_key_exists('is_active', $body)) {
+        $sets[] = 'is_active = ?'; $params[] = $body['is_active'] ? 1 : 0;
+        if ($body['is_active']) { $sets[] = 'deactivated_reason = NULL'; }
+    }
+    if (array_key_exists('target_board_id', $body) || array_key_exists('target_column_id', $body)) {
+        $newBoard  = (int)($body['target_board_id']  ?? $sch['target_board_id']);
+        $newColumn = (int)($body['target_column_id'] ?? $sch['target_column_id']);
+        // Проверяем права ВЛАДЕЛЬЦА (важно когда админ редактирует чужой шаблон)
+        // + не архивная доска + не архивная колонка.
+        tplValidateTarget($pdo, $newBoard, $newColumn, $sch['owner_name']);
+        $sets[] = 'target_board_id = ?';  $params[] = $newBoard;
+        $sets[] = 'target_column_id = ?'; $params[] = $newColumn;
+        // Метки чужой доски — удалить (каскадом нет; чистим вручную)
+        if ($newBoard !== (int)$sch['target_board_id']) {
+            $pdo->prepare("DELETE FROM tasks_template_schedule_labels WHERE schedule_id = ?")->execute([(int)$id]);
+        }
+    }
+    if ($needRecalc) {
+        $tz = new DateTimeZone('Europe/Minsk');
+        $today = (new DateTime('now', $tz))->format('Y-m-d');
+        $next = tCalcNextRunDate($kind, $weekday, $dayOfM, $today);
+        $sets[] = 'next_run_date = ?'; $params[] = $next;
+        $sets[] = 'last_run_date = NULL';
+    }
+
+    // Метки — отдельный массив, замещает существующие
+    if (array_key_exists('label_ids', $body)) {
+        $newLabels = is_array($body['label_ids']) ? array_map('intval', $body['label_ids']) : [];
+        $boardId = (int)($body['target_board_id'] ?? $sch['target_board_id']);
+        $pdo->beginTransaction();
+        try {
+            if ($sets) {
+                $params[] = (int)$id;
+                $pdo->prepare("UPDATE tasks_template_schedules SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            }
+            $pdo->prepare("DELETE FROM tasks_template_schedule_labels WHERE schedule_id = ?")->execute([(int)$id]);
+            if ($newLabels) {
+                $ph = implode(',', array_fill(0, count($newLabels), '?'));
+                $vl = $pdo->prepare("SELECT id FROM tasks_labels WHERE board_id = ? AND id IN ($ph)");
+                $vl->execute(array_merge([$boardId], $newLabels));
+                $valid = array_column($vl->fetchAll(), 'id');
+                if ($valid) {
+                    $ins = $pdo->prepare("INSERT IGNORE INTO tasks_template_schedule_labels (schedule_id, label_id) VALUES (?, ?)");
+                    foreach ($valid as $lid) $ins->execute([(int)$id, (int)$lid]);
+                }
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            tRespond(['error' => 'Ошибка обновления расписания'], 500);
+        }
+        tRespond(['success' => true]);
+    }
+
+    if (!$sets) tRespond(['success' => true]);
+    $params[] = (int)$id;
+    $pdo->prepare("UPDATE tasks_template_schedules SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+    tRespond(['success' => true]);
+}
+
+// ─── DELETE /tasks/template-schedules/:id ───
+if ($action === 'template-schedules' && $id && !$action2 && $method === 'DELETE') {
+    tplScheduleLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $pdo->prepare("DELETE FROM tasks_template_schedules WHERE id = ?")->execute([(int)$id]);
+    tRespond(['success' => true]);
+}
+
+// ─── GET /tasks/template-schedules/:id/preview — следующие 5 дат ───
+if ($action === 'template-schedules' && $id && $action2 === 'preview' && $method === 'GET') {
+    $sch = tplScheduleLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $dates = [];
+    $cur = $sch['next_run_date'] ?: (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('Y-m-d');
+    // Первая дата = next_run_date. Дальше — серия.
+    $tz = new DateTimeZone('Europe/Minsk');
+    $today = (new DateTime('now', $tz))->format('Y-m-d');
+    if ($cur < $today) $cur = $today; // на всякий случай
+    $dates[] = $cur;
+    for ($i = 1; $i < 5; $i++) {
+        $cur = tCalcNextRunDate($sch['recurrence_kind'], $sch['weekday'], $sch['day_of_month'], $cur);
+        $dates[] = $cur;
+    }
+    tRespond(['dates' => $dates]);
+}
+
+// ─── POST /tasks/template-schedules/:id/run-now — создать карточку немедленно ───
+if ($action === 'template-schedules' && $id && $action2 === 'run-now' && $method === 'POST') {
+    $sch = tplScheduleLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    if (!$sch['is_active']) tRespond(['error' => 'Расписание не активно'], 400);
+    // Проверка доступа: владелец шаблона должен иметь право на доску
+    $board = tGetBoard($pdo, $sch['target_board_id']);
+    if (!$board) tRespond(['error' => 'Целевая доска не найдена'], 404);
+    // Загружаем профиль владельца, чтобы проверить tCanWorkWithBoard (для не-админа)
+    $ownU = $pdo->prepare("SELECT name, role FROM users WHERE name = ?");
+    $ownU->execute([$sch['owner_name']]);
+    $owner = $ownU->fetch();
+    if (!$owner || !tCanWorkWithBoard($pdo, $owner, $board)) {
+        $pdo->prepare("UPDATE tasks_template_schedules SET is_active = 0, deactivated_reason = 'no_access' WHERE id = ?")->execute([(int)$sch['id']]);
+        tRespond(['error' => 'У владельца нет доступа к доске. Расписание деактивировано.'], 403);
+    }
+    $cardId = tCreateCardFromTemplate($pdo, (int)$sch['template_id'], $sch, $sch['owner_name']);
+    if (!$cardId) tRespond(['error' => 'Не удалось создать карточку'], 500);
+    tRespond(['card_id' => $cardId]);
+}
+
+// ─── POST /tasks/cards/:id/save-as-template — превратить карточку в шаблон ───
+if ($action === 'cards' && $id && $action2 === 'save-as-template' && $method === 'POST') {
+    $cardId = (int)$id;
+    $card = tGetCard($pdo, $cardId);
+    if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
+    $board = tGetBoard($pdo, $card['board_id']);
+    if (!tCanAccessCard($pdo, $tUser, $cardId, $board)) tRespond(['error' => 'Нет доступа к карточке'], 403);
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("INSERT INTO tasks_card_templates (owner_name, title, description, priority) VALUES (?, ?, ?, ?)")
+            ->execute([$tUserName, mb_substr($card['title'], 0, 255), $card['description'], $card['priority']]);
+        $tplId = (int)$pdo->lastInsertId();
+
+        // Ассайни
+        $a = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
+        $a->execute([$cardId]);
+        $names = array_column($a->fetchAll(), 'user_name');
+        if ($names) {
+            $insA = $pdo->prepare("INSERT INTO tasks_template_assignees (template_id, user_name) VALUES (?, ?)");
+            foreach ($names as $u) $insA->execute([$tplId, $u]);
+        }
+
+        // Чек-лист (плоский, без групп)
+        $c = $pdo->prepare("SELECT title, sort_order FROM tasks_checklist WHERE card_id = ? ORDER BY sort_order, id");
+        $c->execute([$cardId]);
+        $items = $c->fetchAll();
+        if ($items) {
+            $insC = $pdo->prepare("INSERT INTO tasks_template_checklist (template_id, title, sort_order) VALUES (?, ?, ?)");
+            foreach ($items as $i => $it) $insC->execute([$tplId, $it['title'], (int)$it['sort_order']]);
+        }
+
+        $pdo->commit();
+        tRespond(['template_id' => $tplId]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        tRespond(['error' => 'Ошибка сохранения шаблона'], 500);
+    }
 }
 
 // Если не попали ни в один маршрут — возвращаем 404

@@ -34,6 +34,10 @@
                   <TaskIcon name="archive" :size="13" class="ts-pop-menu-icon"/>
                   <span>Дублировать</span>
                 </button>
+                <button type="button" class="ts-pop-menu-item" @click="saveAsTemplate">
+                  <TaskIcon name="calendar" :size="13" class="ts-pop-menu-icon"/>
+                  <span>Сохранить как шаблон</span>
+                </button>
                 <button type="button" class="ts-pop-menu-item" @click="toggleArchive">
                   <TaskIcon name="archive" :size="13" class="ts-pop-menu-icon"/>
                   <span>{{ isInArchive ? 'Восстановить из архива' : 'Архивировать' }}</span>
@@ -1115,6 +1119,15 @@ async function duplicateCard() {
     });
     emit('refresh');
     dlg.info('Готово', 'Создана копия карточки', 'success');
+  } catch (e) { showError(e); }
+}
+
+async function saveAsTemplate() {
+  headerMenuOpen.value = false;
+  if (!full.value) return;
+  try {
+    await tasksApi.saveCardAsTemplate(full.value.card.id);
+    dlg.info('Шаблон создан', 'Откройте «Мои шаблоны» в шапке задач, чтобы добавить расписание.', 'success');
   } catch (e) { showError(e); }
 }
 
