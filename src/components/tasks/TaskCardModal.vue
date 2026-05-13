@@ -40,16 +40,21 @@
             </select>
           </label>
 
-          <!-- Срок: пилюля с датой -->
-          <label class="ts-pill ts-pill-due" :class="dueStateClass(full.card.due_date, full.card.is_done)" :title="full.card.due_date ? 'Срок: ' + full.card.due_date : 'Установить срок'">
+          <!-- Срок: пилюля с датой. Native datetime-local поверх (прозрачный)
+               не открывает picker сам — кликаем по пилюле и зовём showPicker(). -->
+          <button type="button" class="ts-pill ts-pill-due"
+                  :class="dueStateClass(full.card.due_date, full.card.is_done)"
+                  :title="full.card.due_date ? 'Срок: ' + full.card.due_date : 'Установить срок'"
+                  @click="openDuePicker">
             <TaskIcon name="calendar" :size="13" class="ts-pill-icon"/>
             <span class="ts-pill-text">{{ full.card.due_date ? formatDueShort(full.card.due_date) : 'Установить срок' }}</span>
-            <button v-if="full.card.due_date" type="button" class="ts-pill-clear"
-                    @click.stop.prevent="patch({ due_date: null })" title="Убрать срок">
+            <span v-if="full.card.due_date" class="ts-pill-clear"
+                  role="button" tabindex="0"
+                  @click.stop.prevent="patch({ due_date: null })" title="Убрать срок">
               <TaskIcon name="close" :size="11"/>
-            </button>
-            <input type="datetime-local" class="ts-pill-native" :value="dueDateLocal" @change="onDueChange" />
-          </label>
+            </span>
+            <input ref="dueInputRef" type="datetime-local" class="ts-pill-native" :value="dueDateLocal" @change="onDueChange" />
+          </button>
 
           <!-- Колонка: пилюля с цветной точкой -->
           <label class="ts-pill ts-pill-col" :title="'Колонка: ' + columnTitle">
@@ -425,6 +430,18 @@ function formatDueShort(s) {
   if (day.getTime() === today.getTime()) return 'Сегодня' + timeStr;
   if (day.getTime() === tomorrow.getTime()) return 'Завтра' + timeStr;
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }) + timeStr;
+}
+const dueInputRef = ref(null);
+function openDuePicker(e) {
+  // Не перехватываем клик по крестику-очистке внутри пилюли
+  if (e?.target?.closest?.('.ts-pill-clear')) return;
+  const el = dueInputRef.value;
+  if (!el) return;
+  if (typeof el.showPicker === 'function') {
+    try { el.showPicker(); return; } catch (_) { /* fallback ниже */ }
+  }
+  // Запасной путь — фокус (Chrome <99, Safari): хотя бы откроет клавиатуру/поле
+  el.focus();
 }
 function dueStateClass(due, isDone) {
   if (!due || isDone) return '';
@@ -1081,7 +1098,8 @@ function historyText(h) {
   flex-shrink: 0;
 }
 
-/* Базовая пилюля: поверх неё прозрачный native input/select, ловит клики. */
+/* Базовая пилюля: поверх неё прозрачный native input/select, ловит клики.
+   Применяется и к <label>, и к <button> — сбрасываем дефолтные стили браузера. */
 .ts-pill {
   position: relative;
   display: inline-flex; align-items: center; gap: 6px;
@@ -1090,11 +1108,14 @@ function historyText(h) {
   background: var(--tk-n-100, #F3F0E8);
   color: var(--tk-text-secondary, #3D382E);
   font-size: 12.5px; font-weight: var(--tk-fw-semibold, 600);
+  font-family: inherit;
   cursor: pointer;
   border: 1px solid transparent;
   transition: background var(--tk-transition, 140ms ease), border-color var(--tk-transition, 140ms ease);
   max-width: 100%; overflow: hidden;
+  text-align: left;
 }
+button.ts-pill { appearance: none; -webkit-appearance: none; }
 .ts-pill:hover { background: var(--tk-n-200, #E6E1D7); }
 .ts-pill-text {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
