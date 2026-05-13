@@ -594,6 +594,33 @@
         </div>
       </div>
 
+      <!-- Рестораны онлайн -->
+      <div class="adm-maint-msg-card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h4 class="adm-maint-msg-title" style="margin:0;">Рестораны онлайн — {{ onlineRestaurants.length }} {{ onlineRestaurantsWord }}</h4>
+          <button class="btn" style="font-size:12px;padding:4px 10px;" @click="loadOnlineRestaurants" :disabled="onlineRestaurantsLoading">
+            <BkIcon name="redo" size="sm"/>
+          </button>
+        </div>
+        <div v-if="onlineRestaurantsLoading && !onlineRestaurants.length" style="text-align:center;padding:16px;"><BurgerSpinner text="Загрузка..." /></div>
+        <div v-else-if="!onlineRestaurants.length" style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px;">Нет ресторанов онлайн</div>
+        <div v-else class="adm-user-list">
+          <div v-for="r in onlineRestaurants" :key="(r.legal_entity_group || 'BK_VM') + '-' + r.restaurant_number" class="adm-user-row" style="cursor:default;">
+            <div class="adm-user-avatar adm-avatar-online">
+              {{ formatRestaurantNumberShort(r.restaurant_number, r.legal_entity_group) }}
+              <span class="adm-online-dot"></span>
+            </div>
+            <div class="adm-user-info">
+              <div class="adm-user-name">
+                {{ r.city || '—' }}<span v-if="r.address"> · {{ r.address }}</span>
+              </div>
+              <div class="adm-user-meta">{{ shortLegalEntityAdm(r.legal_entity) }}</div>
+            </div>
+            <div class="adm-online-time">{{ formatOnlineTime(r.last_activity) }}</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Активные сессии -->
       <div class="adm-toolbar">
         <div class="adm-toolbar-info">{{ sessionsList.length }} активных сессий</div>
@@ -1281,6 +1308,38 @@ async function loadOnlineUsers() {
   finally { onlineLoading.value = false; }
 }
 
+const onlineRestaurants = ref([]);
+const onlineRestaurantsLoading = ref(false);
+
+const onlineRestaurantsWord = computed(() => {
+  const n = onlineRestaurants.value.length;
+  if (n % 10 === 1 && n % 100 !== 11) return 'ресторан';
+  if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'ресторана';
+  return 'ресторанов';
+});
+
+async function loadOnlineRestaurants() {
+  onlineRestaurantsLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_online_restaurants');
+    onlineRestaurants.value = data || [];
+  } catch (e) { console.warn('[admin] loadOnlineRestaurants:', e); }
+  finally { onlineRestaurantsLoading.value = false; }
+}
+
+function formatRestaurantNumberShort(num, group) {
+  if (group === 'PS') return 'PS' + String(num).padStart(2, '0');
+  return '№' + num;
+}
+
+const LE_SHORT = { 'ООО "Бургер БК"': 'БК', 'ООО "Воглия Матта"': 'ВМ', 'ООО "Пицца Стар"': 'ПС' };
+function shortLegalEntityAdm(le) {
+  if (!le) return '';
+  if (LE_SHORT[le]) return LE_SHORT[le];
+  const m = le.match(/«([^»]+)»|"([^"]+)"/);
+  return m ? (m[1] || m[2]).trim() : (le.length > 16 ? le.slice(0, 14) + '…' : le);
+}
+
 const formatOnlineTime = formatMoscowRelative;
 
 async function sendBroadcast() {
@@ -1671,11 +1730,15 @@ async function deleteChangelog(entry) {
 watch(activeTab, (tab) => {
   if (tab === 'sessions') {
     loadOnlineUsers();
+    loadOnlineRestaurants();
     loadSessions();
     if (onlineTimer) clearInterval(onlineTimer);
     // Не дёргаем сервер на скрытой вкладке — экономит трафик и нагрузку.
     onlineTimer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') loadOnlineUsers();
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        loadOnlineUsers();
+        loadOnlineRestaurants();
+      }
     }, 15000);
   } else {
     if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }

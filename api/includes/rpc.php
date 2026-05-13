@@ -1221,6 +1221,29 @@ if ($endpoint === 'rpc') {
         $s = $pdo->query("SELECT user_name, page, last_seen FROM user_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE ORDER BY last_seen DESC");
         respond($s->fetchAll());
     }
+    if ($fn === 'get_online_restaurants') {
+        // Список ресторанов «онлайн» в кабинете: активность за последние 15 минут.
+        // session_active_until продлевается на +3ч при каждом запросе ro-API,
+        // поэтому «активен 15 мин назад» = session_active_until > NOW() + 2ч45м.
+        requireAdmin($authUser);
+        $s = $pdo->query("
+            SELECT ru.restaurant_number,
+                   ru.legal_entity,
+                   ru.legal_entity_group,
+                   r.city,
+                   r.address,
+                   (ru.session_active_until - INTERVAL 3 HOUR) AS last_activity
+            FROM ro_users ru
+            LEFT JOIN restaurants r
+              ON r.number = ru.restaurant_number
+             AND r.legal_entity = ru.legal_entity
+            WHERE ru.is_active = 1
+              AND ru.session_active_until IS NOT NULL
+              AND ru.session_active_until > NOW() + INTERVAL 2 HOUR + INTERVAL 45 MINUTE
+            ORDER BY ru.session_active_until DESC
+        ");
+        respond($s->fetchAll());
+    }
     if ($fn === 'send_broadcast') {
         $sessionUser = getSessionUser($pdo);
         if (!$sessionUser || $sessionUser['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
@@ -6320,7 +6343,7 @@ if ($endpoint === 'rpc') {
         // Справочники для модалки: поставщики и рестораны, доступные пользователю
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        requireModuleAccess($caller, 'supplier-schedule', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        requireModuleAccess($caller, 'supplier-schedule', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
 
         $group = trim((string)($body['legal_entity_group'] ?? ''));
         if (!in_array($group, ['BK_VM', 'PS'], true)) respond(['error' => 'Требуется legal_entity_group (BK_VM или PS)'], 400);

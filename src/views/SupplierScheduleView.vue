@@ -586,9 +586,7 @@ async function loadData() {
   const group = currentGroup.value;
   const [list, dir] = await Promise.all([
     db.rpc('list_supplier_schedules', { legal_entity_group: group }),
-    canEdit.value
-      ? db.rpc('list_supplier_schedule_directory', { legal_entity_group: group })
-      : Promise.resolve({ data: { suppliers: [], restaurants: [] } }),
+    db.rpc('list_supplier_schedule_directory', { legal_entity_group: group }),
   ]);
   if (list.data) {
     rows.value = list.data.rows || [];
