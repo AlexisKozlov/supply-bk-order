@@ -91,15 +91,15 @@
             <div v-for="l in store.labels" :key="l.id" class="labels-mgr-card"
                  :class="{ open: editingLabelId === l.id }">
               <div class="labels-mgr-card-row">
-                <span class="labels-mgr-swatch" :style="{ background: l.color }"></span>
-                <span class="labels-mgr-pill" :style="{ background: l.color }">{{ l.title || '—' }}</span>
+                <button type="button"
+                        class="labels-mgr-color-dot"
+                        :style="{ background: l.color }"
+                        :class="{ active: editingLabelId === l.id }"
+                        @click="toggleEdit(l)"
+                        title="Сменить цвет"></button>
                 <input v-model="l.title" type="text" class="labels-mgr-input"
                        placeholder="Название метки"
                        @blur="updateLabel(l)" @keydown.enter="$event.target.blur()" />
-                <button class="labels-mgr-edit-btn" :class="{ active: editingLabelId === l.id }"
-                        @click="toggleEdit(l)" title="Сменить цвет">
-                  <TaskIcon name="edit" :size="14"/>
-                </button>
                 <button class="ts-icon-btn danger" @click="deleteLabel(l)" title="Удалить">
                   <TaskIcon name="trash" :size="14"/>
                 </button>
@@ -226,17 +226,33 @@
           <input ref="searchInputRef" v-model="searchQuery" type="text" class="search-input"
                  placeholder="Поиск по карточкам всех досок (название, описание)…"
                  @keydown.esc="searchOpen = false"
-                 @keydown.down.prevent="searchHover = Math.min(searchHover + 1, searchResults.length - 1)"
+                 @keydown.down.prevent="searchHover = Math.min(searchHover + 1, filteredResults.length - 1)"
                  @keydown.up.prevent="searchHover = Math.max(searchHover - 1, 0)"
-                 @keydown.enter="goToSearchResult(searchResults[searchHover])" />
+                 @keydown.enter="goToSearchResult(filteredResults[searchHover])" />
           <span v-if="searchLoading" class="search-loading">…</span>
-          <span v-else-if="searchQuery.length >= 2" class="search-count">{{ searchResults.length }}</span>
+          <span v-else-if="searchQuery.length >= 2" class="search-count">{{ filteredResults.length }}</span>
         </div>
+        <!-- Фильтры по области поиска (Yougile-стиль) -->
+        <div v-if="searchQuery.length >= 2 && searchResults.length" class="search-tabs">
+          <button class="search-tab" :class="{ active: searchScope === 'all' }" @click="searchScope = 'all'">
+            Везде <span class="search-tab-count">{{ scopeCounts.all }}</span>
+          </button>
+          <button v-if="store.currentBoardId" class="search-tab" :class="{ active: searchScope === 'current' }" @click="searchScope = 'current'">
+            Текущая доска <span class="search-tab-count">{{ scopeCounts.current }}</span>
+          </button>
+          <button class="search-tab" :class="{ active: searchScope === 'mine' }" @click="searchScope = 'mine'">
+            Мои доски <span class="search-tab-count">{{ scopeCounts.mine }}</span>
+          </button>
+          <button v-if="scopeCounts.archived" class="search-tab" :class="{ active: searchScope === 'archive' }" @click="searchScope = 'archive'">
+            Архив <span class="search-tab-count">{{ scopeCounts.archived }}</span>
+          </button>
+        </div>
+
         <div v-if="searchError" class="search-empty" style="color: var(--tk-text-muted);">{{ searchError }}</div>
         <div v-else-if="searchQuery.length < 2" class="search-hint">Введите минимум 2 символа</div>
-        <div v-else-if="!searchResults.length && !searchLoading" class="search-empty">Ничего не найдено</div>
+        <div v-else-if="!filteredResults.length && !searchLoading" class="search-empty">Ничего не найдено</div>
         <div v-else class="search-results">
-          <div v-for="(r, i) in searchResults" :key="r.id"
+          <div v-for="(r, i) in filteredResults" :key="r.id"
                class="search-result"
                :class="{ hover: i === searchHover, 'is-done': r.is_done, 'is-archived': r.is_archived }"
                @click="goToSearchResult(r)"
@@ -305,6 +321,29 @@ const searchResults = ref([]);
 const searchLoading = ref(false);
 const searchHover = ref(0);
 const searchInputRef = ref(null);
+// Область поиска: all (все доступные), current (текущая доска), mine (свои), archive (архивные)
+const searchScope = ref('all');
+
+const scopeCounts = computed(() => {
+  const all = searchResults.value.length;
+  let current = 0, mine = 0, archived = 0;
+  for (const r of searchResults.value) {
+    if (store.currentBoardId && r.board_id === store.currentBoardId) current++;
+    if (r.owner_name === currentUserName.value) mine++;
+    if (r.is_archived) archived++;
+  }
+  return { all, current, mine, archived };
+});
+
+const filteredResults = computed(() => {
+  const s = searchScope.value;
+  let res = searchResults.value;
+  if (s === 'current' && store.currentBoardId) res = res.filter(r => r.board_id === store.currentBoardId);
+  else if (s === 'mine') res = res.filter(r => r.owner_name === currentUserName.value);
+  else if (s === 'archive') res = res.filter(r => r.is_archived);
+  else if (s === 'all') res = res.filter(r => !r.is_archived); // в "везде" архив скрываем по умолчанию
+  return res;
+});
 
 // Drag-and-drop колонок
 const colDragFrom = ref(null);
@@ -431,8 +470,11 @@ function openSearch() {
   searchQuery.value = '';
   searchResults.value = [];
   searchHover.value = 0;
+  searchScope.value = 'all';
   nextTick(() => searchInputRef.value?.focus?.());
 }
+// Сбрасываем hover при переключении scope (текущий индекс может быть вне нового списка).
+watch(searchScope, () => { searchHover.value = 0; });
 
 const searchError = ref('');
 let searchTimer = null;
@@ -645,8 +687,9 @@ function onCardDeleted(id) {
 function onColDragStart(i, e) {
   if (!store.canEditStructure) { e.preventDefault(); return; }
   if (store.columns[i]?.is_archive_column) { e.preventDefault(); return; }
-  // Игнорируем перетаскивание, если оно начинается с карточки
-  if (e.target.closest('.task-card')) { e.preventDefault(); return; }
+  // Если drag стартует с карточки — НЕ блокируем drag, иначе ломаем
+  // перенос карточек между колонками. Просто не помечаем как drag колонки.
+  if (e.target.closest('.task-card')) return;
   colDragFrom.value = i;
   e.dataTransfer.effectAllowed = 'move';
 }
@@ -1114,6 +1157,22 @@ function onColDrop(i) {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-shadow: 0 1px 0 rgba(15,23,42,0.20);
 }
+/* Цветной кружок-индикатор для строки метки. Кликабельный — открывает палитру. */
+.labels-mgr-color-dot {
+  flex-shrink: 0;
+  width: 22px; height: 22px; padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.10);
+  cursor: pointer;
+  position: relative;
+  transition: transform var(--tk-transition), box-shadow var(--tk-transition);
+}
+.labels-mgr-color-dot:hover { transform: scale(1.08); }
+.labels-mgr-color-dot.active { box-shadow: 0 0 0 3px var(--tk-accent-soft, rgba(232,122,30,0.18)); }
+.labels-mgr-color-dot.active::after {
+  content: ''; position: absolute; inset: -2px;
+  border-radius: 50%; border: 2px solid var(--tk-accent, #E87A1E);
+}
 
 /* Перебиваем глобальный .modal-box input */
 .labels-mgr-input {
@@ -1254,6 +1313,42 @@ function onColDrop(i) {
   padding: 2px var(--tk-s-2); border-radius: 10px;
   font-weight: var(--tk-fw-semibold);
 }
+/* Чипы фильтра области поиска (Yougile-стиль) */
+.search-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tk-border-soft);
+  background: var(--tk-n-50);
+}
+.search-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 5px 10px; border-radius: 999px;
+  font-family: inherit;
+  font-size: 12px; font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-muted);
+  cursor: pointer;
+  transition: background var(--tk-transition), color var(--tk-transition), border-color var(--tk-transition);
+}
+.search-tab:hover { background: var(--tk-n-100); color: var(--tk-text); }
+.search-tab.active {
+  background: var(--tk-accent);
+  color: #fff;
+  border-color: var(--tk-accent);
+}
+.search-tab-count {
+  font-size: 11px; font-weight: var(--tk-fw-bold);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.10);
+  min-width: 18px; text-align: center;
+}
+.search-tab.active .search-tab-count {
+  background: rgba(255,255,255,0.22);
+  color: #fff;
+}
+
 .search-results {
   /* Перебиваем глобальные правила .search-results из assets/style.css
      (position:absolute, top:100%, left/right:0, border, box-shadow, max-height),
