@@ -102,6 +102,15 @@ function tCanWorkWithBoard($pdo, $u, $board) {
     return $board['owner_name'] === $u['name'];
 }
 
+// Может ли пользователь читать карточку (открыть, увидеть комментарии, написать комментарий).
+// Шире, чем tCanWorkWithBoard: даёт доступ соисполнителю даже если карточка лежит на чужой доске.
+function tCanAccessCard($pdo, $u, $cardId, $board) {
+    if (tCanWorkWithBoard($pdo, $u, $board)) return true;
+    $s = $pdo->prepare("SELECT 1 FROM tasks_assignees WHERE card_id = ? AND user_name = ? LIMIT 1");
+    $s->execute([(int)$cardId, $u['name']]);
+    return (bool)$s->fetchColumn();
+}
+
 // Запись в историю карточки
 function tHistory($pdo, $cardId, $userName, $action, $details = null) {
     $s = $pdo->prepare("INSERT INTO tasks_history (card_id, user_name, action, details) VALUES (?, ?, ?, ?)");
@@ -910,7 +919,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
     $board = tGetBoard($pdo, $card['board_id']);
 
     if ($method === 'GET') {
-        if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет доступа'], 403);
+        if (!tCanAccessCard($pdo, $tUser, $cardId, $board)) tRespond(['error' => 'Нет доступа'], 403);
         // Полная карточка: + чек-лист, комментарии, история, метки, соисполнители, связи, вложения
         $s = $pdo->prepare("SELECT id, title, is_done, sort_order, checklist_id FROM tasks_checklist WHERE card_id = ? ORDER BY sort_order, id");
         $s->execute([$cardId]);
@@ -1267,7 +1276,7 @@ if ($action === 'cards' && $id && $action2 === 'comments') {
     $card = tGetCard($pdo, $cardId);
     if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
     $board = tGetBoard($pdo, $card['board_id']);
-    if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
+    if (!tCanAccessCard($pdo, $tUser, $cardId, $board)) tRespond(['error' => 'Нет прав'], 403);
     if ($method === 'GET') {
         $s = $pdo->prepare("SELECT * FROM tasks_comments WHERE card_id = ? ORDER BY created_at, id");
         $s->execute([$cardId]);
@@ -1320,7 +1329,7 @@ if ($action === 'cards' && $id && $action2 === 'history' && $method === 'GET') {
     $card = tGetCard($pdo, $cardId);
     if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
     $board = tGetBoard($pdo, $card['board_id']);
-    if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет доступа'], 403);
+    if (!tCanAccessCard($pdo, $tUser, $cardId, $board)) tRespond(['error' => 'Нет доступа'], 403);
     $s = $pdo->prepare("SELECT id, user_name, action, details, created_at FROM tasks_history WHERE card_id = ? ORDER BY created_at DESC, id DESC LIMIT 200");
     $s->execute([$cardId]);
     $rows = $s->fetchAll();
