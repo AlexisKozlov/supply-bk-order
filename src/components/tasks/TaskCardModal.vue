@@ -21,9 +21,34 @@
               <template v-else>в колонке «{{ columnTitle }}»</template>
             </div>
           </div>
-          <button class="ts-close" @click="close" title="Закрыть (Esc)">
-            <TaskIcon name="close" :size="16"/>
-          </button>
+          <div class="ts-header-actions">
+            <div class="ts-menu-wrap">
+              <button class="ts-menu-btn" :class="{ 'is-open': headerMenuOpen }"
+                      @click.stop="headerMenuOpen = !headerMenuOpen" title="Действия">
+                <span class="ts-menu-dot"></span>
+                <span class="ts-menu-dot"></span>
+                <span class="ts-menu-dot"></span>
+              </button>
+              <div v-if="headerMenuOpen" class="ts-pop ts-pop-menu" v-click-outside-pop="() => headerMenuOpen = false">
+                <button type="button" class="ts-pop-menu-item" @click="duplicateCard">
+                  <TaskIcon name="archive" :size="13" class="ts-pop-menu-icon"/>
+                  <span>Дублировать</span>
+                </button>
+                <button type="button" class="ts-pop-menu-item" @click="toggleArchive">
+                  <TaskIcon name="archive" :size="13" class="ts-pop-menu-icon"/>
+                  <span>{{ isInArchive ? 'Восстановить из архива' : 'Архивировать' }}</span>
+                </button>
+                <div v-if="canDelete" class="ts-pop-menu-sep"></div>
+                <button v-if="canDelete" type="button" class="ts-pop-menu-item is-danger" @click="askDeleteFromMenu">
+                  <TaskIcon name="trash" :size="13" class="ts-pop-menu-icon"/>
+                  <span>Удалить карточку</span>
+                </button>
+              </div>
+            </div>
+            <button class="ts-close" @click="close" title="Закрыть (Esc)">
+              <TaskIcon name="close" :size="16"/>
+            </button>
+          </div>
         </header>
 
         <!-- Свойства карточки — пилюли с кастомными поповерами -->
@@ -122,13 +147,54 @@
 
           <!-- Метки -->
           <section class="ts-section">
-            <div class="ts-section-title">Метки</div>
-            <div class="ts-labels">
-              <button v-for="l in labels" :key="l.id" class="ts-label"
-                      :class="{ active: full.label_ids.includes(l.id) }"
-                      :style="{ background: full.label_ids.includes(l.id) ? l.color : 'transparent', borderColor: l.color, color: full.label_ids.includes(l.id) ? '#fff' : l.color }"
-                      @click="toggleLabel(l)">{{ l.title }}</button>
-              <button class="ts-label add-label" @click="addNewLabel">+ Метка</button>
+            <div class="ts-section-title">
+              Метки
+              <span v-if="selectedLabels.length" class="ts-section-meta">{{ selectedLabels.length }}</span>
+            </div>
+            <div class="ts-labels-row">
+              <span v-for="l in selectedLabels" :key="l.id" class="ts-label-pill"
+                    :style="labelPillStyle(l)">
+                <span class="ts-label-pill-dot" :style="{ background: l.color }"></span>
+                <span class="ts-label-pill-text">{{ l.title }}</span>
+                <button type="button" class="ts-label-pill-del" @click.stop="toggleLabel(l)" title="Убрать метку">
+                  <TaskIcon name="close" :size="10"/>
+                </button>
+              </span>
+              <div class="ts-label-add-wrap">
+                <button type="button" class="ts-label-add-btn"
+                        :class="{ 'is-open': showLabelPicker }"
+                        @click.stop="showLabelPicker = !showLabelPicker">
+                  <TaskIcon name="plus" :size="12"/>
+                  <span>{{ selectedLabels.length ? 'Добавить ещё' : 'Добавить метку' }}</span>
+                </button>
+                <div v-if="showLabelPicker" class="ts-pop ts-pop-label"
+                     v-click-outside-pop="() => showLabelPicker = false">
+                  <input v-model="labelSearch" type="text" placeholder="Поиск меток"
+                         class="ts-pop-search" autofocus/>
+                  <div class="ts-pop-list ts-pop-label-list">
+                    <button v-for="l in filteredLabels" :key="l.id" type="button"
+                            class="ts-pop-label-item"
+                            :class="{ 'is-active': full.label_ids.includes(l.id) }"
+                            @click="toggleLabel(l)">
+                      <span class="ts-pop-label-check" :class="{ 'is-checked': full.label_ids.includes(l.id) }">
+                        <TaskIcon v-if="full.label_ids.includes(l.id)" name="check" :size="11"/>
+                      </span>
+                      <span class="ts-pop-label-stripe" :style="{ background: l.color }"></span>
+                      <span class="ts-pop-label-text">{{ l.title }}</span>
+                    </button>
+                    <div v-if="!filteredLabels.length" class="ts-pop-empty">
+                      <template v-if="labelSearch">Метка «{{ labelSearch }}» не найдена</template>
+                      <template v-else>У доски пока нет меток</template>
+                    </div>
+                  </div>
+                  <div class="ts-pop-label-foot">
+                    <button type="button" class="ts-pop-label-create" @click="createLabelFromPicker">
+                      <TaskIcon name="plus" :size="12"/>
+                      <span>Создать{{ labelSearch ? ' «' + labelSearch + '»' : ' новую метку' }}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -220,50 +286,59 @@
             </div>
           </section>
 
-          <!-- Связи -->
+          <!-- Связи: чипы со ссылкой на сущности; добавление через popover -->
           <section class="ts-section">
-            <div class="ts-section-title">Связано с
-              <button class="ts-section-add" @click="showRelationPicker = !showRelationPicker">
-                <TaskIcon name="plus" :size="12"/> Добавить
-              </button>
+            <div class="ts-section-title">
+              Связано с
+              <span v-if="full.relations.length" class="ts-section-meta">{{ full.relations.length }}</span>
             </div>
-            <div v-if="full.relations.length" class="ts-relations">
-              <div v-for="r in full.relations" :key="r.id" class="ts-relation">
-                <span class="ts-relation-type">{{ relationTypeLabel(r.entity_type) }}</span>
-                <router-link v-if="r.entity_type === 'protocol'" :to="'/protocols/' + r.entity_id" class="ts-relation-label ts-relation-link">
-                  {{ r.entity_label || ('Протокол №' + r.entity_id) }}
-                </router-link>
-                <span v-else class="ts-relation-label">{{ r.entity_label || r.entity_id }}</span>
-                <button class="ts-icon-btn" @click="removeRelation(r)" title="Убрать">
-                  <TaskIcon name="close" :size="12"/>
+            <div v-if="full.relations.length" class="ts-rel-chips">
+              <component v-for="r in full.relations" :key="r.id"
+                         :is="r.entity_type === 'protocol' ? 'router-link' : 'div'"
+                         :to="r.entity_type === 'protocol' ? '/protocols/' + r.entity_id : undefined"
+                         class="ts-rel-chip"
+                         :class="'ts-rel-' + r.entity_type">
+                <span class="ts-rel-chip-icon">{{ relationTypeIcon(r.entity_type) }}</span>
+                <span class="ts-rel-chip-type">{{ relationTypeLabel(r.entity_type) }}</span>
+                <span class="ts-rel-chip-label">{{ r.entity_label || r.entity_id }}</span>
+                <button type="button" class="ts-rel-chip-del"
+                        @click.stop.prevent="removeRelation(r)" title="Убрать связь">
+                  <TaskIcon name="close" :size="11"/>
                 </button>
-              </div>
+              </component>
             </div>
-            <div v-else class="ts-empty">Нет связей</div>
-            <div v-if="showRelationPicker" class="ts-relation-picker">
-              <select v-model="relationDraft.type">
-                <option value="">— тип —</option>
-                <option value="order">Заказ</option>
-                <option value="supplier">Поставщик</option>
-                <option value="product">Товар</option>
-                <option value="pricing">ПСЦ</option>
-                <option value="plan">План закупок</option>
-                <option value="so_order">Заявка поставщику</option>
-                <option value="protocol">Протокол</option>
-              </select>
-              <input v-model="relationDraft.id" type="text" placeholder="ID или код" />
-              <input v-model="relationDraft.label" type="text" placeholder="Подпись (необяз.)" />
-              <button class="btn primary ts-btn-sm" @click="addRelation" :disabled="!relationDraft.type || !relationDraft.id">Добавить</button>
+
+            <!-- Кнопка-чип «+ Добавить связь» и popover -->
+            <div class="ts-rel-add-wrap">
+              <button type="button" class="ts-rel-add-btn"
+                      :class="{ 'is-open': showRelationPicker }"
+                      @click.stop="showRelationPicker = !showRelationPicker">
+                <TaskIcon name="plus" :size="12"/>
+                <span>{{ full.relations.length ? 'Добавить ещё' : 'Добавить связь' }}</span>
+              </button>
+              <div v-if="showRelationPicker" class="ts-pop ts-pop-rel" v-click-outside-pop="() => showRelationPicker = false">
+                <div class="ts-pop-section-label">Тип связи</div>
+                <div class="ts-rel-types">
+                  <button v-for="t in RELATION_TYPES" :key="t.value" type="button"
+                          class="ts-rel-type"
+                          :class="{ 'is-active': relationDraft.type === t.value }"
+                          @click="relationDraft.type = t.value">
+                    <span class="ts-rel-type-icon">{{ t.icon }}</span>
+                    <span class="ts-rel-type-label">{{ t.label }}</span>
+                  </button>
+                </div>
+                <input v-model="relationDraft.id" type="text" placeholder="ID или код" class="ts-pop-search"/>
+                <input v-model="relationDraft.label" type="text" placeholder="Подпись (необяз.)" class="ts-pop-search"/>
+                <div class="ts-pop-actions">
+                  <button type="button" class="ts-pop-btn" @click="showRelationPicker = false">Отмена</button>
+                  <button type="button" class="ts-pop-btn ts-pop-btn-primary"
+                          :disabled="!relationDraft.type || !relationDraft.id"
+                          @click="addRelation">Добавить</button>
+                </div>
+              </div>
             </div>
           </section>
 
-          <!-- Удаление -->
-          <section v-if="canDelete" class="ts-section ts-section-danger">
-            <button class="btn danger ts-delete-btn" @click="askDelete">
-              <TaskIcon name="trash" :size="14"/>
-              <span>Удалить карточку</span>
-            </button>
-          </section>
         </div>
 
         <!-- ВКЛАДКА «ПОДЗАДАЧИ» — подзадачи + чек-лист. Только у корневых карточек. -->
@@ -361,10 +436,15 @@
         <div v-if="tab === 'chat'" class="ts-pane ts-chat-pane">
           <div class="ts-chat-list" ref="chatListRef">
             <div v-if="!full.comments.length" class="ts-empty ts-chat-empty">
-              Чат пуст. Напишите первое сообщение.
+              <div class="ts-chat-empty-icon">
+                <TaskIcon name="chat" :size="24"/>
+              </div>
+              <div class="ts-chat-empty-text">Чат пуст</div>
+              <div class="ts-chat-empty-hint">Напишите первое сообщение участникам карточки</div>
             </div>
-            <div v-for="c in full.comments" :key="c.id" class="ts-chat-msg"
+            <div v-for="c in full.comments" :key="c.id" class="ts-chat-row"
                  :class="{ own: c.author_name === currentUserName }">
+              <div class="ts-chat-avatar" :title="c.author_name">{{ initials(c.author_name) }}</div>
               <div class="ts-chat-bubble">
                 <div class="ts-chat-meta">
                   <span class="ts-chat-author">{{ c.author_name }}</span>
@@ -386,22 +466,38 @@
             <MarkdownEditor v-model="newComment" :compact="true"
                             placeholder="Сообщение… (Enter — отправить, Shift+Enter — перенос строки)"
                             @ctrl-enter="submitComment"/>
-            <button class="btn primary" @click="submitComment" :disabled="!newComment.trim()">Отправить</button>
+            <button class="ts-chat-send" @click="submitComment"
+                    :disabled="!newComment.trim()" title="Отправить (Enter)">
+              <TaskIcon name="chevronRight" :size="16" class="ts-chat-send-icon"/>
+            </button>
           </div>
         </div>
 
         <!-- ВКЛАДКА «ИСТОРИЯ» -->
         <div v-if="tab === 'history'" class="ts-pane">
-          <div class="ts-history">
-            <div v-for="h in full.history" :key="h.id" class="ts-history-item">
-              <div class="ts-history-row">
-                <span class="ts-history-author">{{ h.user_name }}</span>
-                <span class="ts-history-action">{{ historyText(h) }}</span>
-              </div>
-              <div class="ts-history-date">{{ formatDate(h.created_at) }}</div>
+          <div v-if="!full.history.length" class="ts-hist-empty">
+            <div class="ts-hist-empty-icon">
+              <TaskIcon name="archive" :size="22"/>
             </div>
-            <div v-if="!full.history.length" class="ts-empty">История пуста</div>
+            <div class="ts-hist-empty-text">История пуста</div>
+            <div class="ts-hist-empty-hint">Здесь будут все изменения и события карточки</div>
           </div>
+          <ul v-else class="ts-hist">
+            <li v-for="h in full.history" :key="h.id" class="ts-hist-item">
+              <span class="ts-hist-marker" :class="'ts-hist-marker-' + historyKind(h)">
+                <TaskIcon :name="historyIcon(h)" :size="11"/>
+              </span>
+              <div class="ts-hist-content">
+                <div class="ts-hist-row">
+                  <span class="ts-hist-author">{{ h.user_name }}</span>
+                  <span class="ts-hist-action">{{ historyText(h) }}</span>
+                </div>
+                <div class="ts-hist-date" :title="formatDate(h.created_at)">
+                  {{ formatRelative(h.created_at) }}
+                </div>
+              </div>
+            </li>
+          </ul>
         </div>
       </template>
     </aside>
@@ -438,6 +534,9 @@ const newSubtaskTitle = ref('');
 const newAssignee = ref('');
 const showRelationPicker = ref(false);
 const relationDraft = ref({ type: '', id: '', label: '' });
+const headerMenuOpen = ref(false);
+const showLabelPicker = ref(false);
+const labelSearch = ref('');
 const chatListRef = ref(null);
 const editingChecklistId = ref(null);
 const fileInputRef = ref(null);
@@ -463,6 +562,29 @@ const columnTitle = computed(() => {
 const currentColumnColor = computed(() => {
   if (!full.value) return '#9E9E9E';
   return columns.value.find(c => c.id === full.value.card.column_id)?.color || '#9E9E9E';
+});
+const selectedLabels = computed(() => {
+  if (!full.value) return [];
+  const ids = full.value.label_ids || [];
+  return labels.value.filter(l => ids.includes(l.id));
+});
+const filteredLabels = computed(() => {
+  const q = labelSearch.value.trim().toLowerCase();
+  if (!q) return labels.value;
+  return labels.value.filter(l => (l.title || '').toLowerCase().includes(q));
+});
+function labelPillStyle(l) {
+  return {
+    background: `color-mix(in srgb, ${l.color} 14%, #fff)`,
+    borderColor: `color-mix(in srgb, ${l.color} 35%, transparent)`,
+    color: `color-mix(in srgb, ${l.color} 75%, #1A1814)`,
+  };
+}
+const archiveColumn = computed(() => columns.value.find(c => c.is_archive_column));
+const isInArchive = computed(() => {
+  if (!full.value) return false;
+  const col = columns.value.find(c => c.id === full.value.card.column_id);
+  return !!(col && col.is_archive_column);
 });
 
 function priorityLabel(p) {
@@ -879,6 +1001,22 @@ async function addNewLabel() {
   dlg.info('Подсказка', 'Цвет метки можно изменить в «Метки доски» (шестерёнка → Метки).', 'info');
 }
 
+const LABEL_PALETTE = ['#E87A1E','#10B981','#3B82F6','#F59E0B','#EF4444','#8B5CF6','#06B6D4','#EC4899'];
+async function createLabelFromPicker() {
+  let title = labelSearch.value.trim();
+  if (!title) {
+    title = await dlg.prompt('Новая метка', { placeholder: 'Название метки', okText: 'Создать' });
+    if (!title) return;
+  }
+  const color = LABEL_PALETTE[labels.value.length % LABEL_PALETTE.length];
+  try {
+    await store.createLabel({ board_id: store.currentBoardId, title, color });
+    const created = store.labels.find(l => l.title === title);
+    if (created) await toggleLabel(created);
+    labelSearch.value = '';
+  } catch (e) { showError(e); }
+}
+
 // ─── Соисполнители ───
 async function addAssignee() {
   if (!newAssignee.value) return;
@@ -905,6 +1043,18 @@ async function removeAssignee(name) {
 function relationTypeLabel(t) {
   return ({ order: 'Заказ', supplier: 'Поставщик', product: 'Товар', pricing: 'ПСЦ', plan: 'План', so_order: 'Заявка пост.', protocol: 'Протокол' })[t] || t;
 }
+function relationTypeIcon(t) {
+  return ({ order: '📦', supplier: '🚚', product: '🍔', pricing: '💰', plan: '📋', so_order: '📝', protocol: '📑' })[t] || '🔗';
+}
+const RELATION_TYPES = [
+  { value: 'order',     label: 'Заказ',         icon: '📦' },
+  { value: 'supplier',  label: 'Поставщик',     icon: '🚚' },
+  { value: 'product',   label: 'Товар',         icon: '🍔' },
+  { value: 'pricing',   label: 'ПСЦ',           icon: '💰' },
+  { value: 'plan',      label: 'План',          icon: '📋' },
+  { value: 'so_order',  label: 'Заявка',        icon: '📝' },
+  { value: 'protocol',  label: 'Протокол',      icon: '📑' },
+];
 async function addRelation() {
   if (!relationDraft.value.type || !relationDraft.value.id) return;
   const newList = [
@@ -933,6 +1083,52 @@ async function askDelete() {
   try {
     await tasksApi.deleteCard(props.cardId);
     emit('deleted', props.cardId);
+    close();
+  } catch (e) { showError(e); }
+}
+
+async function askDeleteFromMenu() {
+  headerMenuOpen.value = false;
+  await askDelete();
+}
+
+async function duplicateCard() {
+  headerMenuOpen.value = false;
+  if (!full.value) return;
+  try {
+    const src = full.value.card;
+    await tasksApi.createCard({
+      board_id: src.board_id,
+      column_id: src.column_id,
+      title: src.title + ' (копия)',
+      description: src.description || '',
+      priority: src.priority || 'medium',
+      due_date: src.due_date || null,
+    });
+    emit('refresh');
+    dlg.info('Готово', 'Создана копия карточки', 'success');
+  } catch (e) { showError(e); }
+}
+
+async function toggleArchive() {
+  headerMenuOpen.value = false;
+  if (!full.value) return;
+  try {
+    if (isInArchive.value) {
+      const target = columns.value.find(c => !c.is_archive_column);
+      if (!target) {
+        dlg.info('Ошибка', 'Нет неархивной колонки', 'error');
+        return;
+      }
+      await store.moveCard(props.cardId, target.id, 0);
+    } else {
+      if (!archiveColumn.value) {
+        dlg.info('Ошибка', 'У этой доски нет архивной колонки', 'error');
+        return;
+      }
+      await store.moveCard(props.cardId, archiveColumn.value.id, 0);
+    }
+    emit('refresh');
     close();
   } catch (e) { showError(e); }
 }
@@ -1050,6 +1246,61 @@ function historyText(h) {
     default: return h.action;
   }
 }
+function historyKind(h) {
+  switch (h.action) {
+    case 'created':           return 'created';
+    case 'moved':             return 'moved';
+    case 'updated':           return 'updated';
+    case 'comment':           return 'comment';
+    case 'labels_changed':    return 'labels';
+    case 'assignees_changed': return 'people';
+    case 'relations_changed': return 'relations';
+    case 'auto_closed':       return 'closed';
+    case 'auto_reopened':     return 'reopened';
+    default: return 'other';
+  }
+}
+function historyIcon(h) {
+  return ({
+    created: 'plus',
+    moved: 'columns',
+    updated: 'edit',
+    comment: 'chat',
+    labels_changed: 'tag',
+    assignees_changed: 'copy',
+    relations_changed: 'paperclip',
+    auto_closed: 'check',
+    auto_reopened: 'edit',
+  })[h.action] || 'edit';
+}
+function formatRelative(s) {
+  if (!s) return '';
+  const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+  if (isNaN(d)) return s;
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 30) return 'только что';
+  if (diff < 60) return Math.floor(diff) + ' сек. назад';
+  if (diff < 3600) {
+    const m = Math.floor(diff / 60);
+    return m + ' ' + plural(m, ['минуту', 'минуты', 'минут']) + ' назад';
+  }
+  if (diff < 86400) {
+    const h = Math.floor(diff / 3600);
+    return h + ' ' + plural(h, ['час', 'часа', 'часов']) + ' назад';
+  }
+  if (diff < 86400 * 7) {
+    const days = Math.floor(diff / 86400);
+    if (days === 1) return 'вчера';
+    return days + ' ' + plural(days, ['день', 'дня', 'дней']) + ' назад';
+  }
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+}
+function plural(n, forms) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return forms[0];
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return forms[1];
+  return forms[2];
+}
 </script>
 
 <style scoped>
@@ -1157,6 +1408,79 @@ function historyText(h) {
   transition: background var(--tk-transition), color var(--tk-transition);
 }
 .ts-back:hover, .ts-close:hover { background: var(--tk-n-100); color: var(--tk-text); }
+
+/* Действия в шапке (меню «⋮» + закрыть) */
+.ts-header-actions {
+  display: flex; align-items: center; gap: 2px;
+  flex-shrink: 0;
+}
+
+/* Меню «⋮» */
+.ts-menu-wrap { position: relative; }
+.ts-menu-btn {
+  background: none; border: none;
+  cursor: pointer;
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 2px;
+  color: var(--tk-text-muted, #9C9384);
+  border-radius: var(--tk-r-sm, 8px);
+  transition: background 140ms ease, color 140ms ease;
+}
+.ts-menu-btn:hover,
+.ts-menu-btn.is-open {
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text, #1A1814);
+}
+.ts-menu-dot {
+  width: 3.5px; height: 3.5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Поповер-меню в шапке */
+.ts-pop-menu {
+  position: absolute;
+  top: calc(100% + 6px); right: 0;
+  min-width: 220px;
+  padding: 4px;
+  display: flex; flex-direction: column; gap: 0;
+  z-index: 50;
+}
+.ts-pop-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  color: var(--tk-text, #1A1814);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.ts-pop-menu-item:hover {
+  background: var(--tk-n-100, #F3F0E8);
+}
+.ts-pop-menu-item.is-danger {
+  color: var(--tk-danger, #B23B16);
+}
+.ts-pop-menu-item.is-danger:hover {
+  background: var(--tk-danger-soft, rgba(178,59,22,0.10));
+  color: var(--tk-danger, #B23B16);
+}
+.ts-pop-menu-icon {
+  flex-shrink: 0;
+  color: var(--tk-text-muted, #9C9384);
+}
+.ts-pop-menu-item:hover .ts-pop-menu-icon { color: inherit; }
+.ts-pop-menu-item.is-danger .ts-pop-menu-icon { color: var(--tk-danger, #B23B16); }
+.ts-pop-menu-sep {
+  height: 1px;
+  background: var(--tk-border-soft, #EFEAE0);
+  margin: 4px 6px;
+}
 
 .ts-parent-link {
   display: inline-flex; align-items: center; gap: var(--tk-s-1);
@@ -1359,6 +1683,160 @@ button.ts-pill { appearance: none; -webkit-appearance: none; }
   color: #fff;
   font-size: 10px; font-weight: 700;
   border: 1.5px solid var(--tk-bg-card, #fff);
+}
+
+/* === Связи: чипы и кнопка добавления === */
+.ts-rel-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 8px;
+}
+.ts-rel-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px 4px 6px;
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 999px;
+  font-size: 11.5px; line-height: 1;
+  color: var(--tk-text);
+  text-decoration: none;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  cursor: default;
+  max-width: 100%;
+}
+a.ts-rel-chip { cursor: pointer; }
+a.ts-rel-chip:hover {
+  background: #fff;
+  border-color: var(--tk-accent, #E87A1E);
+  color: var(--tk-text);
+  transform: translateY(-1px);
+}
+.ts-rel-chip-icon {
+  font-size: 13px; line-height: 1;
+  flex-shrink: 0;
+}
+.ts-rel-chip-type {
+  font-size: 10.5px; font-weight: 600;
+  color: var(--tk-text-muted, #9C9384);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.ts-rel-chip-label {
+  font-size: 12px; font-weight: 500;
+  color: var(--tk-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 220px;
+}
+.ts-rel-chip-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; background: transparent;
+  color: var(--tk-text-muted, #9C9384);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+  margin-left: 2px;
+}
+.ts-rel-chip-del:hover {
+  background: var(--tk-prio-urgent-bg, #FEE7E0);
+  color: var(--tk-prio-urgent-fg, #B23B16);
+}
+
+/* Кнопка-чип «+ Добавить связь» */
+.ts-rel-add-wrap { position: relative; display: inline-block; }
+.ts-rel-add-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px 5px 8px;
+  background: transparent;
+  border: 1px dashed var(--tk-border, #E6E1D7);
+  border-radius: 999px;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--tk-text-muted, #9C9384);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.ts-rel-add-btn:hover,
+.ts-rel-add-btn.is-open {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: var(--tk-accent, #E87A1E);
+  border-style: solid;
+  color: var(--tk-accent-text, #B85A0E);
+}
+
+/* Поповер связи */
+.ts-pop-rel {
+  min-width: 280px; max-width: 320px;
+  padding: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ts-pop-section-label {
+  font-size: 10.5px; font-weight: 700;
+  color: var(--tk-text-muted, #9C9384);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 2px;
+}
+.ts-rel-types {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;
+}
+.ts-rel-type {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 7px;
+  font-family: inherit; font-size: 11.5px; font-weight: 500;
+  color: var(--tk-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.ts-rel-type:hover {
+  background: #fff;
+  border-color: var(--tk-accent, #E87A1E);
+}
+.ts-rel-type.is-active {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: var(--tk-accent, #E87A1E);
+  color: var(--tk-accent-text, #B85A0E);
+  font-weight: 600;
+}
+.ts-rel-type-icon { font-size: 14px; line-height: 1; flex-shrink: 0; }
+.ts-rel-type-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Кнопки действий внутри поповера */
+.ts-pop-actions {
+  display: flex; gap: 6px; justify-content: flex-end;
+  padding-top: 6px;
+  border-top: 1px solid var(--tk-border-soft, #EFEAE0);
+  margin-top: 2px;
+}
+.ts-pop-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--tk-border, #E6E1D7);
+  background: #fff;
+  color: var(--tk-text-secondary, #534D40);
+  border-radius: 7px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.ts-pop-btn:hover {
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text);
+}
+.ts-pop-btn-primary {
+  background: var(--tk-accent, #E87A1E);
+  border-color: var(--tk-accent, #E87A1E);
+  color: #fff;
+}
+.ts-pop-btn-primary:hover:not(:disabled) {
+  background: var(--tk-accent-hover, #D26B12);
+  border-color: var(--tk-accent-hover, #D26B12);
+  color: #fff;
+}
+.ts-pop-btn-primary:disabled {
+  opacity: 0.55; cursor: default;
 }
 
 /* Приоритет — цвета по уровню */
@@ -1786,87 +2264,219 @@ button.ts-pill { appearance: none; -webkit-appearance: none; }
 /* ═══ Вложения ═══ */
 .ts-att-drop {
   display: flex; align-items: center; justify-content: center;
-  gap: var(--tk-s-2);
-  border: 1.5px dashed var(--tk-border);
-  border-radius: var(--tk-r-sm);
-  padding: var(--tk-s-3);
-  color: var(--tk-text-muted);
-  font-size: var(--tk-fz-sm, 12px);
+  gap: 8px;
+  border: 1.5px dashed var(--tk-border, #E6E1D7);
+  border-radius: 10px;
+  padding: 14px 12px;
+  color: var(--tk-text-muted, #9C9384);
+  font-size: 12px; font-weight: 500;
   cursor: pointer;
-  background: var(--tk-n-50, #F7F8F9);
-  transition: background var(--tk-transition), border-color var(--tk-transition), color var(--tk-transition);
+  background: var(--tk-n-50, #FAF9F5);
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
   user-select: none;
 }
-.ts-att-drop:hover { border-color: var(--tk-accent); color: var(--tk-text); }
-.ts-att-drop.is-drag { background: var(--tk-accent-soft, #FEEFE0); border-color: var(--tk-accent); color: var(--tk-accent-text, #B85A0E); }
+.ts-att-drop:hover {
+  border-color: var(--tk-accent, #E87A1E);
+  background: #fff;
+  color: var(--tk-text);
+}
+.ts-att-drop.is-drag {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: var(--tk-accent, #E87A1E);
+  border-style: solid;
+  color: var(--tk-accent-text, #B85A0E);
+  transform: scale(1.01);
+}
 .ts-att-drop.is-upload { opacity: 0.7; pointer-events: none; }
 .ts-att-input { display: none; }
-.ts-att-drop-text { font-weight: var(--tk-fw-semibold); }
+.ts-att-drop-text { font-weight: 600; }
 
-.ts-att-list { list-style: none; padding: 0; margin: var(--tk-s-2) 0 0; display: flex; flex-direction: column; gap: var(--tk-s-1); }
-.ts-att-item {
-  display: flex; align-items: center; gap: var(--tk-s-2);
-  padding: var(--tk-s-2);
-  background: var(--tk-n-0);
-  border: 1px solid var(--tk-border-soft);
-  border-radius: var(--tk-r-sm);
+.ts-att-list {
+  list-style: none; padding: 0;
+  margin: 8px 0 0;
+  display: flex; flex-direction: column; gap: 4px;
 }
-.ts-att-item:hover { border-color: var(--tk-border); }
+.ts-att-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 8px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.ts-att-item:hover {
+  border-color: var(--tk-border, #E6E1D7);
+  box-shadow: 0 1px 3px rgba(15,23,42,0.06);
+  transform: translateY(-1px);
+}
 .ts-att-thumb {
-  width: 36px; height: 36px;
-  border-radius: var(--tk-r-sm);
+  width: 34px; height: 34px;
+  border-radius: 7px;
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: var(--tk-fw-bold);
+  font-size: 10.5px; font-weight: 700;
   color: #fff;
   overflow: hidden;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
 }
 .ts-att-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.ts-att-thumb-img { background: var(--tk-n-200); }
-.ts-att-thumb-pdf { background: #D44638; }
-.ts-att-thumb-xls { background: #1F8A4C; }
-.ts-att-thumb-doc { background: #2B5797; }
-.ts-att-thumb-zip { background: #7B4F2A; }
-.ts-att-thumb-txt { background: #6B778C; }
-.ts-att-thumb-other { background: #8E9AB0; }
-.ts-att-info { flex: 1; min-width: 0; }
+.ts-att-thumb-img { background: linear-gradient(135deg, #94A3B8, #64748B); }
+.ts-att-thumb-pdf { background: linear-gradient(135deg, #EF4444, #B91C1C); }
+.ts-att-thumb-xls { background: linear-gradient(135deg, #22C55E, #166534); }
+.ts-att-thumb-doc { background: linear-gradient(135deg, #3B82F6, #1E40AF); }
+.ts-att-thumb-zip { background: linear-gradient(135deg, #A16207, #713F12); }
+.ts-att-thumb-txt { background: linear-gradient(135deg, #94A3B8, #475569); }
+.ts-att-thumb-other { background: linear-gradient(135deg, #9CA3AF, #4B5563); }
+.ts-att-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ts-att-name {
   display: block;
   color: var(--tk-text);
   text-decoration: none;
-  font-weight: var(--tk-fw-semibold);
-  font-size: var(--tk-fz-md);
+  font-weight: 600;
+  font-size: 12.5px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.3;
 }
 .ts-att-name:hover { color: var(--tk-accent-text, #B85A0E); text-decoration: underline; }
-.ts-att-meta { font-size: var(--tk-fz-xs, 11px); color: var(--tk-text-muted); }
-.ts-att-actions { display: flex; gap: 2px; flex-shrink: 0; }
-.ts-att-actions .ts-icon-btn { color: var(--tk-text-muted); }
-.ts-att-actions .ts-icon-btn:hover { color: var(--tk-text); }
+.ts-att-meta {
+  font-size: 10.5px; color: var(--tk-text-muted, #9C9384);
+  line-height: 1.2;
+}
+.ts-att-actions { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity 140ms ease; }
+.ts-att-item:hover .ts-att-actions { opacity: 1; }
+.ts-att-actions .ts-icon-btn { color: var(--tk-text-muted, #9C9384); }
+.ts-att-actions .ts-icon-btn:hover { color: var(--tk-text); background: var(--tk-n-100, #F3F0E8); }
 
 /* ═══ Метки ═══ */
-.ts-labels { display: flex; flex-wrap: wrap; gap: var(--tk-s-1); }
-.ts-label {
-  padding: 4px var(--tk-s-3);
-  border-radius: var(--tk-r-sm);
-  font-size: var(--tk-fz-sm);
-  font-weight: var(--tk-fw-semibold);
-  cursor: pointer;
-  border: 1.5px solid;
-  background: transparent;
+.ts-labels-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  align-items: center;
+}
+.ts-label-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; line-height: 1;
   font-family: inherit;
-  transition: opacity var(--tk-transition);
 }
-.ts-label:hover { opacity: 0.85; }
-.ts-label.add-label {
-  border-color: var(--tk-text-muted);
-  color: var(--tk-text-muted);
-  border-style: dashed;
+.ts-label-pill-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
-.ts-label.add-label:hover {
-  border-color: var(--tk-accent);
-  color: var(--tk-accent-text);
+.ts-label-pill-text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 180px;
+}
+.ts-label-pill-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; background: transparent;
+  color: inherit;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 140ms ease, background 140ms ease;
+}
+.ts-label-pill-del:hover {
   opacity: 1;
+  background: rgba(0,0,0,0.08);
+}
+
+/* Кнопка «+ Добавить метку» */
+.ts-label-add-wrap { position: relative; display: inline-block; }
+.ts-label-add-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px 5px 8px;
+  background: transparent;
+  border: 1px dashed var(--tk-border, #E6E1D7);
+  border-radius: 999px;
+  font-family: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--tk-text-muted, #9C9384);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.ts-label-add-btn:hover,
+.ts-label-add-btn.is-open {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: var(--tk-accent, #E87A1E);
+  border-style: solid;
+  color: var(--tk-accent-text, #B85A0E);
+}
+
+/* Поповер пикера меток */
+.ts-pop-label {
+  min-width: 260px; max-width: 320px;
+  padding: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ts-pop-label-list {
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.ts-pop-label-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  color: var(--tk-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.ts-pop-label-item:hover { background: var(--tk-n-100, #F3F0E8); }
+.ts-pop-label-item.is-active { background: var(--tk-accent-soft, rgba(232,122,30,0.10)); }
+
+.ts-pop-label-check {
+  flex-shrink: 0;
+  width: 16px; height: 16px;
+  border: 1.5px solid var(--tk-border, #E6E1D7);
+  border-radius: 4px;
+  background: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.ts-pop-label-check.is-checked {
+  background: var(--tk-accent, #E87A1E);
+  border-color: var(--tk-accent, #E87A1E);
+}
+.ts-pop-label-stripe {
+  flex-shrink: 0;
+  width: 4px;
+  align-self: stretch;
+  min-height: 14px;
+  border-radius: 2px;
+}
+.ts-pop-label-text {
+  flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.ts-pop-label-foot {
+  padding-top: 6px;
+  border-top: 1px solid var(--tk-border-soft, #EFEAE0);
+}
+.ts-pop-label-create {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: var(--tk-accent-text, #B85A0E);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.ts-pop-label-create:hover {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
 }
 
 /* ═══ Соисполнители ═══ */
@@ -1988,97 +2598,284 @@ button.ts-pill { appearance: none; -webkit-appearance: none; }
 .ts-chat-pane { display: flex; flex-direction: column; padding: 0; }
 .ts-chat-list {
   flex: 1; overflow-y: auto;
-  padding: var(--tk-s-4);
-  display: flex; flex-direction: column; gap: var(--tk-s-2);
-  background: var(--tk-n-50);
+  padding: 16px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--tk-n-50, #FAF9F5);
 }
-.ts-chat-empty { text-align: center; padding: var(--tk-s-6) var(--tk-s-4); }
-.ts-chat-msg {
-  display: flex;
+
+/* Пустое состояние */
+.ts-chat-empty {
+  text-align: center;
+  padding: 36px 20px;
+  color: var(--tk-text-muted, #9C9384);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.ts-chat-empty-icon {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: var(--tk-n-100, #F3F0E8);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--tk-text-muted, #9C9384);
+  margin-bottom: 4px;
+}
+.ts-chat-empty-text {
+  font-size: 13px; font-weight: 600;
+  color: var(--tk-text-secondary, #534D40);
+}
+.ts-chat-empty-hint {
+  font-size: 11.5px; color: var(--tk-text-muted, #9C9384);
+}
+
+/* Строка сообщения: аватар + пузырь */
+.ts-chat-row {
+  display: flex; align-items: flex-end; gap: 8px;
   max-width: 88%;
 }
-.ts-chat-msg.own { align-self: flex-end; }
+.ts-chat-row.own {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+/* Аватар-кружок */
+.ts-chat-avatar {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #B0AAA0, #6E6657);
+  color: #fff;
+  font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  letter-spacing: 0.2px;
+  border: 1.5px solid var(--tk-n-50, #FAF9F5);
+}
+.ts-chat-row.own .ts-chat-avatar {
+  background: linear-gradient(135deg, var(--tk-accent, #E87A1E), #F4A261);
+}
+
+/* Пузырь сообщения */
 .ts-chat-bubble {
-  background: var(--tk-n-0);
-  border: 1px solid var(--tk-border-soft);
-  border-radius: var(--tk-r-md);
-  border-top-left-radius: 4px;
-  padding: var(--tk-s-2) var(--tk-s-3);
+  background: #fff;
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  padding: 7px 11px;
   position: relative;
-  box-shadow: 0 1px 1px rgba(9,30,66,0.04);
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  min-width: 0;
 }
-.ts-chat-msg.own .ts-chat-bubble {
-  background: var(--tk-prio-medium-bg);
-  border-color: #C8DBFF;
-  border-top-left-radius: var(--tk-r-md);
-  border-top-right-radius: 4px;
-  color: var(--tk-prio-medium-fg);
+.ts-chat-row.own .ts-chat-bubble {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: color-mix(in srgb, var(--tk-accent, #E87A1E) 25%, transparent);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 4px;
 }
+
+/* Шапка пузыря: имя · время */
 .ts-chat-meta {
-  display: flex; gap: var(--tk-s-2); align-items: baseline;
-  font-size: var(--tk-fz-xs);
+  display: flex; gap: 6px; align-items: baseline;
+  font-size: 10.5px;
   margin-bottom: 3px;
+  line-height: 1;
 }
-.ts-chat-author { font-weight: var(--tk-fw-bold); color: inherit; }
-.ts-chat-date { color: var(--tk-text-muted); }
-.ts-chat-msg.own .ts-chat-author { color: var(--tk-prio-medium-fg); }
-.ts-chat-msg.own .ts-chat-date { color: rgba(7,71,166,0.6); }
+.ts-chat-author {
+  font-weight: 700;
+  color: var(--tk-text, #1A1814);
+  font-size: 11.5px;
+}
+.ts-chat-row.own .ts-chat-author {
+  color: var(--tk-accent-text, #B85A0E);
+}
+.ts-chat-date {
+  color: var(--tk-text-muted, #9C9384);
+  font-size: 10.5px;
+}
+
+/* Тело сообщения */
 .ts-chat-body {
-  font-size: var(--tk-fz-md);
-  color: inherit;
+  font-size: 12.5px;
+  color: var(--tk-text, #1A1814);
   line-height: 1.45;
   word-break: break-word;
 }
 .ts-chat-body.ts-md-view a { color: var(--tk-accent-text, #B85A0E); }
-.ts-chat-msg.own .ts-chat-body.ts-md-view a { color: var(--tk-prio-medium-fg); }
-.ts-chat-body.ts-md-view code { background: rgba(9,30,66,0.08); }
-.ts-chat-msg.own .ts-chat-body.ts-md-view code { background: rgba(7,71,166,0.12); }
+.ts-chat-body.ts-md-view code {
+  background: rgba(0,0,0,0.06);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+.ts-chat-row.own .ts-chat-body.ts-md-view code { background: rgba(232,122,30,0.14); }
+
+/* Действия редактирования */
 .ts-chat-actions {
   display: flex; gap: 2px; margin-top: 4px;
   opacity: 0;
-  transition: opacity var(--tk-transition);
+  transition: opacity 140ms ease;
   justify-content: flex-end;
 }
 .ts-chat-bubble:hover .ts-chat-actions { opacity: 1; }
 .ts-chat-action {
   background: none; border: none; cursor: pointer;
-  color: var(--tk-text-muted);
+  color: var(--tk-text-muted, #9C9384);
   width: 22px; height: 22px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--tk-r-sm);
-  transition: background var(--tk-transition), color var(--tk-transition);
+  border-radius: 6px;
+  transition: background 140ms ease, color 140ms ease;
 }
-.ts-chat-action:hover { background: rgba(9,30,66,0.10); color: var(--tk-text); }
-.ts-chat-msg.own .ts-chat-action { color: rgba(7,71,166,0.55); }
-.ts-chat-msg.own .ts-chat-action:hover { background: rgba(7,71,166,0.15); color: var(--tk-prio-medium-fg); }
+.ts-chat-action:hover {
+  background: rgba(0,0,0,0.06);
+  color: var(--tk-text, #1A1814);
+}
+.ts-chat-row.own .ts-chat-action:hover {
+  background: rgba(232,122,30,0.15);
+  color: var(--tk-accent-text, #B85A0E);
+}
 
+/* Поле ввода */
 .ts-chat-input {
-  display: flex; gap: var(--tk-s-2); align-items: flex-end;
-  padding: var(--tk-s-3) var(--tk-s-4);
-  border-top: 1px solid var(--tk-border-soft);
-  background: var(--tk-n-0);
+  display: flex; gap: 8px; align-items: flex-end;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--tk-border-soft, #EFEAE0);
+  background: #fff;
   flex-shrink: 0;
 }
-.ts-chat-input > :deep(.me) { flex: 1; max-height: 180px; overflow: hidden; }
-.ts-chat-input > :deep(.me .me-content) { max-height: 120px; overflow-y: auto; }
-.ts-chat-input .btn { padding: 0 var(--tk-s-3); height: 36px; font-size: var(--tk-fz-md); flex-shrink: 0; }
-
-/* ═══ История ═══ */
-.ts-history { display: flex; flex-direction: column; gap: 6px; }
-.ts-history-item {
-  padding: var(--tk-s-2) var(--tk-s-3);
-  background: var(--tk-n-50);
-  border: 1px solid var(--tk-border-soft);
-  border-radius: var(--tk-r-sm);
-  font-size: var(--tk-fz-sm);
+.ts-chat-input > :deep(.me) {
+  flex: 1;
+  max-height: 180px;
+  overflow: hidden;
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 18px;
 }
-.ts-history-row { display: flex; gap: 6px; }
-.ts-history-author { font-weight: var(--tk-fw-bold); color: var(--tk-text); }
-.ts-history-action { color: var(--tk-text-secondary); }
-.ts-history-date {
-  color: var(--tk-text-muted);
-  font-size: var(--tk-fz-xs);
+.ts-chat-input > :deep(.me:focus-within) {
+  border-color: var(--tk-accent, #E87A1E);
+  background: #fff;
+  box-shadow: var(--tk-focus-ring, 0 0 0 3px rgba(232,122,30,0.18));
+}
+.ts-chat-input > :deep(.me .me-content) {
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+
+/* Круглая кнопка отправки */
+.ts-chat-send {
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--tk-accent, #E87A1E);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(232,122,30,0.30);
+  transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+.ts-chat-send:hover:not(:disabled) {
+  background: var(--tk-accent-hover, #D26B12);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(232,122,30,0.35);
+}
+.ts-chat-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+.ts-chat-send-icon {
+  margin-left: 1px;
+}
+
+/* ═══ История (timeline) ═══ */
+.ts-hist {
+  list-style: none; margin: 0;
+  padding: 4px 0 4px 8px;
+  position: relative;
+}
+.ts-hist::before {
+  content: '';
+  position: absolute;
+  top: 14px; bottom: 14px;
+  left: 19px;
+  width: 2px;
+  background: linear-gradient(180deg,
+    var(--tk-border-soft, #EFEAE0) 0%,
+    var(--tk-border, #E6E1D7) 50%,
+    var(--tk-border-soft, #EFEAE0) 100%);
+  border-radius: 2px;
+}
+.ts-hist-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 6px 4px 6px 0;
+  position: relative;
+}
+.ts-hist-marker {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff;
+  background: var(--tk-text-muted, #9C9384);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--tk-border-soft, #EFEAE0);
+  position: relative;
+  z-index: 1;
+}
+.ts-hist-marker-created   { background: var(--tk-accent, #E87A1E); }
+.ts-hist-marker-moved     { background: #3B82F6; }
+.ts-hist-marker-updated   { background: #6E6657; }
+.ts-hist-marker-comment   { background: #10B981; }
+.ts-hist-marker-labels    { background: #8B5CF6; }
+.ts-hist-marker-people    { background: #0EA5E9; }
+.ts-hist-marker-relations { background: #F59E0B; }
+.ts-hist-marker-closed    { background: #16A34A; }
+.ts-hist-marker-reopened  { background: #E87A1E; }
+.ts-hist-marker-other     { background: #9C9384; }
+
+.ts-hist-content {
+  flex: 1; min-width: 0;
+  padding-top: 3px;
+  padding-bottom: 4px;
+}
+.ts-hist-row {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  font-size: 12.5px; line-height: 1.4;
+}
+.ts-hist-author {
+  font-weight: 700;
+  color: var(--tk-text, #1A1814);
+}
+.ts-hist-action {
+  color: var(--tk-text-secondary, #534D40);
+}
+.ts-hist-date {
+  font-size: 10.5px;
+  color: var(--tk-text-muted, #9C9384);
   margin-top: 2px;
+  cursor: default;
+}
+
+/* Пустое состояние истории */
+.ts-hist-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--tk-text-muted, #9C9384);
+}
+.ts-hist-empty-icon {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: var(--tk-n-100, #F3F0E8);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--tk-text-muted, #9C9384);
+  margin-bottom: 4px;
+}
+.ts-hist-empty-text {
+  font-size: 13px; font-weight: 600;
+  color: var(--tk-text-secondary, #534D40);
+}
+.ts-hist-empty-hint {
+  font-size: 11.5px; color: var(--tk-text-muted, #9C9384);
 }
 
 /* ═══ Адаптив ═══ */
