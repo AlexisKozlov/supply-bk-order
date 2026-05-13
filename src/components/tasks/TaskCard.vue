@@ -15,7 +15,7 @@
 
     <!-- Метки сверху (Trello-стиль: тонкие пиллы) -->
     <div v-if="cardLabels.length" class="task-card-labels">
-      <span v-for="l in cardLabels" :key="l.id" class="label-pill" :style="{ background: l.color }"
+      <span v-for="l in cardLabels" :key="l.id" class="label-pill" :style="{ '--lbl-color': l.color }"
             :title="l.title" @click.stop="openLabelsPicker">{{ l.title }}</span>
     </div>
 
@@ -472,18 +472,19 @@ const vClickOutsideCard = {
 <style scoped>
 .task-card {
   background: var(--tk-bg-card, #fff);
-  border: 1px solid var(--tk-border-soft, #E1E4E8);
-  border-radius: var(--tk-r-md, 8px);
-  padding: var(--tk-s-2, 8px) var(--tk-s-3, 12px) var(--tk-s-3, 12px);
-  box-shadow: var(--tk-shadow-card, 0 1px 0 rgba(9,30,66,0.08), 0 1px 2px rgba(9,30,66,0.06));
+  border: 1px solid var(--tk-border-soft, #EEF0F4);
+  border-radius: var(--tk-r-card, 12px);
+  padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-4, 16px);
+  box-shadow: var(--tk-shadow-card);
   cursor: pointer;
   user-select: none;
   position: relative;
-  transition: box-shadow var(--tk-transition, 120ms ease), transform var(--tk-transition, 120ms ease), border-color var(--tk-transition, 120ms ease);
+  transition: box-shadow var(--tk-transition, 140ms ease), transform var(--tk-transition, 140ms ease), border-color var(--tk-transition, 140ms ease);
 }
 .task-card:hover {
-  box-shadow: var(--tk-shadow-card-hover, 0 1px 1px rgba(9,30,66,0.10), 0 4px 8px rgba(9,30,66,0.10));
-  border-color: var(--tk-border, #DCDFE4);
+  box-shadow: var(--tk-shadow-card-hover);
+  border-color: var(--tk-border, #E4E7EE);
+  transform: translateY(-1px);
 }
 .task-card.is-dragging { opacity: 0.45; transform: rotate(1deg); }
 .task-card.is-done { opacity: 0.6; }
@@ -498,19 +499,19 @@ const vClickOutsideCard = {
 }
 .task-card-external svg { color: #B58A2E; }
 
-/* Левая полоска по приоритету (тоньше и спокойнее, чем раньше) */
+/* Левая полоска по приоритету — узкая, плотно прижата к левому краю */
 .task-card::before {
   content: '';
   position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 3px;
-  border-radius: var(--tk-r-md, 8px) 0 0 var(--tk-r-md, 8px);
+  left: 0; top: 8px; bottom: 8px;
+  width: 4px;
+  border-radius: 4px;
   background: transparent;
 }
 .task-card.prio-low::before    { background: var(--tk-n-300); }
 .task-card.prio-medium::before { background: transparent; }
-.task-card.prio-high::before   { background: var(--tk-warning, #B65E03); }
-.task-card.prio-urgent::before { background: var(--tk-danger, #C9372C); }
+.task-card.prio-high::before   { background: var(--tk-warning, #BB6A0A); }
+.task-card.prio-urgent::before { background: var(--tk-danger, #D33A2C); }
 
 /* ═══ Метки сверху ═══ */
 .task-card-labels {
@@ -519,13 +520,20 @@ const vClickOutsideCard = {
   margin-bottom: var(--tk-s-2, 8px);
 }
 .label-pill {
-  font-size: 10px; font-weight: var(--tk-fw-bold, 700); color: #fff;
-  padding: 2px var(--tk-s-2, 8px);
-  border-radius: var(--tk-r-sm, 4px);
-  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* В Yougile метки — пастельная подложка + тёмный шрифт того же оттенка.
+     Цвет приходит через --lbl-color, подложку и текст выводим color-mix-ом. */
+  --lbl-color: var(--tk-n-400);
+  font-size: 11px; font-weight: var(--tk-fw-semibold, 600);
+  color: color-mix(in srgb, var(--lbl-color) 65%, #0E1320 35%);
+  background: color-mix(in srgb, var(--lbl-color) 20%, #ffffff 80%);
+  padding: 3px 10px;
+  border-radius: var(--tk-r-pill, 999px);
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   cursor: pointer;
-  letter-spacing: .2px;
-  text-shadow: 0 1px 0 rgba(9,30,66,0.20);
+  letter-spacing: .1px;
+  text-shadow: none;
+  border: 1px solid transparent;
+  transition: opacity var(--tk-transition, 140ms ease);
 }
 .label-pill:hover { opacity: 0.85; }
 

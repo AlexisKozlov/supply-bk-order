@@ -1226,29 +1226,37 @@ function historyText(h) {
 }
 
 /* ═══ Подзадачи ═══ */
-.ts-subtasks { list-style: none; padding: 0; margin: 0 0 var(--tk-s-1); }
+.ts-subtasks {
+  list-style: none; padding: 0; margin: 0 0 var(--tk-s-2);
+  display: flex; flex-direction: column; gap: 6px;
+}
 .ts-sub-item {
   display: flex; align-items: center; gap: var(--tk-s-2);
-  padding: 6px var(--tk-s-1);
-  border-bottom: 1px solid var(--tk-border-soft);
-  min-height: 32px;
+  padding: var(--tk-s-2) var(--tk-s-3);
+  background: var(--tk-bg-card, #fff);
+  border: 1px solid var(--tk-border-soft, #EEF0F4);
+  border-radius: var(--tk-r-md, 10px);
+  min-height: 40px;
+  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
 }
-.ts-sub-item:last-child { border-bottom: none; }
-.ts-sub-item:hover { background: var(--tk-n-50); }
+.ts-sub-item:hover {
+  border-color: var(--tk-border, #E4E7EE);
+  box-shadow: 0 2px 6px rgba(15,23,42,0.06);
+}
 
 .ts-sub-text {
   flex: 1 1 auto; min-width: 0;
   display: flex; align-items: center; justify-content: space-between; gap: var(--tk-s-2);
   background: none; border: none; cursor: pointer;
   text-align: left;
-  padding: 2px var(--tk-s-1);
+  padding: 2px 0;
   border-radius: var(--tk-r-sm);
   color: var(--tk-text);
   font-family: inherit;
   font-size: var(--tk-fz-md);
-  transition: background var(--tk-transition), color var(--tk-transition);
+  transition: color var(--tk-transition);
 }
-.ts-sub-text:hover { background: var(--tk-accent-soft); color: var(--tk-accent-text); }
+.ts-sub-text:hover { color: var(--tk-accent-text); }
 .ts-sub-text.done .ts-sub-title { text-decoration: line-through; color: var(--tk-text-muted); }
 .ts-sub-title { word-break: break-word; min-width: 0; }
 .ts-sub-meta {

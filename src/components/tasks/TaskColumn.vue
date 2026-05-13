@@ -334,17 +334,17 @@ defineExpose({});
 
 <style scoped>
 .task-column {
-  background: var(--tk-bg-column, #EBECF0);
-  border-radius: var(--tk-r-lg, 12px);
+  background: var(--tk-bg-column, #EEF0F5);
+  border-radius: var(--tk-r-lg, 14px);
   padding: 0;
-  width: 280px;
-  flex: 0 0 280px;
+  width: 288px;
+  flex: 0 0 288px;
   display: flex;
   flex-direction: column;
   max-height: 100%;
-  border: 2px solid transparent;
-  box-shadow: var(--tk-shadow-column, 0 1px 1px rgba(9,30,66,0.06), 0 0 1px rgba(9,30,66,0.10));
-  transition: border-color var(--tk-transition, 120ms ease), background var(--tk-transition, 120ms ease);
+  border: 1px solid transparent;
+  box-shadow: var(--tk-shadow-column);
+  transition: border-color var(--tk-transition, 140ms ease), background var(--tk-transition, 140ms ease);
 }
 .task-column.is-drop-target {
   border-color: var(--tk-accent, #E87A1E);
@@ -368,25 +368,25 @@ defineExpose({});
 }
 .task-column { position: relative; }
 .task-column-color-bar {
-  height: 4px;
+  height: 3px;
   background: var(--col-color, #9E9E9E);
-  border-radius: var(--tk-r-lg, 12px) var(--tk-r-lg, 12px) 0 0;
+  border-radius: var(--tk-r-lg, 14px) var(--tk-r-lg, 14px) 0 0;
+  opacity: 0.9;
 }
-.task-column.is-archive .task-column-color-bar { background: #9E9E9E; opacity: 0.6; }
+.task-column.is-archive .task-column-color-bar { background: var(--tk-n-300); opacity: 0.5; }
 
 .task-column-header {
-  padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-2, 8px);
+  padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-1, 4px);
   display: flex; align-items: center; gap: var(--tk-s-1, 4px);
   position: relative;
 }
 .task-column-title-wrap { flex: 1; display: flex; align-items: center; gap: var(--tk-s-2, 8px); min-width: 0; }
 .task-column-title {
   font-weight: var(--tk-fw-semibold, 600);
-  font-size: var(--tk-fz-md, 13px);
+  font-size: var(--tk-fz-lg, 14px);
   color: var(--tk-text, #172B4D);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   cursor: text;
-  text-transform: uppercase; letter-spacing: .4px;
 }
 .task-column-title-input {
   font-weight: var(--tk-fw-semibold, 600);

@@ -602,10 +602,12 @@ function onColDrop(i) {
    Бренд: оранжевый #E87A1E. Стиль: Trello/Jira — нейтральная серая база, цветной акцент только в активных состояниях.
    Дочерние компоненты (TaskColumn, TaskCard, TaskCardModal) наследуют эти переменные. */
 .tasks-view {
-  /* Радиусы — только три значения */
+  /* Радиусы — добавлен r-card специально для крупных карточек/колонок */
   --tk-r-sm: 4px;
-  --tk-r-md: 8px;
-  --tk-r-lg: 12px;
+  --tk-r-md: 10px;
+  --tk-r-lg: 14px;
+  --tk-r-card: 12px;
+  --tk-r-pill: 999px;
 
   /* Отступы — ступени по 4 */
   --tk-s-1: 4px;
@@ -615,11 +617,11 @@ function onColDrop(i) {
   --tk-s-5: 20px;
   --tk-s-6: 24px;
 
-  /* Тени */
-  --tk-shadow-card: 0 1px 0 rgba(9,30,66,0.08), 0 1px 2px rgba(9,30,66,0.06);
-  --tk-shadow-card-hover: 0 1px 1px rgba(9,30,66,0.10), 0 4px 8px rgba(9,30,66,0.10);
-  --tk-shadow-column: 0 1px 1px rgba(9,30,66,0.06), 0 0 1px rgba(9,30,66,0.10);
-  --tk-shadow-popover: 0 8px 24px rgba(9,30,66,0.18), 0 1px 2px rgba(9,30,66,0.10);
+  /* Тени — мягче и тоньше (Yougile/Linear) */
+  --tk-shadow-card: 0 1px 1px rgba(15,23,42,0.04), 0 0 0 1px rgba(15,23,42,0.04);
+  --tk-shadow-card-hover: 0 6px 16px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.06);
+  --tk-shadow-column: none;
+  --tk-shadow-popover: 0 12px 32px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
 
   /* Типографика */
   --tk-fz-xs: 11px;
@@ -632,59 +634,63 @@ function onColDrop(i) {
   --tk-fw-semibold: 600;
   --tk-fw-bold: 700;
 
-  /* Палитра — нейтральная серая шкала (atlassian-inspired) */
+  /* Палитра — прохладные нейтральные тона */
   --tk-n-0: #FFFFFF;
-  --tk-n-50: #F7F8F9;
-  --tk-n-100: #F1F2F4;
-  --tk-n-200: #DCDFE4;
-  --tk-n-300: #B3B9C4;
-  --tk-n-400: #8590A2;
-  --tk-n-500: #758195;
-  --tk-n-600: #626F86;
-  --tk-n-700: #44546F;
-  --tk-n-800: #2C3E5D;
-  --tk-n-900: #172B4D;
+  --tk-n-50: #F8F9FC;
+  --tk-n-100: #F1F3F8;
+  --tk-n-200: #E4E7EE;
+  --tk-n-300: #C8CCD6;
+  --tk-n-400: #98A0B0;
+  --tk-n-500: #6B7385;
+  --tk-n-600: #525B6F;
+  --tk-n-700: #3E465A;
+  --tk-n-800: #283044;
+  --tk-n-900: #131A2A;
 
   /* Поверхности */
-  --tk-bg-board: #F7F8F9;
-  --tk-bg-column: #EBECF0;
+  --tk-bg-board: #F5F6FA;
+  --tk-bg-column: #EEF0F5;
   --tk-bg-card: #FFFFFF;
   --tk-bg-popover: #FFFFFF;
-  --tk-border: #DCDFE4;
-  --tk-border-soft: #E1E4E8;
+  --tk-border: #E4E7EE;
+  --tk-border-soft: #EEF0F4;
 
-  /* Акцент бренда (оранжевый) */
+  /* Акцент бренда (оранжевый, сохраняем) */
   --tk-accent: #E87A1E;
   --tk-accent-hover: #D26B12;
   --tk-accent-soft: rgba(232,122,30,0.10);
   --tk-accent-soft-strong: rgba(232,122,30,0.18);
   --tk-accent-text: #B85A0E;
 
+  /* Доп. акцент — для разнообразия в карточках/чипах */
+  --tk-violet: #635BFF;
+  --tk-violet-soft: rgba(99,91,255,0.12);
+
   /* Приоритеты — пастельные плашки */
-  --tk-prio-urgent-bg: #FFEBE6;
-  --tk-prio-urgent-fg: #BF2600;
-  --tk-prio-high-bg: #FFF7D6;
-  --tk-prio-high-fg: #974F0C;
-  --tk-prio-medium-bg: #DEEBFF;
-  --tk-prio-medium-fg: #0747A6;
-  --tk-prio-low-bg: #EBECF0;
-  --tk-prio-low-fg: #44546F;
+  --tk-prio-urgent-bg: #FEE7E0;
+  --tk-prio-urgent-fg: #B23B16;
+  --tk-prio-high-bg: #FFF1D6;
+  --tk-prio-high-fg: #8B5E00;
+  --tk-prio-medium-bg: #E4ECFE;
+  --tk-prio-medium-fg: #2C4DB0;
+  --tk-prio-low-bg: #EEF0F4;
+  --tk-prio-low-fg: #525B6F;
 
   /* Семантика */
-  --tk-success: #1F8F4E;
-  --tk-success-soft: rgba(31,143,78,0.10);
-  --tk-warning: #B65E03;
-  --tk-warning-soft: rgba(182,94,3,0.10);
-  --tk-danger: #C9372C;
-  --tk-danger-soft: rgba(201,55,44,0.08);
+  --tk-success: #16A364;
+  --tk-success-soft: rgba(22,163,100,0.12);
+  --tk-warning: #BB6A0A;
+  --tk-warning-soft: rgba(187,106,10,0.12);
+  --tk-danger: #D33A2C;
+  --tk-danger-soft: rgba(211,58,44,0.10);
 
   /* Текст */
   --tk-text: var(--tk-n-900);
   --tk-text-secondary: var(--tk-n-700);
   --tk-text-muted: var(--tk-n-500);
 
-  --tk-transition: 120ms ease;
-  --tk-focus-ring: 0 0 0 2px rgba(232,122,30,0.35);
+  --tk-transition: 140ms ease;
+  --tk-focus-ring: 0 0 0 3px rgba(232,122,30,0.25);
 
   /* ═══ собственно стили страницы ═══ */
   display: flex; flex-direction: column;
