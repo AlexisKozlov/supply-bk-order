@@ -1,58 +1,53 @@
 <template>
   <div class="tasks-view">
-    <!-- Шапка в стиле Yougile: верхний ряд — выбор доски и «+ Новая доска»,
-         нижний ряд — вкладки «Канбан / Календарь» с подчёркиванием и
-         дополнительные действия (поиск/сортировка/настройки) справа. -->
+    <!-- Шапка в один ряд: выбор доски + вкладки «Канбан/Календарь» с
+         подчёркиванием активной + действия справа (поиск/сортировка/⚙/+). -->
     <header class="tasks-header">
-      <div class="tasks-header-row tasks-header-row-top">
-        <div v-if="store.boards.length" class="tasks-board-picker">
-          <select class="tasks-board-select" :value="store.currentBoardId" @change="changeBoard">
-            <optgroup v-for="(group, owner) in groupedBoards" :key="owner" :label="owner === currentUserName ? 'Мои' : owner">
-              <option v-for="b in group.active" :key="b.id" :value="b.id">{{ b.title }}</option>
-            </optgroup>
-            <optgroup v-if="archivedBoards.length" label="Архивные">
-              <option v-for="b in archivedBoards" :key="b.id" :value="b.id">{{ b.title }} ({{ b.owner_name }})</option>
-            </optgroup>
+      <div v-if="store.boards.length" class="tasks-board-picker">
+        <select class="tasks-board-select" :value="store.currentBoardId" @change="changeBoard">
+          <optgroup v-for="(group, owner) in groupedBoards" :key="owner" :label="owner === currentUserName ? 'Мои' : owner">
+            <option v-for="b in group.active" :key="b.id" :value="b.id">{{ b.title }}</option>
+          </optgroup>
+          <optgroup v-if="archivedBoards.length" label="Архивные">
+            <option v-for="b in archivedBoards" :key="b.id" :value="b.id">{{ b.title }} ({{ b.owner_name }})</option>
+          </optgroup>
+        </select>
+        <TaskIcon name="chevronDown" :size="14" class="tasks-board-select-chev"/>
+      </div>
+
+      <nav class="tasks-tabs" role="tablist" aria-label="Режим отображения">
+        <button class="tasks-tab" :class="{ active: viewMode === 'kanban' }" @click="setViewMode('kanban')">
+          <TaskIcon name="columns" :size="14"/>
+          <span>Канбан</span>
+        </button>
+        <button class="tasks-tab" :class="{ active: viewMode === 'calendar' }" @click="setViewMode('calendar')">
+          <TaskIcon name="calendar" :size="14"/>
+          <span>Календарь</span>
+        </button>
+      </nav>
+
+      <div class="tasks-header-actions">
+        <div class="sort-wrap" v-if="viewMode === 'kanban'">
+          <select :value="store.sortMode" @change="store.sortMode = $event.target.value" class="sort-select" title="Сортировка карточек">
+            <option value="manual">Вручную</option>
+            <option value="due">По сроку</option>
+            <option value="priority">По приоритету</option>
+            <option value="created">По дате создания</option>
           </select>
-          <TaskIcon name="chevronDown" :size="14" class="tasks-board-select-chev"/>
+          <TaskIcon name="chevronDown" :size="12" class="sort-select-chev"/>
         </div>
-        <div class="tasks-header-spacer"></div>
+        <button class="btn search-btn" @click="openSearch" title="Поиск по карточкам">
+          <TaskIcon name="search" :size="14"/>
+          <span class="search-btn-label">Поиск</span>
+          <kbd class="search-btn-kbd">{{ shortcutSymbol }}K</kbd>
+        </button>
+        <button v-if="store.board" class="btn icon-btn" @click="boardMenuOpen = !boardMenuOpen" title="Настройки доски">
+          <TaskIcon name="gear" :size="16"/>
+        </button>
         <button class="btn primary tasks-new-board-btn" @click="createBoardPrompt">
           <TaskIcon name="plus" :size="14"/>
           <span>Новая доска</span>
         </button>
-      </div>
-
-      <div class="tasks-header-row tasks-header-row-bottom">
-        <nav class="tasks-tabs" role="tablist" aria-label="Режим отображения">
-          <button class="tasks-tab" :class="{ active: viewMode === 'kanban' }" @click="setViewMode('kanban')">
-            <TaskIcon name="columns" :size="14"/>
-            <span>Канбан</span>
-          </button>
-          <button class="tasks-tab" :class="{ active: viewMode === 'calendar' }" @click="setViewMode('calendar')">
-            <TaskIcon name="calendar" :size="14"/>
-            <span>Календарь</span>
-          </button>
-        </nav>
-        <div class="tasks-header-actions">
-          <div class="sort-wrap" v-if="viewMode === 'kanban'">
-            <select :value="store.sortMode" @change="store.sortMode = $event.target.value" class="sort-select" title="Сортировка карточек">
-              <option value="manual">Вручную</option>
-              <option value="due">По сроку</option>
-              <option value="priority">По приоритету</option>
-              <option value="created">По дате создания</option>
-            </select>
-            <TaskIcon name="chevronDown" :size="12" class="sort-select-chev"/>
-          </div>
-          <button class="btn search-btn" @click="openSearch" title="Поиск по карточкам">
-            <TaskIcon name="search" :size="14"/>
-            <span class="search-btn-label">Поиск</span>
-            <kbd class="search-btn-kbd">{{ shortcutSymbol }}K</kbd>
-          </button>
-          <button v-if="store.board" class="btn icon-btn" @click="boardMenuOpen = !boardMenuOpen" title="Настройки доски">
-            <TaskIcon name="gear" :size="16"/>
-          </button>
-        </div>
       </div>
 
       <!-- Меню настроек доски -->
@@ -815,26 +810,18 @@ function onColDrop(i) {
   color: var(--tk-text);
 }
 .tasks-header {
-  display: flex; flex-direction: column;
+  display: flex; align-items: center; gap: var(--tk-s-3);
+  padding: 6px var(--tk-s-4) 0;
   background: var(--tk-n-0);
   border-bottom: 1px solid var(--tk-border);
   position: relative;
+  min-height: 46px;
+  flex-wrap: wrap;
 }
-.tasks-header-row {
-  display: flex; align-items: center; gap: var(--tk-s-3);
-  padding: 8px var(--tk-s-4);
-}
-.tasks-header-row-top {
-  border-bottom: 1px solid var(--tk-border-soft);
-  min-height: 44px;
-}
-.tasks-header-row-bottom {
-  min-height: 40px;
-}
-.tasks-header-spacer { flex: 1; }
 .tasks-header-actions {
   margin-left: auto;
   display: flex; align-items: center; gap: var(--tk-s-2);
+  padding-bottom: 6px;
 }
 .tasks-header-left { display: flex; align-items: center; gap: var(--tk-s-3); flex: 1; min-width: 0; }
 .tasks-title {
@@ -885,16 +872,19 @@ function onColDrop(i) {
   padding: 0 var(--tk-s-3); height: 32px; font-size: var(--tk-fz-md);
 }
 
-/* Вкладки «Канбан / Календарь» — Yougile-стиль с подчёркиванием */
+/* Вкладки «Канбан / Календарь» — Yougile-стиль с подчёркиванием.
+   Растягиваются на всю высоту шапки, подчёркивание активной встаёт
+   ровно на border-bottom шапки. */
 .tasks-tabs {
-  display: inline-flex; align-items: stretch;
+  align-self: stretch;
+  display: inline-flex; align-items: flex-end;
   gap: 4px;
   margin-bottom: -1px; /* подчёркивание активной перекрывает border-bottom шапки */
 }
 .tasks-tab {
   display: inline-flex; align-items: center; gap: 6px;
   background: transparent; border: none;
-  padding: 8px 14px 10px;
+  padding: 6px 14px;
   margin: 0;
   font-family: inherit;
   font-size: var(--tk-fz-md, 13px);
