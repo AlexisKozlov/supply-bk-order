@@ -574,7 +574,11 @@ async function addColumnPrompt() {
   catch (e) { showError('Ошибка', e); }
 }
 
-function openCard(card) { cardStack.value = [card.id]; }
+function openCard(cardOrId) {
+  // С доски приходит объект карточки, из календаря/поиска — только id.
+  const id = (cardOrId && typeof cardOrId === 'object') ? cardOrId.id : cardOrId;
+  if (id) cardStack.value = [id];
+}
 function openSubcard(cardId) { cardStack.value.push(cardId); }
 function onOpenSubtaskFromBoard({ parent, subtask }) {
   // Сразу открываем подзадачу с возможностью «← Назад» к родителю
@@ -1033,6 +1037,85 @@ function onColDrop(i) {
   border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
 }
 .labels-mgr-add .btn { padding: 0 var(--tk-s-3); height: 28px; }
+
+/* ── Новая структура менеджера меток (карточный вид) ── */
+.labels-mgr-box {
+  max-width: 560px; width: 92vw;
+  padding: var(--tk-s-4);
+  display: flex; flex-direction: column; gap: var(--tk-s-3);
+}
+.labels-mgr-help {
+  margin: 0;
+  font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
+  line-height: 1.5;
+}
+.labels-mgr-list {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 50vh; overflow-y: auto;
+}
+.labels-mgr-card {
+  background: var(--tk-bg-card, #fff);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
+}
+.labels-mgr-card:hover { border-color: var(--tk-border); box-shadow: 0 2px 6px rgba(15,23,42,0.06); }
+.labels-mgr-card.open { border-color: var(--tk-accent); box-shadow: 0 0 0 3px var(--tk-accent-soft); }
+.labels-mgr-card-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.labels-mgr-pill {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 999px;
+  font-size: 11.5px; font-weight: var(--tk-fw-semibold);
+  color: #fff;
+  min-width: 60px; max-width: 140px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 0 rgba(15,23,42,0.20);
+}
+.labels-mgr-edit-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid var(--tk-border);
+  border-radius: 6px; cursor: pointer;
+  color: var(--tk-text-secondary);
+  transition: background var(--tk-transition), border-color var(--tk-transition);
+}
+.labels-mgr-edit-btn:hover { background: var(--tk-n-100); border-color: var(--tk-n-300); }
+.labels-mgr-edit-btn.active { background: var(--tk-accent); color: #fff; border-color: var(--tk-accent); }
+.labels-mgr-palette-wrap {
+  padding-top: 8px;
+  border-top: 1px dashed var(--tk-border-soft);
+}
+
+.labels-mgr-add {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 0;
+  padding: var(--tk-s-3);
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border-soft);
+  border-radius: 10px;
+}
+.labels-mgr-add-title {
+  font-size: 11.5px; font-weight: var(--tk-fw-semibold);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--tk-text-muted);
+}
+.labels-mgr-add-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.labels-mgr-add-row .labels-mgr-input.flex-grow { flex: 1; }
+.labels-mgr-add-palette {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.labels-mgr-palette-label {
+  font-size: 11.5px; font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-muted);
+}
+.ts-icon-btn.danger { color: var(--tk-danger); }
+.ts-icon-btn.danger:hover { background: var(--tk-danger-soft); color: var(--tk-danger); }
 .ts-icon-btn {
   background: none; border: none; cursor: pointer;
   color: var(--tk-text-muted); font-size: var(--tk-fz-sm);
@@ -1109,9 +1192,28 @@ function onColDrop(i) {
   font-weight: var(--tk-fw-semibold);
 }
 .search-results {
+  /* Перебиваем глобальные правила .search-results из assets/style.css
+     (position:absolute, top:100%, left/right:0, border, box-shadow, max-height),
+     которые сделаны под dropdown-подсказки в других компонентах и ломают
+     наш модальный список поиска (отбрасывают его за низ экрана). */
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  max-height: none !important;
+  display: block !important;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  border-radius: 0;
+}
+.search-result {
+  /* Сбрасываем глобальный padding/font-size/border на свои значения, заданные ниже. */
+  padding: var(--tk-s-3) var(--tk-s-4);
+  font-size: inherit;
 }
 .search-empty, .search-hint {
   padding: var(--tk-s-6); text-align: center;

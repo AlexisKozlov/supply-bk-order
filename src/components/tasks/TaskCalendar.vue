@@ -2,14 +2,18 @@
   <div class="tc">
     <!-- Шапка с навигацией -->
     <div class="tc-toolbar">
-      <button class="tc-nav-btn" @click="prevMonth" title="Предыдущий месяц">
+      <button class="tc-nav-btn" @click="navPrev" :title="viewMode === 'week' ? 'Предыдущая неделя' : 'Предыдущий месяц'">
         <TaskIcon name="chevronRight" :size="16" style="transform: rotate(180deg)"/>
       </button>
       <button class="tc-today-btn" @click="goToday">Сегодня</button>
-      <button class="tc-nav-btn" @click="nextMonth" title="Следующий месяц">
+      <button class="tc-nav-btn" @click="navNext" :title="viewMode === 'week' ? 'Следующая неделя' : 'Следующий месяц'">
         <TaskIcon name="chevronRight" :size="16"/>
       </button>
-      <div class="tc-title">{{ monthLabel }}</div>
+      <div class="tc-title">{{ viewMode === 'week' ? weekLabel : monthLabel }}</div>
+      <div class="tc-mode-toggle" role="group" aria-label="Режим календаря">
+        <button class="tc-mode-btn" :class="{ active: viewMode === 'month' }" @click="setViewMode('month')">Месяц</button>
+        <button class="tc-mode-btn" :class="{ active: viewMode === 'week' }" @click="setViewMode('week')">Неделя</button>
+      </div>
       <div class="tc-spacer"></div>
       <div class="tc-legend">
         <span class="tc-legend-item"><span class="tc-legend-dot tc-prio-urgent"></span> Срочно</span>
@@ -20,12 +24,21 @@
     </div>
 
     <!-- Шапка дней недели -->
-    <div class="tc-weekdays">
-      <div v-for="(w, i) in weekdays" :key="i" class="tc-weekday" :class="{ 'tc-weekend': i >= 5 }">{{ w }}</div>
+    <div class="tc-weekdays" :class="{ 'tc-weekdays-week': viewMode === 'week' }">
+      <div v-for="(w, i) in (viewMode === 'week' ? weekGrid : weekdays.map(x => null))"
+           :key="i"
+           class="tc-weekday"
+           :class="{ 'tc-weekend': i >= 5, 'tc-weekday-today': viewMode === 'week' && weekGrid[i]?.isToday }">
+        <template v-if="viewMode === 'week'">
+          <span class="tc-weekday-name">{{ weekdays[i] }}</span>
+          <span class="tc-weekday-date">{{ weekGrid[i].date.getDate() }}.{{ String(weekGrid[i].date.getMonth() + 1).padStart(2,'0') }}</span>
+        </template>
+        <template v-else>{{ weekdays[i] }}</template>
+      </div>
     </div>
 
     <!-- Сетка месяца -->
-    <div class="tc-grid">
+    <div v-if="viewMode === 'month'" class="tc-grid">
       <div v-for="day in monthGrid" :key="day.iso"
            class="tc-day"
            :class="{
@@ -53,6 +66,33 @@
             <span class="tc-card-title">{{ card.title }}</span>
             <span v-if="card.assignees?.length" class="tc-card-bubble" :title="card.assignees.join(', ')">{{ initials(card.assignees[0]) }}</span>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Недельный вид: 7 колонок с расширенным пространством для карточек -->
+    <div v-else class="tc-week-grid">
+      <div v-for="day in weekGrid" :key="day.iso"
+           class="tc-week-col"
+           :class="{
+             'tc-day-today': day.isToday,
+             'tc-day-weekend': day.weekend,
+             'tc-day-drop': dropDayIso === day.iso,
+           }"
+           @dragover.prevent="onDayDragOver($event, day)"
+           @dragleave="onDayDragLeave(day)"
+           @drop.prevent="onDayDrop($event, day)">
+        <div class="tc-week-col-empty" v-if="!day.cards.length">— нет задач —</div>
+        <div v-for="card in day.cards"
+             :key="card.id"
+             class="tc-card tc-card-week"
+             :class="['prio-bg-' + (card.priority || 'medium'), { 'tc-card-done': card.is_done, 'tc-card-overdue': isOverdue(card) }]"
+             draggable="true"
+             @click.stop="$emit('open-card', card.id)"
+             @dragstart="onCardDragStart($event, card)"
+             @dragend="onCardDragEnd">
+          <span class="tc-card-title">{{ card.title }}</span>
+          <span v-if="card.assignees?.length" class="tc-card-bubble" :title="card.assignees.join(', ')">{{ initials(card.assignees[0]) }}</span>
         </div>
       </div>
     </div>
@@ -105,7 +145,32 @@ const dropDayIso = ref(null);
 const dropUndated = ref(false);
 let draggedCardId = null;
 
+// 'month' | 'week' — режим календаря, запоминаем в localStorage
+const viewMode = ref(localStorage.getItem('bk_tasks_cal_view_mode') === 'week' ? 'week' : 'month');
+function setViewMode(m) {
+  viewMode.value = m;
+  try { localStorage.setItem('bk_tasks_cal_view_mode', m); } catch (_) {}
+  // При переключении в неделю — выставляем viewDate на текущую неделю
+  if (m === 'week') {
+    weekAnchor.value = new Date(today);
+  }
+}
+
+// Якорь для недельного режима (любая дата в выбранной неделе)
+const weekAnchor = ref(new Date(today));
+
 const monthLabel = computed(() => `${monthNames[viewDate.value.getMonth()]} ${viewDate.value.getFullYear()}`);
+const weekLabel = computed(() => {
+  const g = weekGrid.value;
+  if (!g.length) return '';
+  const a = g[0].date, b = g[6].date;
+  const sameMonth = a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+  const aTxt = `${a.getDate()} ${monthNames[a.getMonth()].slice(0,3).toLowerCase()}`;
+  const bTxt = sameMonth
+    ? `${b.getDate()} ${monthNames[b.getMonth()].slice(0,3).toLowerCase()} ${b.getFullYear()}`
+    : `${b.getDate()} ${monthNames[b.getMonth()].slice(0,3).toLowerCase()} ${b.getFullYear()}`;
+  return `${aTxt} — ${bTxt}`;
+});
 
 function isoOf(d) {
   const pad = n => String(n).padStart(2, '0');
@@ -165,16 +230,54 @@ const monthGrid = computed(() => {
   return days;
 });
 
-function prevMonth() {
-  viewDate.value = new Date(viewDate.value.getFullYear(), viewDate.value.getMonth() - 1, 1);
+// Недельный грид: 7 дней начиная с понедельника недели, в которой weekAnchor
+const weekGrid = computed(() => {
+  const anchor = new Date(weekAnchor.value);
+  anchor.setHours(0, 0, 0, 0);
+  // Сдвигаем на понедельник
+  const dow = (anchor.getDay() + 6) % 7;
+  const start = new Date(anchor);
+  start.setDate(anchor.getDate() - dow);
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    d.setHours(0, 0, 0, 0);
+    const iso = isoOf(d);
+    days.push({
+      date: d,
+      iso,
+      isToday: d.getTime() === today.getTime(),
+      weekend: d.getDay() === 0 || d.getDay() === 6,
+      cards: cardsByDate.value.get(iso) || [],
+    });
+  }
+  return days;
+});
+
+function navPrev() {
+  if (viewMode.value === 'week') {
+    const a = new Date(weekAnchor.value);
+    a.setDate(a.getDate() - 7);
+    weekAnchor.value = a;
+  } else {
+    viewDate.value = new Date(viewDate.value.getFullYear(), viewDate.value.getMonth() - 1, 1);
+  }
   expandedDayIso.value = null;
 }
-function nextMonth() {
-  viewDate.value = new Date(viewDate.value.getFullYear(), viewDate.value.getMonth() + 1, 1);
+function navNext() {
+  if (viewMode.value === 'week') {
+    const a = new Date(weekAnchor.value);
+    a.setDate(a.getDate() + 7);
+    weekAnchor.value = a;
+  } else {
+    viewDate.value = new Date(viewDate.value.getFullYear(), viewDate.value.getMonth() + 1, 1);
+  }
   expandedDayIso.value = null;
 }
 function goToday() {
   viewDate.value = new Date(today.getFullYear(), today.getMonth(), 1);
+  weekAnchor.value = new Date(today);
   expandedDayIso.value = null;
 }
 
@@ -306,6 +409,81 @@ function onUndatedDrop(e) {
 }
 .tc-weekday { padding: 4px 6px; min-width: 0; }
 .tc-weekday.tc-weekend { color: var(--tk-prio-urgent, #D44638); }
+.tc-weekdays-week .tc-weekday {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 12px;
+  align-items: flex-start;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+.tc-weekdays-week .tc-weekday-today {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  color: var(--tk-accent-text, #B85A0E);
+}
+.tc-weekday-name { font-weight: var(--tk-fw-semibold, 600); }
+.tc-weekday-date { font-size: 11px; color: var(--tk-text-muted, #6E6657); }
+
+/* Недельный грид */
+.tc-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.tc-week-col {
+  background: var(--tk-n-0, #fff);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 10px;
+  padding: 8px 8px 10px;
+  display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto;
+  min-width: 0;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.tc-week-col.tc-day-today {
+  background: linear-gradient(180deg, var(--tk-accent-soft, rgba(232,122,30,0.10)) 0%, transparent 50%);
+  border-color: color-mix(in srgb, var(--tk-accent) 35%, var(--tk-border) 65%);
+}
+.tc-week-col.tc-day-weekend { background: var(--tk-n-50, #FAF9F5); }
+.tc-week-col.tc-day-drop {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: var(--tk-accent, #E87A1E);
+}
+.tc-week-col-empty {
+  font-size: 11px;
+  color: var(--tk-text-muted, #9C9384);
+  text-align: center;
+  padding: 14px 0;
+  font-style: italic;
+}
+.tc-card-week {
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+
+/* Переключатель «Месяц / Неделя» */
+.tc-mode-toggle {
+  display: inline-flex; align-items: center;
+  background: var(--tk-n-100, #F3F0E8);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 0;
+}
+.tc-mode-btn {
+  border: none; background: transparent;
+  padding: 5px 12px; border-radius: 6px;
+  font-family: inherit; font-size: 12px; font-weight: var(--tk-fw-semibold, 600);
+  color: var(--tk-text-muted, #6E6657); cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.tc-mode-btn:hover { color: var(--tk-text, #1A1814); }
+.tc-mode-btn.active {
+  background: var(--tk-n-0, #fff);
+  color: var(--tk-text, #1A1814);
+  box-shadow: 0 1px 2px rgba(15,23,42,0.08);
+}
 
 .tc-grid {
   display: grid;
