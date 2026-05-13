@@ -73,63 +73,61 @@
       </div>
     </header>
 
-    <!-- Менеджер меток (модалка) -->
+    <!-- Менеджер меток (модалка) — полностью своя разметка, без .modal-box -->
     <Teleport to="body" v-if="labelsManagerOpen">
-      <div class="modal" @click.self="closeLabelsManager">
-        <div class="modal-box labels-mgr-box">
-          <div class="modal-header">
-            <h3>Метки доски</h3>
-            <button class="modal-close" @click="closeLabelsManager">
+      <div class="lm-overlay" @click.self="closeLabelsManager">
+        <div class="lm-box">
+          <header class="lm-head">
+            <h3 class="lm-title">Метки доски</h3>
+            <button class="lm-close" @click="closeLabelsManager" title="Закрыть">
               <TaskIcon name="close" :size="16"/>
             </button>
-          </div>
+          </header>
 
-          <p class="labels-mgr-help">Метки помогают группировать карточки по теме или подразделению.</p>
+          <p class="lm-help">Метки помогают группировать карточки по теме или подразделению.</p>
 
-          <!-- Список существующих меток -->
-          <div class="labels-mgr-list">
-            <div v-for="l in store.labels" :key="l.id" class="labels-mgr-card"
-                 :class="{ open: editingLabelId === l.id }">
-              <div class="labels-mgr-card-row">
+          <section class="lm-list-wrap">
+            <div v-if="store.labels.length" class="lm-list">
+              <div v-for="l in store.labels" :key="l.id" class="lm-row"
+                   :class="{ open: editingLabelId === l.id }">
                 <button type="button"
-                        class="labels-mgr-color-dot"
+                        class="lm-dot"
                         :style="{ background: l.color }"
                         :class="{ active: editingLabelId === l.id }"
                         @click="toggleEdit(l)"
                         title="Сменить цвет"></button>
-                <input v-model="l.title" type="text" class="labels-mgr-input"
+                <input v-model="l.title" type="text" class="lm-input"
                        placeholder="Название метки"
                        @blur="updateLabel(l)" @keydown.enter="$event.target.blur()" />
-                <button class="ts-icon-btn danger" @click="deleteLabel(l)" title="Удалить">
+                <button class="lm-del" @click="deleteLabel(l)" title="Удалить">
                   <TaskIcon name="trash" :size="14"/>
                 </button>
-              </div>
-              <div v-if="editingLabelId === l.id" class="labels-mgr-palette-wrap">
-                <ColorPalette :model-value="l.color" @update:modelValue="onLabelColorPick(l, $event)"/>
+                <div v-if="editingLabelId === l.id" class="lm-palette-row">
+                  <ColorPalette :model-value="l.color" @update:modelValue="onLabelColorPick(l, $event)"/>
+                </div>
               </div>
             </div>
-            <div v-if="!store.labels.length" class="labels-mgr-empty">Меток пока нет — добавьте первую ниже</div>
-          </div>
+            <div v-else class="lm-empty">Меток пока нет — добавьте первую ниже</div>
+          </section>
 
-          <!-- Форма добавления -->
-          <div class="labels-mgr-add">
-            <div class="labels-mgr-add-title">Добавить метку</div>
-            <div class="labels-mgr-add-row">
-              <span class="labels-mgr-pill" :style="{ background: newLabel.color }">
+          <section class="lm-add">
+            <div class="lm-add-title">Добавить метку</div>
+            <div class="lm-add-row">
+              <span class="lm-preview" :style="{ background: newLabel.color }">
                 {{ newLabel.title.trim() || 'Превью' }}
               </span>
               <input v-model="newLabel.title" type="text" placeholder="Название новой метки"
-                     class="labels-mgr-input flex-grow"
+                     class="lm-input"
                      @keydown.enter="addLabel" />
-              <button class="btn primary" @click="addLabel" :disabled="!newLabel.title.trim()">
-                <TaskIcon name="plus" :size="14"/> Добавить
+              <button class="lm-add-btn" @click="addLabel" :disabled="!newLabel.title.trim()">
+                <TaskIcon name="plus" :size="14"/> <span>Добавить</span>
               </button>
             </div>
-            <div class="labels-mgr-add-palette">
-              <div class="labels-mgr-palette-label">Цвет:</div>
+            <div class="lm-add-palette">
+              <span class="lm-add-palette-label">Цвет:</span>
               <ColorPalette v-model="newLabel.color"/>
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </Teleport>
@@ -1070,179 +1068,189 @@ function onColDrop(i) {
 }
 :deep(.modal-close):hover { background: var(--tk-n-100); color: var(--tk-text); }
 
-.labels-mgr { display: flex; flex-direction: column; gap: var(--tk-s-1); }
-.labels-mgr-row {
-  display: flex; align-items: center; gap: var(--tk-s-2);
-  padding: var(--tk-s-1) var(--tk-s-2); border-radius: var(--tk-r-sm);
-}
-.labels-mgr-row:hover { background: var(--tk-n-100); }
-.labels-mgr-swatch {
-  width: 14px; height: 14px; border-radius: 50%;
-  flex-shrink: 0; border: 1px solid rgba(9,30,66,0.10);
-}
-.labels-mgr-input {
-  flex: 1; padding: 6px var(--tk-s-2); font-size: var(--tk-fz-md);
-  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
-  background: var(--tk-n-0); color: var(--tk-text); font-family: inherit;
-  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
-}
-.labels-mgr-input:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
-.labels-mgr-color {
-  width: 30px; height: 28px; padding: 0; cursor: pointer;
-  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
-  background: var(--tk-n-0);
-}
-.labels-mgr-empty {
-  text-align: center; padding: var(--tk-s-3); color: var(--tk-text-muted);
-  font-size: var(--tk-fz-md); font-style: italic;
-}
-.labels-mgr-add {
-  display: flex; gap: var(--tk-s-2); align-items: center;
-  margin-top: var(--tk-s-2); padding-top: var(--tk-s-3);
-  border-top: 1px solid var(--tk-border-soft);
-}
-.labels-mgr-add input[type="text"] {
-  flex: 1; padding: 6px var(--tk-s-2); font-size: var(--tk-fz-md);
-  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
-  background: var(--tk-n-0); color: var(--tk-text); font-family: inherit;
-  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
-}
-.labels-mgr-add input[type="text"]:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
-.labels-mgr-add input[type="color"] {
-  width: 30px; height: 28px; padding: 0; cursor: pointer;
-  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
-}
-.labels-mgr-add .btn { padding: 0 var(--tk-s-3); height: 28px; }
+/* ─────────────── Модалка «Метки доски» ───────────────
+   Полностью своя разметка (lm-*) — НЕ зависит от глобального .modal-box.
+   Жёсткие токены: дублируем тёплую палитру внутри .lm-overlay, потому что
+   через Teleport переменные с .tasks-view не наследуются. */
+.lm-overlay {
+  --lm-bg: #FFFFFF;
+  --lm-bg-soft: #FAF9F5;
+  --lm-border: #E6E1D7;
+  --lm-border-soft: #EFEAE0;
+  --lm-text: #1A1814;
+  --lm-text-secondary: #3D382E;
+  --lm-text-muted: #6E6657;
+  --lm-accent: #E87A1E;
+  --lm-accent-text: #B85A0E;
+  --lm-accent-soft: rgba(232,122,30,0.18);
+  --lm-danger: #D33A2C;
+  --lm-danger-soft: rgba(211,58,44,0.10);
 
-/* ── Новая структура менеджера меток (карточный вид) ──
-   Перебиваем глобальные .modal-box input { width:100% !important; margin-bottom: 6px }
-   из assets/style.css, иначе инпут метки раздвигает соседние элементы и
-   при ховере карточки выглядит «прыжком». */
-.labels-mgr-box {
-  max-width: 560px; width: 92vw;
-  padding: var(--tk-s-4);
-  display: flex; flex-direction: column; gap: var(--tk-s-3);
+  position: fixed; inset: 0;
+  background: rgba(20, 24, 32, 0.45);
+  backdrop-filter: blur(4px);
+  z-index: 10010;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
 }
-.labels-mgr-help {
+.lm-box {
+  width: 100%; max-width: 560px;
+  max-height: 90vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--lm-bg);
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(15,23,42,0.18), 0 4px 12px rgba(15,23,42,0.06);
+}
+.lm-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--lm-border-soft);
+}
+.lm-title {
   margin: 0;
-  font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
+  font-size: 17px; font-weight: 700; color: var(--lm-text);
+  letter-spacing: -0.01em;
+}
+.lm-close {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: var(--lm-bg-soft); color: var(--lm-text-muted);
+  border-radius: 8px; cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.lm-close:hover { background: var(--lm-danger-soft); color: var(--lm-danger); }
+
+.lm-help {
+  margin: 0; padding: 12px 20px;
+  font-size: 12.5px; color: var(--lm-text-muted);
   line-height: 1.5;
+  background: var(--lm-bg);
 }
-.labels-mgr-list {
-  display: flex; flex-direction: column; gap: 8px;
-  max-height: 50vh; overflow-y: auto;
-  /* Тонированный контейнер: белые карточки внутри выделяются на нём,
-     не сливаются с белой модалкой. */
-  padding: 10px;
-  background: var(--tk-n-50, #FAF9F5);
-  border: 1px solid var(--tk-border-soft, #EFEAE0);
+
+.lm-list-wrap {
+  padding: 0 20px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+.lm-list {
+  background: var(--lm-bg-soft);
+  border: 1px solid var(--lm-border-soft);
   border-radius: 10px;
+  padding: 10px;
+  display: flex; flex-direction: column; gap: 8px;
 }
-.labels-mgr-card {
-  background: var(--tk-bg-card, #fff) !important;
-  border: 1px solid var(--tk-border, #E6E1D7);
+.lm-empty {
+  background: var(--lm-bg-soft);
+  border: 1px dashed var(--lm-border);
+  border-radius: 10px;
+  padding: 24px 16px; text-align: center;
+  color: var(--lm-text-muted); font-style: italic; font-size: 13px;
+}
+.lm-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  background: var(--lm-bg);
+  border: 1px solid var(--lm-border);
   border-radius: 10px;
   padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 8px;
-  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
-  margin: 0;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
-.labels-mgr-card:hover { border-color: var(--tk-n-300); box-shadow: 0 2px 6px rgba(15,23,42,0.08); }
-.labels-mgr-card.open { border-color: var(--tk-accent); box-shadow: 0 0 0 3px var(--tk-accent-soft); }
-.labels-mgr-card-row {
+.lm-row:hover { border-color: #C8C1B2; box-shadow: 0 2px 6px rgba(15,23,42,0.08); }
+.lm-row.open { border-color: var(--lm-accent); box-shadow: 0 0 0 3px var(--lm-accent-soft); }
+.lm-dot {
+  grid-row: 1; grid-column: 1;
+  width: 22px; height: 22px; padding: 0;
+  border-radius: 50%; border: 1px solid rgba(0,0,0,0.10);
+  cursor: pointer; position: relative;
+  transition: transform 140ms ease;
+}
+.lm-dot:hover { transform: scale(1.08); }
+.lm-dot.active::after {
+  content: ''; position: absolute; inset: -3px;
+  border-radius: 50%; border: 2px solid var(--lm-accent);
+}
+.lm-input {
+  grid-row: 1; grid-column: 2;
+  flex: 1; min-width: 0;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--lm-border);
+  border-radius: 6px;
+  background: var(--lm-bg); color: var(--lm-text);
+  font-family: inherit; font-size: 13px;
+  margin: 0;
+  box-sizing: border-box;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.lm-input:focus {
+  outline: none;
+  border-color: var(--lm-accent);
+  box-shadow: 0 0 0 3px var(--lm-accent-soft);
+}
+.lm-del {
+  grid-row: 1; grid-column: 3;
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; background: transparent;
+  border-radius: 6px; cursor: pointer;
+  color: var(--lm-text-muted);
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.lm-del:hover { background: var(--lm-danger-soft); color: var(--lm-danger); border-color: rgba(211,58,44,0.20); }
+.lm-palette-row {
+  grid-row: 2; grid-column: 1 / -1;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--lm-border-soft);
+}
+
+.lm-add {
+  margin: 14px 20px 20px;
+  background: var(--lm-bg-soft);
+  border: 1px solid var(--lm-border-soft);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.lm-add-title {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--lm-text-muted);
+}
+.lm-add-row {
   display: flex; align-items: center; gap: 8px;
 }
-.labels-mgr-pill {
+.lm-preview {
   flex-shrink: 0;
   display: inline-flex; align-items: center;
-  padding: 3px 10px; border-radius: 999px;
-  font-size: 11.5px; font-weight: var(--tk-fw-semibold);
-  color: #fff;
-  min-width: 60px; max-width: 140px;
+  padding: 4px 12px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; color: #fff;
+  min-width: 70px; max-width: 150px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-shadow: 0 1px 0 rgba(15,23,42,0.20);
 }
-/* Цветной кружок-индикатор для строки метки. Кликабельный — открывает палитру. */
-.labels-mgr-color-dot {
+.lm-add-btn {
   flex-shrink: 0;
-  width: 22px; height: 22px; padding: 0;
-  border-radius: 50%;
-  border: 1px solid rgba(0,0,0,0.10);
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border: none; border-radius: 8px;
+  background: var(--lm-accent); color: #fff;
+  font-family: inherit; font-size: 13px; font-weight: 600;
   cursor: pointer;
-  position: relative;
-  transition: transform var(--tk-transition), box-shadow var(--tk-transition);
+  transition: filter 140ms ease;
 }
-.labels-mgr-color-dot:hover { transform: scale(1.08); }
-.labels-mgr-color-dot.active { box-shadow: 0 0 0 3px var(--tk-accent-soft, rgba(232,122,30,0.18)); }
-.labels-mgr-color-dot.active::after {
-  content: ''; position: absolute; inset: -2px;
-  border-radius: 50%; border: 2px solid var(--tk-accent, #E87A1E);
-}
+.lm-add-btn:hover:not(:disabled) { filter: brightness(0.95); }
+.lm-add-btn:disabled { opacity: 0.55; cursor: default; background: #BCB3A1; }
 
-/* Перебиваем глобальный .modal-box input */
-.labels-mgr-input {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  width: auto !important;
-  margin: 0 !important;
-  padding: 6px 10px !important;
-  font-size: var(--tk-fz-md, 13px) !important;
-  border: 1px solid var(--tk-border) !important;
-  border-radius: 6px !important;
-  background: var(--tk-n-0, #fff) !important;
-  color: var(--tk-text) !important;
-  font-family: inherit;
-  height: auto;
-  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
-}
-.labels-mgr-input:focus {
-  outline: none;
-  border-color: var(--tk-accent) !important;
-  box-shadow: var(--tk-focus-ring) !important;
-}
-
-.labels-mgr-edit-btn {
-  flex-shrink: 0;
-  width: 28px; height: 28px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; border: 1px solid var(--tk-border);
-  border-radius: 6px; cursor: pointer;
-  color: var(--tk-text-secondary);
-  transition: background var(--tk-transition), border-color var(--tk-transition);
-}
-.labels-mgr-edit-btn:hover { background: var(--tk-n-100); border-color: var(--tk-n-300); }
-.labels-mgr-edit-btn.active { background: var(--tk-accent); color: #fff; border-color: var(--tk-accent); }
-.labels-mgr-palette-wrap {
-  padding-top: 8px;
-  border-top: 1px dashed var(--tk-border-soft);
-}
-
-.labels-mgr-add {
-  display: flex; flex-direction: column; gap: 10px;
-  margin-top: 0;
-  padding: var(--tk-s-3);
-  background: var(--tk-n-50, #FAF9F5);
-  border: 1px solid var(--tk-border-soft);
-  border-radius: 10px;
-}
-.labels-mgr-add-title {
-  font-size: 11.5px; font-weight: var(--tk-fw-semibold);
-  text-transform: uppercase; letter-spacing: 0.04em;
-  color: var(--tk-text-muted);
-}
-.labels-mgr-add-row {
-  display: flex; gap: 8px; align-items: center;
-}
-.labels-mgr-add-row .labels-mgr-input.flex-grow { flex: 1 1 auto !important; }
-.labels-mgr-add-palette {
+.lm-add-palette {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
-.labels-mgr-palette-label {
-  font-size: 11.5px; font-weight: var(--tk-fw-semibold);
-  color: var(--tk-text-muted);
+.lm-add-palette-label {
+  font-size: 12px; font-weight: 600; color: var(--lm-text-muted);
 }
-.ts-icon-btn.danger { color: var(--tk-danger); }
-.ts-icon-btn.danger:hover { background: var(--tk-danger-soft); color: var(--tk-danger); }
 .ts-icon-btn {
   background: none; border: none; cursor: pointer;
   color: var(--tk-text-muted); font-size: var(--tk-fz-sm);
