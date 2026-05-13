@@ -178,6 +178,75 @@ function tNotify($pdo, $userName, $title, $message, $cardId) {
     }
 }
 
+// Расширенное уведомление модуля задач (этапы 1-3):
+// - кладёт запись в tasks_notifications
+// - если у получателя привязан telegram_chat_id — сразу шлёт в Telegram
+//   (используем готовую sendMessage из bot_rest.php)
+function taskPushNotif($pdo, $toUser, $type, $cardId, $boardId, $sourceUser, $extra = []) {
+    if (!$toUser || $toUser === $sourceUser) return; // себе не шлём
+    try {
+        $payload = json_encode($extra, JSON_UNESCAPED_UNICODE);
+        $pdo->prepare("INSERT INTO tasks_notifications (user_name, source_user, card_id, board_id, type, payload)
+                       VALUES (?, ?, ?, ?, ?, ?)")
+            ->execute([$toUser, $sourceUser, $cardId ?: null, $boardId ?: null, $type, $payload]);
+    } catch (Exception $e) {
+        error_log('[tasks] taskPushNotif insert error: ' . $e->getMessage());
+        return;
+    }
+    // Telegram (best-effort, не валим запрос если что-то пошло не так)
+    try {
+        $chat = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? LIMIT 1");
+        $chat->execute([$toUser]);
+        $chatId = $chat->fetchColumn();
+        if (!$chatId) return;
+
+        if (!function_exists('sendMessage')) require_once __DIR__ . '/bot_rest.php';
+        if (!function_exists('sendMessage')) return;
+
+        $title = $extra['card_title'] ?? '';
+        $board = $extra['board_title'] ?? '';
+        $by    = $sourceUser ? htmlspecialchars($sourceUser, ENT_QUOTES, 'UTF-8') : 'Кто-то';
+        $titleEsc = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+        $boardEsc = htmlspecialchars($board, ENT_QUOTES, 'UTF-8');
+        $boardLine = $board ? "\n📋 <i>" . $boardEsc . "</i>" : '';
+
+        $msg = '';
+        switch ($type) {
+            case 'assigned':
+                $msg = "🔔 <b>{$by}</b> назначил(а) вас на задачу:\n«<b>{$titleEsc}</b>»{$boardLine}"; break;
+            case 'comment':
+                $preview = htmlspecialchars(mb_substr((string)($extra['preview'] ?? ''), 0, 200), ENT_QUOTES, 'UTF-8');
+                $msg = "💬 <b>{$by}</b> в «<b>{$titleEsc}</b>»:{$boardLine}\n<i>{$preview}</i>"; break;
+            case 'closed':
+                $msg = "✅ <b>{$by}</b> закрыл(а) задачу «<b>{$titleEsc}</b>»{$boardLine}"; break;
+            case 'reopened':
+                $msg = "↩️ <b>{$by}</b> вернул(а) в работу задачу «<b>{$titleEsc}</b>»{$boardLine}"; break;
+            case 'due_changed':
+                $due = $extra['due_date'] ? date('d.m.Y H:i', strtotime($extra['due_date'])) : 'снят';
+                $msg = "🗓 Срок задачи «<b>{$titleEsc}</b>» {$due}{$boardLine}"; break;
+            case 'mention':
+                $msg = "👤 <b>{$by}</b> упомянул(а) вас в «<b>{$titleEsc}</b>»{$boardLine}"; break;
+            default:
+                $msg = "🔔 Событие по задаче «<b>{$titleEsc}</b>»{$boardLine}";
+        }
+        sendMessage($chatId, $msg);
+    } catch (Exception $e) {
+        error_log('[tasks] taskPushNotif tg error: ' . $e->getMessage());
+    }
+}
+
+// Хелпер: список соисполнителей карточки (без указанных исключений)
+function tCardRecipients($pdo, $cardId, array $exclude = []) {
+    $card = $pdo->prepare("SELECT b.owner_name FROM tasks_cards c JOIN tasks_boards b ON b.id = c.board_id WHERE c.id = ?");
+    $card->execute([$cardId]);
+    $owner = (string)$card->fetchColumn();
+    $a = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
+    $a->execute([$cardId]);
+    $assignees = array_column($a->fetchAll(), 'user_name');
+    $all = array_unique(array_filter(array_merge([$owner], $assignees)));
+    return array_values(array_diff($all, $exclude));
+}
+
 // Аутентификация — все маршруты требуют сессию
 $tUser = tRequireUser($pdo);
 $tUserName = $tUser['name'];
@@ -208,6 +277,51 @@ if (($tUser['role'] ?? '') !== 'admin') {
 $action = $subpoint;
 $id = isset($parts[2]) ? urldecode($parts[2]) : null;
 $action2 = isset($parts[3]) ? urldecode($parts[3]) : null;
+
+// ─── GET tasks/notifications — мои последние уведомления + счётчик непрочитанных ───
+if ($method === 'GET' && $action === 'notifications') {
+    $limit = max(1, min(100, (int)($_GET['limit'] ?? 30)));
+    $s = $pdo->prepare("
+        SELECT n.id, n.type, n.source_user, n.card_id, n.board_id, n.payload, n.is_read, n.created_at,
+               c.title AS card_title,
+               b.title AS board_title
+        FROM tasks_notifications n
+        LEFT JOIN tasks_cards  c ON c.id = n.card_id
+        LEFT JOIN tasks_boards b ON b.id = n.board_id
+        WHERE n.user_name = ?
+        ORDER BY n.created_at DESC, n.id DESC
+        LIMIT $limit
+    ");
+    $s->execute([$tUserName]);
+    $rows = $s->fetchAll();
+    foreach ($rows as &$r) {
+        if ($r['payload']) $r['payload'] = json_decode($r['payload'], true);
+        $r['is_read'] = (int)$r['is_read'];
+    }
+    $u = $pdo->prepare("SELECT COUNT(*) FROM tasks_notifications WHERE user_name = ? AND is_read = 0");
+    $u->execute([$tUserName]);
+    $unread = (int)$u->fetchColumn();
+    tRespond(['items' => $rows, 'unread' => $unread]);
+}
+
+// ─── POST tasks/notifications/mark-read — пометить прочитанными ───
+if ($method === 'POST' && $action === 'notifications' && $id === 'mark-read') {
+    $ids = $body['ids'] ?? null;
+    $all = !empty($body['all']);
+    if ($all) {
+        $pdo->prepare("UPDATE tasks_notifications SET is_read = 1, read_at = NOW() WHERE user_name = ? AND is_read = 0")
+            ->execute([$tUserName]);
+        tRespond(['success' => true]);
+    }
+    if (is_array($ids) && count($ids)) {
+        $intIds = array_map('intval', $ids);
+        $ph = implode(',', array_fill(0, count($intIds), '?'));
+        $sql = "UPDATE tasks_notifications SET is_read = 1, read_at = NOW() WHERE user_name = ? AND id IN ($ph)";
+        $pdo->prepare($sql)->execute(array_merge([$tUserName], $intIds));
+        tRespond(['success' => true]);
+    }
+    tRespond(['error' => 'Нужен ids[] или all=true'], 400);
+}
 
 // ─── GET tasks/users — список пользователей для выпадашки исполнителей ───
 if ($method === 'GET' && $action === 'users') {
@@ -771,6 +885,17 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         if ($isProto) tCheckCardAutoState($pdo, $cardId, $tUserName);
 
         $pdo->commit();
+
+        // Уведомления: задача закрыта (попала в done/archive) или возвращена в работу
+        $wasDone = (int)$card['is_done'] === 1;
+        $nowDone = (int)$newIsDone === 1;
+        if ($wasDone !== $nowDone) {
+            $type = $nowDone ? 'closed' : 'reopened';
+            $extra = ['card_title' => $card['title'], 'board_title' => $toBoard['title'] ?? ''];
+            foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
+                taskPushNotif($pdo, $t, $type, $cardId, $card['board_id'], $tUserName, $extra);
+            }
+        }
     } catch (Exception $e) {
         $pdo->rollBack();
         tRespond(['error' => 'Ошибка: ' . $e->getMessage()], 500);
@@ -925,6 +1050,24 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         if ($changes) tHistory($pdo, $cardId, $tUserName, 'updated', $changes);
         if (isset($body['is_done']) && tIsProtocolCard($pdo, $cardId)) {
             tCheckCardAutoState($pdo, $cardId, $tUserName);
+        }
+        // Уведомления: смена дедлайна и закрытие/возврат через чекбокс
+        $extraBase = ['card_title' => $card['title'], 'board_title' => $board['title'] ?? ''];
+        if (isset($changes['due_date'])) {
+            $extra = $extraBase + ['due_date' => $changes['due_date']['to']];
+            foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
+                taskPushNotif($pdo, $t, 'due_changed', $cardId, $card['board_id'], $tUserName, $extra);
+            }
+        }
+        if (isset($body['is_done'])) {
+            $wasDone = (int)$card['is_done'] === 1;
+            $nowDone = $body['is_done'] ? true : false;
+            if ($wasDone !== $nowDone) {
+                $type = $nowDone ? 'closed' : 'reopened';
+                foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
+                    taskPushNotif($pdo, $t, $type, $cardId, $card['board_id'], $tUserName, $extraBase);
+                }
+            }
         }
         tRespond(['success' => true]);
     }
@@ -1136,13 +1279,14 @@ if ($action === 'cards' && $id && $action2 === 'comments') {
         $pdo->prepare("INSERT INTO tasks_comments (card_id, author_name, body) VALUES (?, ?, ?)")
             ->execute([$cardId, $tUserName, mb_substr($body_text, 0, 5000)]);
         tHistory($pdo, $cardId, $tUserName, 'comment', ['preview' => mb_substr($body_text, 0, 80)]);
-        // Уведомление владельцу доски и соисполнителям (кроме себя)
-        $targets = [$card['owner_name']];
-        $a = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
-        $a->execute([$cardId]);
-        foreach ($a->fetchAll() as $r) $targets[] = $r['user_name'];
-        $targets = array_unique(array_filter($targets, fn($n) => $n !== $tUserName));
-        foreach ($targets as $t) tNotify($pdo, $t, 'Новый комментарий', $tUserName . ': ' . mb_substr($body_text, 0, 100), $cardId);
+        // Уведомление автору карточки и соисполнителям (кроме себя)
+        $targets = tCardRecipients($pdo, $cardId, [$tUserName]);
+        $extra = [
+            'card_title'  => $card['title'],
+            'board_title' => $board['title'] ?? '',
+            'preview'     => mb_substr($body_text, 0, 200),
+        ];
+        foreach ($targets as $t) taskPushNotif($pdo, $t, 'comment', $cardId, $card['board_id'], $tUserName, $extra);
         tRespond(['id' => (int)$pdo->lastInsertId()]);
     }
 }
@@ -1227,8 +1371,12 @@ if ($action === 'cards' && $id && $action2 === 'assignees' && $method === 'POST'
         }
         tHistory($pdo, $cardId, $tUserName, 'assignees_changed', ['user_names' => $names]);
         $pdo->commit();
+        $extra = [
+            'card_title'  => $card['title'],
+            'board_title' => $board['title'] ?? '',
+        ];
         foreach ($added as $u) {
-            if ($u !== $tUserName) tNotify($pdo, $u, 'Вас добавили в задачу', $card['title'], $cardId);
+            if ($u !== $tUserName) taskPushNotif($pdo, $u, 'assigned', $cardId, $card['board_id'], $tUserName, $extra);
         }
     } catch (Exception $e) {
         $pdo->rollBack();

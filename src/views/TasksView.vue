@@ -41,6 +41,53 @@
           <span class="search-btn-label">Поиск</span>
           <kbd class="search-btn-kbd">{{ shortcutSymbol }}K</kbd>
         </button>
+
+        <!-- Колокольчик уведомлений -->
+        <div class="notif-wrap" v-click-outside-notif="() => notifOpen = false">
+          <button class="btn icon-btn notif-btn"
+                  :class="{ 'has-unread': notifUnread > 0 }"
+                  @click="toggleNotif" title="Уведомления">
+            <TaskIcon name="chat" :size="16"/>
+            <span v-if="notifUnread > 0" class="notif-badge">{{ notifUnread > 99 ? '99+' : notifUnread }}</span>
+          </button>
+          <div v-if="notifOpen" class="notif-popover">
+            <header class="notif-head">
+              <span class="notif-title">Уведомления</span>
+              <button v-if="notifUnread > 0" class="notif-mark-all" @click="markAllNotifRead">
+                Отметить всё прочитанным
+              </button>
+            </header>
+            <div v-if="notifLoading" class="notif-empty">Загрузка…</div>
+            <div v-else-if="!notifList.length" class="notif-empty">
+              <div class="notif-empty-icon"><TaskIcon name="chat" :size="22"/></div>
+              <div class="notif-empty-text">Пока всё спокойно</div>
+              <div class="notif-empty-hint">Уведомления будут приходить сюда</div>
+            </div>
+            <ul v-else class="notif-list">
+              <li v-for="n in notifList" :key="n.id" class="notif-item"
+                  :class="{ 'is-unread': !n.is_read }"
+                  @click="openNotifCard(n)">
+                <span class="notif-icon" :class="'notif-icon-' + n.type">
+                  <TaskIcon :name="notifTypeIcon(n.type)" :size="12"/>
+                </span>
+                <div class="notif-body">
+                  <div class="notif-line">
+                    <span class="notif-author">{{ n.source_user || 'Система' }}</span>
+                    <span class="notif-action">{{ notifTypeText(n) }}</span>
+                  </div>
+                  <div v-if="n.card_title" class="notif-card-title">{{ n.card_title }}</div>
+                  <div v-if="n.payload?.preview" class="notif-preview">«{{ n.payload.preview }}»</div>
+                  <div class="notif-meta">
+                    <span v-if="n.board_title" class="notif-board">📋 {{ n.board_title }}</span>
+                    <span class="notif-time" :title="n.created_at">{{ notifFormatTime(n.created_at) }}</span>
+                  </div>
+                </div>
+                <span v-if="!n.is_read" class="notif-dot"></span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
         <button v-if="store.board" class="btn icon-btn" @click="boardMenuOpen = !boardMenuOpen" title="Настройки доски">
           <TaskIcon name="gear" :size="16"/>
         </button>
@@ -321,6 +368,11 @@ const cardStack = ref([]); // стек открытых карточек (для
 const openedCardId = computed(() => cardStack.value[cardStack.value.length - 1] || null);
 const draggedCard = ref(null);
 const boardMenuOpen = ref(false);
+const notifOpen = ref(false);
+const notifList = ref([]);
+const notifUnread = ref(0);
+const notifLoading = ref(false);
+let notifTimer = null;
 const labelsManagerOpen = ref(false);
 const editingLabelId = ref(null);
 const newLabel = ref({ title: '', color: '#42A5F5' });
@@ -455,10 +507,14 @@ onMounted(async () => {
   const cardId = parseInt(route.query.cardId);
   if (cardId) cardStack.value = [cardId];
   document.addEventListener('keydown', onHotkey);
+  // Уведомления: первая загрузка + опрос каждые 60 секунд
+  loadNotifications();
+  notifTimer = setInterval(loadNotifications, 60000);
 });
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onHotkey);
+  if (notifTimer) clearInterval(notifTimer);
 });
 
 function onHotkey(e) {
@@ -649,6 +705,87 @@ const vClickOutsideBoard = {
   },
   unmounted(el) { document.removeEventListener('mousedown', el.__co); },
 };
+const vClickOutsideNotif = {
+  mounted(el, binding) {
+    el.__co = (e) => { if (!el.contains(e.target)) binding.value(e); };
+    setTimeout(() => document.addEventListener('mousedown', el.__co), 0);
+  },
+  unmounted(el) { document.removeEventListener('mousedown', el.__co); },
+};
+
+// ─── Уведомления ───
+async function loadNotifications() {
+  try {
+    const r = await tasksApi.listNotifications(30);
+    notifList.value = r.items || [];
+    notifUnread.value = r.unread || 0;
+  } catch (_) { /* silent */ }
+}
+async function toggleNotif() {
+  notifOpen.value = !notifOpen.value;
+  if (notifOpen.value) {
+    notifLoading.value = true;
+    await loadNotifications();
+    notifLoading.value = false;
+  }
+}
+async function markAllNotifRead() {
+  try {
+    await tasksApi.markAllNotificationsRead();
+    notifList.value = notifList.value.map(n => ({ ...n, is_read: 1 }));
+    notifUnread.value = 0;
+  } catch (e) { showError('Ошибка', e); }
+}
+async function openNotifCard(n) {
+  // Помечаем прочитанным
+  if (!n.is_read) {
+    try { await tasksApi.markNotificationsRead([n.id]); } catch (_) {}
+    n.is_read = 1;
+    notifUnread.value = Math.max(0, notifUnread.value - 1);
+  }
+  notifOpen.value = false;
+  if (!n.card_id) return;
+  // Если карточка на другой доске — переключаем доску
+  if (n.board_id && store.currentBoardId !== n.board_id) {
+    try { await store.loadBoard(n.board_id); } catch (_) {}
+  }
+  openCard(n.card_id);
+}
+function notifTypeIcon(t) {
+  return ({
+    assigned: 'plus',
+    comment: 'chat',
+    closed: 'check',
+    reopened: 'edit',
+    due_changed: 'calendar',
+    mention: 'chat',
+  })[t] || 'chat';
+}
+function notifTypeText(n) {
+  switch (n.type) {
+    case 'assigned':    return 'добавил(а) вас в задачу';
+    case 'comment':     return 'оставил(а) комментарий';
+    case 'closed':      return 'закрыл(а) задачу';
+    case 'reopened':    return 'вернул(а) в работу';
+    case 'due_changed': return 'изменил(а) срок задачи';
+    case 'mention':     return 'упомянул(а) вас';
+    default: return n.type;
+  }
+}
+function notifFormatTime(s) {
+  if (!s) return '';
+  const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+  if (isNaN(d)) return s;
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return 'только что';
+  if (diff < 3600) return Math.floor(diff / 60) + ' мин. назад';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' ч. назад';
+  if (diff < 86400 * 7) {
+    const days = Math.floor(diff / 86400);
+    return days === 1 ? 'вчера' : days + ' дн. назад';
+  }
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
 
 async function addColumnPrompt() {
   const title = await dlg.prompt('Новая колонка', { placeholder: 'Название колонки', okText: 'Создать' });
@@ -1031,6 +1168,151 @@ function onColDrop(i) {
   transition: background var(--tk-transition), border-color var(--tk-transition), color var(--tk-transition);
 }
 .icon-btn:hover { background: var(--tk-n-100); border-color: var(--tk-n-300); color: var(--tk-text); }
+
+/* ═══ Колокольчик уведомлений ═══ */
+.notif-wrap { position: relative; }
+.notif-btn {
+  position: relative;
+}
+.notif-btn.has-unread {
+  color: var(--tk-accent, #E87A1E);
+  border-color: color-mix(in srgb, var(--tk-accent, #E87A1E) 30%, var(--tk-border, #E6E1D7) 70%);
+}
+.notif-badge {
+  position: absolute;
+  top: -5px; right: -5px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  background: var(--tk-prio-urgent-fg, #D44638);
+  color: #fff;
+  border: 1.5px solid var(--tk-bg-card, #fff);
+  border-radius: 999px;
+  font-size: 9.5px; font-weight: 700;
+  line-height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  letter-spacing: -0.2px;
+}
+
+.notif-popover {
+  position: absolute;
+  top: calc(100% + 8px); right: 0;
+  width: 360px;
+  max-height: 480px;
+  display: flex; flex-direction: column;
+  background: #fff;
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
+  z-index: 100;
+  overflow: hidden;
+}
+.notif-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--tk-border-soft, #EFEAE0);
+  background: var(--tk-n-50, #FAF9F5);
+}
+.notif-title {
+  font-size: 12.5px; font-weight: 700;
+  color: var(--tk-text, #1A1814);
+}
+.notif-mark-all {
+  background: none; border: none; cursor: pointer;
+  font-family: inherit; font-size: 11px; font-weight: 600;
+  color: var(--tk-accent-text, #B85A0E);
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 140ms ease;
+}
+.notif-mark-all:hover { background: var(--tk-accent-soft, rgba(232,122,30,0.10)); }
+
+.notif-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--tk-text-muted, #9C9384);
+}
+.notif-empty-icon {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--tk-n-100, #F3F0E8);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.notif-empty-text { font-size: 13px; font-weight: 600; color: var(--tk-text-secondary, #534D40); margin-top: 2px; }
+.notif-empty-hint { font-size: 11px; }
+
+.notif-list {
+  list-style: none; margin: 0; padding: 4px;
+  overflow-y: auto;
+  flex: 1;
+}
+.notif-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 10px 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  position: relative;
+  transition: background 140ms ease;
+}
+.notif-item:hover { background: var(--tk-n-100, #F3F0E8); }
+.notif-item.is-unread { background: var(--tk-accent-soft, rgba(232,122,30,0.06)); }
+.notif-item.is-unread:hover { background: var(--tk-accent-soft, rgba(232,122,30,0.12)); }
+
+.notif-icon {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff;
+  background: #9C9384;
+}
+.notif-icon-assigned    { background: #3B82F6; }
+.notif-icon-comment     { background: #10B981; }
+.notif-icon-closed      { background: #16A34A; }
+.notif-icon-reopened    { background: #E87A1E; }
+.notif-icon-due_changed { background: #F59E0B; }
+.notif-icon-mention     { background: #8B5CF6; }
+
+.notif-body { flex: 1; min-width: 0; }
+.notif-line {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.notif-author { font-weight: 700; color: var(--tk-text, #1A1814); }
+.notif-action { color: var(--tk-text-secondary, #534D40); }
+.notif-card-title {
+  font-size: 12.5px; font-weight: 600;
+  color: var(--tk-text, #1A1814);
+  margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.notif-preview {
+  font-size: 11.5px;
+  color: var(--tk-text-secondary, #534D40);
+  margin-top: 2px;
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-meta {
+  display: flex; gap: 8px; align-items: center;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--tk-text-muted, #9C9384);
+}
+.notif-board { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.notif-time { margin-left: auto; flex-shrink: 0; }
+.notif-dot {
+  position: absolute;
+  top: 14px; right: 10px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--tk-accent, #E87A1E);
+}
 .icon-btn:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); border-color: var(--tk-accent); }
 
 .board-menu {

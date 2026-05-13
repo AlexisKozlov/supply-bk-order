@@ -82,6 +82,11 @@ export const tasksApi = {
   search(q)                          { return call('GET',   '/search?q=' + encodeURIComponent(q)); },
   myCards()                          { return call('GET',   '/my-cards'); },
 
+  // Уведомления
+  listNotifications(limit = 30)      { return call('GET',   '/notifications?limit=' + limit); },
+  markNotificationsRead(ids)         { return call('POST',  '/notifications/mark-read', { ids }); },
+  markAllNotificationsRead()         { return call('POST',  '/notifications/mark-read', { all: true }); },
+
   // Вложения (живут под /api/upload/task-attachment и /api/uploads/task-attachments/)
   uploadAttachment(cardId, file, onProgress) {
     return new Promise((resolve, reject) => {
