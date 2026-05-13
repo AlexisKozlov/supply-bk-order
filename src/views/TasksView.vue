@@ -683,13 +683,14 @@ function onCardDeleted(id) {
   store.cards = store.cards.filter(c => c.id !== id);
 }
 
-// Drag-and-drop колонок (только для редакторов структуры; архив-колонку не двигаем)
+// Drag-and-drop колонок (только для редакторов структуры; архив-колонку не двигаем).
+// Сначала пропускаем drag-старт с карточки — preventDefault на dragstart отменяет
+// drag целиком (а не только наш column-drag), поэтому проверки структуры/архива
+// должны быть ПОСЛЕ. Иначе card-drag из архивной колонки умирает.
 function onColDragStart(i, e) {
+  if (e.target.closest('.task-card')) return;
   if (!store.canEditStructure) { e.preventDefault(); return; }
   if (store.columns[i]?.is_archive_column) { e.preventDefault(); return; }
-  // Если drag стартует с карточки — НЕ блокируем drag, иначе ломаем
-  // перенос карточек между колонками. Просто не помечаем как drag колонки.
-  if (e.target.closest('.task-card')) return;
   colDragFrom.value = i;
   e.dataTransfer.effectAllowed = 'move';
 }
@@ -1130,19 +1131,23 @@ function onColDrop(i) {
 .labels-mgr-list {
   display: flex; flex-direction: column; gap: 8px;
   max-height: 50vh; overflow-y: auto;
-  /* лёгкая внутренняя обёртка, чтобы карточки не сливались с фоном модалки */
-  padding: 2px;
+  /* Тонированный контейнер: белые карточки внутри выделяются на нём,
+     не сливаются с белой модалкой. */
+  padding: 10px;
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 10px;
 }
 .labels-mgr-card {
   background: var(--tk-bg-card, #fff) !important;
-  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border: 1px solid var(--tk-border, #E6E1D7);
   border-radius: 10px;
   padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px;
   transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
   margin: 0;
 }
-.labels-mgr-card:hover { border-color: var(--tk-border); box-shadow: 0 2px 6px rgba(15,23,42,0.06); }
+.labels-mgr-card:hover { border-color: var(--tk-n-300); box-shadow: 0 2px 6px rgba(15,23,42,0.08); }
 .labels-mgr-card.open { border-color: var(--tk-accent); box-shadow: 0 0 0 3px var(--tk-accent-soft); }
 .labels-mgr-card-row {
   display: flex; align-items: center; gap: 8px;
