@@ -26,24 +26,36 @@
           </button>
         </header>
 
-        <!-- Свойства -->
+        <!-- Свойства карточки — пилюли в Yougile-стиле -->
         <div class="ts-props">
-          <label class="ts-prop">
-            <span class="ts-prop-label">Приоритет</span>
-            <select :value="full.card.priority" @change="patch({ priority: $event.target.value })">
+          <!-- Приоритет: пилюля с цветом, кликабельная (native <select> прозрачный поверх) -->
+          <label class="ts-pill" :class="'ts-pill-prio-' + (full.card.priority || 'medium')" :title="'Приоритет: ' + priorityLabel(full.card.priority)">
+            <span class="ts-pill-icon"><span class="ts-pill-dot"></span></span>
+            <span class="ts-pill-text">{{ priorityLabel(full.card.priority) }}</span>
+            <select class="ts-pill-native" :value="full.card.priority" @change="patch({ priority: $event.target.value })">
               <option value="low">Низкий</option>
               <option value="medium">Средний</option>
               <option value="high">Высокий</option>
               <option value="urgent">Срочно</option>
             </select>
           </label>
-          <label class="ts-prop">
-            <span class="ts-prop-label">Срок</span>
-            <input type="datetime-local" :value="dueDateLocal" @change="onDueChange" />
+
+          <!-- Срок: пилюля с датой -->
+          <label class="ts-pill ts-pill-due" :class="dueStateClass(full.card.due_date, full.card.is_done)" :title="full.card.due_date ? 'Срок: ' + full.card.due_date : 'Установить срок'">
+            <TaskIcon name="calendar" :size="13" class="ts-pill-icon"/>
+            <span class="ts-pill-text">{{ full.card.due_date ? formatDueShort(full.card.due_date) : 'Установить срок' }}</span>
+            <button v-if="full.card.due_date" type="button" class="ts-pill-clear"
+                    @click.stop.prevent="patch({ due_date: null })" title="Убрать срок">
+              <TaskIcon name="close" :size="11"/>
+            </button>
+            <input type="datetime-local" class="ts-pill-native" :value="dueDateLocal" @change="onDueChange" />
           </label>
-          <label class="ts-prop">
-            <span class="ts-prop-label">Колонка</span>
-            <select :value="full.card.column_id" @change="onColumnChange">
+
+          <!-- Колонка: пилюля с цветной точкой -->
+          <label class="ts-pill ts-pill-col" :title="'Колонка: ' + columnTitle">
+            <span class="ts-pill-icon"><span class="ts-pill-col-dot" :style="{ background: currentColumnColor }"></span></span>
+            <span class="ts-pill-text">{{ columnTitle }}</span>
+            <select class="ts-pill-native" :value="full.card.column_id" @change="onColumnChange">
               <option v-for="col in columns" :key="col.id" :value="col.id">{{ col.title }}</option>
             </select>
           </label>
@@ -392,6 +404,38 @@ const columnTitle = computed(() => {
   if (!full.value) return '';
   return columns.value.find(c => c.id === full.value.card.column_id)?.title || '';
 });
+const currentColumnColor = computed(() => {
+  if (!full.value) return '#9E9E9E';
+  return columns.value.find(c => c.id === full.value.card.column_id)?.color || '#9E9E9E';
+});
+
+function priorityLabel(p) {
+  return ({ low: 'Низкий', medium: 'Средний', high: 'Высокий', urgent: 'Срочно' })[p || 'medium'];
+}
+function formatDueShort(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  const day = new Date(d); day.setHours(0,0,0,0);
+  const timeStr = d.getHours() || d.getMinutes()
+    ? ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  if (day.getTime() === today.getTime()) return 'Сегодня' + timeStr;
+  if (day.getTime() === tomorrow.getTime()) return 'Завтра' + timeStr;
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' }) + timeStr;
+}
+function dueStateClass(due, isDone) {
+  if (!due || isDone) return '';
+  const d = new Date(due);
+  const now = new Date();
+  const hours = (d - now) / 3600000;
+  if (hours < 0) return 'overdue';
+  if (hours < 24) return 'fire';
+  if (hours < 72) return 'warn';
+  return '';
+}
 
 const checklistTotal = computed(() => {
   let n = 0;
@@ -1029,34 +1073,83 @@ function historyText(h) {
   margin-top: 2px;
 }
 
-/* ═══ Свойства ═══ */
+/* ═══ Свойства карточки — пилюли (Yougile-стиль) ═══ */
 .ts-props {
-  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--tk-s-2);
-  padding: var(--tk-s-2) var(--tk-s-4) var(--tk-s-3);
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: var(--tk-s-3) var(--tk-s-4);
   border-bottom: 1px solid var(--tk-border-soft);
   flex-shrink: 0;
 }
-.ts-prop { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.ts-prop-label {
-  font-size: var(--tk-fz-xs);
-  font-weight: var(--tk-fw-bold);
-  color: var(--tk-text-muted);
-  text-transform: uppercase;
-  letter-spacing: .5px;
+
+/* Базовая пилюля: поверх неё прозрачный native input/select, ловит клики. */
+.ts-pill {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--tk-n-100, #F3F0E8);
+  color: var(--tk-text-secondary, #3D382E);
+  font-size: 12.5px; font-weight: var(--tk-fw-semibold, 600);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--tk-transition, 140ms ease), border-color var(--tk-transition, 140ms ease);
+  max-width: 100%; overflow: hidden;
 }
-.ts-prop select, .ts-prop input {
-  padding: 6px var(--tk-s-2);
-  font-size: var(--tk-fz-sm);
-  border: 1px solid var(--tk-border);
-  border-radius: var(--tk-r-sm);
-  background: var(--tk-n-0);
-  color: var(--tk-text);
+.ts-pill:hover { background: var(--tk-n-200, #E6E1D7); }
+.ts-pill-text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.2;
+}
+.ts-pill-icon {
+  flex-shrink: 0; display: inline-flex; align-items: center;
+  width: 14px; height: 14px;
+}
+.ts-pill-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: currentColor;
+  margin: auto;
+}
+.ts-pill-col-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  margin: auto;
+}
+/* Прозрачный native контрол поверх пилюли — ловит клик и открывает picker */
+.ts-pill-native {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0; cursor: pointer;
+  border: none; background: transparent;
   font-family: inherit;
-  width: 100%;
-  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
+  appearance: none; -webkit-appearance: none;
 }
-.ts-prop select:hover, .ts-prop input:hover { border-color: var(--tk-n-300); }
-.ts-prop select:focus, .ts-prop input:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+.ts-pill:focus-within {
+  border-color: var(--tk-accent, #E87A1E);
+  box-shadow: var(--tk-focus-ring, 0 0 0 3px rgba(232,122,30,0.25));
+}
+
+/* Приоритет — цвета по уровню */
+.ts-pill-prio-urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
+.ts-pill-prio-high   { background: var(--tk-prio-high-bg);   color: var(--tk-prio-high-fg); }
+.ts-pill-prio-medium { background: var(--tk-prio-medium-bg); color: var(--tk-prio-medium-fg); }
+.ts-pill-prio-low    { background: var(--tk-prio-low-bg);    color: var(--tk-prio-low-fg); }
+
+/* Срок — состояния */
+.ts-pill-due { background: var(--tk-n-100, #F3F0E8); color: var(--tk-text-secondary, #3D382E); }
+.ts-pill-due.warn    { background: var(--tk-prio-high-bg); color: var(--tk-prio-high-fg); }
+.ts-pill-due.fire    { background: var(--tk-warning-soft, rgba(187,106,10,0.12)); color: var(--tk-warning, #BB6A0A); }
+.ts-pill-due.overdue { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
+
+/* Кнопка-крестик «Убрать срок» */
+.ts-pill-clear {
+  position: relative; z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; margin-left: 2px;
+  border: none; background: transparent; border-radius: 50%;
+  color: currentColor; opacity: 0.55;
+  cursor: pointer;
+  transition: opacity var(--tk-transition), background var(--tk-transition);
+}
+.ts-pill-clear:hover { opacity: 1; background: rgba(0,0,0,0.10); }
 
 /* ═══ Вкладки ═══ */
 .ts-tabs {
