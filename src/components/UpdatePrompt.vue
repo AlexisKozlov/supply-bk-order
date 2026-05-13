@@ -95,6 +95,8 @@ window.addEventListener('bk:needs-update', () => {
 });
 
 async function doUpdate() {
+  // Защита от двойного клика: если уже идёт обновление — игнорируем.
+  if (updating.value) return;
   updating.value = true;
   try {
     if ('serviceWorker' in navigator) {

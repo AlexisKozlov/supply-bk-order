@@ -350,13 +350,24 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import TaskColumn from '@/components/tasks/TaskColumn.vue';
 import TaskIcon from '@/components/tasks/TaskIcon.vue';
 import ColorPalette from '@/components/tasks/ColorPalette.vue';
+import { h } from 'vue';
 
-// Тяжёлые компоненты — lazy-чанк. Грузятся только когда реально нужны:
-// календарь — при переключении вкладки; модалка карточки — при клике;
-// шаблоны — при клике по иконке. Снижает первый чанк TasksView на ~40%.
-const TaskCalendar         = defineAsyncComponent(() => import('@/components/tasks/TaskCalendar.vue'));
-const TaskCardModal        = defineAsyncComponent(() => import('@/components/tasks/TaskCardModal.vue'));
-const TasksTemplatesDialog = defineAsyncComponent(() => import('@/components/tasks/TasksTemplatesDialog.vue'));
+// Тяжёлые компоненты — lazy-чанк. Грузятся только когда реально нужны.
+// Снижает первый чанк TasksView на ~40%. При первой загрузке чанка
+// показываем минимальный плейсхолдер чтобы пользователь видел реакцию.
+const lazyPlaceholder = {
+  render: () => h('div', {
+    style: { padding: '40px', textAlign: 'center', color: '#9C9384', fontSize: '13px' },
+  }, 'Загрузка…'),
+};
+const lazyOpts = {
+  loadingComponent: lazyPlaceholder,
+  delay: 150,       // 150 мс — не мигаем спиннером если чанк уже в кеше
+  timeout: 15000,   // 15 сек — если чанк не пришёл, показываем ошибку
+};
+const TaskCalendar         = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskCalendar.vue'),         ...lazyOpts });
+const TaskCardModal        = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskCardModal.vue'),        ...lazyOpts });
+const TasksTemplatesDialog = defineAsyncComponent({ loader: () => import('@/components/tasks/TasksTemplatesDialog.vue'), ...lazyOpts });
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const InfoModal    = defineAsyncComponent(() => import('@/components/modals/InfoModal.vue'));
