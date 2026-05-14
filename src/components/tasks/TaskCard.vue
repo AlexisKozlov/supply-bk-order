@@ -125,7 +125,7 @@
             :class="{ 'is-running': card.timer.any_running, 'is-mine': card.timer.my_running }"
             :title="timerTitle">
         <TaskIcon name="clock" :size="12"/>
-        <span>{{ formatTimerShort(card.timer.seconds_total) }}</span>
+        <span>{{ timerDisplay }}</span>
       </span>
 
       <!-- Соисполнители (справа). Галочка на bubble — этот исполнитель закрыл свою часть. -->
@@ -221,7 +221,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, inject } from 'vue';
 import TaskIcon from './TaskIcon.vue';
 import DatetimePicker from './DatetimePicker.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
@@ -302,10 +302,25 @@ function formatTimerShort(sec) {
   const mr = m % 60;
   return mr ? `${h}ч${mr}м` : `${h}ч`;
 }
+// Общий тикер из TasksView через provide/inject. Может быть undefined,
+// если карточка отрендерена вне канбан-доски (например, в поиске) — тогда
+// «живой» прирост = 0 и показываем статичную сумму.
+const nowTick = inject('tasksNowTick', null);
+const timerLiveSeconds = computed(() => {
+  const t = props.card.timer;
+  if (!t) return 0;
+  const base = t.seconds_total || 0;
+  if (!t.any_running || !t.running_started_at || !nowTick) return base;
+  const started = new Date(String(t.running_started_at).replace(' ', 'T')).getTime();
+  if (Number.isNaN(started)) return base;
+  const live = Math.max(0, Math.floor((nowTick.value - started) / 1000));
+  return base + live;
+});
+const timerDisplay = computed(() => formatTimerShort(timerLiveSeconds.value));
 const timerTitle = computed(() => {
   const t = props.card.timer;
   if (!t) return '';
-  const total = formatTimerShort(t.seconds_total || 0);
+  const total = formatTimerShort(timerLiveSeconds.value);
   if (t.my_running)  return `Ваш таймер идёт. Накоплено: ${total}`;
   if (t.any_running) return `Идёт чужой таймер. Накоплено: ${total}`;
   return `На задачу потрачено: ${total}`;

@@ -299,7 +299,9 @@ function tBuildCardTimer($pdo, $cardId, $tUserName) {
 }
 
 // Сводка таймеров по массиву карточек (для канбан-доски).
-// Возвращает массив [card_id => ['seconds_total' => int, 'any_running' => bool, 'my_running' => bool]]
+// Возвращает массив [card_id => ['seconds_total' => int, 'any_running' => bool,
+//                                 'my_running' => bool, 'running_started_at' => ?string]]
+// running_started_at — самый ранний открытый интервал по карточке (для тиканья на канбане).
 function tBuildCardsTimerSummary($pdo, array $cardIds, $tUserName) {
     if (!$cardIds) return [];
     $ph = implode(',', array_fill(0, count($cardIds), '?'));
@@ -308,14 +310,19 @@ function tBuildCardsTimerSummary($pdo, array $cardIds, $tUserName) {
     $sumByCard = [];
     foreach ($s->fetchAll() as $r) $sumByCard[(int)$r['card_id']] = (int)$r['sec'];
 
-    $s = $pdo->prepare("SELECT card_id, user_name FROM tasks_card_time WHERE card_id IN ($ph) AND stopped_at IS NULL");
+    $s = $pdo->prepare("SELECT card_id, user_name, started_at FROM tasks_card_time WHERE card_id IN ($ph) AND stopped_at IS NULL");
     $s->execute($cardIds);
     $runByCard = [];
     $myRunByCard = [];
+    $startedByCard = [];
     foreach ($s->fetchAll() as $r) {
         $cid = (int)$r['card_id'];
         $runByCard[$cid] = true;
         if ((string)$r['user_name'] === (string)$tUserName) $myRunByCard[$cid] = true;
+        // Самый ранний открытый интервал по карточке
+        if (!isset($startedByCard[$cid]) || $r['started_at'] < $startedByCard[$cid]) {
+            $startedByCard[$cid] = $r['started_at'];
+        }
     }
 
     $out = [];
@@ -323,9 +330,10 @@ function tBuildCardsTimerSummary($pdo, array $cardIds, $tUserName) {
         $cid = (int)$cid;
         if (!isset($sumByCard[$cid]) && !isset($runByCard[$cid])) continue;
         $out[$cid] = [
-            'seconds_total' => $sumByCard[$cid] ?? 0,
-            'any_running'   => !empty($runByCard[$cid]),
-            'my_running'    => !empty($myRunByCard[$cid]),
+            'seconds_total'      => $sumByCard[$cid] ?? 0,
+            'any_running'        => !empty($runByCard[$cid]),
+            'my_running'         => !empty($myRunByCard[$cid]),
+            'running_started_at' => $startedByCard[$cid] ?? null,
         ];
     }
     return $out;

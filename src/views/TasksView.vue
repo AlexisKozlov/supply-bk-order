@@ -340,7 +340,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent, provide } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -513,6 +513,13 @@ const groupedBoards = computed(() => {
 
 const archivedBoards = computed(() => store.boards.filter(b => b.is_archived));
 
+// Глобальный тикер для живых таймеров карточек на канбане (C4).
+// Один setInterval на всё представление — карточки получают его через inject,
+// чтобы не создавать N таймеров для N карточек.
+const tasksNowTick = ref(Date.now());
+let tickTimer = null;
+provide('tasksNowTick', tasksNowTick);
+
 onMounted(async () => {
   await store.fetchBoards();
   // Открываем первую СВОЮ доску
@@ -526,11 +533,14 @@ onMounted(async () => {
   // Уведомления: первая загрузка + опрос каждые 60 секунд
   loadNotifications();
   notifTimer = setInterval(loadNotifications, 60000);
+  // Живые таймеры на канбане — раз в секунду обновляем общий счётчик
+  tickTimer = setInterval(() => { tasksNowTick.value = Date.now(); }, 1000);
 });
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onHotkey);
   if (notifTimer) clearInterval(notifTimer);
+  if (tickTimer)  { clearInterval(tickTimer); tickTimer = null; }
 });
 
 function onHotkey(e) {

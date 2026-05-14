@@ -679,12 +679,14 @@ async function toggleTimer() {
       : await tasksApi.startTimer(props.cardId);
     if (res?.timer) full.value.timer = res.timer;
     // Обновим карточку в общем списке, чтобы значок на канбане сразу подсветился
+    // и live-тикер на канбане смог начать отсчёт от running_started_at.
     const inList = store.cards.find(c => c.id === props.cardId);
     if (inList) {
       inList.timer = {
         seconds_total: res.timer.seconds_total,
         any_running: res.timer.any_running,
         my_running: !!res.timer.my_running,
+        running_started_at: res.timer.my_running?.started_at || null,
       };
     }
   } catch (e) { showError(e); }
