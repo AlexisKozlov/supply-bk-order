@@ -73,7 +73,10 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="order in sortedOrders" :key="order.id" class="ht-row" :class="{ 'ht-row-selected': drawerOrder?.id === order.id || compareSelection.includes(order.id) }" @click="compareMode ? toggleCompareSelect(order) : openOrderDrawer(order)">
+          <tr v-for="order in sortedOrders" :key="order.id" class="ht-row" :class="{ 'ht-row-selected': drawerOrder?.id === order.id || compareSelection.includes(order.id) }"
+              :draggable="!compareMode"
+              @dragstart="onOrderDragStart($event, order)"
+              @click="compareMode ? toggleCompareSelect(order) : openOrderDrawer(order)">
               <td v-if="compareMode" class="ht-td ht-td-center" style="width:36px;" @click.stop>
                 <input type="checkbox" :checked="compareSelection.includes(order.id)" @change="toggleCompareSelect(order)" :disabled="compareSelection.length >= 2 && !compareSelection.includes(order.id)"/>
               </td>
@@ -303,6 +306,20 @@ function toggleCompareSelect(order) {
 function openCompare() { showCompareModal.value = true; }
 const compareOrderA = computed(() => historyStore.orders.find(o => o.id === compareSelection.value[0]));
 const compareOrderB = computed(() => historyStore.orders.find(o => o.id === compareSelection.value[1]));
+
+// Drag-from-anywhere → создание задачи (этап 10).
+// Контракт: dataTransfer.application/x-bk-entity = JSON {type, id, label}.
+// Виджет TaskQuickDropWidget в AppLayout автораскрывается на dragstart с этим mime,
+// принимает drop в колонку и создаёт карточку с автопривязкой через tasks_relations.
+function onOrderDragStart(e, order) {
+  if (!e.dataTransfer) return;
+  const label = `Заказ ${order.supplier || '#' + order.id} от ${formatDateShort(order.delivery_date)}`;
+  const payload = JSON.stringify({ type: 'order', id: order.id, label });
+  try {
+    e.dataTransfer.setData('application/x-bk-entity', payload);
+    e.dataTransfer.effectAllowed = 'copy';
+  } catch (err) { /* старый браузер — игнор */ }
+}
 
 let searchTimer = null;
 function onSearchInput() {

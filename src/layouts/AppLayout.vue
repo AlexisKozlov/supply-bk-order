@@ -376,11 +376,18 @@
     <!-- Командная палитра (Ctrl+K или /) -->
     <CommandPalette ref="cmdPalette" />
 
+    <!-- Drag-from-anywhere виджет: на любой странице (кроме /tasks) висит
+         маленькая пилюля в правом нижнем углу. Перетащил карточку
+         бизнес-сущности с поддержкой application/x-bk-entity → создалась
+         задача с автопривязкой. Виджет монтируется только для пользователей
+         с доступом к модулю tasks. -->
+    <TaskQuickDropWidget v-if="userStore.hasAccess('tasks', 'view')"/>
+
   </div>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted, watch, provide } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch, provide, defineAsyncComponent } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -393,6 +400,9 @@ import BroadcastPopup from '@/components/BroadcastPopup.vue';
 import BugReportButton from '@/components/BugReportButton.vue';
 import OfflineIndicator from '@/components/ui/OfflineIndicator.vue';
 import CommandPalette from '@/components/ui/CommandPalette.vue';
+// Виджет лениво грузится отдельным чанком, чтобы пользователи без доступа
+// к модулю tasks не тащили его в основной bundle.
+const TaskQuickDropWidget = defineAsyncComponent(() => import('@/components/tasks/TaskQuickDropWidget.vue'));
 
 
 const router = useRouter();
