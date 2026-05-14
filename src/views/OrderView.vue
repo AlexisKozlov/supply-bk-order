@@ -104,7 +104,10 @@
 
     <!-- Сводка заказа (режим просмотра) -->
     <div v-if="orderStore.viewOnlyMode && viewSummaryOrder && !showFullOrder" class="order-summary-wrap">
-    <div class="order-summary-card">
+    <div class="order-summary-card"
+         draggable="true"
+         @dragstart="onOrderSummaryDragStart"
+         title="Перетащи в виджет «Задачи», чтобы создать задачу с привязкой к заказу">
       <div class="osc-header">
         <div class="osc-supplier">{{ viewSummaryOrder.supplier }}</div>
         <div class="osc-meta">
@@ -355,6 +358,21 @@ function fmtDateFull(str) {
   const d = new Date(str);
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
     d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Drag-from-anywhere → создание задачи (этап 10 расширение).
+// Сводная карточка заказа в режиме просмотра — draggable. Контракт:
+// dataTransfer.application/x-bk-entity = JSON {type, id, label}.
+// Виджет TaskQuickDropWidget из AppLayout раскрывается автоматически.
+function onOrderSummaryDragStart(e) {
+  const o = viewSummaryOrder.value;
+  if (!o || !e.dataTransfer) return;
+  const label = `Заказ ${o.supplier || '#' + o.id} от ${fmtDateShort(o.delivery_date)}`;
+  const payload = JSON.stringify({ type: 'order', id: o.id, label });
+  try {
+    e.dataTransfer.setData('application/x-bk-entity', payload);
+    e.dataTransfer.effectAllowed = 'copy';
+  } catch { /* старый браузер — игнор */ }
 }
 function fmtDateShort(str) {
   if (!str) return '—';
