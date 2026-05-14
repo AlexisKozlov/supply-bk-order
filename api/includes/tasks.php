@@ -1756,16 +1756,17 @@ if ($action === 'cards' && $id && $action2 === 'timer') {
             }
             // Закрываем все остальные открытые таймеры этого пользователя на других карточках
             // (чтобы у одного человека одновременно бежал только один таймер).
-            $now = date('Y-m-d H:i:s');
+            // Время пишем через MySQL NOW() — PHP работает в UTC, а MySQL в +03:00,
+            // фронт же парсит DATETIME как локальное; единый источник времени = MySQL.
             $other = $pdo->prepare("SELECT id, card_id, started_at FROM tasks_card_time WHERE user_name = ? AND stopped_at IS NULL FOR UPDATE");
             $other->execute([$tUserName]);
-            $closeStmt = $pdo->prepare("UPDATE tasks_card_time SET stopped_at = ?, seconds = TIMESTAMPDIFF(SECOND, started_at, ?) WHERE id = ?");
+            $closeStmt = $pdo->prepare("UPDATE tasks_card_time SET stopped_at = NOW(), seconds = TIMESTAMPDIFF(SECOND, started_at, NOW()) WHERE id = ?");
             foreach ($other->fetchAll() as $row) {
-                $closeStmt->execute([$now, $now, (int)$row['id']]);
+                $closeStmt->execute([(int)$row['id']]);
                 tHistory($pdo, (int)$row['card_id'], $tUserName, 'timer_stopped', ['auto' => true]);
             }
-            $pdo->prepare("INSERT INTO tasks_card_time (card_id, user_name, started_at) VALUES (?, ?, ?)")
-                ->execute([$cardId, $tUserName, $now]);
+            $pdo->prepare("INSERT INTO tasks_card_time (card_id, user_name, started_at) VALUES (?, ?, NOW())")
+                ->execute([$cardId, $tUserName]);
             tHistory($pdo, $cardId, $tUserName, 'timer_started', null);
         } else {
             // stop
@@ -1773,9 +1774,8 @@ if ($action === 'cards' && $id && $action2 === 'timer') {
                 $pdo->commit();
                 tRespond(['timer' => tBuildCardTimer($pdo, $cardId, $tUserName)]);
             }
-            $now = date('Y-m-d H:i:s');
-            $pdo->prepare("UPDATE tasks_card_time SET stopped_at = ?, seconds = TIMESTAMPDIFF(SECOND, started_at, ?) WHERE id = ?")
-                ->execute([$now, $now, (int)$open['id']]);
+            $pdo->prepare("UPDATE tasks_card_time SET stopped_at = NOW(), seconds = TIMESTAMPDIFF(SECOND, started_at, NOW()) WHERE id = ?")
+                ->execute([(int)$open['id']]);
             // Длительность для истории
             $dur = $pdo->prepare("SELECT seconds FROM tasks_card_time WHERE id = ?");
             $dur->execute([(int)$open['id']]);

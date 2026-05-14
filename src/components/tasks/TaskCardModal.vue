@@ -67,7 +67,9 @@
               <span class="ts-pill-text">{{ priorityLabel(full.card.priority) }}</span>
               <TaskIcon name="chevronDown" :size="11" class="ts-pill-chev"/>
             </button>
-            <div v-if="propPopover === 'priority'" class="ts-pop" v-click-outside-pop="closePropPopover">
+            <div v-if="propPopover === 'priority'" ref="popPriorityRef"
+                 class="ts-pop" :class="{ 'ts-pop-flip-right': flipRight.priority }"
+                 v-click-outside-pop="closePropPopover">
               <button v-for="p in PRIORITIES" :key="p.value"
                       type="button" class="ts-pop-item"
                       :class="{ 'is-active': (full.card.priority || 'medium') === p.value }"
@@ -93,7 +95,9 @@
                 <TaskIcon name="close" :size="11"/>
               </span>
             </button>
-            <div v-if="propPopover === 'due'" class="ts-pop ts-pop-flat" v-click-outside-pop="closePropPopover">
+            <div v-if="propPopover === 'due'" ref="popDueRef"
+                 class="ts-pop ts-pop-flat" :class="{ 'ts-pop-flip-right': flipRight.due }"
+                 v-click-outside-pop="closePropPopover">
               <DatetimePicker :model-value="full.card.due_date || ''"
                               @update:model-value="onPickerChange"
                               @cancel="closePropPopover"/>
@@ -110,7 +114,9 @@
               <span class="ts-pill-text">{{ columnTitle }}</span>
               <TaskIcon name="chevronDown" :size="11" class="ts-pill-chev"/>
             </button>
-            <div v-if="propPopover === 'column'" class="ts-pop" v-click-outside-pop="closePropPopover">
+            <div v-if="propPopover === 'column'" ref="popColumnRef"
+                 class="ts-pop" :class="{ 'ts-pop-flip-right': flipRight.column }"
+                 v-click-outside-pop="closePropPopover">
               <button v-for="col in columns" :key="col.id"
                       type="button" class="ts-pop-item"
                       :class="{ 'is-active': full.card.column_id === col.id }"
@@ -138,7 +144,9 @@
                 <TaskIcon name="close" :size="11"/>
               </span>
             </button>
-            <div v-if="propPopover === 'color'" class="ts-pop ts-pop-flat ts-pop-color" v-click-outside-pop="closePropPopover">
+            <div v-if="propPopover === 'color'" ref="popColorRef"
+                 class="ts-pop ts-pop-flat ts-pop-color" :class="{ 'ts-pop-flip-right': flipRight.color }"
+                 v-click-outside-pop="closePropPopover">
               <div class="ts-color-grid">
                 <button v-for="c in CARD_BG_COLORS" :key="c.hex"
                         type="button" class="ts-color-sw"
@@ -747,8 +755,24 @@ const CARD_BG_COLORS = [
 ];
 
 const propPopover = ref(null); // 'priority' | 'due' | 'column' | 'color' | null
-function togglePropPopover(name) {
+const popPriorityRef = ref(null);
+const popDueRef      = ref(null);
+const popColumnRef   = ref(null);
+const popColorRef    = ref(null);
+const flipRight = reactive({ priority: false, due: false, column: false, color: false });
+
+async function togglePropPopover(name) {
   propPopover.value = propPopover.value === name ? null : name;
+  if (propPopover.value !== name) return;
+  // Сбрасываем флип, чтобы измерить «нативную» левую позицию
+  flipRight[name] = false;
+  await nextTick();
+  const elMap = { priority: popPriorityRef, due: popDueRef, column: popColumnRef, color: popColorRef };
+  const el = elMap[name]?.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  // Если поповер вылез за правую границу — переключаем на выравнивание по правому краю кнопки
+  if (rect.right > window.innerWidth - 8) flipRight[name] = true;
 }
 function closePropPopover() { propPopover.value = null; }
 function selectPriority(p) {
@@ -1742,6 +1766,9 @@ button.ts-pill { appearance: none; -webkit-appearance: none; }
   box-shadow: var(--tk-shadow-popover, 0 12px 32px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06));
   padding: 6px;
   display: flex; flex-direction: column; gap: 2px;
+}
+.ts-pop.ts-pop-flip-right {
+  left: auto; right: 0;
 }
 .ts-pop-flat {
   padding: 0; border: none; background: transparent;
