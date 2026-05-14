@@ -8,12 +8,6 @@
     @dragend="onDragEnd"
     @click="onCardClick"
   >
-    <!-- Маркер чужой карточки: видна на моей доске, потому что я в исполнителях -->
-    <div v-if="card.is_external" class="task-card-external" :title="'Карточка с доски: ' + card.external_board_owner">
-      <TaskIcon name="arrowUpRight" :size="11"/>
-      <span>с доски: {{ card.external_board_owner }}</span>
-    </div>
-
     <!-- Метки сверху (Trello-стиль: тонкие пиллы) -->
     <div v-if="cardLabels.length" class="task-card-labels">
       <span v-for="l in cardLabels" :key="l.id" class="label-pill" :style="{ '--lbl-color': l.color }"
@@ -58,25 +52,22 @@
       </button>
     </div>
 
-    <!-- Заголовок + чекбокс «Готово → в архив» -->
+    <!-- Заголовок + чекбокс «Готово → в архив». Маркер чужой карточки —
+         маленькая иконка перед заголовком с тултипом. -->
     <div class="task-card-title-row">
       <input v-if="canEditCard" type="checkbox" class="task-card-done-chk"
              :checked="!!card.is_done"
              @click.stop
              @change="completeAndArchive"
              title="Завершить и убрать в архив" />
+      <TaskIcon v-if="card.is_external" name="arrowUpRight" :size="12"
+                class="task-card-external-mark"
+                :title="'Карточка с доски: ' + card.external_board_owner"/>
       <div class="task-card-title">{{ card.title }}</div>
     </div>
 
-    <!-- Прогресс чек-листа — тонкая заполняющаяся линия (Yougile-стиль).
-         Подзадачи показывают свой прогресс прямо в заголовке «Подзадачи». -->
-    <div v-if="card.checklist?.total" class="task-card-progress"
-         :title="'Чек-лист: ' + card.checklist.done + ' из ' + card.checklist.total"
-         :class="{ done: card.checklist.done === card.checklist.total }">
-      <div class="task-card-progress-fill" :style="{ width: checklistPct + '%' }"></div>
-    </div>
-
-
+    <!-- Метаданные снизу. Прогресс чек-листа идёт счётчиком в мета-строке,
+         отдельная заполняющаяся линия больше не рисуется. -->
     <!-- Метаданные снизу -->
     <div class="task-card-meta">
       <!-- Приоритет (всегда показываем, включая «Средний») -->
@@ -86,17 +77,13 @@
         <span class="meta-dot"></span>{{ priorityLabel }}
       </button>
 
-      <!-- Срок -->
+      <!-- Срок: показываем только если задан. Ghost-плашка убрана —
+           установить срок можно через модалку. -->
       <button v-if="card.due_date" class="meta-pill due-pill"
               :class="{ overdue: isOverdue, fire: dueClass === 'due-fire', warn: dueClass === 'due-warn' }"
               @click.stop="togglePopover('due')" :title="'Срок: ' + (card.due_date || '')">
         <TaskIcon name="calendar" :size="12"/>
         <span>{{ formatDue }}</span>
-      </button>
-      <button v-else-if="canEditCard" class="meta-pill meta-pill-ghost"
-              @click.stop="togglePopover('due')" title="Установить срок">
-        <TaskIcon name="calendar" :size="12"/>
-        <span>Срок</span>
       </button>
 
       <!-- Чек-лист -->
@@ -240,7 +227,15 @@ const emit = defineEmits(['open', 'open-chat', 'open-subtask', 'subtasks-changed
 const store = useTasksStore();
 const dragging = ref(false);
 const popover = ref(null); // 'priority' | 'due' | 'labels' | null
+
+// Подзадачи: состояние «свёрнут/развёрнут» сохраняется в localStorage per-карточка.
+// Ключ: bk_tasks_subtasks_expanded_{cardId}. По умолчанию свёрнуто.
+const STORAGE_KEY_SUBTASKS = `bk_tasks_subtasks_expanded_${props.card.id}`;
 const subtasksOpen = ref(false);
+try {
+  if (localStorage.getItem(STORAGE_KEY_SUBTASKS) === '1') subtasksOpen.value = true;
+} catch (e) { /* localStorage может быть недоступен (приватный режим) — игнор */ }
+
 const addingSubtask = ref(false);
 const newSubtaskTitle = ref('');
 const cardMenuOpen = ref(false);
@@ -279,12 +274,6 @@ function subtaskHasMeta(st) {
 }
 const priorityClass = computed(() => 'prio-' + (props.card.priority || 'medium'));
 const priorityLabel = computed(() => (priorities.find(p => p.value === props.card.priority)?.label) || 'Средний');
-const checklistPct = computed(() => {
-  const total = props.card.checklist?.total || 0;
-  const done = props.card.checklist?.done || 0;
-  if (!total) return 0;
-  return Math.round(done / total * 100);
-});
 const subtasksPct = computed(() => {
   const total = props.card.subtasks_total || 0;
   const done = props.card.subtasks_done || 0;
@@ -451,7 +440,13 @@ async function archiveOrRestoreFromMenu() {
   await completeAndArchive();
 }
 
-function toggleSubtasks() { subtasksOpen.value = !subtasksOpen.value; }
+function toggleSubtasks() {
+  subtasksOpen.value = !subtasksOpen.value;
+  try {
+    if (subtasksOpen.value) localStorage.setItem(STORAGE_KEY_SUBTASKS, '1');
+    else localStorage.removeItem(STORAGE_KEY_SUBTASKS);
+  } catch (e) { /* игнор */ }
+}
 
 function isSubOverdue(st) {
   if (!st.due_date || st.is_done) return false;
@@ -586,30 +581,31 @@ const vClickOutsideCard = {
 .task-card.is-done .task-card-title { text-decoration: line-through; color: var(--tk-text-muted); }
 .task-card.is-external { background: linear-gradient(180deg, #FAF5EE 0%, #FFFFFF 60%); border-color: #E8D9BD; }
 
-/* F4 — тонировка карточки выбранным цветом.
-   Подложка ~30% насыщенности от --card-bg, чтобы не дралась с метками сверху
-   и приоритетной полоской. is-external/is-done имеют свои правила и в эту
-   ветку не падают. */
-.task-card.has-bg-color:not(.is-external) {
-  background: color-mix(in srgb, var(--card-bg, transparent) 35%, #fff);
-  border-color: color-mix(in srgb, var(--card-bg, transparent) 55%, var(--tk-border, #E6E1D7));
+/* Цвет карточки card.color превращается в 6px-обложку сверху (Trello cover),
+   а не в заливку всего фона. Карточка остаётся белой, цвет — тонкий смысловой
+   индикатор сверху. Поле в БД (tasks_cards.color) не меняется, меняется только
+   отображение. См. дизайн-док: Решённые вопросы #1. */
+.task-card.has-bg-color::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 6px;
+  background: var(--card-bg, transparent);
+  border-radius: var(--tk-r-card, 12px) var(--tk-r-card, 12px) 0 0;
+  pointer-events: none;
 }
-.task-card.has-bg-color:not(.is-external):hover {
-  background: color-mix(in srgb, var(--card-bg, transparent) 42%, #fff);
+.task-card.has-bg-color { padding-top: 18px; }
+
+/* Маркер «карточка с чужой доски» — маленькая иконка перед заголовком
+   с тултипом. Раньше была полоса-баннер сверху — убрали как лишний сигнал. */
+.task-card-external-mark {
+  color: var(--tk-accent-text, #B85A0E);
+  flex-shrink: 0;
+  margin-top: 3px;
 }
 
-.task-card-external {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: #8A6F3D; font-weight: 600;
-  background: #F4E9CF; border-radius: 4px;
-  padding: 2px 6px; margin-bottom: 6px;
-}
-.task-card-external svg { color: #B58A2E; }
-
-/* Приоритет — без полоски слева. Подсветка идёт через цветной meta-pill
-   в футере карточки. Срочно/высокий дополнительно тонируют border-color. */
-.task-card.prio-urgent { border-color: color-mix(in srgb, var(--tk-danger) 35%, var(--tk-border-soft) 65%); }
-.task-card.prio-high   { border-color: color-mix(in srgb, var(--tk-warning) 30%, var(--tk-border-soft) 70%); }
+/* Приоритет рамкой карточки больше не тонируется — индикатор приоритета
+   несёт цветной meta-pill в мета-строке. Одна цветовая семантика за раз. */
 
 /* ═══ Метки сверху ═══ */
 .task-card-labels {
@@ -653,26 +649,8 @@ const vClickOutsideCard = {
 }
 .task-card.is-done .task-card-title { /* перебивает .is-done из ранее */ }
 
-/* Прогресс-бар — тонкая заполняющаяся линия (Yougile-стиль) */
-.task-card-progress {
-  height: 5px;
-  background: var(--tk-n-100, #F3F0E8);
-  border-radius: 999px;
-  overflow: hidden;
-  margin: 0;
-  position: relative;
-}
-.task-card-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--tk-accent, #E87A1E), #F4A261);
-  border-radius: inherit;
-  transition: width 280ms cubic-bezier(0.16, 1, 0.3, 1), background 200ms ease;
-  box-shadow: 0 0 0 1px rgba(232,122,30,0.12);
-}
-.task-card-progress.done .task-card-progress-fill {
-  background: linear-gradient(90deg, var(--tk-success, #16A364), #4BCE97);
-  box-shadow: 0 0 0 1px rgba(22,163,100,0.15);
-}
+/* Прогресс-бар чек-листа убран с карточки — счётчик «3/5» в мета-строке
+   достаточен. Одна сигнальная зона для прогресса вместо двух. */
 
 /* Круглый чекбокс «Готово + в архив» */
 .task-card-done-chk {
@@ -791,16 +769,6 @@ const vClickOutsideCard = {
   transition: background var(--tk-transition, 140ms ease);
 }
 .meta-pill:hover { background: var(--tk-n-200, #E6E1D7); }
-.meta-pill-ghost {
-  background: transparent;
-  color: var(--tk-text-muted, #758195);
-  border: 1px dashed var(--tk-border, #DCDFE4);
-  padding: 1px 7px;
-  opacity: 0;
-  transition: opacity var(--tk-transition, 120ms ease), border-color var(--tk-transition, 120ms ease), color var(--tk-transition, 120ms ease);
-}
-.task-card:hover .meta-pill-ghost { opacity: 0.95; }
-.meta-pill-ghost:hover { border-color: var(--tk-accent, #E87A1E); color: var(--tk-accent-text, #B85A0E); }
 
 .meta-dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -858,15 +826,9 @@ const vClickOutsideCard = {
   50%      { opacity: 1; }
 }
 
-/* Срок горит / просрочено — мягкое тонирование рамки без второго ободка.
-   Информативную нагрузку несёт также красная/жёлтая капсула срока внизу. */
-.task-card.due-fire {
-  border-color: color-mix(in srgb, var(--tk-warning, #BB6A0A) 35%, var(--tk-border, #E6E1D7) 65%);
-}
-.task-card.due-overdue,
-.task-card.is-overdue {
-  border-color: color-mix(in srgb, var(--tk-danger, #D33A2C) 40%, var(--tk-border, #E6E1D7) 60%);
-}
+/* Срок горит / просрочено — рамкой карточки больше не подсвечивается.
+   Информацию о горящем сроке несёт чип "Срок" в мета-строке (оранжевый /
+   красный). Одна цветовая семантика за раз. */
 
 /* ═══ Соисполнители ═══ */
 .meta-assignees {
