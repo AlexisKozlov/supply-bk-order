@@ -267,6 +267,70 @@ function tCardRecipients($pdo, $cardId, array $exclude = []) {
     return array_values(array_diff($all, $exclude));
 }
 
+// ─── Хелперы таймера карточки (C4) ───
+// Возвращает { seconds_total, by_user: [{user_name, seconds}], my_running: { started_at } | null,
+//              any_running: bool, running_user: ?string }
+function tBuildCardTimer($pdo, $cardId, $tUserName) {
+    // Суммы закрытых интервалов по пользователям
+    $s = $pdo->prepare("SELECT user_name, COALESCE(SUM(seconds), 0) AS sec FROM tasks_card_time WHERE card_id = ? AND stopped_at IS NOT NULL GROUP BY user_name ORDER BY sec DESC");
+    $s->execute([$cardId]);
+    $byUser = [];
+    $total  = 0;
+    foreach ($s->fetchAll() as $r) {
+        $sec = (int)$r['sec'];
+        $byUser[] = ['user_name' => $r['user_name'], 'seconds' => $sec];
+        $total += $sec;
+    }
+    // Открытый интервал у текущего пользователя
+    $r = $pdo->prepare("SELECT id, started_at FROM tasks_card_time WHERE card_id = ? AND user_name = ? AND stopped_at IS NULL ORDER BY id DESC LIMIT 1");
+    $r->execute([$cardId, $tUserName]);
+    $myRow = $r->fetch();
+    // Открытый интервал у кого угодно — чтобы канбан показывал «у кого-то идёт»
+    $r2 = $pdo->prepare("SELECT user_name FROM tasks_card_time WHERE card_id = ? AND stopped_at IS NULL ORDER BY id DESC LIMIT 1");
+    $r2->execute([$cardId]);
+    $running = $r2->fetchColumn();
+    return [
+        'seconds_total' => $total,
+        'by_user'       => $byUser,
+        'my_running'    => $myRow ? ['id' => (int)$myRow['id'], 'started_at' => $myRow['started_at']] : null,
+        'any_running'   => $running !== false && $running !== null,
+        'running_user'  => $running !== false && $running !== null ? (string)$running : null,
+    ];
+}
+
+// Сводка таймеров по массиву карточек (для канбан-доски).
+// Возвращает массив [card_id => ['seconds_total' => int, 'any_running' => bool, 'my_running' => bool]]
+function tBuildCardsTimerSummary($pdo, array $cardIds, $tUserName) {
+    if (!$cardIds) return [];
+    $ph = implode(',', array_fill(0, count($cardIds), '?'));
+    $s = $pdo->prepare("SELECT card_id, COALESCE(SUM(seconds), 0) AS sec FROM tasks_card_time WHERE card_id IN ($ph) AND stopped_at IS NOT NULL GROUP BY card_id");
+    $s->execute($cardIds);
+    $sumByCard = [];
+    foreach ($s->fetchAll() as $r) $sumByCard[(int)$r['card_id']] = (int)$r['sec'];
+
+    $s = $pdo->prepare("SELECT card_id, user_name FROM tasks_card_time WHERE card_id IN ($ph) AND stopped_at IS NULL");
+    $s->execute($cardIds);
+    $runByCard = [];
+    $myRunByCard = [];
+    foreach ($s->fetchAll() as $r) {
+        $cid = (int)$r['card_id'];
+        $runByCard[$cid] = true;
+        if ((string)$r['user_name'] === (string)$tUserName) $myRunByCard[$cid] = true;
+    }
+
+    $out = [];
+    foreach ($cardIds as $cid) {
+        $cid = (int)$cid;
+        if (!isset($sumByCard[$cid]) && !isset($runByCard[$cid])) continue;
+        $out[$cid] = [
+            'seconds_total' => $sumByCard[$cid] ?? 0,
+            'any_running'   => !empty($runByCard[$cid]),
+            'my_running'    => !empty($myRunByCard[$cid]),
+        ];
+    }
+    return $out;
+}
+
 // ─── Хелперы повторяющихся задач (этап 6) ───
 
 // Считает следующую дату срабатывания строго ПОСЛЕ $fromDate (YYYY-MM-DD).
@@ -806,6 +870,9 @@ if ($action === 'board' && $id && $method === 'GET') {
         $attCount = [];
         foreach ($s->fetchAll() as $r) $attCount[(int)$r['card_id']] = (int)$r['cnt'];
 
+        // Таймер: сумма + признак «у кого-то идёт» (для значка часов на канбан-карточке)
+        $timerSummary = tBuildCardsTimerSummary($pdo, $ids, $tUserName);
+
         $s = $pdo->prepare("SELECT card_id, user_name, is_done FROM tasks_assignees WHERE card_id IN ($ph)");
         $s->execute($ids);
         $assg = [];
@@ -841,6 +908,7 @@ if ($action === 'board' && $id && $method === 'GET') {
             $c['subtasks']    = $subsByParent[$cid] ?? [];
             $c['subtasks_total'] = $subsCount[$cid] ?? 0;
             $c['subtasks_done']  = $subsDone[$cid] ?? 0;
+            $c['timer']       = $timerSummary[$cid] ?? null;
         }
         unset($c);
     }
@@ -907,7 +975,7 @@ if ($action === 'columns' && $id && $id !== 'reorder') {
         $params = [];
         if (isset($body['title']))          { $sets[] = 'title = ?';          $params[] = mb_substr(trim($body['title']), 0, 100); }
         if (isset($body['color']))          { $sets[] = 'color = ?';          $params[] = mb_substr($body['color'], 0, 20); }
-        if (isset($body['wip_limit']))      { $sets[] = 'wip_limit = ?';      $params[] = $body['wip_limit'] > 0 ? (int)$body['wip_limit'] : null; }
+        if (array_key_exists('wip_limit', $body)) { $sets[] = 'wip_limit = ?'; $params[] = $body['wip_limit'] && (int)$body['wip_limit'] > 0 ? (int)$body['wip_limit'] : null; }
         if (isset($body['is_done_column'])) { $sets[] = 'is_done_column = ?'; $params[] = $body['is_done_column'] ? 1 : 0; }
         if (!$sets) tRespond(['error' => 'Нет полей для обновления'], 400);
         $params[] = $colId;
@@ -954,13 +1022,14 @@ if ($action === 'cards' && !$id) {
         $priority = in_array($body['priority'] ?? '', ['low','medium','high','urgent']) ? $body['priority'] : 'medium';
         $due = !empty($body['due_date']) ? $body['due_date'] : null;
         $desc = isset($body['description']) ? mb_substr((string)$body['description'], 0, 5000) : null;
+        $color = !empty($body['color']) ? mb_substr(trim((string)$body['color']), 0, 20) : null;
         $pdo->beginTransaction();
         try {
             $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id " . ($parentId ? "= ?" : "IS NULL"));
             $s->execute($parentId ? [$columnId, $parentId] : [$columnId]);
             $so = (int)$s->fetchColumn();
-            $pdo->prepare("INSERT INTO tasks_cards (board_id, parent_card_id, column_id, title, description, priority, due_date, sort_order, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                ->execute([$boardId, $parentId, $columnId, mb_substr($title, 0, 255), $desc, $priority, $due, $so, $tUserName]);
+            $pdo->prepare("INSERT INTO tasks_cards (board_id, parent_card_id, column_id, title, description, priority, color, due_date, sort_order, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                ->execute([$boardId, $parentId, $columnId, mb_substr($title, 0, 255), $desc, $priority, $color, $due, $so, $tUserName]);
             $cardId = (int)$pdo->lastInsertId();
             tHistory($pdo, $cardId, $tUserName, 'created', ['title' => $title, 'parent_card_id' => $parentId]);
             $pdo->commit();
@@ -1202,6 +1271,9 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             $protocolCoAssignees = array_column($pca->fetchAll(), 'user_name');
         } catch (\Throwable $e) { /* таблицы протоколов могут отсутствовать в части окружений */ }
 
+        // Таймер: суммы по пользователям + открытый интервал
+        $timer = tBuildCardTimer($pdo, $cardId, $tUserName);
+
         tRespond([
             'card'        => $card,
             'checklist'   => $checklist,           // плоский (для обратной совместимости)
@@ -1216,6 +1288,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             'subtasks'    => $subtasks,
             'parent'      => $parentInfo,
             'protocol_co_assignees' => $protocolCoAssignees,
+            'timer'       => $timer,
         ]);
     }
 
@@ -1229,6 +1302,11 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         if (isset($body['priority']) && in_array($body['priority'], ['low','medium','high','urgent'])) {
             if ($body['priority'] !== $card['priority']) $changes['priority'] = ['from' => $card['priority'], 'to' => $body['priority']];
             $sets[] = 'priority = ?'; $params[] = $body['priority'];
+        }
+        if (array_key_exists('color', $body)) {
+            $newColor = $body['color'] ? mb_substr(trim((string)$body['color']), 0, 20) : null;
+            if ($newColor !== $card['color']) $changes['color'] = ['from' => $card['color'], 'to' => $newColor];
+            $sets[] = 'color = ?'; $params[] = $newColor;
         }
         if (array_key_exists('due_date', $body)) {
             $new = $body['due_date'] ? $body['due_date'] : null;
@@ -1643,6 +1721,73 @@ if ($action === 'cards' && $id && $action2 === 'relations' && $method === 'POST'
         tRespond(['error' => $e->getMessage()], 500);
     }
     tRespond(['success' => true]);
+}
+
+// ─── TIMER (учёт времени работы по карточке, C4) ───
+// POST /tasks/cards/:id/timer  body: { op: 'start' | 'stop' }
+// GET  /tasks/cards/:id/timer  — отдать актуальное состояние (опционально, не используется UI)
+if ($action === 'cards' && $id && $action2 === 'timer') {
+    $cardId = (int)$id;
+    $card = tGetCard($pdo, $cardId);
+    if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
+    $board = tGetBoard($pdo, $card['board_id']);
+    if (!tCanAccessCard($pdo, $tUser, $cardId, $board)) tRespond(['error' => 'Нет доступа'], 403);
+
+    if ($method === 'GET') {
+        tRespond(['timer' => tBuildCardTimer($pdo, $cardId, $tUserName)]);
+    }
+    if ($method !== 'POST') tRespond(['error' => 'Method not allowed'], 405);
+
+    $op = $body['op'] ?? '';
+    if (!in_array($op, ['start', 'stop'], true)) tRespond(['error' => "op должно быть 'start' или 'stop'"], 400);
+
+    $pdo->beginTransaction();
+    try {
+        // Лок открытой записи текущего пользователя на этой карточке
+        $s = $pdo->prepare("SELECT id, started_at FROM tasks_card_time WHERE card_id = ? AND user_name = ? AND stopped_at IS NULL ORDER BY id DESC LIMIT 1 FOR UPDATE");
+        $s->execute([$cardId, $tUserName]);
+        $open = $s->fetch();
+
+        if ($op === 'start') {
+            if ($open) {
+                // Уже бежит — идемпотентно отдаём текущее состояние
+                $pdo->commit();
+                tRespond(['timer' => tBuildCardTimer($pdo, $cardId, $tUserName)]);
+            }
+            // Закрываем все остальные открытые таймеры этого пользователя на других карточках
+            // (чтобы у одного человека одновременно бежал только один таймер).
+            $now = date('Y-m-d H:i:s');
+            $other = $pdo->prepare("SELECT id, card_id, started_at FROM tasks_card_time WHERE user_name = ? AND stopped_at IS NULL FOR UPDATE");
+            $other->execute([$tUserName]);
+            $closeStmt = $pdo->prepare("UPDATE tasks_card_time SET stopped_at = ?, seconds = TIMESTAMPDIFF(SECOND, started_at, ?) WHERE id = ?");
+            foreach ($other->fetchAll() as $row) {
+                $closeStmt->execute([$now, $now, (int)$row['id']]);
+                tHistory($pdo, (int)$row['card_id'], $tUserName, 'timer_stopped', ['auto' => true]);
+            }
+            $pdo->prepare("INSERT INTO tasks_card_time (card_id, user_name, started_at) VALUES (?, ?, ?)")
+                ->execute([$cardId, $tUserName, $now]);
+            tHistory($pdo, $cardId, $tUserName, 'timer_started', null);
+        } else {
+            // stop
+            if (!$open) {
+                $pdo->commit();
+                tRespond(['timer' => tBuildCardTimer($pdo, $cardId, $tUserName)]);
+            }
+            $now = date('Y-m-d H:i:s');
+            $pdo->prepare("UPDATE tasks_card_time SET stopped_at = ?, seconds = TIMESTAMPDIFF(SECOND, started_at, ?) WHERE id = ?")
+                ->execute([$now, $now, (int)$open['id']]);
+            // Длительность для истории
+            $dur = $pdo->prepare("SELECT seconds FROM tasks_card_time WHERE id = ?");
+            $dur->execute([(int)$open['id']]);
+            $sec = (int)$dur->fetchColumn();
+            tHistory($pdo, $cardId, $tUserName, 'timer_stopped', ['seconds' => $sec]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        tRespond(['error' => 'Ошибка таймера: ' . $e->getMessage()], 500);
+    }
+    tRespond(['timer' => tBuildCardTimer($pdo, $cardId, $tUserName)]);
 }
 
 if ($action === 'relations' && $id && $method === 'DELETE') {

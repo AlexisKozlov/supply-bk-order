@@ -71,6 +71,10 @@ export const tasksApi = {
   // Соисполнители
   setAssignees(cardId, names)        { return call('POST',  `/cards/${cardId}/assignees`, { user_names: names }); },
 
+  // Таймер карточки (C4)
+  startTimer(cardId)                 { return call('POST',  `/cards/${cardId}/timer`, { op: 'start' }); },
+  stopTimer(cardId)                  { return call('POST',  `/cards/${cardId}/timer`, { op: 'stop' }); },
+
   // Связи с сущностями
   setRelations(cardId, relations)    { return call('POST',  `/cards/${cardId}/relations`, { relations }); },
   deleteRelation(id)                 { return call('DELETE',`/relations/${id}`); },

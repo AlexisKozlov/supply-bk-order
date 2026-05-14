@@ -121,6 +121,39 @@
               </button>
             </div>
           </div>
+
+          <!-- Цвет фона карточки -->
+          <div class="ts-pill-wrap">
+            <button type="button"
+                    class="ts-pill ts-pill-color" :class="{ 'is-open': propPopover === 'color' }"
+                    :title="full.card.color ? 'Цвет карточки' : 'Без цвета'"
+                    @click.stop="togglePropPopover('color')">
+              <span class="ts-pill-icon">
+                <span class="ts-pill-color-dot" :style="{ background: full.card.color || 'transparent', borderColor: full.card.color || 'var(--tk-border, #E6E1D7)' }"></span>
+              </span>
+              <span class="ts-pill-text">{{ full.card.color ? 'Цвет' : 'Без цвета' }}</span>
+              <span v-if="full.card.color" class="ts-pill-clear"
+                    role="button" tabindex="0"
+                    @click.stop.prevent="patch({ color: null })" title="Убрать цвет">
+                <TaskIcon name="close" :size="11"/>
+              </span>
+            </button>
+            <div v-if="propPopover === 'color'" class="ts-pop ts-pop-flat ts-pop-color" v-click-outside-pop="closePropPopover">
+              <div class="ts-color-grid">
+                <button v-for="c in CARD_BG_COLORS" :key="c.hex"
+                        type="button" class="ts-color-sw"
+                        :class="{ 'is-active': (full.card.color || '').toLowerCase() === c.hex.toLowerCase() }"
+                        :style="{ background: c.hex }"
+                        :title="c.label"
+                        @click="selectColor(c.hex)">
+                  <TaskIcon v-if="(full.card.color || '').toLowerCase() === c.hex.toLowerCase()" name="check" :size="13"/>
+                </button>
+              </div>
+              <button type="button" class="ts-color-clear" @click="selectColor(null)">
+                <TaskIcon name="close" :size="12"/> Без цвета
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Вкладки (Yougile-стиль: тематически разделено) -->
@@ -243,6 +276,36 @@
                     <TaskIcon name="trash" :size="14"/>
                   </button>
                 </div>
+              </li>
+            </ul>
+          </section>
+
+          <!-- Время (таймер карточки, C4) -->
+          <section class="ts-section">
+            <div class="ts-section-title">
+              Время
+              <span v-if="timerTotalDisplay" class="ts-section-meta">{{ timerTotalDisplay }}</span>
+            </div>
+            <div class="ts-timer-row">
+              <button type="button" class="ts-timer-btn"
+                      :class="{ 'is-running': !!myRunningStartedAt }"
+                      @click="toggleTimer">
+                <TaskIcon :name="myRunningStartedAt ? 'stop' : 'play'" :size="14"/>
+                <span>{{ myRunningStartedAt ? 'Остановить' : 'Запустить' }}</span>
+              </button>
+              <div v-if="myRunningStartedAt" class="ts-timer-live" :title="'Идёт с ' + formatDate(myRunningStartedAt)">
+                <span class="ts-timer-live-dot"></span>
+                <span class="ts-timer-live-text">{{ myCurrentTickerDisplay }}</span>
+              </div>
+              <div v-else-if="!timerTotalDisplay" class="ts-timer-hint">
+                Отслеживайте, сколько времени потратили на эту задачу
+              </div>
+            </div>
+            <ul v-if="timerByUser.length" class="ts-timer-users">
+              <li v-for="u in timerByUser" :key="u.user_name" class="ts-timer-user">
+                <span class="ts-chip-bubble ts-timer-bubble">{{ initials(u.user_name) }}</span>
+                <span class="ts-timer-user-name">{{ u.user_name }}</span>
+                <span class="ts-timer-user-sec">{{ formatHMS(u.seconds + (u.user_name === currentUserName && myRunningStartedAt ? currentRunningSec : 0)) }}</span>
               </li>
             </ul>
           </section>
@@ -550,6 +613,10 @@ const isDragOver = ref(false);
 const uploadingCount = ref(0);
 const uploadingDone = ref(0);
 
+// Таймер (C4) — тикающий счётчик для своего активного интервала
+const nowTick = ref(Date.now());
+let tickHandle = null;
+
 function onDescBlur() {
   patch({ description: full.value?.card?.description || '' });
 }
@@ -569,6 +636,51 @@ const currentColumnColor = computed(() => {
   if (!full.value) return '#9E9E9E';
   return columns.value.find(c => c.id === full.value.card.column_id)?.color || '#9E9E9E';
 });
+
+// ── Таймер (C4) ──
+const timerByUser = computed(() => full.value?.timer?.by_user || []);
+const timerTotalSec = computed(() => full.value?.timer?.seconds_total || 0);
+const myRunningStartedAt = computed(() => full.value?.timer?.my_running?.started_at || null);
+const currentRunningSec = computed(() => {
+  if (!myRunningStartedAt.value) return 0;
+  const started = new Date(myRunningStartedAt.value.replace(' ', 'T')).getTime();
+  if (Number.isNaN(started)) return 0;
+  return Math.max(0, Math.floor((nowTick.value - started) / 1000));
+});
+const timerTotalDisplay = computed(() => {
+  const total = timerTotalSec.value + currentRunningSec.value;
+  return total > 0 ? formatHMS(total) : '';
+});
+const myCurrentTickerDisplay = computed(() => formatHMS(currentRunningSec.value));
+
+function formatHMS(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}ч ${m.toString().padStart(2, '0')}м`;
+  if (m > 0) return `${m}м ${s.toString().padStart(2, '0')}с`;
+  return `${s}с`;
+}
+
+async function toggleTimer() {
+  if (!full.value) return;
+  try {
+    const res = myRunningStartedAt.value
+      ? await tasksApi.stopTimer(props.cardId)
+      : await tasksApi.startTimer(props.cardId);
+    if (res?.timer) full.value.timer = res.timer;
+    // Обновим карточку в общем списке, чтобы значок на канбане сразу подсветился
+    const inList = store.cards.find(c => c.id === props.cardId);
+    if (inList) {
+      inList.timer = {
+        seconds_total: res.timer.seconds_total,
+        any_running: res.timer.any_running,
+        my_running: !!res.timer.my_running,
+      };
+    }
+  } catch (e) { showError(e); }
+}
 const selectedLabels = computed(() => {
   if (!full.value) return [];
   const ids = full.value.label_ids || [];
@@ -617,13 +729,34 @@ const PRIORITIES = [
   { value: 'medium', label: 'Средний' },
   { value: 'low',    label: 'Низкий' },
 ];
-const propPopover = ref(null); // 'priority' | 'due' | 'column' | null
+// Палитра цветов фона карточки — мягкие пастельные оттенки,
+// чтобы не дрались с приоритетной полоской и метками.
+const CARD_BG_COLORS = [
+  { hex: '#FFE4B2', label: 'Песочный'  },
+  { hex: '#FFD3B6', label: 'Персик'    },
+  { hex: '#FFB7B7', label: 'Розовый'   },
+  { hex: '#F4C2D7', label: 'Малиновый' },
+  { hex: '#E0BBE4', label: 'Лавандовый'},
+  { hex: '#C7D8FF', label: 'Голубой'   },
+  { hex: '#B5EAD7', label: 'Мятный'    },
+  { hex: '#D7EFC1', label: 'Салатовый' },
+  { hex: '#FFF5BA', label: 'Кремовый'  },
+  { hex: '#E2D7C9', label: 'Бежевый'   },
+  { hex: '#CFD8DC', label: 'Серый'     },
+  { hex: '#FFCCBC', label: 'Коралл'    },
+];
+
+const propPopover = ref(null); // 'priority' | 'due' | 'column' | 'color' | null
 function togglePropPopover(name) {
   propPopover.value = propPopover.value === name ? null : name;
 }
 function closePropPopover() { propPopover.value = null; }
 function selectPriority(p) {
   patch({ priority: p });
+  closePropPopover();
+}
+function selectColor(hex) {
+  patch({ color: hex || null });
   closePropPopover();
 }
 async function selectColumn(colId) {
@@ -752,9 +885,11 @@ async function load() {
 onMounted(() => {
   load();
   document.addEventListener('keydown', onKeydown);
+  tickHandle = setInterval(() => { nowTick.value = Date.now(); }, 1000);
 });
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown);
+  if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
 });
 watch(() => props.cardId, load);
 
@@ -1638,6 +1773,113 @@ button.ts-pill { appearance: none; -webkit-appearance: none; }
 .ts-pop-item-dot.prio-bg-low    { background: var(--tk-prio-low-fg); }
 .ts-pop-item-label { flex: 1; }
 .ts-pop-item-check { color: var(--tk-accent, #E87A1E); }
+
+/* Цвет фона карточки (F4) */
+.ts-pill-color-dot {
+  display: inline-block; width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--tk-border, #E6E1D7);
+  background: transparent;
+  box-sizing: border-box;
+}
+.ts-pop-color {
+  background: var(--tk-surface, #fff);
+  border: 1px solid var(--tk-border, #E6E1D7);
+  border-radius: 10px;
+  box-shadow: var(--tk-shadow-popover, 0 12px 32px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06));
+  padding: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ts-color-grid {
+  display: grid; grid-template-columns: repeat(6, 26px);
+  gap: 6px;
+}
+.ts-color-sw {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(15,23,42,0.65);
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+.ts-color-sw:hover { transform: scale(1.08); border-color: rgba(15,23,42,0.18); }
+.ts-color-sw.is-active {
+  border-color: #172B4D;
+  box-shadow: 0 0 0 1px #fff inset;
+}
+.ts-color-clear {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--tk-border, #E6E1D7);
+  background: var(--tk-n-50, #F7F4EE);
+  border-radius: 6px;
+  font: inherit; font-size: 12px; color: var(--tk-text-muted);
+  cursor: pointer;
+}
+.ts-color-clear:hover { background: var(--tk-n-100); color: var(--tk-text); }
+
+/* Таймер (C4) */
+.ts-timer-row {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
+.ts-timer-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--tk-border, #E6E1D7);
+  background: var(--tk-surface, #fff);
+  border-radius: 999px;
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--tk-text);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.ts-timer-btn:hover { background: var(--tk-n-100); }
+.ts-timer-btn.is-running {
+  background: color-mix(in srgb, var(--tk-danger, #D33A2C) 12%, #fff);
+  border-color: color-mix(in srgb, var(--tk-danger, #D33A2C) 50%, transparent);
+  color: var(--tk-danger, #D33A2C);
+}
+.ts-timer-btn.is-running:hover {
+  background: color-mix(in srgb, var(--tk-danger, #D33A2C) 18%, #fff);
+}
+.ts-timer-live {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600;
+  color: var(--tk-text);
+}
+.ts-timer-live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--tk-danger, #D33A2C);
+  animation: ts-timer-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ts-timer-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.25); }
+}
+.ts-timer-live-text { font-variant-numeric: tabular-nums; }
+.ts-timer-hint {
+  font-size: 12px; color: var(--tk-text-muted);
+}
+.ts-timer-users {
+  list-style: none; margin: 8px 0 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ts-timer-user {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+.ts-timer-bubble {
+  width: 22px; height: 22px; font-size: 10px;
+}
+.ts-timer-user-name { flex: 1; color: var(--tk-text); }
+.ts-timer-user-sec {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600; color: var(--tk-text-muted);
+}
 
 /* Поповер выбора соисполнителя */
 .ts-assignee-add-wrap { position: relative; display: inline-block; margin-top: 6px; }

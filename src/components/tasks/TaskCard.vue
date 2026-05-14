@@ -1,7 +1,8 @@
 <template>
   <div
     class="task-card"
-    :class="[priorityClass, dueClass, { 'is-overdue': isOverdue, 'is-done': card.is_done, 'is-dragging': dragging, 'is-external': !!card.is_external }]"
+    :class="[priorityClass, dueClass, { 'is-overdue': isOverdue, 'is-done': card.is_done, 'is-dragging': dragging, 'is-external': !!card.is_external, 'has-bg-color': !!card.color }]"
+    :style="card.color ? { '--card-bg': card.color } : {}"
     draggable="true"
     @dragstart="onDragStart"
     @dragend="onDragEnd"
@@ -116,6 +117,15 @@
       <span v-if="card.attachments" class="meta-icon-stat" :title="'Вложений: ' + card.attachments">
         <TaskIcon name="paperclip" :size="12"/>
         <span>{{ card.attachments }}</span>
+      </span>
+
+      <!-- Таймер: суммарное время и индикатор «идёт» -->
+      <span v-if="card.timer && (card.timer.seconds_total > 0 || card.timer.any_running)"
+            class="meta-icon-stat meta-timer"
+            :class="{ 'is-running': card.timer.any_running, 'is-mine': card.timer.my_running }"
+            :title="timerTitle">
+        <TaskIcon name="clock" :size="12"/>
+        <span>{{ formatTimerShort(card.timer.seconds_total) }}</span>
       </span>
 
       <!-- Соисполнители (справа). Галочка на bubble — этот исполнитель закрыл свою часть. -->
@@ -280,6 +290,25 @@ const subtasksPct = computed(() => {
   const done = props.card.subtasks_done || 0;
   if (!total) return 0;
   return Math.round(done / total * 100);
+});
+
+// Таймер на канбан-карточке (C4): краткий формат + подсказка о состоянии
+function formatTimerShort(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  if (sec < 60) return sec + 'с';
+  const m = Math.floor(sec / 60);
+  if (m < 60) return m + 'м';
+  const h = Math.floor(m / 60);
+  const mr = m % 60;
+  return mr ? `${h}ч${mr}м` : `${h}ч`;
+}
+const timerTitle = computed(() => {
+  const t = props.card.timer;
+  if (!t) return '';
+  const total = formatTimerShort(t.seconds_total || 0);
+  if (t.my_running)  return `Ваш таймер идёт. Накоплено: ${total}`;
+  if (t.any_running) return `Идёт чужой таймер. Накоплено: ${total}`;
+  return `На задачу потрачено: ${total}`;
 });
 const isInArchiveColumn = computed(() => {
   const col = store.columns.find(c => c.id === props.card.column_id);
@@ -542,6 +571,18 @@ const vClickOutsideCard = {
 .task-card.is-done .task-card-title { text-decoration: line-through; color: var(--tk-text-muted); }
 .task-card.is-external { background: linear-gradient(180deg, #FAF5EE 0%, #FFFFFF 60%); border-color: #E8D9BD; }
 
+/* F4 — тонировка карточки выбранным цветом.
+   Подложка ~30% насыщенности от --card-bg, чтобы не дралась с метками сверху
+   и приоритетной полоской. is-external/is-done имеют свои правила и в эту
+   ветку не падают. */
+.task-card.has-bg-color:not(.is-external) {
+  background: color-mix(in srgb, var(--card-bg, transparent) 35%, #fff);
+  border-color: color-mix(in srgb, var(--card-bg, transparent) 55%, var(--tk-border, #E6E1D7));
+}
+.task-card.has-bg-color:not(.is-external):hover {
+  background: color-mix(in srgb, var(--card-bg, transparent) 42%, #fff);
+}
+
 .task-card-external {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11px; color: #8A6F3D; font-weight: 600;
@@ -785,6 +826,22 @@ const vClickOutsideCard = {
 }
 .meta-icon-stat.done { color: var(--tk-success, #1F8F4E); }
 .meta-icon-stat[role="button"], .meta-icon-stat:not(.done):hover { cursor: default; }
+
+/* Таймер (C4): обычно нейтрально серый, при активном — подсветка */
+.meta-icon-stat.meta-timer.is-running {
+  color: var(--tk-danger, #D33A2C);
+  background: color-mix(in srgb, var(--tk-danger, #D33A2C) 12%, transparent);
+}
+.meta-icon-stat.meta-timer.is-running.is-mine {
+  /* свой активный таймер дополнительно усилен пульсацией иконки */
+}
+.meta-icon-stat.meta-timer.is-running.is-mine :deep(svg) {
+  animation: meta-timer-pulse 1.4s ease-in-out infinite;
+}
+@keyframes meta-timer-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
 
 /* Срок горит / просрочено — мягкое тонирование рамки без второго ободка.
    Информативную нагрузку несёт также красная/жёлтая капсула срока внизу. */
