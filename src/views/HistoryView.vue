@@ -126,7 +126,10 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="plan in filteredPlans" :key="plan.id" class="ht-row" :class="{ 'ht-row-selected': drawerPlan?.id === plan.id }" @click="openPlanDrawer(plan)">
+          <tr v-for="plan in filteredPlans" :key="plan.id" class="ht-row" :class="{ 'ht-row-selected': drawerPlan?.id === plan.id }"
+              draggable="true"
+              @dragstart="onPlanDragStart($event, plan)"
+              @click="openPlanDrawer(plan)">
               <td class="ht-td ht-td-supplier">
                 <span class="ht-supplier-dot" :style="{ background: supplierColor(plan.supplier) }"></span>
                 {{ plan.supplier || '—' }}
@@ -315,6 +318,19 @@ function onOrderDragStart(e, order) {
   if (!e.dataTransfer) return;
   const label = `Заказ ${order.supplier || '#' + order.id} от ${formatDateShort(order.delivery_date)}`;
   const payload = JSON.stringify({ type: 'order', id: order.id, label });
+  try {
+    e.dataTransfer.setData('application/x-bk-entity', payload);
+    e.dataTransfer.effectAllowed = 'copy';
+  } catch (err) { /* старый браузер — игнор */ }
+}
+
+function onPlanDragStart(e, plan) {
+  if (!e.dataTransfer) return;
+  const period = plan.period_type === 'weeks'
+    ? `${plan.period_count} нед.`
+    : `${plan.period_count} мес.`;
+  const label = `План ${plan.supplier || '#' + plan.id} (${period})`;
+  const payload = JSON.stringify({ type: 'plan', id: plan.id, label });
   try {
     e.dataTransfer.setData('application/x-bk-entity', payload);
     e.dataTransfer.effectAllowed = 'copy';

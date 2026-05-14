@@ -1268,8 +1268,8 @@ function relationTo(r) {
       // В entity_label нет гарантированного формата — пока без supplier-фильтра.
       return { name: 'pricing' };
     case 'plan':
-      // /planning — пока без deep-link на конкретный план.
-      return { name: 'planning' };
+      // /planning?planId=X&mode=view — паттерн из HistoryView.copyPlanLink.
+      return { name: 'planning', query: { planId: r.entity_id, mode: 'view' } };
     case 'protocol':
       return '/protocols/' + r.entity_id;
     default:
