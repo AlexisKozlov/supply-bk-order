@@ -1806,4 +1806,38 @@ function onColDrop(i) {
 .sr-tag-mini.urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
 .sr-tag-mini.high   { background: var(--tk-prio-high-bg);   color: var(--tk-prio-high-fg); }
 .sr-due { font-weight: var(--tk-fw-semibold); color: var(--tk-success); }
+
+/* ═══ Мобильная адаптация (Этап 8) ═══
+   На узких экранах канбан превращается в горизонтальную ленту со snap'ом:
+   палец прокручивает колонки одну за другой, не залипая посередине.
+   Поиск (overlay) — на весь экран. Шапка доски сжимается. */
+@media (max-width: 720px) {
+  /* Snap-прокрутка: палец отпускает — ближайшая колонка цепляется к левому краю.
+     scroll-padding учитывает отступ слева, чтобы первая колонка не уезжала под край. */
+  .tasks-columns {
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: var(--tk-s-3);
+    scroll-padding-right: var(--tk-s-3);
+    cursor: auto;
+  }
+  .tasks-column-wrap {
+    scroll-snap-align: start;
+  }
+  /* Поиск-overlay: бокс растягивается почти на весь экран. */
+  .search-box {
+    top: var(--tk-s-3) !important;
+    width: calc(100% - var(--tk-s-4)) !important;
+    max-height: calc(100vh - var(--tk-s-4) * 2) !important;
+  }
+  /* Шапка доски — мельче отступы. */
+  .tasks-header { padding: var(--tk-s-2) var(--tk-s-3) 0; gap: var(--tk-s-1); }
+  /* Селект досок и кнопки шапки — сжать. */
+  .search-btn-kbd { display: none; }
+}
+
+/* Уважение к prefers-reduced-motion (a11y): отключаем анимации, оставляем
+   только опасные/важные (приём drop остаётся видимым через изменение цвета). */
+@media (prefers-reduced-motion: reduce) {
+  .tasks-columns { scroll-behavior: auto; }
+}
 </style>

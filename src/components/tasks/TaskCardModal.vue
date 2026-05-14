@@ -3176,10 +3176,22 @@ a.ts-rel-chip:hover {
   font-size: 11.5px; color: var(--tk-text-muted, #9C9384);
 }
 
-/* ═══ Адаптив ═══ */
-@media (max-width: 540px) {
-  .task-sidebar { max-width: 100%; }
+/* ═══ Адаптив ═══
+   На мобильных и планшетах модалка раскрывается на весь экран
+   (full-screen). На десктопе остаётся правым сайдбаром 600px из этапа 4.
+   Breakpoint поднят с 540 → 720, чтобы покрыть iPhone Plus / iPad mini. */
+@media (max-width: 720px) {
+  .task-sidebar {
+    max-width: 100%;
+    width: 100%;
+  }
+  /* Анимация выезда справа на мобильном смотрится странно — пусть просто появляется. */
+  .task-sidebar { animation: fadeIn .18s; }
   .ts-props { grid-template-columns: 1fr; }
+  /* Шапка чуть тоньше — на мобильном место дорого. */
+  .ts-header { padding: var(--tk-s-2) var(--tk-s-3); }
+  /* Содержимое — отступы поменьше. */
+  .ts-pane { padding: var(--tk-s-3) var(--tk-s-3) var(--tk-s-4); }
 }
 
 .ts-relation-link { color: var(--accent, #F4A261); text-decoration: none; }
