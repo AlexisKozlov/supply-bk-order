@@ -187,9 +187,34 @@
     </Teleport>
 
     <!-- Тело -->
-    <div v-if="store.loading && !store.board" class="tasks-loading">Загрузка…</div>
-    <div v-else-if="store.error" class="tasks-error">{{ store.error }}</div>
-    <div v-else-if="!store.board" class="tasks-empty">Создайте первую доску</div>
+    <!-- Loading: скелетон-доска из 3 колонок с 3 карточками каждая. Даёт ощущение
+         «вот так это будет», а не серый экран с надписью «Загрузка». -->
+    <div v-if="store.loading && !store.board" class="tasks-loading">
+      <div class="tasks-loading-grid">
+        <div v-for="col in 3" :key="col" class="tasks-loading-col">
+          <UiSkeleton width="60%" :height="14"/>
+          <UiSkeleton v-for="card in 3" :key="card" width="100%" :height="64"/>
+        </div>
+      </div>
+    </div>
+    <!-- Error: единый шелл с возможностью повторить. -->
+    <UiEmptyState v-else-if="store.error"
+                  class="tasks-error"
+                  title="Не удалось загрузить доску"
+                  :description="store.error"
+                  action-label="Повторить"
+                  @action="store.reload">
+      <template #icon><TaskIcon name="close" :size="48"/></template>
+    </UiEmptyState>
+    <!-- Empty: ни одной доски. Кнопка должна вести в /tasks-настройки —
+         сейчас доска создаётся автоматически на первом входе через tEnsureDefaultBoard,
+         так что этот экран редкий, но осмысленный. -->
+    <UiEmptyState v-else-if="!store.board"
+                  class="tasks-empty"
+                  title="Досок пока нет"
+                  description="Похоже, первая доска ещё не создалась. Перезагрузи страницу или обратись к админу.">
+      <template #icon><TaskIcon name="columns" :size="48"/></template>
+    </UiEmptyState>
 
     <div v-else class="tasks-board-area">
       <!-- Колонки (канбан) -->
@@ -363,6 +388,7 @@ import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import UiEmptyState from '@/components/ui/UiEmptyState.vue';
+import UiSkeleton from '@/components/ui/UiSkeleton.vue';
 import TaskColumn from '@/components/tasks/TaskColumn.vue';
 import TaskIcon from '@/components/tasks/TaskIcon.vue';
 import ColorPalette from '@/components/tasks/ColorPalette.vue';
@@ -1046,11 +1072,34 @@ function onColDrop(i) {
   white-space: nowrap;
 }
 
-.tasks-loading, .tasks-error, .tasks-empty {
-  padding: 40px; text-align: center; color: var(--tk-text-muted);
-  font-size: var(--tk-fz-md);
+/* Error и Empty состояния доски — теперь через <UiEmptyState>, отдельные
+   классы только для базовой обёртки и небольшого верхнего отступа. */
+.tasks-error, .tasks-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+
+/* Loading: скелетон-доска. Три серых колонки с тремя серыми карточками каждая —
+   пользователь сразу видит «вот в такой форме будет контент», а не пустой экран. */
+.tasks-loading {
+  flex: 1;
+  padding: var(--tk-s-4);
+  overflow: hidden;
 }
-.tasks-error { color: var(--tk-danger); }
+.tasks-loading-grid {
+  display: flex;
+  gap: var(--tk-s-3);
+  height: 100%;
+  align-items: stretch;
+}
+.tasks-loading-col {
+  flex: 0 0 280px;
+  background: var(--tk-bg-column);
+  border: 1px solid var(--tk-border-soft);
+  border-radius: var(--tk-r-md);
+  padding: var(--tk-s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--tk-s-2);
+}
+.tasks-loading-col > * { display: block; }
 
 .tasks-board-area {
   flex: 1; overflow: hidden;

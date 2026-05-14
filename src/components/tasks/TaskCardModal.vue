@@ -2,7 +2,31 @@
   <Teleport to="body">
     <div class="task-sidebar-backdrop" @click="close"></div>
     <aside class="task-sidebar" @click.stop :class="{ 'task-sidebar-enter': true }">
-      <div v-if="loading" class="task-sidebar-loader">Загрузка…</div>
+      <!-- Loading-скелетон: повторяет визуальный ритм будущей модалки —
+           шапка, ряд пилюль, секция описания. Не «крутится спиннер», а
+           вырастает похожий каркас. -->
+      <div v-if="loading" class="task-sidebar-loader">
+        <div class="tsl-header">
+          <UiSkeleton width="32px" :height="32" shape="circle"/>
+          <div class="tsl-header-text">
+            <UiSkeleton width="70%" :height="20"/>
+            <UiSkeleton width="40%" :height="12"/>
+          </div>
+          <UiSkeleton width="32px" :height="32" shape="circle"/>
+        </div>
+        <div class="tsl-props">
+          <UiSkeleton width="80px" :height="24" shape="pill"/>
+          <UiSkeleton width="100px" :height="24" shape="pill"/>
+          <UiSkeleton width="90px" :height="24" shape="pill"/>
+          <UiSkeleton width="70px" :height="24" shape="pill"/>
+        </div>
+        <div class="tsl-pane">
+          <UiSkeleton width="30%" :height="11"/>
+          <UiSkeleton width="100%" :height="14"/>
+          <UiSkeleton width="100%" :height="14"/>
+          <UiSkeleton width="80%" :height="14"/>
+        </div>
+      </div>
       <template v-else-if="full">
         <!-- Шапка -->
         <header class="ts-header">
@@ -591,6 +615,7 @@ import { renderMarkdown } from '@/lib/markdown.js';
 import TaskIcon from './TaskIcon.vue';
 import MarkdownEditor from './MarkdownEditor.vue';
 import DatetimePicker from './DatetimePicker.vue';
+import UiSkeleton from '@/components/ui/UiSkeleton.vue';
 const dlg = useTasksDialogs();
 const showError = (e, prefix = 'Ошибка') => dlg.info(prefix, e?.message || String(e), 'error');
 
@@ -1513,7 +1538,34 @@ function plural(n, forms) {
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
-.task-sidebar-loader { padding: 40px; text-align: center; color: var(--tk-text-muted); font-size: var(--tk-fz-md); }
+/* Loading-скелетон модалки: повторяет ритм будущего контента — шапка,
+   пилюли свойств, секция описания. UiSkeleton с shimmer-анимацией. */
+.task-sidebar-loader {
+  display: flex; flex-direction: column;
+  gap: var(--tk-s-4);
+  padding: var(--tk-s-4);
+  flex: 1;
+}
+.tsl-header {
+  display: flex; align-items: center; gap: var(--tk-s-3);
+  padding-bottom: var(--tk-s-3);
+  border-bottom: 1px solid var(--tk-border-soft);
+}
+.tsl-header-text {
+  flex: 1;
+  display: flex; flex-direction: column;
+  gap: var(--tk-s-1);
+}
+.tsl-props {
+  display: flex; gap: var(--tk-s-2);
+  flex-wrap: wrap;
+  padding-bottom: var(--tk-s-3);
+  border-bottom: 1px solid var(--tk-border-soft);
+}
+.tsl-pane {
+  display: flex; flex-direction: column;
+  gap: var(--tk-s-2);
+}
 
 /* ═══ Шапка ═══ */
 .ts-header {
