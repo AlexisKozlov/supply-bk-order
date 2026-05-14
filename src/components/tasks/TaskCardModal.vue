@@ -1257,6 +1257,19 @@ function relationTo(r) {
     case 'order':
       // /order?orderId=X&mode=view — паттерн из HistoryView.copyOrderLink.
       return { name: 'order', query: { orderId: r.entity_id, mode: 'view' } };
+    case 'supplier':
+      // Конкретного per-supplier роута нет — открываем вкладку «Поставщики»
+      // в DatabaseView. Пользователь увидит список и найдёт нужного.
+      return { name: 'database', query: { tab: 'suppliers' } };
+    case 'pricing':
+      // Конкретного per-PSC роута нет — открываем PricingView. Если связь
+      // содержит supplier в label (формат «ПСЦ X · Supplier»), пытаемся
+      // вытащить и пробросить как filter, чтобы список сузился.
+      // В entity_label нет гарантированного формата — пока без supplier-фильтра.
+      return { name: 'pricing' };
+    case 'plan':
+      // /planning — пока без deep-link на конкретный план.
+      return { name: 'planning' };
     case 'protocol':
       return '/protocols/' + r.entity_id;
     default:

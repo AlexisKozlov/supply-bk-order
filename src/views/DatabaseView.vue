@@ -98,7 +98,10 @@
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!sortedSuppliers.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="s in sortedSuppliers" :key="s.id" class="db-card" @click="!isViewer && editSupplier(s)" :style="isViewer ? 'cursor:default' : ''">
+        <div v-for="s in sortedSuppliers" :key="s.id" class="db-card"
+             draggable="true"
+             @dragstart="onSupplierDragStart($event, s)"
+             @click="!isViewer && editSupplier(s)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
             <span class="db-card-supplier-name">{{ s.short_name }}</span>
             <span v-if="s.full_name" style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ s.full_name }}</span>
@@ -350,7 +353,7 @@ const restaurantStore = useRestaurantStore();
 const isViewer = computed(() => !userStore.hasAccess('database', 'edit'));
 const isAdmin = computed(() => userStore.hasAccess('database', 'full'));
 
-const activeTab = useTabRoute('products', ['products', 'suppliers', 'restaurants', 'recipes']);
+const activeTab = useTabRoute('products', ['products', 'suppliers', 'analogs', 'restaurants', 'recipes']);
 const searchQuery = ref('');
 const loading = ref(false);
 const products = ref([]);
@@ -360,6 +363,19 @@ let _suppLoadId = 0;
 const editCardModal = ref({ show: false, product: null });
 const editSupplierModal = ref({ show: false, supplier: null });
 const confirmModal = ref({ show: false, title: '', message: '', resolve: null });
+// Drag-from-anywhere → создание задачи (этап 10 расширение).
+// Контракт: dataTransfer.application/x-bk-entity = JSON {type, id, label}.
+// Виджет TaskQuickDropWidget из AppLayout раскрывается автоматически на dragstart.
+function onSupplierDragStart(e, supplier) {
+  if (!e.dataTransfer) return;
+  const label = `Поставщик ${supplier.short_name || supplier.full_name || '#' + supplier.id}`;
+  const payload = JSON.stringify({ type: 'supplier', id: supplier.id, label });
+  try {
+    e.dataTransfer.setData('application/x-bk-entity', payload);
+    e.dataTransfer.effectAllowed = 'copy';
+  } catch { /* старый браузер — игнор */ }
+}
+
 function confirmAction(title, message) {
   return new Promise(r => { confirmModal.value = { show: true, title, message, resolve: r }; });
 }

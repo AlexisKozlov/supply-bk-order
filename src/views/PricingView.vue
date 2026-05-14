@@ -190,7 +190,10 @@
       <div v-if="loadingAgreements" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredAgreements.length" style="text-align:center;padding:40px;color:var(--text-muted);">Протоколы не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="agreementCardClass(a)" @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
+        <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="agreementCardClass(a)"
+             draggable="true"
+             @dragstart="onAgreementDragStart($event, a)"
+             @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
           <div class="db-card-top">
             <span class="agreement-status" :class="'st-' + a.status">{{ statusLabel(a.status) }}</span>
             <span class="doc-type-badge" :class="'dt-' + (a.doc_type || 'psc')">{{ docTypeLabel(a.doc_type) }}</span>
@@ -707,6 +710,19 @@ const apiBase = API_BASE;
 const agreementUrls = ref({}); // id → URL
 const agFormUrl = ref('');
 function agUrl(a) { return agreementUrls.value[a.id] || ''; }
+
+// Drag-from-anywhere → создание задачи (этап 10 расширение).
+// Контракт: dataTransfer.application/x-bk-entity = JSON {type, id, label}.
+function onAgreementDragStart(e, agreement) {
+  if (!e.dataTransfer) return;
+  const label = `ПСЦ ${agreement.number || '#' + agreement.id}` +
+                (agreement.supplier ? ` · ${agreement.supplier}` : '');
+  const payload = JSON.stringify({ type: 'pricing', id: agreement.id, label });
+  try {
+    e.dataTransfer.setData('application/x-bk-entity', payload);
+    e.dataTransfer.effectAllowed = 'copy';
+  } catch { /* старый браузер — игнор */ }
+}
 async function refreshAgreementUrls() {
   const map = {};
   for (const a of agreements.value) {
