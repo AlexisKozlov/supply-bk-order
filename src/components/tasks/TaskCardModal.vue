@@ -394,10 +394,12 @@
             </div>
             <div v-if="full.relations.length" class="ts-rel-chips">
               <component v-for="r in full.relations" :key="r.id"
-                         :is="r.entity_type === 'protocol' ? 'router-link' : 'div'"
-                         :to="r.entity_type === 'protocol' ? '/protocols/' + r.entity_id : undefined"
+                         :is="relationTo(r) ? 'router-link' : 'div'"
+                         :to="relationTo(r) || undefined"
                          class="ts-rel-chip"
                          :class="'ts-rel-' + r.entity_type">
+                <!-- router-link рендерится как <a>, и a.ts-rel-chip уже
+                     стилизована как кликабельная (cursor + hover). -->
                 <span class="ts-rel-chip-icon">{{ relationTypeIcon(r.entity_type) }}</span>
                 <span class="ts-rel-chip-type">{{ relationTypeLabel(r.entity_type) }}</span>
                 <span class="ts-rel-chip-label">{{ r.entity_label || r.entity_id }}</span>
@@ -1243,6 +1245,23 @@ function relationTypeLabel(t) {
 }
 function relationTypeIcon(t) {
   return ({ order: '📦', supplier: '🚚', product: '🍔', pricing: '💰', plan: '📋', so_order: '📝', protocol: '📑' })[t] || '🔗';
+}
+// Возвращает router-link target ({name, query, params}) для типов связей,
+// которые можно открыть кликом. Для типов, у которых пока нет deep-link'а —
+// возвращает null, и тогда чип рендерится как обычный div (как было раньше).
+// При расширении: добавь сюда новый case для supplier/pricing/plan, когда
+// будут известны их роуты с параметрами для одной сущности.
+function relationTo(r) {
+  if (!r) return null;
+  switch (r.entity_type) {
+    case 'order':
+      // /order?orderId=X&mode=view — паттерн из HistoryView.copyOrderLink.
+      return { name: 'order', query: { orderId: r.entity_id, mode: 'view' } };
+    case 'protocol':
+      return '/protocols/' + r.entity_id;
+    default:
+      return null;
+  }
 }
 const RELATION_TYPES = [
   { value: 'order',     label: 'Заказ',         icon: '📦' },
