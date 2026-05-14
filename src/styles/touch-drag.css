@@ -1,0 +1,40 @@
+/*
+  touch-drag.css — глобальные стили для long-press DnD на тач-устройствах.
+
+  Классы добавляются программно из src/composables/useTouchDrag.js:
+  - .tdrag-source — на оригинальной карточке во время drag (приглушаем).
+  - .tdrag-ghost  — клон карточки следует за пальцем (в document.body,
+                    поэтому правила должны быть глобальные, не scoped).
+  - .tdrag-over   — на колонке-цели когда палец над ней.
+
+  На десктопе не используются — там работает HTML5 DnD.
+*/
+
+.tdrag-source {
+  opacity: 0.4;
+  filter: saturate(0.6);
+  transition: opacity var(--tk-anim-fast, 120ms) ease,
+              filter var(--tk-anim-fast, 120ms) ease;
+}
+
+.tdrag-ghost {
+  /* position/top/left/width/transform — задаются inline в useTouchDrag.js.
+     Здесь — только визуальные «подъёмные» эффекты. */
+  border-radius: var(--tk-r-card, 12px);
+  will-change: transform;
+  cursor: grabbing;
+}
+
+.tdrag-over {
+  outline: 2px solid var(--tk-accent, #E87A1E);
+  outline-offset: -2px;
+  background: var(--tk-accent-soft, rgba(232, 122, 30, 0.10));
+  transition: outline-color var(--tk-anim-fast, 120ms) ease,
+              background var(--tk-anim-fast, 120ms) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tdrag-source, .tdrag-ghost, .tdrag-over {
+    transition: none;
+  }
+}

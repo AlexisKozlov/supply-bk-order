@@ -3,6 +3,7 @@
     class="task-column"
     :class="{ 'is-drop-target': dropActive, 'is-archive': column.is_archive_column, 'wip-exceeded': wipExceeded }"
     :style="{ '--col-color': column.color || '#9E9E9E' }"
+    :data-column-id="column.id"
     @dragover.prevent="onColumnDragOver"
     @dragleave="onColumnDragLeave"
     @drop="onColumnDrop"

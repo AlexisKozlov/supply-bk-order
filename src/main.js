@@ -9,6 +9,7 @@ import { notifyAppUpdateRequired } from '@/lib/appUpdateNotify.js';
 import { db } from '@/lib/apiClient.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import './styles/tokens.css';
+import './styles/touch-drag.css';
 import './assets/style.css';
 import './assets/components.css';
 import './assets/compact.css';

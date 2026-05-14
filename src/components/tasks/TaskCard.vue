@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="cardEl"
     class="task-card"
     :class="[priorityClass, dueClass, { 'is-overdue': isOverdue, 'is-done': card.is_done, 'is-dragging': dragging, 'is-external': !!card.is_external, 'has-bg-color': !!card.color }]"
     :style="card.color ? { '--card-bg': card.color } : {}"
@@ -214,6 +215,7 @@ import DatetimePicker from './DatetimePicker.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
+import { useTouchDrag } from '@/composables/useTouchDrag.js';
 const dlg = useTasksDialogs();
 const showError = (e) => dlg.info('Ошибка', e?.message || String(e), 'error');
 
@@ -225,8 +227,33 @@ const props = defineProps({
 const emit = defineEmits(['open', 'open-chat', 'open-subtask', 'subtasks-changed', 'dragstart', 'dragend']);
 
 const store = useTasksStore();
+const cardEl = ref(null);
 const dragging = ref(false);
 const popover = ref(null); // 'priority' | 'due' | 'labels' | null
+
+// Long-press DnD на тач-устройствах. На десктопе работает HTML5 (draggable),
+// здесь pointerdown→pointermove→pointerup имитируют тот же поток.
+// Композабл сам вешает/снимает слушатели через onUnmounted.
+useTouchDrag({
+  cardRef: cardEl,
+  onDragStart() {
+    closePopover();
+    dragging.value = true;
+    emit('dragstart', props.card);
+  },
+  async onDrop(targetColumnId) {
+    dragging.value = false;
+    emit('dragend');
+    if (targetColumnId === props.card.column_id) return; // та же колонка
+    try {
+      await store.moveCard(props.card.id, targetColumnId, 0);
+    } catch (e) { showError(e); }
+  },
+  onCancel() {
+    dragging.value = false;
+    emit('dragend');
+  },
+});
 
 // Подзадачи: состояние «свёрнут/развёрнут» сохраняется в localStorage per-карточка.
 // Ключ: bk_tasks_subtasks_expanded_{cardId}. По умолчанию свёрнуто.
