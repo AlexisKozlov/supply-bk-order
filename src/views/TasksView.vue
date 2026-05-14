@@ -897,103 +897,9 @@ function onColDrop(i) {
 </script>
 
 <style scoped>
-/* ═══ Дизайн-токены модуля «Задачи» ═══
-   Бренд: оранжевый #E87A1E. Стиль: Trello/Jira — нейтральная серая база, цветной акцент только в активных состояниях.
-   Дочерние компоненты (TaskColumn, TaskCard, TaskCardModal) наследуют эти переменные. */
+/* Дизайн-токены модуля больше не объявляются локально — переехали в src/styles/tokens.css на :root.
+   В этой ветке остаются только стили самой страницы. */
 .tasks-view {
-  /* Радиусы — добавлен r-card специально для крупных карточек/колонок */
-  --tk-r-sm: 4px;
-  --tk-r-md: 10px;
-  --tk-r-lg: 14px;
-  --tk-r-card: 12px;
-  --tk-r-pill: 999px;
-
-  /* Отступы — ступени по 4 */
-  --tk-s-1: 4px;
-  --tk-s-2: 8px;
-  --tk-s-3: 12px;
-  --tk-s-4: 16px;
-  --tk-s-5: 20px;
-  --tk-s-6: 24px;
-
-  /* Тени — мягче и тоньше (Yougile/Linear) */
-  --tk-shadow-card: 0 1px 2px rgba(15,23,42,0.05), 0 1px 4px rgba(15,23,42,0.04);
-  --tk-shadow-card-hover: 0 4px 12px rgba(15,23,42,0.10), 0 1px 3px rgba(15,23,42,0.06);
-  --tk-shadow-column: 0 1px 2px rgba(15,23,42,0.04);
-  --tk-shadow-popover: 0 12px 32px rgba(15,23,42,0.14), 0 2px 4px rgba(15,23,42,0.06);
-
-  /* Типографика */
-  --tk-fz-xs: 11px;
-  --tk-fz-sm: 12px;
-  --tk-fz-md: 13px;
-  --tk-fz-lg: 14px;
-  --tk-fz-xl: 16px;
-  --tk-fz-h1: 18px;
-  --tk-fw-medium: 500;
-  --tk-fw-semibold: 600;
-  --tk-fw-bold: 700;
-
-  /* Палитра — тёплая нейтральная шкала, согласуется с бежевым фоном */
-  --tk-n-0: #FFFFFF;
-  --tk-n-50: #FAF9F5;
-  --tk-n-100: #F3F0E8;
-  --tk-n-200: #E6E1D7;
-  --tk-n-300: #C8C1B2;
-  --tk-n-400: #9C9384;
-  --tk-n-500: #6E6657;
-  --tk-n-600: #534D40;
-  --tk-n-700: #3D382E;
-  --tk-n-800: #2A2620;
-  --tk-n-900: #1A1814;
-
-  /* Поверхности: тёплая бежевая база доски привязывает модуль к бренду
-     (оранжевый), колонки — чистый белый с очень тонкой тёплой границей.
-     Карточки тоже белые, но за счёт плотной тени отделяются. */
-  --tk-bg-board: #F6F4EF;
-  --tk-bg-column: #FFFFFF;
-  --tk-bg-card: #FFFFFF;
-  --tk-bg-popover: #FFFFFF;
-  --tk-border: #E6E1D7;
-  --tk-border-soft: #EFEAE0;
-
-  /* Акцент бренда (оранжевый, сохраняем) */
-  --tk-accent: #E87A1E;
-  --tk-accent-hover: #D26B12;
-  --tk-accent-soft: rgba(232,122,30,0.10);
-  --tk-accent-soft-strong: rgba(232,122,30,0.18);
-  --tk-accent-text: #B85A0E;
-
-  /* Доп. акцент — для разнообразия в карточках/чипах */
-  --tk-violet: #635BFF;
-  --tk-violet-soft: rgba(99,91,255,0.12);
-
-  /* Приоритеты — пастельные плашки */
-  --tk-prio-urgent-bg: #FEE7E0;
-  --tk-prio-urgent-fg: #B23B16;
-  --tk-prio-high-bg: #FFF1D6;
-  --tk-prio-high-fg: #8B5E00;
-  --tk-prio-medium-bg: #E4ECFE;
-  --tk-prio-medium-fg: #2C4DB0;
-  --tk-prio-low-bg: #EEF0F4;
-  --tk-prio-low-fg: #525B6F;
-
-  /* Семантика */
-  --tk-success: #16A364;
-  --tk-success-soft: rgba(22,163,100,0.12);
-  --tk-warning: #BB6A0A;
-  --tk-warning-soft: rgba(187,106,10,0.12);
-  --tk-danger: #D33A2C;
-  --tk-danger-soft: rgba(211,58,44,0.10);
-
-  /* Текст */
-  --tk-text: var(--tk-n-900);
-  --tk-text-secondary: var(--tk-n-700);
-  --tk-text-muted: var(--tk-n-500);
-
-  --tk-transition: 140ms ease;
-  --tk-focus-ring: 0 0 0 3px rgba(232,122,30,0.25);
-
-  /* ═══ собственно стили страницы ═══ */
   display: flex; flex-direction: column;
   height: 100%;
   background: var(--tk-bg-board);
@@ -1665,26 +1571,9 @@ function onColDrop(i) {
 .ts-icon-btn:hover { color: var(--tk-danger); background: var(--tk-danger-soft); }
 
 /* ═══ Поиск ═══
-   Teleport-ится в body — токены с .tasks-view не наследуются. Дублируем минимум локально. */
+   Teleport в body — токены подтягиваются глобально с :root через src/styles/tokens.css. */
 .search-modal {
-  --tk-r-sm: 4px; --tk-r-md: 8px; --tk-r-lg: 12px;
-  --tk-s-1: 4px; --tk-s-2: 8px; --tk-s-3: 12px; --tk-s-4: 16px; --tk-s-5: 20px; --tk-s-6: 24px;
-  --tk-fz-xs: 11px; --tk-fz-sm: 12px; --tk-fz-md: 13px; --tk-fz-lg: 14px; --tk-fz-xl: 16px;
-  --tk-fw-medium: 500; --tk-fw-semibold: 600; --tk-fw-bold: 700;
-  --tk-n-0: #FFFFFF; --tk-n-50: #F7F8F9; --tk-n-100: #F1F2F4;
-  --tk-n-200: #DCDFE4; --tk-n-300: #B3B9C4; --tk-n-500: #758195;
-  --tk-n-700: #44546F; --tk-n-900: #172B4D;
-  --tk-bg-popover: #FFFFFF;
-  --tk-border: #DCDFE4; --tk-border-soft: #E1E4E8;
-  --tk-accent: #E87A1E; --tk-accent-text: #B85A0E;
-  --tk-prio-urgent-bg: #FFEBE6; --tk-prio-urgent-fg: #BF2600;
-  --tk-prio-high-bg: #FFF7D6;   --tk-prio-high-fg:   #974F0C;
-  --tk-success: #1F8F4E;
-  --tk-text: var(--tk-n-900); --tk-text-secondary: var(--tk-n-700); --tk-text-muted: var(--tk-n-500);
-  --tk-transition: 120ms ease;
-  --tk-shadow-popover: 0 8px 24px rgba(9,30,66,0.18), 0 1px 2px rgba(9,30,66,0.10);
-
-  position: fixed; inset: 0; background: rgba(9,30,66,0.50);
+  position: fixed; inset: 0; background: var(--tk-bg-overlay);
   z-index: 1100;
 }
 .search-box {

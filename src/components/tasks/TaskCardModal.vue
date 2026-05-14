@@ -1486,73 +1486,13 @@ function plural(n, forms) {
 </script>
 
 <style scoped>
-/* Локальные fallback'и токенов: если modal teleportится в body, токены с .tasks-view не наследуются.
-   Поэтому держим минимальную копию ключевых переменных. */
-.task-sidebar {
-  --tk-r-sm: 4px;
-  --tk-r-md: 8px;
-  --tk-r-lg: 12px;
-  --tk-s-1: 4px;
-  --tk-s-2: 8px;
-  --tk-s-3: 12px;
-  --tk-s-4: 16px;
-  --tk-s-5: 20px;
-  --tk-s-6: 24px;
-  --tk-fz-xs: 11px;
-  --tk-fz-sm: 12px;
-  --tk-fz-md: 13px;
-  --tk-fz-lg: 14px;
-  --tk-fz-xl: 16px;
-  --tk-fz-h1: 18px;
-  --tk-fw-medium: 500;
-  --tk-fw-semibold: 600;
-  --tk-fw-bold: 700;
-  --tk-n-0: #FFFFFF;
-  --tk-n-50: #F7F8F9;
-  --tk-n-100: #F1F2F4;
-  --tk-n-200: #DCDFE4;
-  --tk-n-300: #B3B9C4;
-  --tk-n-400: #8590A2;
-  --tk-n-500: #758195;
-  --tk-n-600: #626F86;
-  --tk-n-700: #44546F;
-  --tk-n-800: #2C3E5D;
-  --tk-n-900: #172B4D;
-  --tk-bg-card: #FFFFFF;
-  --tk-bg-popover: #FFFFFF;
-  --tk-border: #DCDFE4;
-  --tk-border-soft: #E1E4E8;
-  --tk-accent: #E87A1E;
-  --tk-accent-hover: #D26B12;
-  --tk-accent-soft: rgba(232,122,30,0.10);
-  --tk-accent-soft-strong: rgba(232,122,30,0.18);
-  --tk-accent-text: #B85A0E;
-  --tk-prio-urgent-bg: #FFEBE6;
-  --tk-prio-urgent-fg: #BF2600;
-  --tk-prio-high-bg: #FFF7D6;
-  --tk-prio-high-fg: #974F0C;
-  --tk-prio-medium-bg: #DEEBFF;
-  --tk-prio-medium-fg: #0747A6;
-  --tk-prio-low-bg: #EBECF0;
-  --tk-prio-low-fg: #44546F;
-  --tk-success: #1F8F4E;
-  --tk-success-soft: rgba(31,143,78,0.10);
-  --tk-warning: #B65E03;
-  --tk-warning-soft: rgba(182,94,3,0.10);
-  --tk-danger: #C9372C;
-  --tk-danger-soft: rgba(201,55,44,0.08);
-  --tk-text: var(--tk-n-900);
-  --tk-text-secondary: var(--tk-n-700);
-  --tk-text-muted: var(--tk-n-500);
-  --tk-transition: 120ms ease;
-  --tk-focus-ring: 0 0 0 2px rgba(232,122,30,0.35);
-  --tk-shadow-popover: 0 8px 24px rgba(9,30,66,0.18), 0 1px 2px rgba(9,30,66,0.10);
-}
+/* Дизайн-токены подтягиваются глобально с :root через src/styles/tokens.css.
+   Teleport в body больше не разрывает каскад — переменные доступны везде. */
 
 /* ═══ Сайдбар справа ═══ */
 .task-sidebar-backdrop {
   position: fixed; inset: 0;
-  background: rgba(9,30,66,0.42);
+  background: var(--tk-bg-overlay);
   z-index: 998;
   animation: fadeIn .15s;
 }
