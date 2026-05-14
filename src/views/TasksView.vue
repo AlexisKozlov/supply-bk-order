@@ -303,9 +303,24 @@
           </button>
         </div>
 
-        <div v-if="searchError" class="search-empty" style="color: var(--tk-text-muted);">{{ searchError }}</div>
-        <div v-else-if="searchQuery.length < 2" class="search-hint">Введите минимум 2 символа</div>
-        <div v-else-if="!filteredResults.length && !searchLoading" class="search-empty">Ничего не найдено</div>
+        <UiEmptyState v-if="searchError"
+                      class="search-state"
+                      title="Не удалось найти"
+                      :description="searchError">
+          <template #icon><TaskIcon name="search" :size="48"/></template>
+        </UiEmptyState>
+        <UiEmptyState v-else-if="searchQuery.length < 2"
+                      class="search-state"
+                      title="Начни вводить запрос"
+                      description="Минимум 2 символа. Поиск идёт по названию и описанию.">
+          <template #icon><TaskIcon name="search" :size="48"/></template>
+        </UiEmptyState>
+        <UiEmptyState v-else-if="!filteredResults.length && !searchLoading"
+                      class="search-state"
+                      :title="`«${searchQuery}» — ничего не нашлось`"
+                      description="Попробуй другие слова или загляни в архив через вкладки выше.">
+          <template #icon><TaskIcon name="search" :size="48"/></template>
+        </UiEmptyState>
         <div v-else class="search-results">
           <div v-for="(r, i) in filteredResults" :key="r.id"
                class="search-result"
@@ -347,6 +362,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import TaskColumn from '@/components/tasks/TaskColumn.vue';
 import TaskIcon from '@/components/tasks/TaskIcon.vue';
 import ColorPalette from '@/components/tasks/ColorPalette.vue';
@@ -1666,9 +1682,10 @@ function onColDrop(i) {
   padding: var(--tk-s-3) var(--tk-s-4);
   font-size: inherit;
 }
-.search-empty, .search-hint {
-  padding: var(--tk-s-6); text-align: center;
-  color: var(--tk-text-muted); font-size: var(--tk-fz-md);
+/* Старые стили .search-empty / .search-hint удалены — заменены на <UiEmptyState>.
+   Обёртке .search-state даём более компактные отступы внутри поиска. */
+.search-state :deep(.ui-empty) {
+  padding: var(--tk-s-5) var(--tk-s-4);
 }
 /* Yougile-style: компактные строки 48px, иконка слева + заголовок + время справа,
    на второй строке подзаголовок (доска · колонка · теги). */
