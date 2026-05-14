@@ -39,8 +39,33 @@
 
 import { onUnmounted, watchEffect } from 'vue';
 
-const LONG_PRESS_MS = 450;
-const MOVE_TOLERANCE_PX = 8;
+const LONG_PRESS_MS = 380;
+const MOVE_TOLERANCE_PX = 12;
+
+// Селектор интерактивных элементов внутри карточки, на которых long-press
+// не должен запускать drag. Туда попадают: чекбокс «готово», меню «⋮»,
+// чипы метаданных, ссылки в плашках, поповеры, подзадачи и форма добавления.
+// Без этого пользователь, тапая по кнопке, случайно держал её 450мс — стартовал drag.
+const INTERACTIVE_SELECTOR = [
+  'button',
+  'input',
+  'select',
+  'textarea',
+  'a',
+  '[role="button"]',
+  '.meta-pill',
+  '.meta-icon-stat',
+  '.meta-assignees',
+  '.label-pill',
+  '.card-menu',
+  '.card-menu-btn',
+  '.task-card-done-chk',
+  '.task-card-external-mark',
+  '.card-popover',
+  '.subtasks-toggle',
+  '.subtasks-list',
+  '.subtask-add-form',
+].join(',');
 
 export function useTouchDrag({ cardRef, onDragStart, onDrop, onCancel }) {
   let timerId = null;
@@ -56,6 +81,10 @@ export function useTouchDrag({ cardRef, onDragStart, onDrop, onCancel }) {
     // Только тач. На мыши и пере полагаемся на нативный HTML5 DnD.
     if (e.pointerType !== 'touch') return;
     if (e.isPrimary === false) return;
+    // Игнорируем нажатия на интерактивные элементы внутри карточки —
+    // там пользователь хочет нажать кнопку, не запустить drag.
+    const target = e.target;
+    if (target && target.closest && target.closest(INTERACTIVE_SELECTOR)) return;
     startX = e.clientX;
     startY = e.clientY;
     timerId = setTimeout(() => beginDrag(), LONG_PRESS_MS);
