@@ -380,6 +380,9 @@ function onSupplierDragStart(e, supplier) {
 
 // Per-supplier deep-link: ?supplierId=X в URL — скроллим к карточке + подсветка.
 // Используется при клике на плашку «Поставщик» в карточке задачи (TaskCardModal.relationTo).
+// Срабатывает И при первом монтировании (onMounted), И при изменении URL уже на
+// открытой странице (watch ниже) — последнее важно, потому что AppLayout держит
+// KeepAlive, и при второй навигации в /database компонент не размонтируется.
 const highlightedSupplierId = ref(null);
 async function focusSupplierFromQuery() {
   const id = parseInt(route.query.supplierId, 10);
@@ -394,6 +397,11 @@ async function focusSupplierFromQuery() {
     setTimeout(() => { if (highlightedSupplierId.value === id) highlightedSupplierId.value = null; }, 2400);
   }
 }
+// In-page навигация: пользователь уже на /database, кликнул плашку связи в
+// модалке задачи — URL меняется, onMounted не срабатывает, нужно отдельно watch.
+watch(() => route.query.supplierId, (newId) => {
+  if (newId) focusSupplierFromQuery();
+});
 
 function confirmAction(title, message) {
   return new Promise(r => { confirmModal.value = { show: true, title, message, resolve: r }; });

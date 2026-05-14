@@ -190,7 +190,12 @@ export function useTouchDrag({ cardRef, onDragStart, onDrop, onCancel }) {
     let targetColumnId = null;
     if (e && e.clientX != null && e.clientY != null) {
       const col = columnUnderPoint(e.clientX, e.clientY);
-      if (col) targetColumnId = parseInt(col.dataset.columnId, 10);
+      if (col) {
+        const parsed = parseInt(col.dataset.columnId, 10);
+        // Защита от NaN — если data-column-id отсутствует или невалиден,
+        // оставляем null чтобы onDrop понял что цели нет.
+        targetColumnId = Number.isFinite(parsed) ? parsed : null;
+      }
     }
 
     if (lastTargetCol) {

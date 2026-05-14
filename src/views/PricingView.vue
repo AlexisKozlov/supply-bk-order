@@ -728,6 +728,8 @@ function onAgreementDragStart(e, agreement) {
 
 // Per-agreement deep-link: ?agreementId=X в URL — скроллим к карточке + подсветка.
 // Используется при клике на плашку «ПСЦ» в карточке задачи (TaskCardModal.relationTo).
+// Срабатывает И при onMounted, И при in-page навигации (watch ниже) — нужно из-за
+// KeepAlive в AppLayout: компонент не размонтируется, onMounted не повторяется.
 const highlightedAgreementId = ref(null);
 async function focusAgreementFromQuery() {
   const id = parseInt(route.query.agreementId, 10);
@@ -743,6 +745,11 @@ async function focusAgreementFromQuery() {
     setTimeout(() => { if (highlightedAgreementId.value === id) highlightedAgreementId.value = null; }, 2400);
   }
 }
+// In-page навигация: пользователь уже на /pricing, кликнул плашку связи в
+// модалке задачи — URL меняется, onMounted не срабатывает.
+watch(() => route.query.agreementId, (newId) => {
+  if (newId) focusAgreementFromQuery();
+});
 async function refreshAgreementUrls() {
   const map = {};
   for (const a of agreements.value) {
