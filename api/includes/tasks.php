@@ -1761,9 +1761,21 @@ if ($action === 'cards' && $id && $action2 === 'timer') {
             $other = $pdo->prepare("SELECT id, card_id, started_at FROM tasks_card_time WHERE user_name = ? AND stopped_at IS NULL FOR UPDATE");
             $other->execute([$tUserName]);
             $closeStmt = $pdo->prepare("UPDATE tasks_card_time SET stopped_at = NOW(), seconds = TIMESTAMPDIFF(SECOND, started_at, NOW()) WHERE id = ?");
+            $foundOnSameCard = false;
             foreach ($other->fetchAll() as $row) {
+                if ((int)$row['card_id'] === $cardId) {
+                    // Параллельный запрос уже создал открытую запись на этой же карточке
+                    // (gap-lock с NULL в индексе не гарантирует уникальности) —
+                    // не плодим дубль, возвращаем текущее состояние.
+                    $foundOnSameCard = true;
+                    continue;
+                }
                 $closeStmt->execute([(int)$row['id']]);
                 tHistory($pdo, (int)$row['card_id'], $tUserName, 'timer_stopped', ['auto' => true]);
+            }
+            if ($foundOnSameCard) {
+                $pdo->commit();
+                tRespond(['timer' => tBuildCardTimer($pdo, $cardId, $tUserName)]);
             }
             $pdo->prepare("INSERT INTO tasks_card_time (card_id, user_name, started_at) VALUES (?, ?, NOW())")
                 ->execute([$cardId, $tUserName]);
