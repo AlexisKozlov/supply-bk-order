@@ -168,8 +168,22 @@
                   @dragstart="$emit('card-dragstart', card)" @dragend="$emit('card-dragend')" />
       </div>
       <div v-if="dropIndex === items.length" class="drop-indicator"></div>
-      <div v-if="!items.length && !adding" class="task-column-empty">
-        <span class="task-column-empty-text">{{ column.is_archive_column ? 'Архив пуст' : 'Карточек пока нет' }}</span>
+      <!-- Пустое состояние, не во время drag — полный UiEmptyState с иконкой,
+           описанием и кнопкой создания. Использует <UiEmptyState> из дизайн-системы. -->
+      <UiEmptyState v-if="!items.length && !adding && !dropActive"
+                    class="task-column-empty"
+                    :title="column.is_archive_column ? 'Архив пуст' : 'Карточек пока нет'"
+                    :description="column.is_archive_column ? '' : 'Создай первую — это займёт пару секунд.'"
+                    :action-label="column.is_archive_column ? '' : '+ Создать карточку'"
+                    @action="adding = true; $nextTick(() => $refs.addInput?.focus())">
+        <template #icon>
+          <TaskIcon :name="column.is_archive_column ? 'archive' : 'list'" :size="48"/>
+        </template>
+      </UiEmptyState>
+      <!-- Drop-зона над пустой колонкой — показывается только когда что-то перетаскивают.
+           Имеет акцентную рамку и приглашение «Отпустите, чтобы переместить». -->
+      <div v-else-if="!items.length && !adding && dropActive" class="task-column-drop-hint">
+        Отпустите, чтобы переместить
       </div>
     </div>
 
@@ -197,6 +211,7 @@ import { ref, nextTick, computed } from 'vue';
 import TaskCard from './TaskCard.vue';
 import TaskIcon from './TaskIcon.vue';
 import ColorPalette from './ColorPalette.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 const dlg = useTasksDialogs();
@@ -817,25 +832,25 @@ defineExpose({});
 .task-column-body::-webkit-scrollbar-track { background: transparent; }
 
 .card-slot { position: relative; }
+/* Обёртка для UiEmptyState — собственные отступы у компонента, нам только center. */
 .task-column-empty {
-  color: var(--tk-text-muted, #758195);
-  font-size: var(--tk-fz-sm, 12px);
-  padding: var(--tk-s-4, 16px) var(--tk-s-1, 4px);
-  text-align: center;
-  display: flex; align-items: center; justify-content: center;
-  min-height: 64px;
-  border: 1px dashed transparent;
-  border-radius: var(--tk-r-md, 8px);
-  transition: border-color var(--tk-transition, 120ms ease), background var(--tk-transition, 120ms ease);
+  display: flex;
+  justify-content: center;
 }
-.task-column.is-drop-target .task-column-empty {
-  border-color: var(--tk-accent, #E87A1E);
-  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+/* Drop-зона над пустой колонкой во время drag — акцентная пунктирная рамка
+   с приглашением «Отпустите, чтобы переместить». Показывается v-else-if
+   когда dropActive и колонка пустая. */
+.task-column-drop-hint {
   color: var(--tk-accent-text, #B85A0E);
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  font-size: var(--tk-fz-sm, 12px);
+  font-weight: var(--tk-fw-semibold, 600);
+  padding: var(--tk-s-5, 20px) var(--tk-s-3, 12px);
+  text-align: center;
+  border: 2px dashed var(--tk-accent, #E87A1E);
+  border-radius: var(--tk-r-md, 10px);
+  margin: var(--tk-s-2, 8px) 0;
 }
-.task-column.is-drop-target .task-column-empty .task-column-empty-text::before { content: 'Отпустите, чтобы переместить'; }
-.task-column.is-drop-target .task-column-empty .task-column-empty-text { font-size: 0; }
-.task-column.is-drop-target .task-column-empty .task-column-empty-text::before { font-size: var(--tk-fz-sm, 12px); font-weight: var(--tk-fw-semibold, 600); }
 .drop-indicator {
   height: 3px;
   background: var(--tk-accent, #E87A1E);
