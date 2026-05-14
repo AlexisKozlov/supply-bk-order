@@ -1499,7 +1499,7 @@ function plural(n, forms) {
 .task-sidebar {
   position: fixed; top: 0; right: 0; bottom: 0;
   width: 100%;
-  max-width: 540px;
+  max-width: 600px;   /* было 540 — расширили под дизайн-док */
   background: var(--tk-bg-card);
   z-index: 999;
   display: flex; flex-direction: column;
@@ -1507,6 +1507,9 @@ function plural(n, forms) {
   animation: slideIn .22s cubic-bezier(.2,.8,.3,1);
   color: var(--tk-text);
 }
+/* Шапка + свойства + табы прибиты к верху через flex-shrink: 0 (уже сделано
+   на каждом из этих блоков ниже). .ts-pane занимает остаток и единственный
+   прокручивается — это и есть «sticky-шапка над содержимым» из дизайн-дока. */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
