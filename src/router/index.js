@@ -35,6 +35,7 @@ const routes = [
       { path: 'shelf-life/analytics', name: 'shelf-life-analytics', component: () => import('@/views/ShelfLifeAnalyticsView.vue'), meta: { title: 'Аналитика ячеек', module: 'shelf-life' } },
       { path: 'pricing', name: 'pricing', component: () => import('@/views/PricingView.vue'), meta: { title: 'Цены и ПСЦ', module: 'pricing' } },
       { path: 'admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true, title: 'Админ-панель' } },
+      { path: 'ui-kit', name: 'ui-kit', component: () => import('@/views/UiKitView.vue'), meta: { requiresAdmin: true, title: 'UI Kit — дизайн-система' } },
       { path: 'telegram-admin', name: 'telegram-admin', component: () => import('@/views/TelegramAdminView.vue'), meta: { title: 'Telegram-бот', module: 'telegram' } },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
       { path: 'deficit', name: 'deficit', component: () => import('@/views/DeficitView.vue'), meta: { title: 'Распределение дефицита', module: 'deficit' } },
