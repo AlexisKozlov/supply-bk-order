@@ -190,7 +190,9 @@
       <div v-if="loadingAgreements" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredAgreements.length" style="text-align:center;padding:40px;color:var(--text-muted);">Протоколы не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="agreementCardClass(a)"
+        <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card"
+             :class="[agreementCardClass(a), { 'db-card-highlight': highlightedAgreementId === a.id }]"
+             :data-agreement-id="a.id"
              draggable="true"
              @dragstart="onAgreementDragStart($event, a)"
              @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
@@ -722,6 +724,24 @@ function onAgreementDragStart(e, agreement) {
     e.dataTransfer.setData('application/x-bk-entity', payload);
     e.dataTransfer.effectAllowed = 'copy';
   } catch { /* старый браузер — игнор */ }
+}
+
+// Per-agreement deep-link: ?agreementId=X в URL — скроллим к карточке + подсветка.
+// Используется при клике на плашку «ПСЦ» в карточке задачи (TaskCardModal.relationTo).
+const highlightedAgreementId = ref(null);
+async function focusAgreementFromQuery() {
+  const id = parseInt(route.query.agreementId, 10);
+  if (!id || isNaN(id)) return;
+  activeTab.value = 'agreements';
+  // Если ПСЦ ещё не загружены — ждём.
+  if (!agreements.value.length) await loadAgreements();
+  await nextTick();
+  const el = document.querySelector(`[data-agreement-id="${id}"]`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightedAgreementId.value = id;
+    setTimeout(() => { if (highlightedAgreementId.value === id) highlightedAgreementId.value = null; }, 2400);
+  }
 }
 async function refreshAgreementUrls() {
   const map = {};
@@ -1810,6 +1830,8 @@ onMounted(async () => {
   // Догружаем данные текущей вкладки, если она пришла из URL `?tab=...`
   if (activeTab.value === 'deposits') loadDepositList();
   if (activeTab.value === 'dynamics') loadDynamics();
+  // ?agreementId=X — приходим из задачи (связь «ПСЦ»). Скроллим + подсвечиваем.
+  if (route.query.agreementId) focusAgreementFromQuery();
 });
 
 // При смене юрлица — перезагрузить
@@ -1916,8 +1938,22 @@ async function loadDynamics() {
 
 /* ═══ Cards grid ═══ */
 .db-grid { display:flex; flex-direction:column; gap:4px; }
-.db-card { background:var(--card); border:1px solid var(--border-light); border-radius:6px; padding:7px 12px; cursor:pointer; transition:border-color .15s; display:flex; align-items:center; gap:10px; }
+.db-card { background:var(--card); border:1px solid var(--border-light); border-radius:6px; padding:7px 12px; cursor:pointer; transition:border-color .15s, background .3s, box-shadow .3s; display:flex; align-items:center; gap:10px; }
 .db-card:hover { border-color:var(--bk-orange); }
+/* Подсветка карточки при переходе из задачи по ?agreementId=X. Длится 2.4с. */
+.db-card-highlight {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: var(--tk-accent, #E87A1E);
+  animation: db-card-pulse 2.4s ease-out;
+}
+@keyframes db-card-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--tk-accent, #E87A1E); background: var(--tk-accent-soft-strong, rgba(232,122,30,0.18)); }
+  60%  { box-shadow: 0 0 0 4px var(--tk-accent-soft, rgba(232,122,30,0.10)); }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-card-highlight { animation: none; }
+}
 .db-card-top { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
 .db-card-meta { display:flex; flex-wrap:nowrap; gap:5px; font-size:10px; color:var(--text-muted); flex-shrink:0; }
 .db-card-meta span { background:var(--bg); padding:1px 5px; border-radius:3px; white-space:nowrap; }

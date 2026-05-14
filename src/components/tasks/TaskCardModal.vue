@@ -1258,15 +1258,13 @@ function relationTo(r) {
       // /order?orderId=X&mode=view — паттерн из HistoryView.copyOrderLink.
       return { name: 'order', query: { orderId: r.entity_id, mode: 'view' } };
     case 'supplier':
-      // Конкретного per-supplier роута нет — открываем вкладку «Поставщики»
-      // в DatabaseView. Пользователь увидит список и найдёт нужного.
-      return { name: 'database', query: { tab: 'suppliers' } };
+      // /database?tab=suppliers&supplierId=X — DatabaseView читает supplierId
+      // и скроллит к карточке поставщика + подсвечивает на 2.4с.
+      return { name: 'database', query: { tab: 'suppliers', supplierId: r.entity_id } };
     case 'pricing':
-      // Конкретного per-PSC роута нет — открываем PricingView. Если связь
-      // содержит supplier в label (формат «ПСЦ X · Supplier»), пытаемся
-      // вытащить и пробросить как filter, чтобы список сузился.
-      // В entity_label нет гарантированного формата — пока без supplier-фильтра.
-      return { name: 'pricing' };
+      // /pricing?agreementId=X — PricingView читает agreementId и скроллит
+      // к карточке ПСЦ + подсвечивает.
+      return { name: 'pricing', query: { agreementId: r.entity_id } };
     case 'plan':
       // /planning?planId=X&mode=view — паттерн из HistoryView.copyPlanLink.
       return { name: 'planning', query: { planId: r.entity_id, mode: 'view' } };

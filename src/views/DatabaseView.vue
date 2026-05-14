@@ -99,6 +99,8 @@
       <div v-else-if="!sortedSuppliers.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
       <div v-else class="db-grid">
         <div v-for="s in sortedSuppliers" :key="s.id" class="db-card"
+             :class="{ 'db-card-highlight': highlightedSupplierId === s.id }"
+             :data-supplier-id="s.id"
              draggable="true"
              @dragstart="onSupplierDragStart($event, s)"
              @click="!isViewer && editSupplier(s)" :style="isViewer ? 'cursor:default' : ''">
@@ -324,7 +326,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, defineAsyncComponent, onMounted, watch } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
@@ -374,6 +376,23 @@ function onSupplierDragStart(e, supplier) {
     e.dataTransfer.setData('application/x-bk-entity', payload);
     e.dataTransfer.effectAllowed = 'copy';
   } catch { /* старый браузер — игнор */ }
+}
+
+// Per-supplier deep-link: ?supplierId=X в URL — скроллим к карточке + подсветка.
+// Используется при клике на плашку «Поставщик» в карточке задачи (TaskCardModal.relationTo).
+const highlightedSupplierId = ref(null);
+async function focusSupplierFromQuery() {
+  const id = parseInt(route.query.supplierId, 10);
+  if (!id || isNaN(id)) return;
+  activeTab.value = 'suppliers';
+  await loadSuppliers();
+  await nextTick();
+  const el = document.querySelector(`[data-supplier-id="${id}"]`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightedSupplierId.value = id;
+    setTimeout(() => { if (highlightedSupplierId.value === id) highlightedSupplierId.value = null; }, 2400);
+  }
 }
 
 function confirmAction(title, message) {
@@ -587,6 +606,8 @@ onMounted(() => {
     editCardModal.value = { show: true, product: null };
     router.replace({ name: 'database' });
   }
+  // ?supplierId=X — приходим из задачи (связь «Поставщик»). Скроллим + подсвечиваем.
+  if (route.query.supplierId) focusSupplierFromQuery();
 });
 
 async function loadProducts() {
@@ -799,8 +820,23 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 .db-tab-count { display:inline-block; background:var(--border-light); color:var(--text-muted); font-size:11px; font-weight:700; padding:1px 7px; border-radius:10px; margin-left:4px; }
 .db-tab.active .db-tab-count { background:var(--bk-brown); color:#fff; }
 .db-grid { display:flex; flex-direction:column; gap:4px; }
-.db-card { background:var(--card); border:1px solid var(--border-light); border-radius:6px; padding:7px 12px; cursor:pointer; transition:border-color .15s; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.db-card { background:var(--card); border:1px solid var(--border-light); border-radius:6px; padding:7px 12px; cursor:pointer; transition:border-color .15s, background .3s, box-shadow .3s; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .db-card:hover { border-color:var(--bk-orange); }
+/* Подсветка карточки при переходе из задачи по ?supplierId=X. Длится 2.4с. */
+.db-card-highlight {
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-color: var(--tk-accent, #E87A1E);
+  box-shadow: 0 0 0 2px var(--tk-accent-soft, rgba(232,122,30,0.10));
+  animation: db-card-pulse 2.4s ease-out;
+}
+@keyframes db-card-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--tk-accent, #E87A1E); background: var(--tk-accent-soft-strong, rgba(232,122,30,0.18)); }
+  60%  { box-shadow: 0 0 0 4px var(--tk-accent-soft, rgba(232,122,30,0.10)); }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-card-highlight { animation: none; }
+}
 .db-card-top { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
 .db-card-title { display:flex; align-items:baseline; gap:6px; min-width:0; flex:1; }
 .db-card-sku { font-size:11px; font-weight:700; color:var(--bk-orange); white-space:nowrap; flex-shrink:0; }
