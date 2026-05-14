@@ -11,11 +11,14 @@
      с автопривязкой через tasks_relations + toast.
 
   Виджет:
-  — Свёрнут: маленькая пилюля «Задачи» в правом нижнем углу с хоткеем T.
-  — Развёрнут: панель ~320×420px с заголовком, селектором доски и
-    списком колонок-дроп-зон.
+  — Свёрнут: НИЧЕГО не показывается (без визуального шума).
+  — Открывается хоткеем T или автоматически на dragstart любой сущности.
+  — Развёрнут: панель ~320×420px в правом нижнем углу с заголовком,
+    селектором доски и списком колонок-дроп-зон. Закрытие крестиком или Esc.
   — Не показывается на странице /tasks (там доска уже на экране).
-  — Состояние «открыт/свёрнут» в localStorage bk_tasks_widget_open.
+  — Состояние НЕ персистируется в localStorage: каждое открытие — явный
+    жест (хоткей T или dragstart). Между переходами по страницам виджет
+    закрывается сам.
 
   Контракт dragstart для родительских страниц:
     e.dataTransfer.setData('application/x-bk-entity',
@@ -24,17 +27,14 @@
 -->
 
 <template>
-  <div v-if="!isOnTasksRoute" class="tqdw" :class="{ 'tqdw--open': open }">
-    <!-- Свёрнутая кнопка-пилюля -->
-    <button v-if="!open" class="tqdw__trigger" type="button"
-            @click="setOpen(true)" title="Быстрая задача (T)">
-      <TaskIcon name="plus" :size="14"/>
-      <span>Задачи</span>
-      <span class="tqdw__kbd">T</span>
-    </button>
+  <div v-if="!isOnTasksRoute && open" class="tqdw tqdw--open">
+    <!-- Свёрнутого вида у виджета нет: открывается только по хоткею T
+         или автоматически на dragstart любой сущности с mime
+         application/x-bk-entity. Это снижает визуальный шум — когда
+         виджет не нужен, его не видно. -->
 
     <!-- Развёрнутая панель -->
-    <section v-else class="tqdw__panel" @dragover.prevent @drop.prevent>
+    <section class="tqdw__panel" @dragover.prevent @drop.prevent>
       <header class="tqdw__header">
         <div class="tqdw__title">Быстрая задача</div>
         <button type="button" class="tqdw__close" @click="setOpen(false)" title="Свернуть (Esc)">
@@ -92,16 +92,13 @@ const route = useRoute();
 const store = useTasksStore();
 const toast = useToastStore();
 
-const STORAGE_KEY = 'bk_tasks_widget_open';
-
+// Виджет всегда стартует закрытым — открыть можно хоткеем T или
+// автоматически на dragstart сущности. localStorage НЕ используем: открытое
+// состояние не должно «жить» между страницами и сессиями, это создавало
+// фон висящего окна.
 const open = ref(false);
 const loading = ref(false);
 const hoverColId = ref(null);
-
-// Восстановление состояния «открыт/свёрнут» из localStorage.
-try {
-  if (localStorage.getItem(STORAGE_KEY) === '1') open.value = true;
-} catch (e) { /* приватный режим — игнор */ }
 
 const isOnTasksRoute = computed(() => route.name === 'tasks');
 
@@ -122,10 +119,6 @@ function columnCardCount(colId) {
 
 function setOpen(v) {
   open.value = v;
-  try {
-    if (v) localStorage.setItem(STORAGE_KEY, '1');
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch (e) { /* игнор */ }
   if (v) ensureBoardLoaded();
 }
 
@@ -240,40 +233,9 @@ watch(isOnTasksRoute, (v) => { if (v) open.value = false; });
   font-family: var(--tk-font);
 }
 
-/* Свёрнутая пилюля-триггер */
-.tqdw__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--tk-s-2);
-  padding: var(--tk-s-2) var(--tk-s-3);
-  background: var(--tk-accent);
-  color: #FFFFFF;
-  border: none;
-  border-radius: var(--tk-r-pill);
-  font-size: var(--tk-fz-md);
-  font-weight: var(--tk-fw-medium);
-  font-family: inherit;
-  cursor: pointer;
-  box-shadow: var(--tk-shadow-card-hover);
-  transition: background var(--tk-transition-fast), transform var(--tk-transition-fast);
-  min-height: var(--tk-touch-min);
-}
-.tqdw__trigger:hover {
-  background: var(--tk-accent-hover);
-  transform: translateY(-1px);
-}
-.tqdw__trigger:focus-visible {
-  outline: none;
-  box-shadow: var(--tk-focus-ring), var(--tk-shadow-card-hover);
-}
-.tqdw__kbd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: var(--tk-fz-xs);
-  font-weight: var(--tk-fw-semibold);
-  padding: 1px 6px;
-  background: rgba(255, 255, 255, 0.20);
-  border-radius: var(--tk-r-sm);
-}
+/* Свёрнутого триггера у виджета нет: открывается хоткеем T или
+   автоматически на dragstart. Удалено по запросу пользователя — пилюля
+   создавала визуальный шум на всех страницах. */
 
 /* Развёрнутая панель */
 .tqdw__panel {
