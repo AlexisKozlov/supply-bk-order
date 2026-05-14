@@ -1003,7 +1003,13 @@ async function loadTrends() {
   const gen = ++_loadTrendsGen;
   try {
     // 1) SKU → analog_group
-    const { data: prods } = await db.from('products').select('sku, analog_group').in('sku', skus);
+    // Фильтр по legal_entity_group: один и тот же SKU может лежать в products
+    // дважды (BK_VM и PS) с разными analog_group. Без фильтра в skuToGroup
+    // случайно попадает чужая группа → реализация считается по неправильной группе.
+    const { data: prods } = await db.from('products')
+      .select('sku, analog_group')
+      .eq('legal_entity_group', getEntityGroupCode(orderStore.settings.legalEntity))
+      .in('sku', skus);
     if (gen !== _loadTrendsGen) return;
     const skuToGroup = {};
     const groups = new Set();
