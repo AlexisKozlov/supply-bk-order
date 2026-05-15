@@ -83,6 +83,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { tasksApi } from '@/lib/tasksApi.js';
 import TaskIcon from './TaskIcon.vue';
 import UiEmptyState from '@/components/ui/UiEmptyState.vue';
@@ -91,6 +92,7 @@ import UiSkeleton from '@/components/ui/UiSkeleton.vue';
 const route = useRoute();
 const store = useTasksStore();
 const toast = useToastStore();
+const userStore = useUserStore();
 
 // Виджет всегда стартует закрытым — открыть можно хоткеем T или
 // автоматически на dragstart сущности. localStorage НЕ используем: открытое
@@ -132,8 +134,18 @@ async function ensureBoardLoaded() {
       await store.fetchBoards();
     }
     if (!store.currentBoardId) {
-      const firstBoard = (store.boards || []).find(b => !b.is_archived)
-                       || (store.boards || [])[0];
+      // Берём доску ТЕКУЩЕГО пользователя по owner_name. Для роли user это
+      // не важно (он видит только свою), но admin/manager видят ВСЕ доски —
+      // и «первая попавшаяся» оказывалась чужой. Создавать задачи на чужой
+      // доске нельзя. Fallback на первую — только если своей нет.
+      const boards = store.boards || [];
+      const myName = userStore.currentUser?.name;
+      const myBoard = myName
+        ? boards.find(b => b.owner_name === myName && !b.is_archived)
+        : null;
+      const firstBoard = myBoard
+                       || boards.find(b => !b.is_archived)
+                       || boards[0];
       if (firstBoard) await store.loadBoard(firstBoard.id);
     } else if (!columns.value.length) {
       await store.reload();
