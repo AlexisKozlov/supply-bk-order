@@ -606,11 +606,10 @@ const vClickOutsideCard = {
   border-color: var(--tk-border, #E6E1D7);
 }
 .task-card.is-dragging { opacity: 0.45; transform: rotate(1deg); }
-/* Компактный режим: меньше отступов, заголовок в 2 строки максимум */
+/* Компактный режим: меньше отступов и шрифт, но заголовок виден целиком */
 .task-card.card-compact { padding: 8px 10px 7px; gap: 6px; }
 .task-card.card-compact .task-card-title {
   font-size: 12.5px; line-height: 1.3;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .task-card.card-compact .task-card-meta { gap: 4px 5px; }
 .task-card.is-done { opacity: 0.6; }

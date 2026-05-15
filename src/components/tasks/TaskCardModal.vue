@@ -38,8 +38,10 @@
               <TaskIcon name="chevronRight" :size="11" style="transform: rotate(180deg);"/>
               <span>{{ full.parent.title }}</span>
             </button>
-            <input v-model="full.card.title" class="ts-title-input"
-                   @blur="patch({ title: full.card.title })" @keydown.enter.prevent="$event.target.blur()" />
+            <textarea v-model="full.card.title" ref="titleEl" rows="1" class="ts-title-input"
+                      @input="autoGrowTitle"
+                      @blur="patch({ title: full.card.title })"
+                      @keydown.enter.prevent="$event.target.blur()"></textarea>
             <div class="ts-subtitle">
               <template v-if="full.parent">подзадача в «{{ full.parent.title }}»</template>
               <template v-else>в колонке «{{ columnTitle }}»</template>
@@ -954,6 +956,16 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown);
   if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
 });
+// Заголовок задачи — авто-растущий textarea: длинное название видно целиком.
+const titleEl = ref(null);
+function autoGrowTitle() {
+  const el = titleEl.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+watch(() => full.value?.card?.id, () => nextTick(autoGrowTitle));
+
 watch(() => props.cardId, load);
 
 // Автопрокрутка чата вниз при загрузке/новом сообщении
@@ -1724,6 +1736,8 @@ function plural(n, forms) {
 .ts-header-titles { flex: 1; min-width: 0; }
 .ts-title-input {
   width: 100%;
+  box-sizing: border-box;
+  display: block;
   font-size: var(--tk-fz-h1);
   font-weight: var(--tk-fw-bold);
   border: 1px solid transparent;
@@ -1733,6 +1747,10 @@ function plural(n, forms) {
   color: var(--tk-text);
   font-family: inherit;
   letter-spacing: -0.2px;
+  /* Авто-растущий textarea: длинный заголовок переносится и виден целиком */
+  resize: none;
+  overflow: hidden;
+  line-height: 1.3;
   transition: border-color var(--tk-transition), background var(--tk-transition), box-shadow var(--tk-transition);
 }
 .ts-title-input:hover { border-color: var(--tk-border); }
