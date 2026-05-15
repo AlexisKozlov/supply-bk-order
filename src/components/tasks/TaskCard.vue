@@ -12,7 +12,7 @@
     <!-- Метки сверху (Trello-стиль: тонкие пиллы) -->
     <div v-if="cardLabels.length" class="task-card-labels">
       <span v-for="l in cardLabels" :key="l.id" class="label-pill" :style="{ '--lbl-color': l.color }"
-            :title="l.title" @click.stop="openLabelsPicker">{{ l.title }}</span>
+            :title="l.title" @click.stop="openLabelsPicker($event)">{{ l.title }}</span>
     </div>
 
     <!-- Меню «⋮» в правом верхнем углу -->
@@ -73,7 +73,7 @@
     <div class="task-card-meta">
       <!-- Приоритет (всегда показываем, включая «Средний») -->
       <button class="meta-pill prio-pill" :class="'prio-' + (card.priority || 'medium')"
-              @click.stop="togglePopover('priority')"
+              @click.stop="togglePopover('priority', $event)"
               :title="'Приоритет: ' + priorityLabel">
         <span class="meta-dot"></span>{{ priorityLabel }}
       </button>
@@ -82,7 +82,7 @@
            установить срок можно через модалку. -->
       <button v-if="card.due_date" class="meta-pill due-pill"
               :class="{ overdue: isOverdue, fire: dueClass === 'due-fire', warn: dueClass === 'due-warn' }"
-              @click.stop="togglePopover('due')" :title="'Срок: ' + (card.due_date || '')">
+              @click.stop="togglePopover('due', $event)" :title="'Срок: ' + (card.due_date || '')">
         <TaskIcon name="calendar" :size="12"/>
         <span>{{ formatDue }}</span>
       </button>
@@ -177,39 +177,44 @@
       </div>
     </div>
 
-    <!-- Поповер: приоритет -->
-    <div v-if="popover === 'priority'" class="card-popover" @click.stop v-click-outside-card="closePopover">
-      <div class="popover-title">Приоритет</div>
-      <button v-for="p in priorities" :key="p.value" class="popover-item"
-              :class="{ active: card.priority === p.value }"
-              @click="setPriority(p.value)">
-        <span class="prio-dot" :class="'prio-bg-' + p.value"></span>{{ p.label }}
-      </button>
-    </div>
-
-    <!-- Поповер: срок — кастомный календарь -->
-    <div v-if="popover === 'due'" class="card-popover card-popover-flat" @click.stop v-click-outside-card="closePopover">
-      <DatetimePicker :model-value="card.due_date || ''"
-                      @update:model-value="onCardDuePicked"
-                      @cancel="closePopover"/>
-    </div>
-
-    <!-- Поповер: метки -->
-    <div v-if="popover === 'labels'" class="card-popover labels-popover" @click.stop v-click-outside-card="closePopover">
-      <div class="popover-title">Метки</div>
-      <div class="popover-labels">
-        <button v-for="l in labels" :key="l.id" class="popover-label"
-                :class="{ active: (card.label_ids || []).includes(l.id) }"
-                :style="{ background: (card.label_ids || []).includes(l.id) ? l.color : 'transparent', borderColor: l.color, color: (card.label_ids || []).includes(l.id) ? '#fff' : l.color }"
-                @click="toggleLabel(l)">{{ l.title }}</button>
-        <div v-if="!labels.length" class="popover-empty">Меток пока нет — добавьте в настройках доски</div>
+    <!-- Поповеры карточки вынесены в <body> через Teleport: иначе колонка с
+         overflow обрезает их по краю и зажимает по ширине. Позиция — fixed,
+         считается от кнопки-триггера (togglePopover → placePopover). -->
+    <Teleport to="body">
+      <div v-if="popover" class="card-popover-layer" @click.self="closePopover">
+        <!-- Приоритет -->
+        <div v-if="popover === 'priority'" ref="popoverEl" class="card-popover" :style="popoverStyle" @click.stop>
+          <div class="popover-title">Приоритет</div>
+          <button v-for="p in priorities" :key="p.value" class="popover-item"
+                  :class="{ active: card.priority === p.value }"
+                  @click="setPriority(p.value)">
+            <span class="prio-dot" :class="'prio-bg-' + p.value"></span>{{ p.label }}
+          </button>
+        </div>
+        <!-- Срок — кастомный календарь -->
+        <div v-else-if="popover === 'due'" ref="popoverEl" class="card-popover card-popover-flat" :style="popoverStyle" @click.stop>
+          <DatetimePicker :model-value="card.due_date || ''"
+                          @update:model-value="onCardDuePicked"
+                          @cancel="closePopover"/>
+        </div>
+        <!-- Метки -->
+        <div v-else-if="popover === 'labels'" ref="popoverEl" class="card-popover labels-popover" :style="popoverStyle" @click.stop>
+          <div class="popover-title">Метки</div>
+          <div class="popover-labels">
+            <button v-for="l in labels" :key="l.id" class="popover-label"
+                    :class="{ active: (card.label_ids || []).includes(l.id) }"
+                    :style="{ background: (card.label_ids || []).includes(l.id) ? l.color : 'transparent', borderColor: l.color, color: (card.label_ids || []).includes(l.id) ? '#fff' : l.color }"
+                    @click="toggleLabel(l)">{{ l.title }}</button>
+            <div v-if="!labels.length" class="popover-empty">Меток пока нет — добавьте в настройках доски</div>
+          </div>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, inject } from 'vue';
+import { computed, ref, inject, nextTick } from 'vue';
 import TaskIcon from './TaskIcon.vue';
 import DatetimePicker from './DatetimePicker.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
@@ -230,6 +235,14 @@ const store = useTasksStore();
 const cardEl = ref(null);
 const dragging = ref(false);
 const popover = ref(null); // 'priority' | 'due' | 'labels' | null
+const popoverEl = ref(null);            // DOM вынесенного поповера
+const popoverPos = ref({ top: 0, left: 0 });
+let popoverAnchor = null;               // rect кнопки-триггера
+const popoverStyle = computed(() => ({
+  position: 'fixed',
+  top: popoverPos.value.top + 'px',
+  left: popoverPos.value.left + 'px',
+}));
 
 // Long-press DnD на тач-устройствах. На десктопе работает HTML5 (draggable),
 // здесь pointerdown→pointermove→pointerup имитируют тот же поток.
@@ -527,12 +540,36 @@ function onDragEnd() {
   emit('dragend');
 }
 
-function togglePopover(name) {
-  if (!props.canEditCard && name !== 'labels') { /* всё равно даём смотреть */ }
-  popover.value = popover.value === name ? null : name;
+function togglePopover(name, event) {
+  if (popover.value === name) { popover.value = null; return; }
+  const el = event?.currentTarget;
+  popoverAnchor = el ? el.getBoundingClientRect() : null;
+  if (popoverAnchor) {
+    popoverPos.value = { top: popoverAnchor.bottom + 4, left: popoverAnchor.left };
+  }
+  popover.value = name;
+  nextTick(placePopover);
+}
+// Уточняет позицию вынесенного поповера: держит его в пределах экрана,
+// при нехватке места снизу — открывает вверх от триггера.
+function placePopover() {
+  const el = popoverEl.value;
+  if (!el || !popoverAnchor) return;
+  const r = el.getBoundingClientRect();
+  const m = 8;
+  let left = popoverAnchor.left;
+  if (left + r.width > window.innerWidth - m) {
+    left = Math.max(m, window.innerWidth - r.width - m);
+  }
+  let top = popoverAnchor.bottom + 4;
+  if (top + r.height > window.innerHeight - m) {
+    const above = popoverAnchor.top - r.height - 4;
+    top = above >= m ? above : Math.max(m, window.innerHeight - r.height - m);
+  }
+  popoverPos.value = { top, left };
 }
 function closePopover() { popover.value = null; }
-function openLabelsPicker() { togglePopover('labels'); }
+function openLabelsPicker(event) { togglePopover('labels', event); }
 function openCardChat() { emit('open-chat', props.card); }
 
 async function setPriority(p) {
@@ -902,9 +939,16 @@ const vClickOutsideCard = {
 }
 
 /* ═══ Поповер ═══ */
+/* Подложка на весь экран: ловит клик «мимо» для закрытия. Поповеры
+   вынесены сюда через Teleport, позиция — fixed (см. popoverStyle). */
+.card-popover-layer {
+  position: fixed; inset: 0; z-index: 1000;
+}
 .card-popover {
-  position: absolute; top: 100%; left: 0; right: 0;
-  margin-top: var(--tk-s-1, 4px); z-index: 50;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--tk-bg-popover, #fff);
   border: 1px solid var(--tk-border, #DCDFE4);
   border-radius: var(--tk-r-md, 8px);
@@ -918,7 +962,8 @@ const vClickOutsideCard = {
   border: none;
   box-shadow: none;
   padding: 0;
-  right: auto; width: max-content;
+  overflow: visible;
+  max-height: none;
 }
 .popover-title {
   font-size: var(--tk-fz-xs, 11px); font-weight: var(--tk-fw-bold, 700);
