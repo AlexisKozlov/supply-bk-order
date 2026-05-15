@@ -226,7 +226,11 @@
            @mousedown="onBoardPanStart">
         <div v-for="(col, i) in store.columns" :key="col.id"
              class="tasks-column-wrap"
-             :class="{ 'col-drag-over': colDragOver === i }"
+             :class="{
+               'col-dragging': colDragFrom === i,
+               'col-insert-before': colDragFrom !== null && colDragOver === i && colDragFrom > i,
+               'col-insert-after': colDragFrom !== null && colDragOver === i && colDragFrom < i,
+             }"
              draggable="true"
              @dragstart="onColDragStart(i, $event)"
              @dragover.prevent="onColDragOver(i)"
@@ -1181,11 +1185,45 @@ function onColDrop(i) {
 .tasks-column-wrap {
   height: 100%;
   display: flex;
+  position: relative;
   border: 2px solid transparent;
   border-radius: var(--tk-r-lg);
-  transition: border-color var(--tk-transition);
+  transition: border-color var(--tk-transition), opacity var(--tk-transition), transform var(--tk-transition);
 }
-.tasks-column-wrap.col-drag-over { border-color: var(--tk-accent); }
+/* Колонка, которую сейчас тащат — бледнеет и слегка уменьшается («где была») */
+.tasks-column-wrap.col-dragging {
+  opacity: 0.4;
+  transform: scale(0.97);
+}
+.tasks-column-wrap.col-dragging::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--tk-accent);
+  border-radius: var(--tk-r-lg);
+  pointer-events: none;
+}
+/* Яркая вертикальная полоса — место, куда колонка переедет */
+.tasks-column-wrap.col-insert-before::before,
+.tasks-column-wrap.col-insert-after::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 5px;
+  border-radius: 5px;
+  background: var(--tk-accent);
+  box-shadow: 0 0 10px 1px var(--tk-accent);
+  pointer-events: none;
+  z-index: 6;
+  animation: col-insert-pulse 0.9s ease-in-out infinite;
+}
+.tasks-column-wrap.col-insert-before::before { left: -3px; }
+.tasks-column-wrap.col-insert-after::after { right: -3px; }
+@keyframes col-insert-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 
 .tasks-add-column {
   width: 280px; flex: 0 0 280px;
