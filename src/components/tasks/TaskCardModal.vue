@@ -404,7 +404,7 @@
                 <!-- router-link рендерится как <a>, и a.ts-rel-chip уже
                      стилизована как кликабельная (cursor + hover). -->
                 <span class="ts-rel-chip-icon">{{ relationTypeIcon(r.entity_type) }}</span>
-                <span class="ts-rel-chip-type">{{ relationTypeLabel(r.entity_type) }}</span>
+                <span v-if="relationShowType(r)" class="ts-rel-chip-type">{{ relationTypeLabel(r.entity_type) }}</span>
                 <span class="ts-rel-chip-label">{{ r.entity_label || r.entity_id }}</span>
                 <button type="button" class="ts-rel-chip-del"
                         @click.stop.prevent="removeRelation(r)" title="Убрать связь">
@@ -1255,6 +1255,16 @@ function relationTypeLabel(t) {
 }
 function relationTypeIcon(t) {
   return ({ order: '📦', supplier: '🚚', product: '🍔', pricing: '💰', plan: '📋', so_order: '📝', protocol: '📑' })[t] || '🔗';
+}
+// Метку типа в плашке показываем, ТОЛЬКО если entity_label не начинается с
+// названия типа. Карточки из drag-from-anywhere имеют label вида
+// «Заказ Молочный мир от 20.05» — без этой проверки в плашке было бы
+// «Заказ · Заказ Молочный мир...» (дважды). Тип всё равно виден по иконке.
+function relationShowType(r) {
+  const label = (r?.entity_label || '').trim().toLowerCase();
+  if (!label) return true;
+  const type = relationTypeLabel(r.entity_type).toLowerCase();
+  return !label.startsWith(type);
 }
 // Возвращает router-link target ({name, query, params}) для типов связей,
 // которые можно открыть кликом. Для типов, у которых пока нет deep-link'а —
