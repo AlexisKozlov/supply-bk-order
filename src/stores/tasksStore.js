@@ -289,6 +289,11 @@ export const useTasksStore = defineStore('tasks', () => {
       is_archived: toArchive ? 1 : 0,
       completed_at: (toArchive || toDone) ? new Date().toISOString().slice(0,19).replace('T',' ') : null,
     };
+    // Задача ушла в done/архив — бэк останавливает таймеры на ней.
+    // Сразу гасим «бегущий» вид, чтобы счётчик на карточке не продолжал тикать.
+    if ((toArchive || toDone) && updated.timer) {
+      updated.timer = { ...updated.timer, any_running: false, my_running: false };
+    }
     // Пересчёт sort_order в целевой колонке
     const inTarget = cards.value
       .filter(c => c.column_id === toColumnId && c.id !== cardId)

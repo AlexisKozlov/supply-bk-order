@@ -299,6 +299,27 @@ function tBoardForRecipient($pdo, $cardId, $userName, $fallbackBoardId) {
 }
 
 // ─── Хелперы таймера карточки (C4) ───
+
+// Останавливает бегущие таймеры на карточке (когда задача закрыта/в архиве —
+// учёт времени логично прекратить). $onlyUser !== null — закрываем только
+// запись этого пользователя, иначе все. Идемпотентно: если бегущих нет —
+// ничего не делает. Возвращает кол-во остановленных записей.
+function tStopCardTimers($pdo, $cardId, $actor, $onlyUser = null) {
+    $sql  = "SELECT id, card_id FROM tasks_card_time WHERE card_id = ? AND stopped_at IS NULL";
+    $args = [$cardId];
+    if ($onlyUser !== null) { $sql .= " AND user_name = ?"; $args[] = $onlyUser; }
+    $st = $pdo->prepare($sql);
+    $st->execute($args);
+    $rows = $st->fetchAll();
+    if (!$rows) return 0;
+    $close = $pdo->prepare("UPDATE tasks_card_time SET stopped_at = NOW(), seconds = TIMESTAMPDIFF(SECOND, started_at, NOW()) WHERE id = ?");
+    foreach ($rows as $r) {
+        $close->execute([(int)$r['id']]);
+        tHistory($pdo, $cardId, $actor, 'timer_stopped', ['auto' => true, 'reason' => 'archived']);
+    }
+    return count($rows);
+}
+
 // Возвращает { seconds_total, by_user: [{user_name, seconds}], my_running: { started_at } | null,
 //              any_running: bool, running_user: ?string }
 function tBuildCardTimer($pdo, $cardId, $tUserName) {
@@ -1272,6 +1293,8 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
                 $pdo->prepare("UPDATE tasks_assignees SET is_done = 1, done_at = NOW() WHERE card_id = ? AND user_name = ?")
                     ->execute([$cardId, $tUserName]);
                 tHistory($pdo, $cardId, $tUserName, 'assignee_done', ['user' => $tUserName]);
+                // Соисполнитель закрыл свою часть — останавливаем его таймер на карточке.
+                tStopCardTimers($pdo, $cardId, $tUserName, $tUserName);
             } else {
                 // Возврат из архива в работу: сбрасываем «выполнил».
                 $pdo->prepare("UPDATE tasks_assignees SET is_done = 0, done_at = NULL WHERE card_id = ? AND user_name = ? AND is_done = 1")
@@ -1309,6 +1332,12 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = ?, is_archived = ?, completed_at = ? WHERE id = ?")
             ->execute([$toColumnId, $newIsDone, $isToArchive, $completedAt, $cardId]);
         tHistory($pdo, $cardId, $tUserName, 'moved', ['from_column' => $fromCol, 'to_column' => $toColumnId]);
+
+        // Задача закрыта (попала в done/архив) — останавливаем бегущие таймеры
+        // на ней: учёт времени по выполненной задаче продолжаться не должен.
+        if ((int)$card['is_done'] !== 1 && $newIsDone === 1) {
+            tStopCardTimers($pdo, $cardId, $tUserName);
+        }
 
         if ($fromCol !== $toColumnId) {
             $s = $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id = ? ORDER BY sort_order, id");
@@ -1503,6 +1532,10 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         $params[] = $cardId;
         $pdo->prepare("UPDATE tasks_cards SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
         if ($changes) tHistory($pdo, $cardId, $tUserName, 'updated', $changes);
+        // Задача отмечена выполненной — останавливаем бегущие таймеры на ней.
+        if (isset($body['is_done']) && $body['is_done'] && (int)$card['is_done'] !== 1) {
+            tStopCardTimers($pdo, $cardId, $tUserName);
+        }
         if (isset($body['is_done']) && tIsProtocolCard($pdo, $cardId)) {
             tCheckCardAutoState($pdo, $cardId, $tUserName);
         }
