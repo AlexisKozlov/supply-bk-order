@@ -385,12 +385,15 @@ function onSupplierDragStart(e, supplier) {
 // KeepAlive, и при второй навигации в /database компонент не размонтируется.
 const highlightedSupplierId = ref(null);
 async function focusSupplierFromQuery() {
-  const id = parseInt(route.query.supplierId, 10);
-  if (!id || isNaN(id)) return;
+  // ID поставщика — UUID-строка (например 8e306beb-a6b8-...), НЕ число.
+  // parseInt здесь обрезал бы UUID на первой не-цифре («8e306beb» → 8),
+  // и подсветка/скролл не находили карточку. Работаем со строкой как есть.
+  const id = route.query.supplierId;
+  if (!id) return;
   activeTab.value = 'suppliers';
   await loadSuppliers();
   await nextTick();
-  const el = document.querySelector(`[data-supplier-id="${id}"]`);
+  const el = document.querySelector(`[data-supplier-id="${CSS.escape(String(id))}"]`);
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     highlightedSupplierId.value = id;
