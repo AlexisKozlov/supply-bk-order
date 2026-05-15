@@ -218,9 +218,11 @@
 
     <div v-else class="tasks-board-area">
       <!-- Колонки (канбан) -->
-      <div v-if="viewMode === 'kanban'" class="tasks-columns"
+      <div v-if="viewMode === 'kanban'" ref="boardEl" class="tasks-columns"
            :class="{ 'is-panning': panActive }"
-           @dragover.prevent
+           @dragover.prevent="onBoardDragOver"
+           @drop="stopBoardAutoScroll"
+           @dragend="stopBoardAutoScroll"
            @mousedown="onBoardPanStart">
         <div v-for="(col, i) in store.columns" :key="col.id"
              class="tasks-column-wrap"
@@ -229,7 +231,7 @@
              @dragstart="onColDragStart(i, $event)"
              @dragover.prevent="onColDragOver(i)"
              @drop="onColDrop(i)"
-             @dragend="colDragFrom = null; colDragOver = null">
+             @dragend="colDragFrom = null; colDragOver = null; stopBoardAutoScroll()">
           <TaskColumn
             :column="col"
             :items="store.cardsByColumn[col.id] || []"
@@ -473,6 +475,57 @@ const colDragOver = ref(null);
 // 2) левой кнопке в пустой области полотна (между/под колонками)
 // 3) Shift + левая кнопка где угодно
 const panActive = ref(false);
+
+// ─── Авто-скролл доски при перетаскивании к краю ───
+// При HTML5-drag карточки или колонки браузер сам не прокручивает контейнер.
+// Если курсор подошёл к левому/правому краю доски — плавно панорамируем,
+// чтобы можно было дотащить до колонки за пределами экрана.
+const boardEl = ref(null);
+let autoScrollRAF = null;
+let autoScrollDir = 0;     // -1 влево, +1 вправо, 0 — стоп
+let autoScrollSpeed = 0;   // px за кадр
+const AUTOSCROLL_EDGE = 90;       // ширина «горячей» зоны у края, px
+const AUTOSCROLL_MIN = 5;         // минимальная скорость (у границы зоны)
+const AUTOSCROLL_MAX = 26;        // максимальная (вплотную к краю)
+
+function onBoardDragOver(e) {
+  const el = boardEl.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const distLeft = e.clientX - rect.left;
+  const distRight = rect.right - e.clientX;
+  if (distLeft < AUTOSCROLL_EDGE) {
+    autoScrollDir = -1;
+    autoScrollSpeed = edgeSpeed(distLeft);
+  } else if (distRight < AUTOSCROLL_EDGE) {
+    autoScrollDir = 1;
+    autoScrollSpeed = edgeSpeed(distRight);
+  } else {
+    autoScrollDir = 0;
+  }
+  if (autoScrollDir !== 0 && autoScrollRAF === null) {
+    autoScrollRAF = requestAnimationFrame(autoScrollStep);
+  }
+}
+function edgeSpeed(dist) {
+  // dist=0 (вплотную к краю) → MAX, dist=AUTOSCROLL_EDGE → MIN.
+  const t = 1 - Math.max(0, Math.min(1, dist / AUTOSCROLL_EDGE));
+  return AUTOSCROLL_MIN + t * (AUTOSCROLL_MAX - AUTOSCROLL_MIN);
+}
+function autoScrollStep() {
+  const el = boardEl.value;
+  if (!el || autoScrollDir === 0) { autoScrollRAF = null; return; }
+  el.scrollLeft += autoScrollDir * autoScrollSpeed;
+  autoScrollRAF = requestAnimationFrame(autoScrollStep);
+}
+function stopBoardAutoScroll() {
+  autoScrollDir = 0;
+  if (autoScrollRAF !== null) {
+    cancelAnimationFrame(autoScrollRAF);
+    autoScrollRAF = null;
+  }
+}
+
 function onBoardPanStart(e) {
   const middleBtn = e.button === 1;
   const leftBtn = e.button === 0;
