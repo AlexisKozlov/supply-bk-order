@@ -115,28 +115,20 @@ async function doUpdate() {
         } catch (_) { /* offline / sw.js 404 — ок */ }
       }
 
-      // 2. Параллельно: чистим Workbox-кэши И снимаем все SW. Друг от друга
-      //    не зависят, держать последовательно нет смысла.
-      const tasks = [];
+      // 2. Чистим Workbox-кэши, чтобы релоад взял свежие ассеты.
+      //    SW НЕ снимаем (unregister) — это уничтожило бы push-подписку
+      //    ресторана (подписка привязана к регистрации SW). Новый SW и так
+      //    встаёт через SKIP_WAITING выше.
       if ('caches' in window) {
-        tasks.push((async () => {
-          try {
-            const keys = await caches.keys();
-            await Promise.all(keys.map(k => caches.delete(k).catch(() => false)));
-          } catch (_) {}
-        })());
-      }
-      tasks.push((async () => {
         try {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map(r => r.unregister().catch(() => false)));
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k).catch(() => false)));
         } catch (_) {}
-      })());
-      await Promise.all(tasks);
+      }
     }
   } finally {
-    // 3. Жёсткий релоад с cache-bust. У страницы больше нет контроллера —
-    //    index.html и все ассеты пойдут прямо с сервера.
+    // 3. Жёсткий релоад с cache-bust: index.html и ассеты берутся свежими
+    //    (SW-кэши очищены). Push-подписка при этом сохраняется.
     setTimeout(() => {
       const u = new URL(window.location.href);
       u.searchParams.set('_v', Date.now().toString(36));
