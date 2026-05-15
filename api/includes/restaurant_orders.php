@@ -949,10 +949,10 @@ function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $l
 
         for ($r = $headerRow + 1; $r < count($rows); $r++) {
             $del = mb_strtolower(trim((string)($rows[$r][$cols['del']] ?? '')), 'UTF-8');
-            if ($del === 'да' || $del === 'yes' || $del === 'true') {
-                $rowsSkippedDeleted++;
-                continue;
-            }
+            // Строки с пометкой удаления в 1С УТ теперь тоже импортируются,
+            // позже позиция помечается комментарием «Удалено в 1С УТ».
+            $isDeletedRow = ($del === 'да' || $del === 'yes' || $del === 'true');
+            if ($isDeletedRow) $rowsSkippedDeleted++;
 
             $productRaw = trim((string)($rows[$r][$cols['product']] ?? ''));
             $restRaw = trim((string)($rows[$r][$cols['restaurant']] ?? ''));
@@ -1033,9 +1033,11 @@ function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $l
                     'category' => $category,
                     'quantity' => 0,
                     'comment' => null,
+                    '_has_active' => false,
                 ];
             }
             $orders[$restNumber]['items'][$finalSku]['quantity'] += $qty;
+            if (!$isDeletedRow) $orders[$restNumber]['items'][$finalSku]['_has_active'] = true;
             $rowsMatched++;
         }
     }
@@ -1053,6 +1055,15 @@ function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $l
     $ordersOut = [];
     $skippedExisting = [];
     foreach ($orders as $restNumber => $order) {
+        // Позиция, у которой все строки в файле помечены удалёнными в 1С УТ,
+        // получает комментарий-пометку. Если есть хоть одна активная строка — не помечаем.
+        foreach ($order['items'] as &$itRef) {
+            if (empty($itRef['_has_active'])) {
+                $itRef['comment'] = 'Удалено в 1С УТ';
+            }
+            unset($itRef['_has_active']);
+        }
+        unset($itRef);
         $order['items'] = array_values($order['items']);
         usort($order['items'], fn($a, $b) => strcmp(($a['category'] ?? '') . ($a['product_name'] ?? ''), ($b['category'] ?? '') . ($b['product_name'] ?? '')));
         if (isset($existingByRestaurant[$restNumber])) {
