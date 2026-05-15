@@ -1,5 +1,7 @@
 <template>
-  <div class="tasks-view">
+  <div class="tasks-view"
+       :class="{ 'has-board-accent': !!boardAccent }"
+       :style="boardAccent ? { '--board-accent': boardAccent } : null">
     <!-- Шапка в один ряд: выбор доски + вкладки «Канбан/Календарь» с
          подчёркиванием активной + действия справа (поиск/сортировка/⚙/+). -->
     <header class="tasks-header">
@@ -107,10 +109,18 @@
             <TaskIcon name="edit" :size="14" class="board-menu-icon"/>
             <span>Переименовать</span>
           </button>
+          <button v-if="store.canEditStructure" class="board-menu-item" @click="openBoardSettings">
+            <TaskIcon name="gear" :size="14" class="board-menu-icon"/>
+            <span>Настройки доски</span>
+          </button>
           <button class="board-menu-item" @click="openLabelsManager">
             <TaskIcon name="tag" :size="14" class="board-menu-icon"/>
             <span>Метки доски</span>
             <span class="board-menu-badge">{{ store.labels.length }}</span>
+          </button>
+          <button class="board-menu-item" @click="openTimeReport">
+            <TaskIcon name="clock" :size="14" class="board-menu-icon"/>
+            <span>Сводка по времени</span>
           </button>
         </div>
         <div v-if="store.canEditStructure" class="board-menu-sep"></div>
@@ -281,6 +291,12 @@
     <!-- Мои шаблоны -->
     <TasksTemplatesDialog v-model="templatesOpen"/>
 
+    <!-- Настройки доски и сводка по времени -->
+    <TaskBoardSettingsDialog v-model="boardSettingsOpen"/>
+    <TaskTimeReportDialog v-model="timeReportOpen"
+                          :board-id="store.currentBoardId"
+                          @open-card="openCard"/>
+
     <!-- Глобальные диалоги модуля (один раз на странице) -->
     <ConfirmModal v-if="dlg.confirmModal.value.show"
                   :title="dlg.confirmModal.value.title"
@@ -416,6 +432,8 @@ const lazyOpts = {
 const TaskCalendar         = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskCalendar.vue'),         ...lazyOpts });
 const TaskCardModal        = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskCardModal.vue'),        ...lazyOpts });
 const TasksTemplatesDialog = defineAsyncComponent({ loader: () => import('@/components/tasks/TasksTemplatesDialog.vue'), ...lazyOpts });
+const TaskBoardSettingsDialog = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskBoardSettingsDialog.vue'), ...lazyOpts });
+const TaskTimeReportDialog    = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskTimeReportDialog.vue'),    ...lazyOpts });
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const InfoModal    = defineAsyncComponent(() => import('@/components/modals/InfoModal.vue'));
@@ -433,6 +451,8 @@ const draggedCard = ref(null);
 const boardMenuOpen = ref(false);
 const notifOpen = ref(false);
 const templatesOpen = ref(false);
+const boardSettingsOpen = ref(false);
+const timeReportOpen = ref(false);
 const notifList = ref([]);
 const notifUnread = ref(0);
 const notifLoading = ref(false);
@@ -619,6 +639,10 @@ const tasksNowTick = ref(Date.now());
 let tickTimer = null;
 provide('tasksNowTick', tasksNowTick);
 
+// Настройки оформления доски: акцентный цвет + компактные карточки.
+const boardAccent = computed(() => store.board?.accent_color || '');
+provide('tasksCompact', computed(() => !!store.board?.compact_cards));
+
 onMounted(async () => {
   await store.fetchBoards();
   // Открываем первую СВОЮ доску
@@ -732,7 +756,11 @@ async function addCardToFirstColumn() {
   if (!store.columns.length) return;
   const title = await dlg.prompt('Новая задача', { placeholder: 'Название задачи', okText: 'Создать' });
   if (!title) return;
-  try { await store.createCard({ board_id: store.currentBoardId, column_id: store.columns[0].id, title }); }
+  // Колонка по умолчанию из настроек доски (если задана и не архивная), иначе первая.
+  const defId = store.board?.default_column_id;
+  const defCol = defId ? store.columns.find(c => String(c.id) === String(defId) && !c.is_archive_column) : null;
+  const columnId = defCol ? defCol.id : store.columns[0].id;
+  try { await store.createCard({ board_id: store.currentBoardId, column_id: columnId, title }); }
   catch (e) { dlg.info('Ошибка', e.message, 'error'); }
 }
 
@@ -768,6 +796,14 @@ async function renameBoard() {
 function openLabelsManager() {
   boardMenuOpen.value = false;
   labelsManagerOpen.value = true;
+}
+function openBoardSettings() {
+  boardMenuOpen.value = false;
+  boardSettingsOpen.value = true;
+}
+function openTimeReport() {
+  boardMenuOpen.value = false;
+  timeReportOpen.value = true;
 }
 function closeLabelsManager() {
   labelsManagerOpen.value = false;
@@ -1017,6 +1053,10 @@ function onColDrop(i) {
   margin-left: auto;
   display: flex; align-items: center; gap: var(--tk-s-2);
   padding-bottom: 6px;
+}
+/* Акцентный цвет доски: подсветка нижней кромки шапки. */
+.tasks-view.has-board-accent .tasks-header {
+  border-bottom: 3px solid var(--board-accent);
 }
 .tasks-header-left { display: flex; align-items: center; gap: var(--tk-s-3); flex: 1; min-width: 0; }
 .tasks-title {

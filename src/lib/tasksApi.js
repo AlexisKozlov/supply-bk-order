@@ -29,6 +29,7 @@ export const tasksApi = {
   updateBoard(id, payload)      { return call('PATCH',  `/boards/${id}`, payload); },
   deleteBoard(id)               { return call('DELETE', `/boards/${id}`); },
   loadBoard(id)                 { return call('GET',    `/board/${id}`); },
+  boardTimeReport(id)           { return call('GET',    `/board/${id}/time-report`); },
 
   // Колонки
   createColumn(payload)         { return call('POST',   '/columns', payload); },

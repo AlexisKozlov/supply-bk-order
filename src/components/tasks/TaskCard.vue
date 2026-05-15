@@ -2,7 +2,7 @@
   <div
     ref="cardEl"
     class="task-card"
-    :class="[priorityClass, dueClass, { 'is-overdue': isOverdue, 'is-done': card.is_done, 'is-dragging': dragging, 'is-external': !!card.is_external, 'has-bg-color': !!card.color }]"
+    :class="[priorityClass, dueClass, { 'is-overdue': isOverdue, 'is-done': card.is_done, 'is-dragging': dragging, 'is-external': !!card.is_external, 'has-bg-color': !!card.color, 'card-compact': compact }]"
     :style="card.color ? { '--card-bg': card.color } : {}"
     draggable="true"
     @dragstart="onDragStart"
@@ -322,6 +322,8 @@ function formatTimerShort(sec) {
 // если карточка отрендерена вне канбан-доски (например, в поиске) — тогда
 // «живой» прирост = 0 и показываем статичную сумму.
 const nowTick = inject('tasksNowTick', null);
+// Компактный режим карточек — настройка доски (provide из TasksView).
+const compact = inject('tasksCompact', null);
 const timerLiveSeconds = computed(() => {
   const t = props.card.timer;
   if (!t) return 0;
@@ -604,6 +606,13 @@ const vClickOutsideCard = {
   border-color: var(--tk-border, #E6E1D7);
 }
 .task-card.is-dragging { opacity: 0.45; transform: rotate(1deg); }
+/* Компактный режим: меньше отступов, заголовок в 2 строки максимум */
+.task-card.card-compact { padding: 8px 10px 7px; gap: 6px; }
+.task-card.card-compact .task-card-title {
+  font-size: 12.5px; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.task-card.card-compact .task-card-meta { gap: 4px 5px; }
 .task-card.is-done { opacity: 0.6; }
 .task-card.is-done .task-card-title { text-decoration: line-through; color: var(--tk-text-muted); }
 .task-card.is-external { background: linear-gradient(180deg, #FAF5EE 0%, #FFFFFF 60%); border-color: #E8D9BD; }

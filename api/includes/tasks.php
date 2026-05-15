@@ -784,6 +784,31 @@ if ($action === 'boards' && $id) {
         if (isset($body['title']))       { $sets[] = 'title = ?';       $params[] = mb_substr(trim($body['title']), 0, 150); }
         if (isset($body['is_archived'])) { $sets[] = 'is_archived = ?'; $params[] = $body['is_archived'] ? 1 : 0; }
         if (isset($body['sort_order']))  { $sets[] = 'sort_order = ?';  $params[] = (int)$body['sort_order']; }
+        // Расширенные настройки доски
+        if (isset($body['auto_timer']))    { $sets[] = 'auto_timer = ?';    $params[] = $body['auto_timer'] ? 1 : 0; }
+        if (isset($body['compact_cards'])) { $sets[] = 'compact_cards = ?'; $params[] = $body['compact_cards'] ? 1 : 0; }
+        if (array_key_exists('default_priority', $body)) {
+            $dp = in_array($body['default_priority'], ['low','medium','high','urgent'], true) ? $body['default_priority'] : null;
+            $sets[] = 'default_priority = ?'; $params[] = $dp;
+        }
+        if (array_key_exists('default_assignee', $body)) {
+            $da = trim((string)($body['default_assignee'] ?? ''));
+            $sets[] = 'default_assignee = ?'; $params[] = $da !== '' ? mb_substr($da, 0, 100) : null;
+        }
+        if (array_key_exists('default_column_id', $body)) {
+            $dc = (int)($body['default_column_id'] ?? 0);
+            // Колонка должна принадлежать этой доске, иначе обнуляем
+            if ($dc > 0) {
+                $chk = $pdo->prepare("SELECT 1 FROM tasks_columns WHERE id = ? AND board_id = ?");
+                $chk->execute([$dc, $boardId]);
+                if (!$chk->fetchColumn()) $dc = 0;
+            }
+            $sets[] = 'default_column_id = ?'; $params[] = $dc > 0 ? $dc : null;
+        }
+        if (array_key_exists('accent_color', $body)) {
+            $ac = trim((string)($body['accent_color'] ?? ''));
+            $sets[] = 'accent_color = ?'; $params[] = $ac !== '' ? mb_substr($ac, 0, 20) : null;
+        }
         if (!$sets) tRespond(['error' => 'Нет полей для обновления'], 400);
         $params[] = $boardId;
         $pdo->prepare("UPDATE tasks_boards SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
@@ -795,6 +820,57 @@ if ($action === 'boards' && $id) {
         tRespond(['success' => true]);
     }
     tRespond(['error' => 'Method not allowed'], 405);
+}
+
+// ─── GET tasks/board/:id/time-report — сводка по времени (таймер) ───
+// Должен идти ПЕРЕД роутом полной доски: тот не проверяет $action2.
+if ($action === 'board' && $id && $action2 === 'time-report' && $method === 'GET') {
+    $boardId = (int)$id;
+    $board = tGetBoard($pdo, $boardId);
+    if (!$board) tRespond(['error' => 'Доска не найдена'], 404);
+    if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет доступа'], 403);
+
+    // Открытый интервал (stopped_at IS NULL) считаем до текущего момента.
+    $secExpr = "COALESCE(t.seconds, TIMESTAMPDIFF(SECOND, t.started_at, NOW()))";
+
+    $byUser = $pdo->prepare("
+        SELECT t.user_name,
+               SUM($secExpr) AS seconds,
+               COUNT(DISTINCT t.card_id) AS cards
+        FROM tasks_card_time t
+        JOIN tasks_cards c ON c.id = t.card_id
+        WHERE c.board_id = ?
+        GROUP BY t.user_name
+        ORDER BY seconds DESC");
+    $byUser->execute([$boardId]);
+    $usersR = [];
+    $total = 0;
+    foreach ($byUser->fetchAll() as $r) {
+        $sec = (int)$r['seconds'];
+        $total += $sec;
+        $usersR[] = ['user_name' => $r['user_name'], 'seconds' => $sec, 'cards' => (int)$r['cards']];
+    }
+
+    $byCard = $pdo->prepare("
+        SELECT c.id, c.title, c.is_archived,
+               SUM($secExpr) AS seconds
+        FROM tasks_card_time t
+        JOIN tasks_cards c ON c.id = t.card_id
+        WHERE c.board_id = ?
+        GROUP BY c.id, c.title, c.is_archived
+        ORDER BY seconds DESC");
+    $byCard->execute([$boardId]);
+    $cardsR = [];
+    foreach ($byCard->fetchAll() as $r) {
+        $cardsR[] = [
+            'id'          => (int)$r['id'],
+            'title'       => $r['title'],
+            'is_archived' => (int)$r['is_archived'],
+            'seconds'     => (int)$r['seconds'],
+        ];
+    }
+
+    tRespond(['by_user' => $usersR, 'by_card' => $cardsR, 'total_seconds' => $total]);
 }
 
 // ─── GET tasks/board/:id — полная доска ───
@@ -1058,10 +1134,16 @@ if ($action === 'cards' && !$id) {
         $col = tGetColumn($pdo, $columnId);
         if (!$col || (int)$col['board_id'] !== $boardId) tRespond(['error' => 'Колонка не относится к доске'], 400);
 
-        $priority = in_array($body['priority'] ?? '', ['low','medium','high','urgent']) ? $body['priority'] : 'medium';
+        // Приоритет: явный из тела > приоритет доски по умолчанию (только для
+        // корневых задач) > 'medium'.
+        $validPri = ['low','medium','high','urgent'];
+        $priority = in_array($body['priority'] ?? '', $validPri, true)
+            ? $body['priority']
+            : (!$parentId && in_array($board['default_priority'] ?? '', $validPri, true) ? $board['default_priority'] : 'medium');
         $due = !empty($body['due_date']) ? $body['due_date'] : null;
         $desc = isset($body['description']) ? mb_substr((string)$body['description'], 0, 5000) : null;
         $color = !empty($body['color']) ? mb_substr(trim((string)$body['color']), 0, 20) : null;
+        $autoAssignee = null;
         $pdo->beginTransaction();
         try {
             $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id " . ($parentId ? "= ?" : "IS NULL"));
@@ -1071,10 +1153,54 @@ if ($action === 'cards' && !$id) {
                 ->execute([$boardId, $parentId, $columnId, mb_substr($title, 0, 255), $desc, $priority, $color, $due, $so, $tUserName]);
             $cardId = (int)$pdo->lastInsertId();
             tHistory($pdo, $cardId, $tUserName, 'created', ['title' => $title, 'parent_card_id' => $parentId]);
+
+            // ─── Настройки доски: применяем только к корневым задачам ───
+            if (!$parentId) {
+                // Исполнитель по умолчанию: добавляем в tasks_assignees.
+                $da = trim((string)($board['default_assignee'] ?? ''));
+                if ($da !== '') {
+                    $boardSt = $pdo->prepare("SELECT id FROM tasks_boards WHERE owner_name = ? AND is_archived = 0 ORDER BY sort_order, id LIMIT 1");
+                    $boardSt->execute([$da]);
+                    $bId = $boardSt->fetchColumn();
+                    $aColId = null;
+                    if ($bId) {
+                        $colSt = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND (is_archive_column = 0 OR is_archive_column IS NULL) ORDER BY sort_order, id LIMIT 1");
+                        $colSt->execute([(int)$bId]);
+                        $aColId = $colSt->fetchColumn() ?: null;
+                    }
+                    $pdo->prepare("INSERT INTO tasks_assignees (card_id, user_name, column_id, sort_order, is_done) VALUES (?, ?, ?, 0, 0)")
+                        ->execute([$cardId, $da, $aColId]);
+                    tHistory($pdo, $cardId, $tUserName, 'assignees_changed', ['user_names' => [$da]]);
+                    $autoAssignee = $da;
+                }
+                // Авто-таймер: запускаем таймер создателя на новой задаче.
+                // Срабатывает только при ручном создании задачи (этот роут);
+                // задачи из автоповторов создаются другим путём и таймер не
+                // получают. У одного человека бежит лишь один таймер — поэтому
+                // сначала закрываем все прочие открытые записи этого пользователя.
+                if (!empty($board['auto_timer'])) {
+                    $openT = $pdo->prepare("SELECT id, card_id FROM tasks_card_time WHERE user_name = ? AND stopped_at IS NULL");
+                    $openT->execute([$tUserName]);
+                    $closeT = $pdo->prepare("UPDATE tasks_card_time SET stopped_at = NOW(), seconds = TIMESTAMPDIFF(SECOND, started_at, NOW()) WHERE id = ?");
+                    foreach ($openT->fetchAll() as $row) {
+                        $closeT->execute([(int)$row['id']]);
+                        tHistory($pdo, (int)$row['card_id'], $tUserName, 'timer_stopped', ['auto' => true]);
+                    }
+                    $pdo->prepare("INSERT INTO tasks_card_time (card_id, user_name, started_at) VALUES (?, ?, NOW())")
+                        ->execute([$cardId, $tUserName]);
+                    tHistory($pdo, $cardId, $tUserName, 'timer_started', ['auto' => true]);
+                }
+            }
             $pdo->commit();
         } catch (Exception $e) {
             $pdo->rollBack();
             tRespond(['error' => 'Ошибка создания карточки'], 500);
+        }
+        // Уведомление исполнителю по умолчанию (после коммита, неблокирующе).
+        if ($autoAssignee && $autoAssignee !== $tUserName) {
+            taskPushNotif($pdo, $autoAssignee, 'assigned', $cardId,
+                tBoardForRecipient($pdo, $cardId, $autoAssignee, $boardId), $tUserName,
+                ['card_title' => $title, 'board_title' => $board['title'] ?? '']);
         }
         tRespond(['id' => $cardId]);
     }

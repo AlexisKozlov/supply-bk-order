@@ -207,7 +207,8 @@ export const useTasksStore = defineStore('tasks', () => {
   async function updateBoard(id, payload) {
     await tasksApi.updateBoard(id, payload);
     await fetchBoards();
-    if (board.value && board.value.id === id && payload.title) board.value.title = payload.title;
+    // Сразу отражаем все изменённые поля в активной доске (название, настройки).
+    if (board.value && board.value.id === id) Object.assign(board.value, payload);
   }
 
   async function deleteBoard(id) {
