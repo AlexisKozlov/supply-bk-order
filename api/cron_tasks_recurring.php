@@ -60,12 +60,24 @@ $created = 0;
 $deactivated = 0;
 $total = count($rows);
 
+$tz = new DateTimeZone('Europe/Minsk');
+$today = (new DateTime('now', $tz))->format('Y-m-d');
+
 foreach ($rows as $sch) {
     try {
         // Шаблон ещё существует? (на случай гонок — каскад FK должен был всё убрать)
         $tplExists = $pdo->prepare("SELECT 1 FROM tasks_card_templates WHERE id = ? AND is_archived = 0");
         $tplExists->execute([(int)$sch['template_id']]);
         if (!$tplExists->fetchColumn()) continue;
+
+        // Окончание по дате: срок повтора уже прошёл — деактивируем, не создаём.
+        if (($sch['end_kind'] ?? 'never') === 'until'
+            && !empty($sch['end_date']) && $today > $sch['end_date']) {
+            $pdo->prepare("UPDATE tasks_template_schedules SET is_active = 0, deactivated_reason = 'completed' WHERE id = ?")
+                ->execute([(int)$sch['id']]);
+            $deactivated++;
+            continue;
+        }
 
         // Проверка доступа владельца к целевой доске
         $board = tGetBoard($pdo, (int)$sch['target_board_id']);
@@ -82,17 +94,27 @@ foreach ($rows as $sch) {
         $cardId = tCreateCardFromTemplate($pdo, (int)$sch['template_id'], $sch, $sch['owner_name']);
         if (!$cardId) continue;
 
-        // Пересчёт дат: last = сегодня, next = следующее срабатывание после сегодня
-        $tz = new DateTimeZone('Europe/Minsk');
-        $today = (new DateTime('now', $tz))->format('Y-m-d');
-        $next = tCalcNextRunDate(
-            $sch['recurrence_kind'],
-            $sch['weekday'],
-            $sch['day_of_month'],
-            $today
-        );
-        $pdo->prepare("UPDATE tasks_template_schedules SET last_run_date = ?, next_run_date = ? WHERE id = ?")
-            ->execute([$today, $next, (int)$sch['id']]);
+        $newRuns = (int)$sch['runs_done'] + 1;
+        $next = tCalcNextRunDate($sch, $today);
+
+        // Достигнут предел повтора → деактивируем расписание.
+        $endKind = $sch['end_kind'] ?? 'never';
+        $stop = false;
+        if ($endKind === 'count' && $sch['end_count'] !== null && $newRuns >= (int)$sch['end_count']) {
+            $stop = true;
+        }
+        if ($endKind === 'until' && !empty($sch['end_date']) && $next > $sch['end_date']) {
+            $stop = true;
+        }
+
+        if ($stop) {
+            $pdo->prepare("UPDATE tasks_template_schedules SET last_run_date = ?, runs_done = ?, is_active = 0, deactivated_reason = 'completed' WHERE id = ?")
+                ->execute([$today, $newRuns, (int)$sch['id']]);
+            $deactivated++;
+        } else {
+            $pdo->prepare("UPDATE tasks_template_schedules SET last_run_date = ?, next_run_date = ?, runs_done = ? WHERE id = ?")
+                ->execute([$today, $next, $newRuns, (int)$sch['id']]);
+        }
         $created++;
     } catch (Exception $e) {
         error_log('[cron_tasks_recurring] schedule#' . (int)$sch['id'] . ' error: ' . $e->getMessage());

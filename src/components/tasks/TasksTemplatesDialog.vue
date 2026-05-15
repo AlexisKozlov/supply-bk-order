@@ -126,6 +126,7 @@
                   <button class="tpl-mini-btn danger" @click="deleteSchedule(s.id)">Удалить</button>
                 </div>
               </div>
+
               <div class="tpl-schedule-grid">
                 <label class="tpl-field-inline">
                   <span>Доска</span>
@@ -141,38 +142,54 @@
                     <option v-for="c in columnsOfBoard(s.target_board_id)" :key="c.id" :value="c.id">{{ c.title }}</option>
                   </select>
                 </label>
-                <label class="tpl-field-inline">
-                  <span>Повторение</span>
-                  <select v-model="s.recurrence_kind" class="tpl-input" @change="onKindChange(s)">
-                    <option value="daily">Каждый день</option>
-                    <option value="weekly">Каждую неделю</option>
-                    <option value="monthly">Каждый месяц</option>
-                  </select>
-                </label>
-                <label v-if="s.recurrence_kind === 'weekly'" class="tpl-field-inline">
-                  <span>День недели</span>
-                  <select v-model.number="s.weekday" class="tpl-input"
-                          @change="saveScheduleField(s, 'weekday')">
-                    <option :value="1">Пн</option>
-                    <option :value="2">Вт</option>
-                    <option :value="3">Ср</option>
-                    <option :value="4">Чт</option>
-                    <option :value="5">Пт</option>
-                    <option :value="6">Сб</option>
-                    <option :value="7">Вс</option>
-                  </select>
-                </label>
-                <label v-if="s.recurrence_kind === 'monthly'" class="tpl-field-inline">
-                  <span>Число месяца</span>
-                  <input v-model.number="s.day_of_month" type="number" min="1" max="31" class="tpl-input"
-                         @change="saveScheduleField(s, 'day_of_month')"/>
-                </label>
-                <label class="tpl-field-inline">
-                  <span>Срок через (дней)</span>
-                  <input v-model.number="s.due_offset_days" type="number" min="0" max="60" class="tpl-input"
-                         @change="saveScheduleField(s, 'due_offset_days')"/>
-                </label>
               </div>
+
+              <!-- Повтор -->
+              <div class="tpl-recur">
+                <div class="tpl-recur-row">
+                  <span class="tpl-recur-label">Повторять каждые</span>
+                  <input type="number" min="1" max="60" v-model.number="s.interval_n"
+                         class="tpl-num" @change="saveRecurrence(s)"/>
+                  <select v-model="s.recurrence_kind" class="tpl-input tpl-kind" @change="onKindChange(s)">
+                    <option value="daily">дн.</option>
+                    <option value="weekly">нед.</option>
+                    <option value="monthly">мес.</option>
+                  </select>
+                </div>
+                <div v-if="s.recurrence_kind === 'weekly'" class="tpl-weekdays">
+                  <button v-for="d in weekdayDefs" :key="d.n" type="button"
+                          class="tpl-wd" :class="{ on: s.weekdaysArr.includes(d.n) }"
+                          @click="toggleWeekday(s, d.n)">{{ d.short }}</button>
+                  <button type="button" class="tpl-mini-btn" @click="setWeekdaysPreset(s, 'workdays')">Будни</button>
+                  <button type="button" class="tpl-mini-btn" @click="setWeekdaysPreset(s, 'all')">Все</button>
+                </div>
+                <div v-if="s.recurrence_kind === 'monthly'" class="tpl-recur-row">
+                  <span class="tpl-recur-label">Число месяца</span>
+                  <input type="number" min="1" max="31" v-model.number="s.day_of_month"
+                         class="tpl-num" @change="saveRecurrence(s)"/>
+                </div>
+              </div>
+
+              <!-- Окончание повтора -->
+              <div class="tpl-recur-row">
+                <span class="tpl-recur-label">Окончание</span>
+                <select v-model="s.end_kind" class="tpl-input" @change="onEndKindChange(s)">
+                  <option value="never">Бессрочно</option>
+                  <option value="until">До даты</option>
+                  <option value="count">Повторить N раз</option>
+                </select>
+                <input v-if="s.end_kind === 'until'" type="date" v-model="s.end_date"
+                       class="tpl-input" @change="saveRecurrence(s)"/>
+                <input v-if="s.end_kind === 'count'" type="number" min="1" max="999"
+                       v-model.number="s.end_count" class="tpl-num" @change="saveRecurrence(s)"/>
+              </div>
+
+              <label class="tpl-field-inline tpl-field-due">
+                <span>Срок задачи через (дней)</span>
+                <input v-model.number="s.due_offset_days" type="number" min="0" max="60" class="tpl-num"
+                       @change="saveScheduleField(s, 'due_offset_days')"/>
+              </label>
+
               <div v-if="s.label_ids?.length || labelsOfBoard(s.target_board_id).length" class="tpl-schedule-labels">
                 <span class="tpl-field-mini-label">Метки:</span>
                 <span v-for="l in labelsOfBoard(s.target_board_id)" :key="l.id"
@@ -183,9 +200,31 @@
                   {{ l.title }}
                 </span>
               </div>
+
               <div v-if="s.deactivated_reason" class="tpl-schedule-warn">
-                Деактивировано: {{ reasonLabel(s.deactivated_reason) }}
+                {{ s.deactivated_reason === 'completed' ? 'Повтор завершён' : 'Деактивировано: ' + reasonLabel(s.deactivated_reason) }}
               </div>
+
+              <!-- Результат: следующий запуск + созданные задачи -->
+              <div class="tpl-schedule-result">
+                <span class="tpl-result-stat">
+                  Следующая: <b>{{ s.is_active && s.next_run_date ? formatDate(s.next_run_date) : '—' }}</b>
+                </span>
+                <button class="tpl-mini-btn" @click="toggleScheduleCards(s)">
+                  Создано задач: {{ s.created_count ?? 0 }}
+                  <span class="tpl-chev">{{ expandedCards[s.id] ? '▴' : '▾' }}</span>
+                </button>
+              </div>
+              <ul v-if="expandedCards[s.id]" class="tpl-created-list">
+                <li v-if="cardsLoading[s.id]" class="tpl-muted">Загрузка…</li>
+                <li v-else-if="!scheduleCards[s.id]?.length" class="tpl-muted">Пока ни одной задачи</li>
+                <li v-for="c in scheduleCards[s.id]" :key="c.id"
+                    class="tpl-created-item" @click="openGeneratedCard(c.id)">
+                  <span class="tpl-created-title" :class="{ done: c.is_done }">{{ c.title }}</span>
+                  <span class="tpl-created-meta">{{ c.column_title }} · {{ formatDate(c.created_at) }}</span>
+                </li>
+              </ul>
+
               <div class="tpl-schedule-preview">
                 <span class="tpl-field-mini-label">Ближайшие запуски:</span>
                 <span v-if="previewLoading[s.id]" class="tpl-muted">…</span>
@@ -222,7 +261,7 @@ import TaskIcon from './TaskIcon.vue';
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
 });
-const emit = defineEmits(['update:modelValue']);
+const emit = defineEmits(['update:modelValue', 'open-card']);
 
 const store = useTasksStore();
 
@@ -236,6 +275,29 @@ const newAssignee = ref('');
 const newChecklistItem = ref('');
 const previews = ref({}); // schedule_id -> [dates]
 const previewLoading = ref({});
+const expandedCards = ref({}); // schedule_id -> bool (раскрыт список созданных задач)
+const scheduleCards = ref({}); // schedule_id -> [cards]
+const cardsLoading = ref({});  // schedule_id -> bool
+const weekdayDefs = [
+  { n: 1, short: 'Пн' }, { n: 2, short: 'Вт' }, { n: 3, short: 'Ср' },
+  { n: 4, short: 'Чт' }, { n: 5, short: 'Пт' }, { n: 6, short: 'Сб' }, { n: 7, short: 'Вс' },
+];
+
+// Приводит расписание с бэка к виду, удобному для UI (числа, массив дней недели).
+function normalizeSchedule(s) {
+  s.interval_n = Math.max(1, Number(s.interval_n) || 1);
+  s.recurrence_kind = s.recurrence_kind || 'daily';
+  let arr = [];
+  if (s.weekdays) arr = String(s.weekdays).split(',').map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= 7);
+  if (!arr.length && s.weekday) arr = [Number(s.weekday)];
+  s.weekdaysArr = arr;
+  s.day_of_month = Number(s.day_of_month) || 1;
+  s.end_kind = s.end_kind || 'never';
+  s.end_count = s.end_count != null ? Number(s.end_count) : null;
+  s.due_offset_days = Number(s.due_offset_days) || 0;
+  s.created_count = Number(s.created_count) || 0;
+  return s;
+}
 
 watch(() => props.modelValue, async (val) => {
   if (val) {
@@ -309,6 +371,7 @@ function onCreateClick() {
 async function openEditor(id) {
   try {
     current.value = await tasksApi.loadTemplate(id);
+    (current.value.schedules || []).forEach(normalizeSchedule);
     mode.value = 'edit';
     // Подгружаем превью для всех активных расписаний
     for (const s of current.value.schedules || []) {
@@ -367,44 +430,96 @@ async function addSchedule() {
     return;
   }
   try {
-    const r = await tasksApi.createSchedule(current.value.id, {
+    await tasksApi.createSchedule(current.value.id, {
       target_board_id: b.id,
       target_column_id: col.id,
       recurrence_kind: 'weekly',
-      weekday: 1,
-      lead_days: 0,
+      weekdays: [1],
+      interval_n: 1,
       due_offset_days: 0,
+      end_kind: 'never',
     });
     // Перезагружаем редактор
     await openEditor(current.value.id);
   } catch (e) { alert('Ошибка: ' + e.message); }
 }
 
+// Сохранение простых полей расписания (колонка, срок задачи).
 async function saveScheduleField(s, field) {
   const payload = { [field]: s[field] };
   try { await tasksApi.updateSchedule(s.id, payload); }
-  catch (e) { alert('Ошибка: ' + e.message); return; }
-  // Если поменялось правило — перезагружаем превью
-  if (['recurrence_kind','weekday','day_of_month'].includes(field)) {
-    delete previews.value[s.id];
-    loadPreview(s.id);
-  }
+  catch (e) { alert('Ошибка: ' + e.message); }
 }
 
-async function onKindChange(s) {
-  // При смене типа сбрасываем неактуальные поля
-  if (s.recurrence_kind === 'daily')   { s.weekday = null; s.day_of_month = null; }
-  if (s.recurrence_kind === 'weekly')  { s.weekday = s.weekday || 1; s.day_of_month = null; }
-  if (s.recurrence_kind === 'monthly') { s.weekday = null; s.day_of_month = s.day_of_month || 1; }
+// Сохраняет весь блок повтора целиком (бэк пересчитывает следующую дату).
+async function saveRecurrence(s) {
   try {
     await tasksApi.updateSchedule(s.id, {
       recurrence_kind: s.recurrence_kind,
-      weekday: s.weekday,
-      day_of_month: s.day_of_month,
+      interval_n: Math.max(1, Number(s.interval_n) || 1),
+      weekdays: s.weekdaysArr,
+      day_of_month: Number(s.day_of_month) || 1,
+      end_kind: s.end_kind,
+      end_date: s.end_date || null,
+      end_count: s.end_count || null,
     });
-    delete previews.value[s.id];
-    loadPreview(s.id);
+    // Перечитываем редактор — обновятся «Следующая дата» и заголовок расписания.
+    await openEditor(current.value.id);
   } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+function onKindChange(s) {
+  if (s.recurrence_kind === 'weekly' && !s.weekdaysArr.length) s.weekdaysArr = [1];
+  if (s.recurrence_kind === 'monthly' && !s.day_of_month) s.day_of_month = 1;
+  saveRecurrence(s);
+}
+
+function onEndKindChange(s) {
+  if (s.end_kind === 'count' && !s.end_count) s.end_count = 5;
+  if (s.end_kind === 'until' && !s.end_date) {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 3);
+    s.end_date = d.toISOString().slice(0, 10);
+  }
+  saveRecurrence(s);
+}
+
+function toggleWeekday(s, n) {
+  const i = s.weekdaysArr.indexOf(n);
+  if (i >= 0) {
+    if (s.weekdaysArr.length > 1) s.weekdaysArr.splice(i, 1); // минимум один день
+  } else {
+    s.weekdaysArr.push(n);
+  }
+  s.weekdaysArr.sort((a, b) => a - b);
+  saveRecurrence(s);
+}
+
+function setWeekdaysPreset(s, preset) {
+  s.weekdaysArr = preset === 'workdays' ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6, 7];
+  saveRecurrence(s);
+}
+
+// Раскрывает/сворачивает список задач, созданных расписанием (ленивая загрузка).
+async function toggleScheduleCards(s) {
+  const open = !expandedCards.value[s.id];
+  expandedCards.value = { ...expandedCards.value, [s.id]: open };
+  if (open && !scheduleCards.value[s.id]) {
+    cardsLoading.value = { ...cardsLoading.value, [s.id]: true };
+    try {
+      const r = await tasksApi.scheduleCards(s.id);
+      scheduleCards.value = { ...scheduleCards.value, [s.id]: r.cards || [] };
+    } catch (_) {
+      scheduleCards.value = { ...scheduleCards.value, [s.id]: [] };
+    } finally {
+      cardsLoading.value = { ...cardsLoading.value, [s.id]: false };
+    }
+  }
+}
+
+function openGeneratedCard(id) {
+  emit('open-card', id);
+  close();
 }
 
 async function onScheduleBoardChange(s) {
@@ -446,8 +561,14 @@ async function deleteSchedule(id) {
 
 async function runScheduleNow(id) {
   try {
-    const r = await tasksApi.runScheduleNow(id);
-    alert('Карточка создана. Откройте доску, чтобы увидеть её.');
+    await tasksApi.runScheduleNow(id);
+    // Обновляем счётчик и список созданных задач.
+    delete scheduleCards.value[id];
+    await openEditor(current.value.id);
+    if (expandedCards.value[id]) {
+      const s = (current.value.schedules || []).find(x => x.id === id);
+      if (s) { expandedCards.value[id] = false; toggleScheduleCards(s); }
+    }
   } catch (e) { alert('Ошибка: ' + e.message); }
 }
 
@@ -472,18 +593,33 @@ function priorityLabel(p) {
   return ({ low: 'Низкий', medium: 'Обычный', high: 'Высокий', urgent: 'Срочный' })[p] || p;
 }
 function reasonLabel(r) {
-  return ({ no_access: 'нет доступа к доске', board_archived: 'доска архивирована', manual: 'вручную' })[r] || r;
+  return ({ no_access: 'нет доступа к доске', board_archived: 'доска архивирована',
+            manual: 'вручную', completed: 'повтор завершён' })[r] || r;
 }
 function scheduleHumanTitle(s) {
-  const days = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-  if (s.recurrence_kind === 'daily')   return 'Каждый день';
-  if (s.recurrence_kind === 'weekly')  return 'Каждую неделю, ' + (days[s.weekday] || '?');
-  if (s.recurrence_kind === 'monthly') return 'Каждый месяц, ' + (s.day_of_month || '?') + '-го';
-  return s.recurrence_kind;
+  const short = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const n = Math.max(1, Number(s.interval_n) || 1);
+  let base;
+  if (s.recurrence_kind === 'daily') {
+    base = n === 1 ? 'Каждый день' : `Каждые ${n} дн.`;
+  } else if (s.recurrence_kind === 'weekly') {
+    const days = (s.weekdaysArr || []).map(d => short[d]).filter(Boolean).join(', ');
+    const every = n === 1 ? 'Каждую неделю' : `Каждые ${n} нед.`;
+    base = days ? `${every}: ${days}` : every;
+  } else if (s.recurrence_kind === 'monthly') {
+    const every = n === 1 ? 'Каждый месяц' : `Каждые ${n} мес.`;
+    base = `${every}, ${s.day_of_month || '?'}-го`;
+  } else {
+    base = s.recurrence_kind;
+  }
+  if (s.end_kind === 'until' && s.end_date) base += ` · до ${formatDate(s.end_date)}`;
+  if (s.end_kind === 'count' && s.end_count) base += ` · ${s.end_count} раз`;
+  return base;
 }
 function formatDate(d) {
   if (!d) return '';
-  const [y, m, day] = d.split('-');
+  // Принимает и 'YYYY-MM-DD', и 'YYYY-MM-DD HH:MM:SS'.
+  const [y, m, day] = String(d).slice(0, 10).split('-');
   return `${day}.${m}.${y.slice(2)}`;
 }
 </script>
@@ -661,4 +797,62 @@ function formatDate(d) {
 .tpl-danger-zone { padding-top: 12px; border-top: 1px solid var(--tk-n-200, #E8E2D4); }
 .btn.danger { background: #FEE2E2; color: #991B1B; border: none; }
 .btn.danger:hover { background: #FCA5A5; }
+
+/* ─── Блок повтора ─── */
+.tpl-recur {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--tk-n-100, #F3F0E8); border-radius: 8px;
+}
+.tpl-recur-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 13px; color: var(--tk-text, #1A1814);
+}
+.tpl-recur-label { color: var(--tk-text-secondary, #534D40); font-size: 12px; }
+.tpl-num {
+  width: 58px; padding: 5px 8px; font-size: 13px;
+  border: 1px solid var(--tk-n-200, #E8E2D4); border-radius: 6px;
+  background: #fff; color: var(--tk-text, #1A1814);
+}
+.tpl-num:focus { outline: 2px solid var(--tk-accent, #E87A1E); outline-offset: -1px; }
+.tpl-kind { width: auto; min-width: 70px; }
+
+.tpl-weekdays { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.tpl-wd {
+  width: 34px; height: 30px; padding: 0;
+  border: 1px solid var(--tk-n-200, #E8E2D4); border-radius: 6px;
+  background: #fff; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--tk-text-secondary, #534D40);
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.tpl-wd:hover { border-color: var(--tk-accent, #E87A1E); }
+.tpl-wd.on {
+  background: var(--tk-accent, #E87A1E); color: #fff;
+  border-color: var(--tk-accent, #E87A1E);
+}
+
+.tpl-field-due { flex-direction: row; align-items: center; gap: 8px; margin: 4px 0; }
+
+/* ─── Результат повтора ─── */
+.tpl-schedule-result {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap; margin-top: 8px;
+}
+.tpl-result-stat { font-size: 12px; color: var(--tk-text-secondary, #534D40); }
+.tpl-chev { font-size: 10px; opacity: 0.7; }
+.tpl-created-list {
+  list-style: none; margin: 6px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 180px; overflow-y: auto;
+}
+.tpl-created-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 5px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 12px;
+}
+.tpl-created-item:hover { background: var(--tk-n-100, #F3F0E8); }
+.tpl-created-title { color: var(--tk-text, #1A1814); }
+.tpl-created-title.done { text-decoration: line-through; color: var(--tk-text-secondary, #8A8275); }
+.tpl-created-meta { color: var(--tk-text-secondary, #8A8275); white-space: nowrap; }
 </style>

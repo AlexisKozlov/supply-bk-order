@@ -414,47 +414,135 @@ function tBuildCardsTimerSummary($pdo, array $cardIds, $tUserName) {
 
 // ─── Хелперы повторяющихся задач (этап 6) ───
 
+// Разбирает дни недели расписания в отсортированный массив 1..7 (Пн..Вс).
+// Приоритет — новое поле weekdays (CSV); если пусто — одиночное weekday.
+function tParseWeekdays($sch) {
+    $days = [];
+    $raw = trim((string)($sch['weekdays'] ?? ''));
+    if ($raw !== '') {
+        foreach (explode(',', $raw) as $p) {
+            $n = (int)trim($p);
+            if ($n >= 1 && $n <= 7) $days[$n] = true;
+        }
+    }
+    if (!$days && !empty($sch['weekday'])) {
+        $w = (int)$sch['weekday'];
+        if ($w >= 1 && $w <= 7) $days[$w] = true;
+    }
+    $days = array_keys($days);
+    sort($days);
+    return $days;
+}
+
 // Считает следующую дату срабатывания строго ПОСЛЕ $fromDate (YYYY-MM-DD).
-// Используется и при сохранении расписания, и в cron после успешного создания.
-function tCalcNextRunDate($kind, $weekday, $dayOfMonth, $fromDate) {
+// $sch — массив расписания (recurrence_kind, interval_n, weekday/weekdays,
+// day_of_month). Используется при сохранении расписания, в cron и в preview.
+function tCalcNextRunDate($sch, $fromDate) {
     $tz = new DateTimeZone('Europe/Minsk');
     $from = DateTime::createFromFormat('Y-m-d', $fromDate, $tz);
     if (!$from) $from = new DateTime('now', $tz);
+    $kind     = $sch['recurrence_kind'] ?? 'daily';
+    $interval = max(1, (int)($sch['interval_n'] ?? 1));
+
     if ($kind === 'daily') {
-        $from->modify('+1 day');
+        $from->modify('+' . $interval . ' day');
         return $from->format('Y-m-d');
     }
+
     if ($kind === 'weekly') {
-        $w = max(1, min(7, (int)$weekday));
-        // PHP: 1=Mon..7=Sun (формат N) — совпадает с нашим хранением.
+        // Набор дней недели. PHP формат N: 1=Пн..7=Вс — совпадает с хранением.
+        $days = tParseWeekdays($sch);
+        if (!$days) $days = [1];
         $cur = (int)$from->format('N');
-        $diff = $w - $cur;
-        if ($diff <= 0) $diff += 7;
-        $from->modify("+{$diff} day");
+        $nextSame = null;
+        foreach ($days as $d) { if ($d > $cur) { $nextSame = $d; break; } }
+        if ($nextSame !== null) {
+            // Ещё есть день недели на этой неделе — без интервального скачка.
+            $from->modify('+' . ($nextSame - $cur) . ' day');
+        } else {
+            // Дни этой недели исчерпаны — прыгаем на interval недель к первому дню.
+            $first = $days[0];
+            $diff = (7 - $cur) + $first + 7 * ($interval - 1);
+            $from->modify('+' . $diff . ' day');
+        }
         return $from->format('Y-m-d');
     }
+
     if ($kind === 'monthly') {
-        $d = max(1, min(31, (int)$dayOfMonth));
-        $from->modify('+1 day'); // строго после fromDate
-        // Ищем ближайший день месяца. Если в текущем месяце он уже прошёл —
-        // переходим на следующий, и так пока не найдём подходящий.
-        while (true) {
-            $lastDay = (int)$from->format('t');
-            $target = min($d, $lastDay);
-            $curDay = (int)$from->format('j');
-            if ($curDay <= $target) {
-                $from->setDate(
-                    (int)$from->format('Y'),
-                    (int)$from->format('n'),
-                    $target
-                );
-                return $from->format('Y-m-d');
-            }
-            // Перескакиваем на 1-е следующего месяца.
-            $from->modify('first day of next month');
+        $d  = max(1, min(31, (int)($sch['day_of_month'] ?? 1)));
+        $fy = (int)$from->format('Y');
+        $fm = (int)$from->format('n');
+        // Если нужный день в месяце $from ещё впереди — это и есть следующая дата
+        // (важно для первого расчёта от «сегодня»).
+        $lastThis   = (int)$from->format('t');
+        $targetThis = min($d, $lastThis);
+        if ((int)$from->format('j') < $targetThis) {
+            return sprintf('%04d-%02d-%02d', $fy, $fm, $targetThis);
         }
+        // Иначе — прыгаем на interval месяцев вперёд.
+        $m = $fm + $interval;
+        $y = $fy;
+        while ($m > 12) { $m -= 12; $y++; }
+        $probe = DateTime::createFromFormat('Y-n-j', "$y-$m-1", $tz);
+        $last  = (int)$probe->format('t');
+        return sprintf('%04d-%02d-%02d', $y, $m, min($d, $last));
     }
+
     return $from->format('Y-m-d');
+}
+
+// Нормализует и валидирует параметры повтора из тела запроса.
+// $base — текущие значения расписания (для PATCH, чтобы не сбросить незаданное).
+// Возвращает массив с ключами: kind, interval, weekday, weekdays, dayOfM,
+// endKind, endDate, endCount.
+function tNormalizeRecurrence($body, $base = []) {
+    $kind = $body['recurrence_kind'] ?? ($base['recurrence_kind'] ?? 'daily');
+    if (!in_array($kind, ['daily','weekly','monthly'], true)) $kind = 'daily';
+    $interval = isset($body['interval_n'])
+        ? max(1, min(60, (int)$body['interval_n']))
+        : max(1, min(60, (int)($base['interval_n'] ?? 1)));
+
+    $weekday = null; $weekdays = null;
+    if ($kind === 'weekly') {
+        $arr = [];
+        $raw = $body['weekdays'] ?? null;
+        if (is_array($raw)) {
+            foreach ($raw as $d) { $n = (int)$d; if ($n >= 1 && $n <= 7) $arr[$n] = true; }
+        } elseif (is_string($raw) && $raw !== '') {
+            foreach (explode(',', $raw) as $d) { $n = (int)trim($d); if ($n >= 1 && $n <= 7) $arr[$n] = true; }
+        }
+        if (!$arr && isset($body['weekday'])) { $n = (int)$body['weekday']; if ($n >= 1 && $n <= 7) $arr[$n] = true; }
+        if (!$arr && !empty($base['weekdays'])) {
+            foreach (explode(',', $base['weekdays']) as $d) { $n = (int)trim($d); if ($n >= 1 && $n <= 7) $arr[$n] = true; }
+        }
+        if (!$arr && !empty($base['weekday'])) { $n = (int)$base['weekday']; if ($n >= 1 && $n <= 7) $arr[$n] = true; }
+        if (!$arr) $arr = [1 => true];
+        $list = array_keys($arr); sort($list);
+        $weekdays = implode(',', $list);
+        $weekday  = $list[0];
+    }
+
+    $dayOfM = null;
+    if ($kind === 'monthly') {
+        $dayOfM = isset($body['day_of_month'])
+            ? max(1, min(31, (int)$body['day_of_month']))
+            : max(1, min(31, (int)($base['day_of_month'] ?? 1)));
+    }
+
+    $endKind = $body['end_kind'] ?? ($base['end_kind'] ?? 'never');
+    if (!in_array($endKind, ['never','until','count'], true)) $endKind = 'never';
+    $endDate = null; $endCount = null;
+    if ($endKind === 'until') {
+        $ed = $body['end_date'] ?? ($base['end_date'] ?? null);
+        $endDate = ($ed && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$ed)) ? $ed : null;
+        if (!$endDate) $endKind = 'never';
+    } elseif ($endKind === 'count') {
+        $ec = isset($body['end_count']) ? (int)$body['end_count'] : (int)($base['end_count'] ?? 0);
+        $endCount = $ec > 0 ? min(999, $ec) : null;
+        if (!$endCount) $endKind = 'never';
+    }
+
+    return compact('kind','interval','weekday','weekdays','dayOfM','endKind','endDate','endCount');
 }
 
 // Атомарно создаёт карточку из шаблона+расписания со всем содержимым.
@@ -496,7 +584,7 @@ function tCreateCardFromTemplate($pdo, $templateId, $schedule, $ownerName) {
         $s->execute([$columnId]);
         $so = (int)$s->fetchColumn();
 
-        $pdo->prepare("INSERT INTO tasks_cards (board_id, parent_card_id, column_id, title, description, priority, due_date, sort_order, created_by) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)")
+        $pdo->prepare("INSERT INTO tasks_cards (board_id, parent_card_id, column_id, title, description, priority, due_date, sort_order, created_by, source_schedule_id) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)")
             ->execute([
                 $boardId,
                 $columnId,
@@ -506,6 +594,7 @@ function tCreateCardFromTemplate($pdo, $templateId, $schedule, $ownerName) {
                 $due,
                 $so,
                 $ownerName,
+                (int)$schedule['id'],
             ]);
         $cardId = (int)$pdo->lastInsertId();
 
@@ -2164,8 +2253,14 @@ if ($action === 'templates' && $id && !$action2 && $method === 'GET') {
         foreach ($ll->fetchAll() as $r) {
             $labelsBySched[(int)$r['schedule_id']][] = (int)$r['label_id'];
         }
+        // Счётчик уже созданных карточек по каждому расписанию
+        $cc = $pdo->prepare("SELECT source_schedule_id, COUNT(*) AS cnt FROM tasks_cards WHERE source_schedule_id IN ($ph) GROUP BY source_schedule_id");
+        $cc->execute($schedIds);
+        $countBySched = [];
+        foreach ($cc->fetchAll() as $r) $countBySched[(int)$r['source_schedule_id']] = (int)$r['cnt'];
         foreach ($schedules as &$s) {
-            $s['label_ids'] = $labelsBySched[(int)$s['id']] ?? [];
+            $s['label_ids']     = $labelsBySched[(int)$s['id']] ?? [];
+            $s['created_count'] = $countBySched[(int)$s['id']] ?? 0;
         }
     }
     $tpl['schedules'] = $schedules;
@@ -2256,28 +2351,33 @@ if ($action === 'templates' && $id && $action2 === 'schedules' && $method === 'P
     $tpl = tplLoadOwned($pdo, $id, $tUserName, $isAdmin);
     $boardId  = (int)($body['target_board_id'] ?? 0);
     $columnId = (int)($body['target_column_id'] ?? 0);
-    $kind     = $body['recurrence_kind'] ?? '';
-    if (!in_array($kind, ['daily','weekly','monthly'])) tRespond(['error' => 'recurrence_kind должен быть daily/weekly/monthly'], 400);
-    $weekday  = $kind === 'weekly' ? max(1, min(7, (int)($body['weekday'] ?? 1))) : null;
-    $dayOfM   = $kind === 'monthly' ? max(1, min(31, (int)($body['day_of_month'] ?? 1))) : null;
-    $leadD    = max(0, (int)($body['lead_days'] ?? 0));
-    $dueOff   = max(0, (int)($body['due_offset_days'] ?? 0));
+    $dueOff = max(0, min(60, (int)($body['due_offset_days'] ?? 0)));
     if (!$boardId || !$columnId) tRespond(['error' => 'target_board_id и target_column_id обязательны'], 400);
 
     // Проверяем права ВЛАДЕЛЬЦА шаблона (важно когда админ редактирует чужой)
     // и валидируем целевую колонку (не архивная, относится к доске).
     [$board, $col] = tplValidateTarget($pdo, $boardId, $columnId, $tpl['owner_name']);
 
+    $rc = tNormalizeRecurrence($body);
     $tz = new DateTimeZone('Europe/Minsk');
     $today = (new DateTime('now', $tz))->format('Y-m-d');
-    $next = tCalcNextRunDate($kind, $weekday, $dayOfM, $today);
+    $next = tCalcNextRunDate([
+        'recurrence_kind' => $rc['kind'], 'interval_n' => $rc['interval'],
+        'weekdays' => $rc['weekdays'], 'weekday' => $rc['weekday'], 'day_of_month' => $rc['dayOfM'],
+    ], $today);
 
     $labels = is_array($body['label_ids'] ?? null) ? array_map('intval', $body['label_ids']) : [];
 
     $pdo->beginTransaction();
     try {
-        $pdo->prepare("INSERT INTO tasks_template_schedules (template_id, target_board_id, target_column_id, recurrence_kind, weekday, day_of_month, lead_days, due_offset_days, next_run_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)")
-            ->execute([(int)$id, $boardId, $columnId, $kind, $weekday, $dayOfM, $leadD, $dueOff, $next]);
+        $pdo->prepare("INSERT INTO tasks_template_schedules
+                (template_id, target_board_id, target_column_id, recurrence_kind, interval_n,
+                 weekday, weekdays, day_of_month, due_offset_days,
+                 end_kind, end_date, end_count, next_run_date, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)")
+            ->execute([(int)$id, $boardId, $columnId, $rc['kind'], $rc['interval'],
+                       $rc['weekday'], $rc['weekdays'], $rc['dayOfM'], $dueOff,
+                       $rc['endKind'], $rc['endDate'], $rc['endCount'], $next]);
         $schedId = (int)$pdo->lastInsertId();
         if ($labels) {
             // Только метки целевой доски
@@ -2303,28 +2403,26 @@ if ($action === 'template-schedules' && $id && !$action2 && $method === 'PATCH')
     $sch = tplScheduleLoadOwned($pdo, $id, $tUserName, $isAdmin);
     $sets = []; $params = [];
     $needRecalc = false;
-    $kind = $sch['recurrence_kind'];
-    $weekday = $sch['weekday'];
-    $dayOfM = $sch['day_of_month'];
+    $rc = null;
 
-    if (array_key_exists('recurrence_kind', $body)) {
-        if (!in_array($body['recurrence_kind'], ['daily','weekly','monthly'])) tRespond(['error' => 'неверный recurrence_kind'], 400);
-        $kind = $body['recurrence_kind'];
-        $sets[] = 'recurrence_kind = ?'; $params[] = $kind;
+    // Любое из полей повтора в теле → пересчитываем весь блок повтора целиком
+    // (через tNormalizeRecurrence с базой = текущее расписание).
+    $recKeys = ['recurrence_kind','interval_n','weekdays','weekday','day_of_month','end_kind','end_date','end_count'];
+    $hasRec = false;
+    foreach ($recKeys as $k) { if (array_key_exists($k, $body)) { $hasRec = true; break; } }
+    if ($hasRec) {
+        $rc = tNormalizeRecurrence($body, $sch);
+        $sets[] = 'recurrence_kind = ?'; $params[] = $rc['kind'];
+        $sets[] = 'interval_n = ?';      $params[] = $rc['interval'];
+        $sets[] = 'weekday = ?';         $params[] = $rc['weekday'];
+        $sets[] = 'weekdays = ?';        $params[] = $rc['weekdays'];
+        $sets[] = 'day_of_month = ?';    $params[] = $rc['dayOfM'];
+        $sets[] = 'end_kind = ?';        $params[] = $rc['endKind'];
+        $sets[] = 'end_date = ?';        $params[] = $rc['endDate'];
+        $sets[] = 'end_count = ?';       $params[] = $rc['endCount'];
         $needRecalc = true;
     }
-    if (array_key_exists('weekday', $body)) {
-        $weekday = $body['weekday'] !== null ? max(1, min(7, (int)$body['weekday'])) : null;
-        $sets[] = 'weekday = ?'; $params[] = $weekday;
-        $needRecalc = true;
-    }
-    if (array_key_exists('day_of_month', $body)) {
-        $dayOfM = $body['day_of_month'] !== null ? max(1, min(31, (int)$body['day_of_month'])) : null;
-        $sets[] = 'day_of_month = ?'; $params[] = $dayOfM;
-        $needRecalc = true;
-    }
-    if (array_key_exists('lead_days', $body))       { $sets[] = 'lead_days = ?';       $params[] = max(0, (int)$body['lead_days']); }
-    if (array_key_exists('due_offset_days', $body)) { $sets[] = 'due_offset_days = ?'; $params[] = max(0, (int)$body['due_offset_days']); }
+    if (array_key_exists('due_offset_days', $body)) { $sets[] = 'due_offset_days = ?'; $params[] = max(0, min(60, (int)$body['due_offset_days'])); }
     if (array_key_exists('is_active', $body)) {
         $sets[] = 'is_active = ?'; $params[] = $body['is_active'] ? 1 : 0;
         if ($body['is_active']) { $sets[] = 'deactivated_reason = NULL'; }
@@ -2342,10 +2440,13 @@ if ($action === 'template-schedules' && $id && !$action2 && $method === 'PATCH')
             $pdo->prepare("DELETE FROM tasks_template_schedule_labels WHERE schedule_id = ?")->execute([(int)$id]);
         }
     }
-    if ($needRecalc) {
+    if ($needRecalc && $rc) {
         $tz = new DateTimeZone('Europe/Minsk');
         $today = (new DateTime('now', $tz))->format('Y-m-d');
-        $next = tCalcNextRunDate($kind, $weekday, $dayOfM, $today);
+        $next = tCalcNextRunDate([
+            'recurrence_kind' => $rc['kind'], 'interval_n' => $rc['interval'],
+            'weekdays' => $rc['weekdays'], 'weekday' => $rc['weekday'], 'day_of_month' => $rc['dayOfM'],
+        ], $today);
         $sets[] = 'next_run_date = ?'; $params[] = $next;
         $sets[] = 'last_run_date = NULL';
     }
@@ -2403,10 +2504,26 @@ if ($action === 'template-schedules' && $id && $action2 === 'preview' && $method
     if ($cur < $today) $cur = $today; // на всякий случай
     $dates[] = $cur;
     for ($i = 1; $i < 5; $i++) {
-        $cur = tCalcNextRunDate($sch['recurrence_kind'], $sch['weekday'], $sch['day_of_month'], $cur);
+        $cur = tCalcNextRunDate($sch, $cur);
         $dates[] = $cur;
     }
     tRespond(['dates' => $dates]);
+}
+
+// ─── GET /tasks/template-schedules/:id/cards — задачи, созданные расписанием ───
+if ($action === 'template-schedules' && $id && $action2 === 'cards' && $method === 'GET') {
+    tplScheduleLoadOwned($pdo, $id, $tUserName, $isAdmin);
+    $s = $pdo->prepare("
+        SELECT c.id, c.title, c.is_done, c.is_archived, c.created_at,
+               c.column_id, col.title AS column_title
+        FROM tasks_cards c
+        LEFT JOIN tasks_columns col ON col.id = c.column_id
+        WHERE c.source_schedule_id = ?
+        ORDER BY c.created_at DESC, c.id DESC
+        LIMIT 100
+    ");
+    $s->execute([(int)$id]);
+    tRespond(['cards' => $s->fetchAll()]);
 }
 
 // ─── POST /tasks/template-schedules/:id/run-now — создать карточку немедленно ───

@@ -289,7 +289,7 @@
                    @refresh="store.loadBoard(store.currentBoardId)" />
 
     <!-- Мои шаблоны -->
-    <TasksTemplatesDialog v-model="templatesOpen"/>
+    <TasksTemplatesDialog v-model="templatesOpen" @open-card="openCard"/>
 
     <!-- Настройки доски и сводка по времени -->
     <TaskBoardSettingsDialog v-model="boardSettingsOpen"/>

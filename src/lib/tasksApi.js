@@ -101,6 +101,7 @@ export const tasksApi = {
   updateSchedule(id, payload)        { return call('PATCH',  `/template-schedules/${id}`, payload); },
   deleteSchedule(id)                 { return call('DELETE', `/template-schedules/${id}`); },
   previewSchedule(id)                { return call('GET',    `/template-schedules/${id}/preview`); },
+  scheduleCards(id)                  { return call('GET',    `/template-schedules/${id}/cards`); },
   runScheduleNow(id)                 { return call('POST',   `/template-schedules/${id}/run-now`); },
 
   // Сохранить открытую карточку как шаблон
