@@ -292,9 +292,17 @@ export const useTasksStore = defineStore('tasks', () => {
       completed_at: (toArchive || toDone) ? new Date().toISOString().slice(0,19).replace('T',' ') : null,
     };
     // Задача ушла в done/архив — бэк останавливает таймеры на ней.
-    // Сразу гасим «бегущий» вид, чтобы счётчик на карточке не продолжал тикать.
-    if ((toArchive || toDone) && updated.timer) {
-      updated.timer = { ...updated.timer, any_running: false, my_running: false };
+    // Гасим «бегущий» вид и сразу впечатываем последний интервал в сумму,
+    // чтобы счётчик на карточке показал верное время, не дожидаясь перезагрузки.
+    if (nowDone && updated.timer) {
+      let total = Number(updated.timer.seconds_total) || 0;
+      if (updated.timer.any_running && updated.timer.running_started_at) {
+        const started = new Date(String(updated.timer.running_started_at).replace(' ', 'T')).getTime();
+        if (!Number.isNaN(started)) {
+          total += Math.max(0, Math.floor((Date.now() - started) / 1000));
+        }
+      }
+      updated.timer = { ...updated.timer, seconds_total: total, any_running: false, my_running: false };
     }
     // Пересчёт sort_order в целевой колонке
     const inTarget = cards.value

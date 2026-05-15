@@ -1234,6 +1234,8 @@ if ($action === 'columns' && $id && $id !== 'reorder') {
         $s = $pdo->prepare("SELECT COUNT(*) FROM tasks_cards WHERE column_id = ?");
         $s->execute([$colId]);
         if ((int)$s->fetchColumn() > 0) tRespond(['error' => 'Колонка не пуста — сначала перенесите карточки'], 400);
+        // Снимаем ссылку на эту колонку у доски (колонка по умолчанию).
+        $pdo->prepare("UPDATE tasks_boards SET default_column_id = NULL WHERE default_column_id = ?")->execute([$colId]);
         $pdo->prepare("DELETE FROM tasks_columns WHERE id = ?")->execute([$colId]);
         tRespond(['success' => true]);
     }
