@@ -320,6 +320,27 @@ function tStopCardTimers($pdo, $cardId, $actor, $onlyUser = null) {
     return count($rows);
 }
 
+// Запускает таймер пользователя на карточке (например, при возврате задачи
+// из архива в работу). Соблюдает правило «один бегущий таймер на человека»:
+// прочие открытые записи закрываются. Идемпотентно: если таймер на этой
+// карточке уже бежит — ничего не делает.
+function tStartCardTimer($pdo, $cardId, $userName) {
+    $chk = $pdo->prepare("SELECT 1 FROM tasks_card_time WHERE card_id = ? AND user_name = ? AND stopped_at IS NULL LIMIT 1");
+    $chk->execute([$cardId, $userName]);
+    if ($chk->fetchColumn()) return false;
+    $open = $pdo->prepare("SELECT id, card_id FROM tasks_card_time WHERE user_name = ? AND stopped_at IS NULL");
+    $open->execute([$userName]);
+    $close = $pdo->prepare("UPDATE tasks_card_time SET stopped_at = NOW(), seconds = TIMESTAMPDIFF(SECOND, started_at, NOW()) WHERE id = ?");
+    foreach ($open->fetchAll() as $row) {
+        $close->execute([(int)$row['id']]);
+        tHistory($pdo, (int)$row['card_id'], $userName, 'timer_stopped', ['auto' => true]);
+    }
+    $pdo->prepare("INSERT INTO tasks_card_time (card_id, user_name, started_at) VALUES (?, ?, NOW())")
+        ->execute([$cardId, $userName]);
+    tHistory($pdo, $cardId, $userName, 'timer_started', ['auto' => true, 'reason' => 'reopened']);
+    return true;
+}
+
 // Возвращает { seconds_total, by_user: [{user_name, seconds}], my_running: { started_at } | null,
 //              any_running: bool, running_user: ?string }
 function tBuildCardTimer($pdo, $cardId, $tUserName) {
@@ -1251,9 +1272,11 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         // Ассайни — независимо от is_done. Если уже закрыл, может вытащить
         // карточку из своей архив-колонки обратно в работу — это сбросит
         // is_done и галочку «выполнил» у автора.
-        $a = $pdo->prepare("SELECT 1 FROM tasks_assignees WHERE card_id = ? AND user_name = ?");
+        $a = $pdo->prepare("SELECT is_done FROM tasks_assignees WHERE card_id = ? AND user_name = ?");
         $a->execute([$cardId, $tUserName]);
-        if (!$a->fetchColumn()) tRespond(['error' => 'Нет прав на эту карточку'], 403);
+        $aRow = $a->fetch();
+        if ($aRow === false) tRespond(['error' => 'Нет прав на эту карточку'], 403);
+        $wasAssigneeDone = (int)($aRow['is_done'] ?? 0) === 1;
     } else {
         $cardBoard = tGetBoard($pdo, $card['board_id']);
         if (!tCanWorkWithBoard($pdo, $tUser, $cardBoard)) tRespond(['error' => 'Нет прав'], 403);
@@ -1300,6 +1323,8 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
                 $pdo->prepare("UPDATE tasks_assignees SET is_done = 0, done_at = NULL WHERE card_id = ? AND user_name = ? AND is_done = 1")
                     ->execute([$cardId, $tUserName]);
                 tHistory($pdo, $cardId, $tUserName, 'assignee_moved', ['user' => $tUserName, 'to_column' => $toColumnId]);
+                // Соисполнитель вернул свою копию из архива в работу — возобновляем его таймер.
+                if ($wasAssigneeDone) tStartCardTimer($pdo, $cardId, $tUserName);
             }
 
             $pdo->commit();
@@ -1337,6 +1362,10 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         // на ней: учёт времени по выполненной задаче продолжаться не должен.
         if ((int)$card['is_done'] !== 1 && $newIsDone === 1) {
             tStopCardTimers($pdo, $cardId, $tUserName);
+        }
+        // Задача возвращена из done/архива в работу — возобновляем таймер.
+        if ((int)$card['is_done'] === 1 && $newIsDone === 0) {
+            tStartCardTimer($pdo, $cardId, $tUserName);
         }
 
         if ($fromCol !== $toColumnId) {
@@ -1535,6 +1564,10 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         // Задача отмечена выполненной — останавливаем бегущие таймеры на ней.
         if (isset($body['is_done']) && $body['is_done'] && (int)$card['is_done'] !== 1) {
             tStopCardTimers($pdo, $cardId, $tUserName);
+        }
+        // Задача возвращена в работу (снята отметка «выполнено») — возобновляем таймер.
+        if (isset($body['is_done']) && !$body['is_done'] && (int)$card['is_done'] === 1) {
+            tStartCardTimer($pdo, $cardId, $tUserName);
         }
         if (isset($body['is_done']) && tIsProtocolCard($pdo, $cardId)) {
             tCheckCardAutoState($pdo, $cardId, $tUserName);

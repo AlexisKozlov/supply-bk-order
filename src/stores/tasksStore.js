@@ -278,6 +278,8 @@ export const useTasksStore = defineStore('tasks', () => {
     const targetCol = columns.value.find(c => c.id === toColumnId);
     const toArchive = !!(targetCol && targetCol.is_archive_column);
     const toDone    = !!(targetCol && targetCol.is_done_column);
+    const wasDone   = !!original.is_done;
+    const nowDone   = toArchive || toDone;
     // Для внешних карточек is_done/is_archived — это персональный статус
     // («моя часть закрыта»), а не флаги оригинала автора. Бэк отдаёт их
     // подменёнными на assignee.is_done, поэтому локально обращаемся с ними
@@ -313,6 +315,9 @@ export const useTasksStore = defineStore('tasks', () => {
 
     try {
       await tasksApi.moveCard({ card_id: cardId, to_column_id: toColumnId, to_index: toIndex });
+      // Возврат задачи из done/архива в работу — бэк возобновляет таймер.
+      // Перечитываем доску, чтобы карточка показала актуальное «таймер идёт».
+      if (wasDone && !nowDone) await reload();
     } catch (e) {
       error.value = e.message;
       await reload();
