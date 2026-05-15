@@ -216,6 +216,16 @@ function taskPushNotif($pdo, $toUser, $type, $cardId, $boardId, $sourceUser, $ex
 
         $title = $extra['card_title'] ?? '';
         $board = $extra['board_title'] ?? '';
+        // Название доски берём по фактическому board_id уведомления,
+        // чтобы соисполнитель видел СВОЮ доску, а не доску автора.
+        if ($boardId) {
+            try {
+                $bt = $pdo->prepare("SELECT title FROM tasks_boards WHERE id = ? LIMIT 1");
+                $bt->execute([$boardId]);
+                $btv = $bt->fetchColumn();
+                if ($btv !== false && $btv !== null) $board = (string)$btv;
+            } catch (Exception $e) { /* оставляем board из $extra */ }
+        }
         $by    = $sourceUser ? htmlspecialchars($sourceUser, ENT_QUOTES, 'UTF-8') : 'Кто-то';
         $titleEsc = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
         $boardEsc = htmlspecialchars($board, ENT_QUOTES, 'UTF-8');
@@ -265,6 +275,27 @@ function tCardRecipients($pdo, $cardId, array $exclude = []) {
     $assignees = array_column($a->fetchAll(), 'user_name');
     $all = array_unique(array_filter(array_merge([$owner], $assignees)));
     return array_values(array_diff($all, $exclude));
+}
+
+// Доска, на которой задача отображается у конкретного получателя:
+// для соисполнителя — его собственная доска (по его колонке в tasks_assignees),
+// для владельца и для упомянутого вне задачи — доска-«дом» карточки ($fallbackBoardId).
+function tBoardForRecipient($pdo, $cardId, $userName, $fallbackBoardId) {
+    try {
+        $s = $pdo->prepare(
+            "SELECT col.board_id
+               FROM tasks_assignees a
+               JOIN tasks_columns col ON col.id = a.column_id
+              WHERE a.card_id = ? AND a.user_name = ?
+              LIMIT 1"
+        );
+        $s->execute([$cardId, $userName]);
+        $b = $s->fetchColumn();
+        if ($b) return (int)$b;
+    } catch (Exception $e) {
+        error_log('[tasks] tBoardForRecipient error: ' . $e->getMessage());
+    }
+    return (int)$fallbackBoardId;
 }
 
 // ─── Хелперы таймера карточки (C4) ───
@@ -496,7 +527,7 @@ function tCreateCardFromTemplate($pdo, $templateId, $schedule, $ownerName) {
     $extra['board_title'] = (string)$b->fetchColumn();
     foreach ($assignees as $u) {
         if ($u && $u !== $ownerName) {
-            taskPushNotif($pdo, $u, 'assigned', $cardId, $boardId, $ownerName, $extra);
+            taskPushNotif($pdo, $u, 'assigned', $cardId, tBoardForRecipient($pdo, $cardId, $u, $boardId), $ownerName, $extra);
         }
     }
     return $cardId;
@@ -1171,7 +1202,7 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
             $type = $nowDone ? 'closed' : 'reopened';
             $extra = ['card_title' => $card['title'], 'board_title' => $toBoard['title'] ?? ''];
             foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
-                taskPushNotif($pdo, $t, $type, $cardId, $card['board_id'], $tUserName, $extra);
+                taskPushNotif($pdo, $t, $type, $cardId, tBoardForRecipient($pdo, $cardId, $t, $card['board_id']), $tUserName, $extra);
             }
         }
     } catch (Exception $e) {
@@ -1189,6 +1220,17 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
 
     if ($method === 'GET') {
         if (!tCanAccessCard($pdo, $tUser, $cardId, $board)) tRespond(['error' => 'Нет доступа'], 403);
+
+        // Для соисполнителя (не владельца доски-источника) подменяем колонку
+        // на ЕГО колонку из tasks_assignees — иначе окно задачи не находит
+        // колонку оригинала среди колонок доски соисполнителя и показывает «».
+        if ($card['owner_name'] !== $tUserName) {
+            $asg = $pdo->prepare("SELECT column_id FROM tasks_assignees WHERE card_id = ? AND user_name = ? LIMIT 1");
+            $asg->execute([$cardId, $tUserName]);
+            $asgCol = $asg->fetchColumn();
+            if ($asgCol) $card['column_id'] = (int)$asgCol;
+        }
+
         // Полная карточка: + чек-лист, комментарии, история, метки, соисполнители, связи, вложения
         $s = $pdo->prepare("SELECT id, title, is_done, sort_order, checklist_id FROM tasks_checklist WHERE card_id = ? ORDER BY sort_order, id");
         $s->execute([$cardId]);
@@ -1347,13 +1389,13 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             $added = array_values(array_diff($newM, $oldM, [$tUserName]));
             $extraM = $extraBase + ['preview' => 'упомянул(а) вас в описании'];
             foreach ($added as $m) {
-                taskPushNotif($pdo, $m, 'mention', $cardId, $card['board_id'], $tUserName, $extraM);
+                taskPushNotif($pdo, $m, 'mention', $cardId, tBoardForRecipient($pdo, $cardId, $m, $card['board_id']), $tUserName, $extraM);
             }
         }
         if (isset($changes['due_date'])) {
             $extra = $extraBase + ['due_date' => $changes['due_date']['to']];
             foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
-                taskPushNotif($pdo, $t, 'due_changed', $cardId, $card['board_id'], $tUserName, $extra);
+                taskPushNotif($pdo, $t, 'due_changed', $cardId, tBoardForRecipient($pdo, $cardId, $t, $card['board_id']), $tUserName, $extra);
             }
         }
         if (isset($body['is_done'])) {
@@ -1362,7 +1404,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             if ($wasDone !== $nowDone) {
                 $type = $nowDone ? 'closed' : 'reopened';
                 foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
-                    taskPushNotif($pdo, $t, $type, $cardId, $card['board_id'], $tUserName, $extraBase);
+                    taskPushNotif($pdo, $t, $type, $cardId, tBoardForRecipient($pdo, $cardId, $t, $card['board_id']), $tUserName, $extraBase);
                 }
             }
         }
@@ -1586,11 +1628,11 @@ if ($action === 'cards' && $id && $action2 === 'comments') {
             'preview'     => mb_substr($body_text, 0, 200),
         ];
         foreach (array_keys($mentionSet) as $m) {
-            taskPushNotif($pdo, $m, 'mention', $cardId, $card['board_id'], $tUserName, $extra);
+            taskPushNotif($pdo, $m, 'mention', $cardId, tBoardForRecipient($pdo, $cardId, $m, $card['board_id']), $tUserName, $extra);
         }
         // Уведомление автору карточки и соисполнителям (кроме себя и уже упомянутых)
         $targets = tCardRecipients($pdo, $cardId, array_merge([$tUserName], array_keys($mentionSet)));
-        foreach ($targets as $t) taskPushNotif($pdo, $t, 'comment', $cardId, $card['board_id'], $tUserName, $extra);
+        foreach ($targets as $t) taskPushNotif($pdo, $t, 'comment', $cardId, tBoardForRecipient($pdo, $cardId, $t, $card['board_id']), $tUserName, $extra);
         tRespond(['id' => (int)$pdo->lastInsertId()]);
     }
 }
@@ -1680,7 +1722,7 @@ if ($action === 'cards' && $id && $action2 === 'assignees' && $method === 'POST'
             'board_title' => $board['title'] ?? '',
         ];
         foreach ($added as $u) {
-            if ($u !== $tUserName) taskPushNotif($pdo, $u, 'assigned', $cardId, $card['board_id'], $tUserName, $extra);
+            if ($u !== $tUserName) taskPushNotif($pdo, $u, 'assigned', $cardId, tBoardForRecipient($pdo, $cardId, $u, $card['board_id']), $tUserName, $extra);
         }
     } catch (Exception $e) {
         $pdo->rollBack();

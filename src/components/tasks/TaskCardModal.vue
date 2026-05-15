@@ -44,6 +44,9 @@
               <template v-if="full.parent">подзадача в «{{ full.parent.title }}»</template>
               <template v-else>в колонке «{{ columnTitle }}»</template>
             </div>
+            <div v-if="full.card.created_by" class="ts-created">
+              Создал: {{ full.card.created_by }}<template v-if="full.card.owner_name"> · Доска: {{ full.card.owner_name }}</template><template v-if="createdAtText"> · {{ createdAtText }}</template>
+            </div>
           </div>
           <div class="ts-header-actions">
             <div class="ts-menu-wrap">
@@ -666,6 +669,13 @@ const currentUserName = computed(() => userStore.currentUser?.name || '');
 const columnTitle = computed(() => {
   if (!full.value) return '';
   return columns.value.find(c => c.id === full.value.card.column_id)?.title || '';
+});
+const createdAtText = computed(() => {
+  const v = full.value?.card?.created_at;
+  if (!v) return '';
+  const d = new Date(String(v).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 });
 const currentColumnColor = computed(() => {
   if (!full.value) return '#9E9E9E';
@@ -1719,6 +1729,12 @@ function plural(n, forms) {
 .ts-title-input:focus { border-color: var(--tk-accent); outline: none; background: var(--tk-n-0); box-shadow: var(--tk-focus-ring); }
 
 .ts-subtitle {
+  font-size: var(--tk-fz-sm);
+  color: var(--tk-text-muted);
+  padding-left: var(--tk-s-2);
+  margin-top: 2px;
+}
+.ts-created {
   font-size: var(--tk-fz-sm);
   color: var(--tk-text-muted);
   padding-left: var(--tk-s-2);
