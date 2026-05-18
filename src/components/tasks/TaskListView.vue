@@ -57,36 +57,64 @@
                 чужая
               </span>
             </td>
-            <!-- Статус -->
+            <!-- Статус — редактируется по клику (доступно и на чужих карточках) -->
             <td class="tlv-td">
-              <span class="tlv-status">
+              <button type="button" class="tlv-status tlv-editable" @click.stop="openEditor('status', card, $event)">
                 <span class="tlv-status-dot" :style="{ background: columnColor(card) }"></span>
                 {{ columnTitle(card) }}
-              </span>
+                <TaskIcon name="chevronDown" :size="10" class="tlv-caret"/>
+              </button>
             </td>
-            <!-- Приоритет -->
+            <!-- Приоритет — редактируется (на чужих карточках только просмотр) -->
             <td class="tlv-td">
-              <span class="tlv-prio" :class="'tlv-prio-' + (card.priority || 'medium')">
+              <button v-if="!card.is_external" type="button"
+                      class="tlv-prio tlv-editable tlv-prio-btn" :class="'tlv-prio-' + (card.priority || 'medium')"
+                      @click.stop="openEditor('priority', card, $event)">
+                {{ prioLabel(card.priority) }}
+              </button>
+              <span v-else class="tlv-prio" :class="'tlv-prio-' + (card.priority || 'medium')">
                 {{ prioLabel(card.priority) }}
               </span>
             </td>
             <!-- Срок -->
             <td class="tlv-td">
-              <span v-if="card.due_date" class="tlv-due" :class="dueClass(card)">{{ fmtDue(card.due_date) }}</span>
-              <span v-else class="tlv-muted">—</span>
+              <button v-if="!card.is_external" type="button" class="tlv-cell-btn tlv-editable"
+                      @click.stop="openEditor('due', card, $event)">
+                <span v-if="card.due_date" class="tlv-due" :class="dueClass(card)">{{ fmtDue(card.due_date) }}</span>
+                <span v-else class="tlv-muted">срок</span>
+              </button>
+              <template v-else>
+                <span v-if="card.due_date" class="tlv-due" :class="dueClass(card)">{{ fmtDue(card.due_date) }}</span>
+                <span v-else class="tlv-muted">—</span>
+              </template>
             </td>
             <!-- Исполнители -->
             <td class="tlv-td">
-              <span v-if="card.assignees && card.assignees.length" class="tlv-assignees">
-                <span v-for="(n, i) in card.assignees.slice(0, 4)" :key="i"
-                      class="tlv-bubble"
-                      :class="{ 'tlv-bubble-done': (card.assignees_done || []).includes(n) }"
-                      :title="n + ((card.assignees_done || []).includes(n) ? ' — выполнил' : '')">
-                  {{ initials(n) }}
+              <button v-if="!card.is_external" type="button" class="tlv-cell-btn tlv-editable"
+                      @click.stop="openEditor('assignees', card, $event)">
+                <span v-if="card.assignees && card.assignees.length" class="tlv-assignees">
+                  <span v-for="(n, i) in card.assignees.slice(0, 4)" :key="i"
+                        class="tlv-bubble"
+                        :class="{ 'tlv-bubble-done': (card.assignees_done || []).includes(n) }"
+                        :title="n + ((card.assignees_done || []).includes(n) ? ' — выполнил' : '')">
+                    {{ initials(n) }}
+                  </span>
+                  <span v-if="card.assignees.length > 4" class="tlv-bubble-more">+{{ card.assignees.length - 4 }}</span>
                 </span>
-                <span v-if="card.assignees.length > 4" class="tlv-bubble-more">+{{ card.assignees.length - 4 }}</span>
-              </span>
-              <span v-else class="tlv-muted">—</span>
+                <span v-else class="tlv-muted">исполнитель</span>
+              </button>
+              <template v-else>
+                <span v-if="card.assignees && card.assignees.length" class="tlv-assignees">
+                  <span v-for="(n, i) in card.assignees.slice(0, 4)" :key="i"
+                        class="tlv-bubble"
+                        :class="{ 'tlv-bubble-done': (card.assignees_done || []).includes(n) }"
+                        :title="n">
+                    {{ initials(n) }}
+                  </span>
+                  <span v-if="card.assignees.length > 4" class="tlv-bubble-more">+{{ card.assignees.length - 4 }}</span>
+                </span>
+                <span v-else class="tlv-muted">—</span>
+              </template>
             </td>
             <!-- Метки -->
             <td class="tlv-td">
@@ -124,12 +152,63 @@
         <p class="tlv-empty-sub">{{ search || hideDone ? 'Измените условия поиска' : 'Создайте первую задачу в режиме «Канбан»' }}</p>
       </div>
     </div>
+
+    <!-- Поповер-редактор ячейки: статус / приоритет / срок / исполнители -->
+    <Teleport to="body">
+      <div v-if="editor" class="tlv-pop-layer" @click.self="closeEditor">
+        <div ref="editorEl" class="tlv-pop" :style="editorStyle" @click.stop>
+
+          <template v-if="editor.field === 'status'">
+            <div class="tlv-pop-title">Статус</div>
+            <button v-for="col in columns" :key="col.id" type="button" class="tlv-pop-item"
+                    :class="{ active: col.id === editor.card.column_id }"
+                    @click="setStatus(col)">
+              <span class="tlv-status-dot" :style="{ background: col.color || '#9C9384' }"></span>
+              <span class="tlv-pop-item-text">{{ col.title }}</span>
+            </button>
+          </template>
+
+          <template v-else-if="editor.field === 'priority'">
+            <div class="tlv-pop-title">Приоритет</div>
+            <button v-for="p in PRIORITIES" :key="p.value" type="button" class="tlv-pop-item"
+                    :class="{ active: p.value === (editor.card.priority || 'medium') }"
+                    @click="setPriority(p.value)">
+              <span class="tlv-prio-dot" :style="{ background: PRIO_COLOR[p.value] }"></span>
+              <span class="tlv-pop-item-text">{{ p.label }}</span>
+            </button>
+          </template>
+
+          <template v-else-if="editor.field === 'due'">
+            <DatetimePicker :model-value="editor.card.due_date || ''"
+                            @update:model-value="setDue"
+                            @cancel="closeEditor"/>
+          </template>
+
+          <template v-else-if="editor.field === 'assignees'">
+            <div class="tlv-pop-title">Исполнители</div>
+            <div class="tlv-pop-scroll">
+              <button v-for="u in store.users" :key="u.name" type="button" class="tlv-pop-item"
+                      @click="toggleAssignee(u.name)">
+                <span class="tlv-check" :class="{ on: (editor.card.assignees || []).includes(u.name) }">✓</span>
+                <span class="tlv-pop-item-text">{{ u.name }}</span>
+              </button>
+              <div v-if="!store.users.length" class="tlv-pop-empty">Список пуст</div>
+            </div>
+          </template>
+
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, h } from 'vue';
+import { ref, computed, h, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import TaskIcon from './TaskIcon.vue';
+import DatetimePicker from './DatetimePicker.vue';
+import { tasksApi } from '@/lib/tasksApi.js';
+import { useTasksStore } from '@/stores/tasksStore.js';
+import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 
 const props = defineProps({
   cards:   { type: Array, default: () => [] },
@@ -137,6 +216,10 @@ const props = defineProps({
   labels:  { type: Array, default: () => [] },
 });
 defineEmits(['open-card']);
+
+const store = useTasksStore();
+const dlg = useTasksDialogs();
+const showError = (e) => dlg.info('Ошибка', e?.message || String(e), 'error');
 
 // Маленький маркер сортировки в заголовке колонки
 const SortMark = (p) => p.active
@@ -244,6 +327,120 @@ function initials(name) {
 
 function printList() {
   window.print();
+}
+
+// ─── Редактирование ячеек прямо в таблице ───
+
+const PRIORITIES = [
+  { value: 'low',    label: 'Низкий'  },
+  { value: 'medium', label: 'Средний' },
+  { value: 'high',   label: 'Высокий' },
+  { value: 'urgent', label: 'Срочный' },
+];
+const PRIO_COLOR = { urgent: '#C0392B', high: '#E87A1E', medium: '#2B5797', low: '#6B778C' };
+
+// Список пользователей нужен для поповера исполнителей.
+onMounted(() => { store.fetchUsers(); });
+
+// editor = { field: 'status'|'priority'|'due'|'assignees', card } | null
+const editor = ref(null);
+const editorEl = ref(null);
+const editorPos = ref({ top: 0, left: 0 });
+let editorAnchor = null;
+const editorStyle = computed(() => ({
+  position: 'fixed',
+  top: editorPos.value.top + 'px',
+  left: editorPos.value.left + 'px',
+}));
+
+function openEditor(field, card, event) {
+  // Повторный клик по той же ячейке — закрываем.
+  if (editor.value && editor.value.field === field && editor.value.card.id === card.id) {
+    editor.value = null;
+    return;
+  }
+  const el = event?.currentTarget;
+  editorAnchor = el ? el.getBoundingClientRect() : null;
+  if (editorAnchor) editorPos.value = { top: editorAnchor.bottom + 4, left: editorAnchor.left };
+  editor.value = { field, card };
+  nextTick(placeEditor);
+}
+
+// Позиционирование как у поповеров карточки на канбане: фиксируем по
+// триггеру, при выходе за край экрана сдвигаем внутрь / показываем выше.
+function placeEditor() {
+  const el = editorEl.value;
+  if (!el || !editorAnchor) return;
+  const r = el.getBoundingClientRect();
+  const m = 8;
+  let left = editorAnchor.left;
+  if (left + r.width > window.innerWidth - m) left = Math.max(m, window.innerWidth - r.width - m);
+  let top = editorAnchor.bottom + 4;
+  if (top + r.height > window.innerHeight - m) {
+    const above = editorAnchor.top - r.height - 4;
+    top = above >= m ? above : Math.max(m, window.innerHeight - r.height - m);
+  }
+  editorPos.value = { top, left };
+}
+
+function closeEditor() { editor.value = null; }
+
+function onEsc(e) { if (e.key === 'Escape' && editor.value) closeEditor(); }
+onMounted(() => window.addEventListener('keydown', onEsc));
+onBeforeUnmount(() => window.removeEventListener('keydown', onEsc));
+
+async function setPriority(p) {
+  const card = editor.value?.card;
+  closeEditor();
+  if (!card || p === (card.priority || 'medium')) return;
+  try { await store.updateCard(card.id, { priority: p }); }
+  catch (e) { showError(e); }
+}
+
+async function setDue(iso) {
+  const card = editor.value?.card;
+  closeEditor();
+  if (!card) return;
+  try { await store.updateCard(card.id, { due_date: iso || null }); }
+  catch (e) { showError(e); }
+}
+
+// Перенос заблокированной задачи в колонку-завершение — с подтверждением,
+// тем же, что на канбане (фича зависимостей карточек).
+async function confirmMoveIfBlocked(card, targetColumnId) {
+  if (card.is_done) return true;
+  if (!(card.blocked_by_open > 0)) return true;
+  const col = props.columns.find(c => c.id === targetColumnId);
+  if (!col || (!col.is_archive_column && !col.is_done_column)) return true;
+  return await dlg.confirmCompleteBlocked(card.blocked_by_open);
+}
+
+async function setStatus(col) {
+  const card = editor.value?.card;
+  closeEditor();
+  if (!card || col.id === card.column_id) return;
+  if (!(await confirmMoveIfBlocked(card, col.id))) return;
+  try { await store.moveCard(card.id, col.id, 0); }
+  catch (e) { showError(e); }
+}
+
+// Исполнители: поповер остаётся открытым для нескольких переключений,
+// поэтому после перезагрузки доски переподвязываем editor.card на свежий
+// объект карточки — иначе галочки показывали бы старое состояние.
+async function toggleAssignee(name) {
+  const card = editor.value?.card;
+  if (!card) return;
+  const next = Array.isArray(card.assignees) ? card.assignees.slice() : [];
+  const i = next.indexOf(name);
+  if (i >= 0) next.splice(i, 1); else next.push(name);
+  try {
+    await tasksApi.setAssignees(card.id, next);
+    await store.loadBoard(store.currentBoardId);
+    const fresh = store.cards.find(c => c.id === card.id);
+    if (fresh && editor.value && editor.value.field === 'assignees') {
+      editor.value = { field: 'assignees', card: fresh };
+    }
+  } catch (e) { showError(e); }
 }
 </script>
 
@@ -501,6 +698,97 @@ function printList() {
   .tlv-search-wrap { flex: 1; }
   .tlv-table { font-size: 12px; }
   .tlv-th, .tlv-td { padding: 7px 8px; }
+}
+
+/* ── Редактируемые ячейки ── */
+.tlv-status.tlv-editable,
+.tlv-cell-btn {
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 3px 6px;
+  margin: -3px -6px;
+  text-align: left;
+  transition: background 120ms ease;
+}
+.tlv-cell-btn { display: inline-flex; align-items: center; }
+.tlv-status.tlv-editable:hover,
+.tlv-cell-btn:hover { background: var(--tk-accent-soft, rgba(232,122,30,0.12)); }
+.tlv-caret {
+  color: var(--tk-text-muted, #B0AAA0);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tlv-row:hover .tlv-caret { opacity: 0.7; }
+
+.tlv-prio-btn {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: box-shadow 120ms ease, filter 120ms ease;
+}
+.tlv-prio-btn:hover {
+  filter: brightness(0.96);
+  box-shadow: 0 0 0 1.5px var(--tk-accent, #E87A1E);
+}
+
+/* ── Поповер-редактор ячейки ── */
+.tlv-pop-layer { position: fixed; inset: 0; z-index: 1000; }
+.tlv-pop {
+  position: fixed;
+  min-width: 180px;
+  max-width: 280px;
+  background: #fff;
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px -4px rgba(0,0,0,0.16);
+  padding: 6px;
+  font-family: inherit;
+}
+.tlv-pop-title {
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tk-text-muted, #9C9384);
+  padding: 4px 8px 6px;
+}
+.tlv-pop-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none; background: transparent;
+  border-radius: 6px;
+  font-family: inherit; font-size: 12.5px;
+  color: var(--tk-text, #1A1814);
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+.tlv-pop-item:hover { background: var(--tk-accent-soft, rgba(232,122,30,0.10)); }
+.tlv-pop-item.active { background: var(--tk-n-100, #F3F0E8); font-weight: 600; }
+.tlv-pop-item-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tlv-prio-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.tlv-pop-scroll { max-height: 240px; overflow-y: auto; }
+.tlv-pop-empty {
+  padding: 10px 8px; text-align: center;
+  font-size: 12px; color: var(--tk-text-muted, #9C9384);
+}
+.tlv-check {
+  width: 16px; height: 16px;
+  border: 1.5px solid var(--tk-border, #D8D2C4);
+  border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; color: transparent;
+  flex-shrink: 0;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.tlv-check.on {
+  background: var(--tk-accent, #E87A1E);
+  border-color: var(--tk-accent, #E87A1E);
+  color: #fff;
 }
 
 /* Печать */
