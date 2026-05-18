@@ -26,6 +26,10 @@
           <TaskIcon name="calendar" :size="14"/>
           <span>Календарь</span>
         </button>
+        <button class="tasks-tab" :class="{ active: viewMode === 'list' }" @click="setViewMode('list')">
+          <TaskIcon name="list" :size="14"/>
+          <span>Список</span>
+        </button>
       </nav>
 
       <div class="tasks-header-actions">
@@ -273,10 +277,17 @@
       </div>
 
       <!-- Календарь -->
-      <TaskCalendar v-else
+      <TaskCalendar v-else-if="viewMode === 'calendar'"
                     :cards="store.cards"
                     @open-card="openCard"
                     @update-due="onCalendarUpdateDue"/>
+
+      <!-- Список -->
+      <TaskListView v-else
+                    :cards="store.cards"
+                    :columns="store.columns"
+                    :labels="store.labels"
+                    @open-card="openCard"/>
     </div>
 
     <!-- Сайдбар карточки -->
@@ -430,6 +441,7 @@ const lazyOpts = {
   timeout: 15000,   // 15 сек — если чанк не пришёл, показываем ошибку
 };
 const TaskCalendar         = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskCalendar.vue'),         ...lazyOpts });
+const TaskListView         = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskListView.vue'),         ...lazyOpts });
 const TaskCardModal        = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskCardModal.vue'),        ...lazyOpts });
 const TasksTemplatesDialog = defineAsyncComponent({ loader: () => import('@/components/tasks/TasksTemplatesDialog.vue'), ...lazyOpts });
 const TaskBoardSettingsDialog = defineAsyncComponent({ loader: () => import('@/components/tasks/TaskBoardSettingsDialog.vue'), ...lazyOpts });
@@ -590,7 +602,7 @@ watch(() => store.currentBoardId, (id) => {
   if (!id) return;
   try {
     const v = localStorage.getItem(viewModeKey());
-    viewMode.value = (v === 'calendar') ? 'calendar' : 'kanban';
+    viewMode.value = (v === 'calendar' || v === 'list') ? v : 'kanban';
   } catch (_) { viewMode.value = 'kanban'; }
 }, { immediate: true });
 
