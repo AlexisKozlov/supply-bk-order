@@ -44,6 +44,15 @@ $BOT_TOKEN = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
 
 require_once __DIR__ . '/includes/tasks.php';
 
+// Выходные — напоминания о сроках не отправляем. День недели берём из MySQL
+// (WEEKDAY: 0=Пн … 5=Сб, 6=Вс), потому что PHP и MySQL у нас в разных
+// часовых поясах — у границы суток PHP-дата могла бы дать другой день.
+$weekday = (int)$pdo->query("SELECT WEEKDAY(CURDATE())")->fetchColumn();
+if ($weekday >= 5) {
+    echo "[" . date('Y-m-d H:i:s') . "] выходной (weekday={$weekday}) — пропуск\n";
+    exit;
+}
+
 // Открытые карточки с дедлайном; считаем категорию срока на стороне БД
 // (CURDATE() — серверная локальная дата, MySQL у нас в +03:00).
 $rows = $pdo->query("
@@ -78,7 +87,10 @@ $dupCheck = $pdo->prepare("
       AND DATE(created_at) = CURDATE()
     LIMIT 1
 ");
-$assigneesStmt = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
+// Только соисполнители, у которых задача ещё в работе: кто закрыл свою
+// часть (is_done = 1), напоминания о сроке получать больше не должен —
+// даже если у автора карточка на его доске всё ещё открыта.
+$assigneesStmt = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ? AND is_done = 0");
 
 $sentTotal = 0;
 $cardsSeen = 0;
