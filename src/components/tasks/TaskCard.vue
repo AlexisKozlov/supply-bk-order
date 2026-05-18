@@ -87,8 +87,9 @@
         <span>{{ formatDue }}</span>
       </button>
 
-      <!-- Заблокирована: есть невыполненные блокирующие задачи -->
-      <span v-if="card.blocked_by_open > 0" class="meta-icon-stat meta-blocked"
+      <!-- Заблокирована: есть невыполненные блокирующие задачи.
+           У выполненной карточки метку не показываем — блокировка уже неактуальна. -->
+      <span v-if="card.blocked_by_open > 0 && !card.is_done" class="meta-icon-stat meta-blocked"
             :title="'Заблокирована: ждёт ' + card.blocked_by_open + ' задач(и)'">
         <TaskIcon name="lock" :size="12"/>
         <span>{{ card.blocked_by_open }}</span>
