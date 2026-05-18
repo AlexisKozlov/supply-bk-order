@@ -993,6 +993,14 @@ async function addCard(payload) {
 
 async function onMoveCard({ card, to_column_id, to_index }) {
   if (!card) return;
+  // Заблокированную задачу при переносе в колонку-завершение — с подтверждением.
+  if (!card.is_done && card.blocked_by_open > 0) {
+    const col = store.columns.find(c => c.id === to_column_id);
+    if (col && (col.is_archive_column || col.is_done_column)) {
+      const ok = await dlg.confirmCompleteBlocked(card.blocked_by_open);
+      if (!ok) { draggedCard.value = null; return; }
+    }
+  }
   await store.moveCard(card.id, to_column_id, to_index);
   draggedCard.value = null;
 }

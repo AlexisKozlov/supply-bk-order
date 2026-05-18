@@ -45,6 +45,9 @@
  *   POST   tasks/cards/:id/assignees   — соисполнители: { user_names: [..] } (заменяет)
  *   POST   tasks/cards/:id/relations   — связи с сущностями: { relations: [{entity_type, entity_id, entity_label}] }
  *   DELETE tasks/relations/:id         — удалить связь
+ *   GET    tasks/cards/:id/dependencies — зависимости карточки (blocks / blocked_by)
+ *   POST   tasks/cards/:id/dependencies — добавить: { direction: blocks|blocked_by, other_card_id }
+ *   DELETE tasks/dependencies/:id       — удалить зависимость
  *
  *   GET    tasks/users                 — список пользователей-исполнителей (для выпадашки)
  */
@@ -117,6 +120,51 @@ function tCanAccessCard($pdo, $u, $cardId, $board) {
 function tHistory($pdo, $cardId, $userName, $action, $details = null) {
     $s = $pdo->prepare("INSERT INTO tasks_history (card_id, user_name, action, details) VALUES (?, ?, ?, ?)");
     $s->execute([$cardId, $userName, $action, $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null]);
+}
+
+// Зависимости карточки: список того, что она блокирует, и того, чем заблокирована.
+function tCardDependencies($pdo, $cardId) {
+    $blocks = $pdo->prepare(
+        "SELECT d.id, c.id AS card_id, c.title, c.is_done, c.is_archived
+           FROM tasks_card_dependencies d
+           JOIN tasks_cards c ON c.id = d.blocked_card_id
+          WHERE d.blocker_card_id = ?
+          ORDER BY c.is_done, c.title");
+    $blocks->execute([(int)$cardId]);
+    $blockedBy = $pdo->prepare(
+        "SELECT d.id, c.id AS card_id, c.title, c.is_done, c.is_archived
+           FROM tasks_card_dependencies d
+           JOIN tasks_cards c ON c.id = d.blocker_card_id
+          WHERE d.blocked_card_id = ?
+          ORDER BY c.is_done, c.title");
+    $blockedBy->execute([(int)$cardId]);
+    return [
+        'blocks'     => $blocks->fetchAll(),
+        'blocked_by' => $blockedBy->fetchAll(),
+    ];
+}
+
+// Достижима ли карточка $to из $from по графу зависимостей (blocker → blocked).
+// Нужна для запрета циклов: перед добавлением связи blocker→blocked проверяем,
+// что blocked ещё не блокирует (прямо или транзитивно) blocker.
+function tDepReachable($pdo, $from, $to) {
+    $from = (int)$from; $to = (int)$to;
+    if ($from === $to) return true;
+    $seen = [];
+    $stack = [$from];
+    $stmt = $pdo->prepare("SELECT blocked_card_id FROM tasks_card_dependencies WHERE blocker_card_id = ?");
+    while ($stack) {
+        $cur = (int)array_pop($stack);
+        if ($cur === $to) return true;
+        if (isset($seen[$cur])) continue;
+        $seen[$cur] = true;
+        $stmt->execute([$cur]);
+        foreach ($stmt->fetchAll() as $r) {
+            $next = (int)$r['blocked_card_id'];
+            if (!isset($seen[$next])) $stack[] = $next;
+        }
+    }
+    return false;
 }
 
 function tIsProtocolCard($pdo, $cardId) {
@@ -1143,6 +1191,27 @@ if ($action === 'board' && $id && $method === 'GET') {
             if ($sr['is_done']) $subsDone[$pid] = ($subsDone[$pid] ?? 0) + 1;
         }
 
+        // Зависимости: сколько карточка блокирует и чем заблокирована.
+        // blocked_by_open — количество ещё не выполненных блокирующих карточек
+        // (по нему на канбане показывается значок «заблокирована»).
+        $depBlocks = [];
+        $depBlockedBy = [];
+        $s = $pdo->prepare("SELECT blocker_card_id, COUNT(*) cnt FROM tasks_card_dependencies WHERE blocker_card_id IN ($ph) GROUP BY blocker_card_id");
+        $s->execute($ids);
+        foreach ($s->fetchAll() as $r) $depBlocks[(int)$r['blocker_card_id']] = (int)$r['cnt'];
+        $s = $pdo->prepare(
+            "SELECT d.blocked_card_id,
+                    COUNT(*) total,
+                    SUM(blk.is_done = 0 AND blk.is_archived = 0) open
+               FROM tasks_card_dependencies d
+               JOIN tasks_cards blk ON blk.id = d.blocker_card_id
+              WHERE d.blocked_card_id IN ($ph)
+              GROUP BY d.blocked_card_id");
+        $s->execute($ids);
+        foreach ($s->fetchAll() as $r) {
+            $depBlockedBy[(int)$r['blocked_card_id']] = ['total' => (int)$r['total'], 'open' => (int)$r['open']];
+        }
+
         foreach ($cards as &$c) {
             $cid = (int)$c['id'];
             $c['label_ids']   = $cardLabels[$cid] ?? [];
@@ -1155,6 +1224,9 @@ if ($action === 'board' && $id && $method === 'GET') {
             $c['subtasks_total'] = $subsCount[$cid] ?? 0;
             $c['subtasks_done']  = $subsDone[$cid] ?? 0;
             $c['timer']       = $timerSummary[$cid] ?? null;
+            $c['blocks_count']     = $depBlocks[$cid] ?? 0;
+            $c['blocked_by_count'] = $depBlockedBy[$cid]['total'] ?? 0;
+            $c['blocked_by_open']  = $depBlockedBy[$cid]['open'] ?? 0;
         }
         unset($c);
     }
@@ -1614,6 +1686,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             'parent'      => $parentInfo,
             'protocol_co_assignees' => $protocolCoAssignees,
             'timer'       => $timer,
+            'dependencies' => tCardDependencies($pdo, $cardId),
         ]);
     }
 
@@ -2056,6 +2129,54 @@ if ($action === 'cards' && $id && $action2 === 'relations' && $method === 'POST'
     tRespond(['success' => true]);
 }
 
+// ─── ЗАВИСИМОСТИ КАРТОЧЕК (блокирует / заблокирована) ───
+// GET  /tasks/cards/:id/dependencies — списки blocks[] и blocked_by[]
+// POST /tasks/cards/:id/dependencies — body: { direction: 'blocks'|'blocked_by', other_card_id }
+if ($action === 'cards' && $id && $action2 === 'dependencies') {
+    $cardId = (int)$id;
+    $card = tGetCard($pdo, $cardId);
+    if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
+    $board = tGetBoard($pdo, $card['board_id']);
+    if (!tCanAccessCard($pdo, $tUser, $cardId, $board)) tRespond(['error' => 'Нет доступа'], 403);
+
+    if ($method === 'GET') {
+        tRespond(['dependencies' => tCardDependencies($pdo, $cardId)]);
+    }
+    if ($method !== 'POST') tRespond(['error' => 'Method not allowed'], 405);
+
+    $direction = $body['direction'] ?? '';
+    $other = (int)($body['other_card_id'] ?? 0);
+    if (!in_array($direction, ['blocks', 'blocked_by'], true)) {
+        tRespond(['error' => "direction должно быть 'blocks' или 'blocked_by'"], 400);
+    }
+    if (!$other)            tRespond(['error' => 'other_card_id обязателен'], 400);
+    if ($other === $cardId) tRespond(['error' => 'Нельзя связать карточку саму с собой'], 400);
+
+    $otherCard = tGetCard($pdo, $other);
+    if (!$otherCard) tRespond(['error' => 'Связываемая карточка не найдена'], 404);
+
+    // direction='blocks'    → текущая карточка блокирует другую
+    // direction='blocked_by'→ другая карточка блокирует текущую
+    $blocker = $direction === 'blocks' ? $cardId : $other;
+    $blocked = $direction === 'blocks' ? $other : $cardId;
+
+    // Запрет циклов: если blocked уже (прямо или транзитивно) блокирует blocker,
+    // то новая связь замкнёт круг.
+    if (tDepReachable($pdo, $blocked, $blocker)) {
+        tRespond(['error' => 'Так получится замкнутый круг зависимостей'], 400);
+    }
+
+    try {
+        $pdo->prepare("INSERT IGNORE INTO tasks_card_dependencies (blocker_card_id, blocked_card_id, created_by) VALUES (?, ?, ?)")
+            ->execute([$blocker, $blocked, $tUserName]);
+    } catch (Exception $e) {
+        tRespond(['error' => $e->getMessage()], 500);
+    }
+    tHistory($pdo, $cardId, $tUserName, 'dependency_added',
+             ['direction' => $direction, 'other_card_id' => $other, 'other_title' => $otherCard['title']]);
+    tRespond(['dependencies' => tCardDependencies($pdo, $cardId)]);
+}
+
 // ─── TIMER (учёт времени работы по карточке, C4) ───
 // POST /tasks/cards/:id/timer  body: { op: 'start' | 'stop' }
 // GET  /tasks/cards/:id/timer  — отдать актуальное состояние (опционально, не используется UI)
@@ -2144,6 +2265,31 @@ if ($action === 'relations' && $id && $method === 'DELETE') {
     $board = tGetBoard($pdo, $rel['board_id']);
     if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
     $pdo->prepare("DELETE FROM tasks_relations WHERE id = ?")->execute([$relId]);
+    tRespond(['success' => true]);
+}
+
+// DELETE /tasks/dependencies/:id — убрать зависимость
+if ($action === 'dependencies' && $id && $method === 'DELETE') {
+    $depId = (int)$id;
+    $s = $pdo->prepare("SELECT * FROM tasks_card_dependencies WHERE id = ?");
+    $s->execute([$depId]);
+    $dep = $s->fetch();
+    if (!$dep) tRespond(['error' => 'Зависимость не найдена'], 404);
+
+    // Доступ: достаточно прав хотя бы к одной из двух связанных карточек.
+    $okAccess = false;
+    foreach ([(int)$dep['blocker_card_id'], (int)$dep['blocked_card_id']] as $cid) {
+        $c = tGetCard($pdo, $cid);
+        if ($c && tCanAccessCard($pdo, $tUser, $cid, tGetBoard($pdo, $c['board_id']))) {
+            $okAccess = true;
+            break;
+        }
+    }
+    if (!$okAccess) tRespond(['error' => 'Нет прав'], 403);
+
+    $pdo->prepare("DELETE FROM tasks_card_dependencies WHERE id = ?")->execute([$depId]);
+    tHistory($pdo, (int)$dep['blocker_card_id'], $tUserName, 'dependency_removed', null);
+    tHistory($pdo, (int)$dep['blocked_card_id'], $tUserName, 'dependency_removed', null);
     tRespond(['success' => true]);
 }
 

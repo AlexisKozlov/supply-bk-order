@@ -80,6 +80,13 @@ export const tasksApi = {
   setRelations(cardId, relations)    { return call('POST',  `/cards/${cardId}/relations`, { relations }); },
   deleteRelation(id)                 { return call('DELETE',`/relations/${id}`); },
 
+  // Зависимости между карточками (блокирует / заблокирована)
+  getDependencies(cardId)            { return call('GET',   `/cards/${cardId}/dependencies`); },
+  addDependency(cardId, direction, otherCardId) {
+    return call('POST', `/cards/${cardId}/dependencies`, { direction, other_card_id: otherCardId });
+  },
+  deleteDependency(id)               { return call('DELETE',`/dependencies/${id}`); },
+
   // Список пользователей
   listUsers()                        { return call('GET',   '/users'); },
 

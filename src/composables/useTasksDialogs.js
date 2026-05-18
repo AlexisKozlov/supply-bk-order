@@ -29,6 +29,25 @@ function confirm(title, message, opts = {}) {
 function onConfirm() { confirmModal.value.resolve?.(true); confirmModal.value.show = false; }
 function onCancel()  { confirmModal.value.resolve?.(false); confirmModal.value.show = false; }
 
+// Подтверждение завершения заблокированной задачи. Если у задачи есть
+// невыполненные блокирующие задачи (openCount > 0) — спрашиваем, точно ли
+// завершать. При openCount = 0 диалога нет, сразу resolve(true).
+function confirmCompleteBlocked(openCount) {
+  const n = Number(openCount) || 0;
+  if (n <= 0) return Promise.resolve(true);
+  const m10 = n % 10, m100 = n % 100;
+  const word = (m10 === 1 && m100 !== 11)
+    ? 'незавершённую задачу'
+    : (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20))
+      ? 'незавершённые задачи'
+      : 'незавершённых задач';
+  return confirm(
+    'Задача заблокирована',
+    `Эта задача ждёт ${n} ${word} — они ещё не выполнены. Всё равно отметить её выполненной?`,
+    { okText: 'Всё равно завершить', cancelText: 'Отмена' }
+  );
+}
+
 function info(title, message, type = 'info') {
   infoModal.value = { show: true, title, message, type };
 }
@@ -53,7 +72,7 @@ function onPromptCancel() { promptModal.value.resolve?.(null); promptModal.value
 
 export function useTasksDialogs() {
   return {
-    confirmModal, confirm, onConfirm, onCancel,
+    confirmModal, confirm, confirmCompleteBlocked, onConfirm, onCancel,
     infoModal, info, onInfoClose,
     promptModal, prompt, onPromptOk, onPromptCancel,
   };

@@ -87,6 +87,13 @@
         <span>{{ formatDue }}</span>
       </button>
 
+      <!-- Заблокирована: есть невыполненные блокирующие задачи -->
+      <span v-if="card.blocked_by_open > 0" class="meta-icon-stat meta-blocked"
+            :title="'Заблокирована: ждёт ' + card.blocked_by_open + ' задач(и)'">
+        <TaskIcon name="lock" :size="12"/>
+        <span>{{ card.blocked_by_open }}</span>
+      </span>
+
       <!-- Чек-лист -->
       <span v-if="card.checklist?.total" class="meta-icon-stat"
             :class="{ done: card.checklist.done === card.checklist.total }"
@@ -258,6 +265,7 @@ useTouchDrag({
     dragging.value = false;
     emit('dragend');
     if (targetColumnId === props.card.column_id) return; // та же колонка
+    if (!(await confirmMoveIfBlocked(targetColumnId))) return;
     try {
       await store.moveCard(props.card.id, targetColumnId, 0);
     } catch (e) { showError(e); }
@@ -446,6 +454,7 @@ async function moveToColumn(columnId) {
   cardMenuOpen.value = false;
   moveSubmenuOpen.value = false;
   if (columnId === props.card.column_id) return;
+  if (!(await confirmMoveIfBlocked(columnId))) return;
   try {
     await store.moveCard(props.card.id, columnId, 0);
   } catch (e) { showError(e); }
@@ -462,18 +471,36 @@ async function deleteCardFromMenu() {
   } catch (e) { showError(e); }
 }
 
-async function completeAndArchive() {
+// Если задача заблокирована (есть невыполненные блокирующие задачи) и
+// переезжает в колонку-завершение (архив/готово) — спрашиваем подтверждение.
+async function confirmMoveIfBlocked(targetColumnId) {
+  if (props.card.is_done) return true;
+  if (!(props.card.blocked_by_open > 0)) return true;
+  const col = store.columns.find(c => c.id === targetColumnId);
+  if (!col || (!col.is_archive_column && !col.is_done_column)) return true;
+  return await dlg.confirmCompleteBlocked(props.card.blocked_by_open);
+}
+
+async function completeAndArchive(e) {
   const archiveCol = store.columns.find(c => c.is_archive_column);
-  if (!archiveCol) { dlg.info('Нет архива', 'У доски нет колонки «Архив». Обратитесь к администратору.', 'warning'); return; }
+  if (!archiveCol) {
+    dlg.info('Нет архива', 'У доски нет колонки «Архив». Обратитесь к администратору.', 'warning');
+    if (e?.target) e.target.checked = !!props.card.is_done;
+    return;
+  }
   const isInArchive = props.card.column_id === archiveCol.id;
   let targetCol = archiveCol;
   if (isInArchive) {
     targetCol = store.columns.find(c => !c.is_archive_column && !c.is_done_column) || store.columns[0];
   }
+  if (!(await confirmMoveIfBlocked(targetCol.id))) {
+    if (e?.target) e.target.checked = !!props.card.is_done;
+    return;
+  }
   try {
     await store.moveCard(props.card.id, targetCol.id, 0);
-  } catch (e) {
-    showError(e);
+  } catch (err) {
+    showError(err);
   }
 }
 
@@ -880,6 +907,10 @@ const vClickOutsideCard = {
   border-radius: var(--tk-r-sm, 4px);
 }
 .meta-icon-stat.done { color: var(--tk-success, #1F8F4E); }
+.meta-icon-stat.meta-blocked {
+  color: #C0392B;
+  background: rgba(212,70,56,0.10);
+}
 .meta-icon-stat[role="button"], .meta-icon-stat:not(.done):hover { cursor: default; }
 
 /* Таймер (C4): обычно нейтрально серый, при активном — подсветка */

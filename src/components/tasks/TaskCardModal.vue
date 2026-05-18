@@ -446,6 +446,82 @@
             </div>
           </section>
 
+          <!-- Зависимости: чем задача заблокирована и что блокирует она -->
+          <section class="ts-section">
+            <div class="ts-section-title">
+              Зависимости
+              <span v-if="depCount" class="ts-section-meta">{{ depCount }}</span>
+            </div>
+
+            <div v-if="full.dependencies && full.dependencies.blocked_by.length" class="ts-dep-group">
+              <div class="ts-dep-label ts-dep-label-blocked">
+                <TaskIcon name="lock" :size="11"/> Заблокирована
+              </div>
+              <div class="ts-dep-chips">
+                <div v-for="d in full.dependencies.blocked_by" :key="d.id"
+                     class="ts-dep-chip" :class="{ 'ts-dep-chip-done': d.is_done }"
+                     @click="$emit('open-card', d.card_id)" title="Открыть задачу">
+                  <span class="ts-dep-chip-title">{{ d.title }}</span>
+                  <span v-if="d.is_done" class="ts-dep-chip-state">готово</span>
+                  <button type="button" class="ts-dep-chip-del"
+                          @click.stop="removeDependency(d)" title="Убрать зависимость">
+                    <TaskIcon name="close" :size="11"/>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="full.dependencies && full.dependencies.blocks.length" class="ts-dep-group">
+              <div class="ts-dep-label">
+                <TaskIcon name="arrowRight" :size="11"/> Блокирует
+              </div>
+              <div class="ts-dep-chips">
+                <div v-for="d in full.dependencies.blocks" :key="d.id"
+                     class="ts-dep-chip" :class="{ 'ts-dep-chip-done': d.is_done }"
+                     @click="$emit('open-card', d.card_id)" title="Открыть задачу">
+                  <span class="ts-dep-chip-title">{{ d.title }}</span>
+                  <span v-if="d.is_done" class="ts-dep-chip-state">готово</span>
+                  <button type="button" class="ts-dep-chip-del"
+                          @click.stop="removeDependency(d)" title="Убрать зависимость">
+                    <TaskIcon name="close" :size="11"/>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="ts-rel-add-wrap">
+              <button type="button" class="ts-rel-add-btn"
+                      :class="{ 'is-open': showDepPicker }"
+                      @click.stop="toggleDepPicker">
+                <TaskIcon name="plus" :size="12"/>
+                <span>{{ depCount ? 'Добавить ещё' : 'Добавить зависимость' }}</span>
+              </button>
+              <div v-if="showDepPicker" class="ts-pop ts-pop-rel" v-click-outside-pop="closeDepPicker">
+                <div class="ts-pop-section-label">Тип зависимости</div>
+                <div class="ts-rel-types">
+                  <button type="button" class="ts-rel-type"
+                          :class="{ 'is-active': depDraft.direction === 'blocked_by' }"
+                          @click="depDraft.direction = 'blocked_by'">
+                    <span class="ts-rel-type-label">Заблокирована</span>
+                  </button>
+                  <button type="button" class="ts-rel-type"
+                          :class="{ 'is-active': depDraft.direction === 'blocks' }"
+                          @click="depDraft.direction = 'blocks'">
+                    <span class="ts-rel-type-label">Блокирует</span>
+                  </button>
+                </div>
+                <input v-model="depSearch" type="text" placeholder="Поиск задачи на доске…" class="ts-pop-search"/>
+                <div class="ts-dep-results">
+                  <button v-for="c in depCandidates" :key="c.id" type="button"
+                          class="ts-dep-result" @click="addDependency(c.id)">
+                    {{ c.title }}
+                  </button>
+                  <div v-if="!depCandidates.length" class="ts-dep-noresult">Задачи не найдены</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
         </div>
 
         <!-- ВКЛАДКА «ПОДЗАДАЧИ» — подзадачи + чек-лист. Только у корневых карточек. -->
@@ -643,6 +719,9 @@ const newSubtaskTitle = ref('');
 const newAssignee = ref('');
 const showRelationPicker = ref(false);
 const relationDraft = ref({ type: '', id: '', label: '' });
+const showDepPicker = ref(false);
+const depDraft = ref({ direction: 'blocked_by' });
+const depSearch = ref('');
 const headerMenuOpen = ref(false);
 const showLabelPicker = ref(false);
 const labelSearch = ref('');
@@ -992,6 +1071,16 @@ async function patch(payload) {
 async function onColumnChange(e) {
   const newCol = parseInt(e.target.value, 10);
   if (!newCol || newCol === full.value.card.column_id) return;
+  // Перенос в колонку-завершение для заблокированной задачи — с подтверждением.
+  const targetCol = columns.value.find(c => c.id === newCol);
+  if (targetCol && (targetCol.is_archive_column || targetCol.is_done_column) && !full.value.card.is_done) {
+    const openBlockers = (full.value.dependencies?.blocked_by || [])
+      .filter(d => !d.is_done && !d.is_archived).length;
+    if (!(await dlg.confirmCompleteBlocked(openBlockers))) {
+      e.target.value = full.value.card.column_id;
+      return;
+    }
+  }
   await store.moveCard(props.cardId, newCol, 0);
   await load();
 }
@@ -1335,6 +1424,53 @@ async function removeRelation(r) {
   } catch (e) { showError(e); }
 }
 
+// ─── Зависимости карточек (блокирует / заблокирована) ───
+const depCount = computed(() => {
+  const d = full.value?.dependencies;
+  return d ? (d.blocks?.length || 0) + (d.blocked_by?.length || 0) : 0;
+});
+// Кандидаты для новой зависимости — карточки текущей доски, кроме самой
+// карточки, архивных, подзадач и уже связанных.
+const depCandidates = computed(() => {
+  if (!full.value) return [];
+  const linked = new Set();
+  for (const d of (full.value.dependencies?.blocks || [])) linked.add(d.card_id);
+  for (const d of (full.value.dependencies?.blocked_by || [])) linked.add(d.card_id);
+  const q = depSearch.value.trim().toLowerCase();
+  return store.cards
+    .filter(c => c.id !== props.cardId
+      && !c.parent_card_id
+      && !c.is_archived
+      && !linked.has(c.id)
+      && (!q || (c.title || '').toLowerCase().includes(q)))
+    .slice(0, 30);
+});
+function toggleDepPicker() {
+  showDepPicker.value = !showDepPicker.value;
+  if (showDepPicker.value) { depSearch.value = ''; depDraft.value.direction = 'blocked_by'; }
+}
+function closeDepPicker() { showDepPicker.value = false; }
+async function addDependency(otherId) {
+  try {
+    const res = await tasksApi.addDependency(props.cardId, depDraft.value.direction, otherId);
+    if (res?.dependencies) full.value.dependencies = res.dependencies;
+    showDepPicker.value = false;
+    depSearch.value = '';
+    emit('refresh');
+  } catch (e) { showError(e, 'Не удалось добавить зависимость'); }
+}
+async function removeDependency(d) {
+  try {
+    await tasksApi.deleteDependency(d.id);
+    const dep = full.value.dependencies;
+    if (dep) {
+      dep.blocks = dep.blocks.filter(x => x.id !== d.id);
+      dep.blocked_by = dep.blocked_by.filter(x => x.id !== d.id);
+    }
+    emit('refresh');
+  } catch (e) { showError(e, 'Не удалось убрать зависимость'); }
+}
+
 async function askDelete() {
   const ok = await dlg.confirm('Удалить карточку',
     'Удалить карточку «' + full.value.card.title + '»? Действие нельзя отменить.',
@@ -1395,6 +1531,9 @@ async function toggleArchive() {
         dlg.info('Ошибка', 'У этой доски нет архивной колонки', 'error');
         return;
       }
+      const openBlockers = (full.value.dependencies?.blocked_by || [])
+        .filter(d => !d.is_done && !d.is_archived).length;
+      if (!(await dlg.confirmCompleteBlocked(openBlockers))) return;
       await store.moveCard(props.cardId, archiveColumn.value.id, 0);
     }
     emit('refresh');
@@ -1510,6 +1649,8 @@ function historyText(h) {
     case 'labels_changed': return 'изменил(а) метки';
     case 'assignees_changed': return 'изменил(а) соисполнителей';
     case 'relations_changed': return 'изменил(а) связи';
+    case 'dependency_added':   return 'добавил(а) зависимость';
+    case 'dependency_removed': return 'убрал(а) зависимость';
     case 'auto_closed':   return 'карточка закрыта (все соисполнители готовы)';
     case 'auto_reopened': return 'карточка возвращена в работу';
     default: return h.action;
@@ -1524,6 +1665,8 @@ function historyKind(h) {
     case 'labels_changed':    return 'labels';
     case 'assignees_changed': return 'people';
     case 'relations_changed': return 'relations';
+    case 'dependency_added':   return 'relations';
+    case 'dependency_removed': return 'relations';
     case 'auto_closed':       return 'closed';
     case 'auto_reopened':     return 'reopened';
     default: return 'other';
@@ -1538,6 +1681,8 @@ function historyIcon(h) {
     labels_changed: 'tag',
     assignees_changed: 'copy',
     relations_changed: 'paperclip',
+    dependency_added: 'lock',
+    dependency_removed: 'lock',
     auto_closed: 'check',
     auto_reopened: 'edit',
   })[h.action] || 'edit';
@@ -2122,6 +2267,85 @@ a.ts-rel-chip:hover {
   border-color: var(--tk-accent, #E87A1E);
   border-style: solid;
   color: var(--tk-accent-text, #B85A0E);
+}
+
+/* Зависимости карточки */
+.ts-dep-group { margin-bottom: 8px; }
+.ts-dep-label {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tk-text-muted, #9C9384);
+  margin-bottom: 5px;
+}
+.ts-dep-label-blocked { color: #C0392B; }
+.ts-dep-chips { display: flex; flex-direction: column; gap: 4px; }
+.ts-dep-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 6px 5px 10px;
+  background: var(--tk-n-50, #FAF9F5);
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.ts-dep-chip:hover {
+  background: #fff;
+  border-color: var(--tk-accent, #E87A1E);
+}
+.ts-dep-chip-title {
+  flex: 1; min-width: 0;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--tk-text, #1A1814);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ts-dep-chip-done .ts-dep-chip-title {
+  text-decoration: line-through;
+  color: var(--tk-text-muted, #9C9384);
+}
+.ts-dep-chip-state {
+  font-size: 9.5px; font-weight: 700;
+  text-transform: uppercase;
+  color: #2E7D32;
+  background: rgba(76,175,80,0.14);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.ts-dep-chip-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border: none; background: transparent;
+  border-radius: 5px;
+  color: var(--tk-text-muted, #9C9384);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 140ms ease, color 140ms ease;
+}
+.ts-dep-chip-del:hover { background: rgba(212,70,56,0.12); color: #C0392B; }
+.ts-dep-results {
+  display: flex; flex-direction: column;
+  max-height: 200px; overflow-y: auto;
+  gap: 2px;
+}
+.ts-dep-result {
+  text-align: left;
+  padding: 6px 8px;
+  background: transparent; border: none;
+  border-radius: 6px;
+  font-family: inherit; font-size: 12.5px;
+  color: var(--tk-text, #1A1814);
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background 120ms ease;
+}
+.ts-dep-result:hover { background: var(--tk-accent-soft, rgba(232,122,30,0.10)); }
+.ts-dep-noresult {
+  padding: 10px 8px;
+  font-size: 12px;
+  color: var(--tk-text-muted, #9C9384);
+  text-align: center;
 }
 
 /* Поповер связи */

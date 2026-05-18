@@ -325,7 +325,13 @@ export const useTasksStore = defineStore('tasks', () => {
       await tasksApi.moveCard({ card_id: cardId, to_column_id: toColumnId, to_index: toIndex });
       // Возврат задачи из done/архива в работу — бэк возобновляет таймер.
       // Перечитываем доску, чтобы карточка показала актуальное «таймер идёт».
-      if (wasDone && !nowDone) await reload();
+      if (wasDone && !nowDone) {
+        await reload();
+      } else if (!wasDone && nowDone && (original.blocks_count > 0)) {
+        // Карточка-блокер завершена — перечитываем доску, чтобы задачи,
+        // которые она держала, сразу потеряли значок «заблокирована».
+        await reload();
+      }
     } catch (e) {
       error.value = e.message;
       await reload();
