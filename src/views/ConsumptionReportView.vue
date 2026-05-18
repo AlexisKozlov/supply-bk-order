@@ -118,6 +118,20 @@ import { useOrderStore } from '@/stores/orderStore.js'
 import { useUserStore } from '@/stores/userStore.js'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 
+// Приводит название группы аналогов к единому виду: убирает лишние пробелы
+// по краям и достраивает незакрытые кавычки. Логика совпадает со страницей
+// «Реализация ресторанов» — иначе один и тот же товар считается дважды.
+function normalizeAnalogGroup(s) {
+  let t = String(s ?? '').trim()
+  if (!t) return t
+  const lastOpen = t.lastIndexOf('«')
+  const lastClose = t.lastIndexOf('»')
+  if (lastOpen > lastClose) t += '»'
+  const dq = (t.match(/"/g) || []).length
+  if (dq % 2 === 1) t += '"'
+  return t
+}
+
 const orderStore = useOrderStore()
 const userStore = useUserStore()
 
@@ -215,12 +229,13 @@ async function loadData() {
 
     const whMap = {}
     for (const p of (products || [])) {
-      if (!p.analog_group) continue
+      const group = normalizeAnalogGroup(p.analog_group)
+      if (!group) continue
       const a = analysisMap.get(p.sku)
       if (!a || !a.consumption) continue
       const daily = (a.period_days || 30) > 0 ? a.consumption / (a.period_days || 30) : 0
-      if (!whMap[p.analog_group]) whMap[p.analog_group] = 0
-      whMap[p.analog_group] += daily * 30
+      if (!whMap[group]) whMap[group] = 0
+      whMap[group] += daily * 30
     }
     warehouseData.value = whMap
 
@@ -252,9 +267,10 @@ async function loadData() {
 
     const restMap = {}
     for (const s of (sales || [])) {
-      if (!s.analog_group) continue
-      if (!restMap[s.analog_group]) restMap[s.analog_group] = 0
-      restMap[s.analog_group] += parseFloat(s.quantity) || 0
+      const group = normalizeAnalogGroup(s.analog_group)
+      if (!group) continue
+      if (!restMap[group]) restMap[group] = 0
+      restMap[group] += parseFloat(s.quantity) || 0
     }
     restaurantData.value = restMap
   } catch (e) {
