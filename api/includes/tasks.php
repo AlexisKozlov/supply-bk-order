@@ -1526,8 +1526,11 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         if ((int)$card['is_done'] !== 1 && $newIsDone === 1) {
             tStopCardTimers($pdo, $cardId, $tUserName);
         }
-        // Задача возвращена из done/архива в работу — возобновляем таймер.
-        if ((int)$card['is_done'] === 1 && $newIsDone === 0) {
+        // Задача возвращена из done/архива в работу — возобновляем таймер,
+        // но только если на доске включён авто-таймер. Иначе у задачи, по
+        // которой время вообще не вели, при возврате из архива появлялся
+        // лишний бегущий таймер «0с».
+        if ((int)$card['is_done'] === 1 && $newIsDone === 0 && !empty($cardBoard['auto_timer'])) {
             tStartCardTimer($pdo, $cardId, $tUserName);
         }
 
