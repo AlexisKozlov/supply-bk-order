@@ -1486,8 +1486,14 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
                 $pdo->prepare("UPDATE tasks_assignees SET is_done = 0, done_at = NULL WHERE card_id = ? AND user_name = ? AND is_done = 1")
                     ->execute([$cardId, $tUserName]);
                 tHistory($pdo, $cardId, $tUserName, 'assignee_moved', ['user' => $tUserName, 'to_column' => $toColumnId]);
-                // Соисполнитель вернул свою копию из архива в работу — возобновляем его таймер.
-                if ($wasAssigneeDone) tStartCardTimer($pdo, $cardId, $tUserName);
+                // Соисполнитель вернул свою копию из архива в работу — возобновляем
+                // его таймер, но только если на доске карточки включён авто-таймер
+                // (иначе у задачи без учёта времени появлялся лишний счётчик «0с» —
+                // тот же фикс, что и для своих карточек ниже).
+                if ($wasAssigneeDone) {
+                    $homeBoard = tGetBoard($pdo, $card['board_id']);
+                    if (!empty($homeBoard['auto_timer'])) tStartCardTimer($pdo, $cardId, $tUserName);
+                }
             }
 
             $pdo->commit();
