@@ -13,6 +13,9 @@ nohup.out
 .claude/
 api/uploads/
 public/mockups/
-api/cron_telegram.lock
+api/cron_*.lock
 api/health_state.json
 .aider*
+.gstack/
+__pycache__/
+public/releases/*.exe
