@@ -142,6 +142,13 @@ export const useSupplyAssistantStore = defineStore('supplyAssistant', () => {
     });
   }
 
+  async function adminStockProducts(legalEntity) {
+    const params = new URLSearchParams();
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    const data = await api(`admin/stock-products?${params}`);
+    return data.products || [];
+  }
+
   return {
     deliveryDays,
     products,
@@ -161,5 +168,6 @@ export const useSupplyAssistantStore = defineStore('supplyAssistant', () => {
     adminDeleteOrder,
     adminGetTemplates,
     adminSaveTemplates,
+    adminStockProducts,
   };
 });

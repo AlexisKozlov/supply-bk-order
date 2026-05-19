@@ -368,16 +368,11 @@ if ($saAction === 'search-products' && $method === 'GET') {
     saRespond(['products' => $products]);
 }
 
-// ═══ GET sa/stock-products ═══
-// Товары из «Сроков годности» (stock_malling) — для импорта позиций вне шаблона.
-
-if ($saAction === 'stock-products' && $method === 'GET') {
-    $rest = roGetRestaurantSession($pdo);
-    if (!$rest) saRespond(['error' => 'Не авторизован'], 401);
-
-    $le       = $rest['legal_entity'];
+// ═══ Товары из «Сроков годности» (stock_malling) для импорта позиций вне шаблона ═══
+// Используется и кабинетом ресторана, и разделом отдела закупок.
+function saStockProductsForEntity($pdo, $le) {
     $customer = roShortCustomerName($le);
-    if (!$customer) saRespond(['error' => 'Не удалось определить юр. лицо ресторана'], 400);
+    if (!$customer) return [];
 
     // Справочник товаров
     $prodStmt = $pdo->prepare("
@@ -460,7 +455,14 @@ if ($saAction === 'stock-products' && $method === 'GET') {
         return $cmp !== 0 ? $cmp : strcmp($a['name'] ?? '', $b['name'] ?? '');
     });
 
-    saRespond(['products' => $products]);
+    return $products;
+}
+
+// ═══ GET sa/stock-products — для кабинета ресторана ═══
+if ($saAction === 'stock-products' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) saRespond(['error' => 'Не авторизован'], 401);
+    saRespond(['products' => saStockProductsForEntity($pdo, $rest['legal_entity'])]);
 }
 
 // ═══ GET sa/order ═══
@@ -953,6 +955,14 @@ if ($saAction === 'admin') {
         $s = $pdo->prepare($q);
         $s->execute($params);
         saRespond(['templates' => $s->fetchAll()]);
+    }
+
+    // ── GET sa/admin/stock-products ──────────────────────────────────────────
+    // Товары из «Сроков годности» для импорта в шаблон (сторона отдела закупок).
+    if ($adminAction === 'stock-products' && $method === 'GET') {
+        $le = $_GET['legal_entity'] ?? null;
+        if (!$le) saRespond(['error' => 'Не указан legal_entity'], 400);
+        saRespond(['products' => saStockProductsForEntity($pdo, $le)]);
     }
 
     // ── POST sa/admin/templates ──────────────────────────────────────────────

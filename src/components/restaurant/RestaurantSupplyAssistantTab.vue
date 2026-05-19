@@ -1,5 +1,5 @@
 <template>
-  <div class="sa-wrap">
+  <div class="sa-wrap" ref="rootEl">
     <!-- Загрузка дней доставки -->
     <div v-if="state === 'loading-days'" class="sa-card sa-state">
       <div class="sa-spin"></div>
@@ -92,8 +92,7 @@
               В заказе
               <span v-if="totalItems" class="sa-toggle-count">{{ totalItems }}</span>
             </button>
-            <button class="sa-btn sa-btn--ghost" @click="openStockModal">+ Со склада</button>
-            <button class="sa-btn sa-btn--ghost" @click="openCatalogModal">+ Из каталога</button>
+            <button class="sa-btn sa-btn--ghost" @click="openCatalogModal">+ Добавить товар</button>
           </div>
 
           <!-- Таблица позиций -->
@@ -227,49 +226,15 @@
           <button class="sa-btn sa-btn--primary" @click="openExportModal">Экспорт 1С УТ</button>
         </div>
       </div>
-    </template>
 
-    <!-- ══ Модалка: добавить со склада ══ -->
-    <div v-if="stockModalOpen" class="sa-overlay" @click.self="stockModalOpen = false">
-      <div class="sa-modal">
-        <div class="sa-modal-head">
-          <h2>Добавить со склада</h2>
-          <button class="sa-modal-close" @click="stockModalOpen = false" aria-label="Закрыть">&times;</button>
-        </div>
-        <div class="sa-modal-body">
-          <p class="sa-modal-hint">Товары с остатком на складе из «Сроков годности» — добавьте те, которых нет в вашем шаблоне.</p>
-          <div class="sa-search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input v-model="stockSearch" type="text" placeholder="Поиск товара" @input="filterStockProducts" />
-          </div>
-          <div v-if="stockModalLoading" class="sa-state sa-state--inline"><div class="sa-spin"></div></div>
-          <div v-else-if="filteredStockProducts.length === 0" class="sa-empty">Нет товаров для добавления</div>
-          <div v-else class="sa-pick-list">
-            <label
-              v-for="p in filteredStockProducts"
-              :key="p.sku"
-              class="sa-pick"
-              :class="{ 'is-checked': stockSelected.has(p.sku) }"
-            >
-              <input type="checkbox" :checked="stockSelected.has(p.sku)" @change="toggleStockSelect(p)" />
-              <span class="sa-pick-main">
-                <span class="sa-sku">{{ p.sku }}</span>
-                <span class="sa-name-text">{{ p.name }}</span>
-                <span class="sa-pick-cat">{{ canonCategory(p.category) }}</span>
-              </span>
-              <span class="sa-pick-qty">{{ p.stock != null ? p.stock : '—' }}</span>
-            </label>
-          </div>
-        </div>
-        <div class="sa-modal-foot">
-          <span v-if="stockSelected.size" class="sa-dim">Выбрано: {{ stockSelected.size }}</span>
-          <span v-else></span>
-          <button class="sa-btn sa-btn--primary" :disabled="stockSelected.size === 0" @click="addSelectedFromStock">
-            Добавить{{ stockSelected.size ? ` (${stockSelected.size})` : '' }}
-          </button>
-        </div>
+      <!-- ── Подсказка до выбора даты ── -->
+      <div v-else class="sa-card sa-intro">
+        <div class="sa-intro-step"><span class="sa-intro-num">1</span> Выберите дату поставки выше</div>
+        <div class="sa-intro-step"><span class="sa-intro-num">2</span> Укажите количество товаров по складам — Сухой, Холод, Мороз</div>
+        <div class="sa-intro-step"><span class="sa-intro-num">3</span> Сохраните заказ</div>
+        <div class="sa-intro-step"><span class="sa-intro-num">4</span> Нажмите «Экспорт 1С УТ» и перенесите заявки в 1С</div>
       </div>
-    </div>
+    </template>
 
     <!-- ══ Модалка: добавить из каталога ══ -->
     <div v-if="catalogModalOpen" class="sa-overlay" @click.self="catalogModalOpen = false">
@@ -357,11 +322,18 @@
         </div>
       </div>
     </div>
+
+    <!-- Кнопка «Наверх» -->
+    <transition name="sa-fade">
+      <button v-show="showScrollTop" class="sa-scrolltop" @click="scrollToTop" aria-label="Наверх">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </transition>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useSupplyAssistantStore } from '@/stores/supplyAssistantStore.js';
 
 const store = useSupplyAssistantStore();
@@ -381,6 +353,8 @@ const orderComment = ref('');
 const saveError = ref('');
 const successStats = ref({ items: 0, qty: 0 });
 const loadedOrderExists = ref(false); // на сервере уже есть сохранённый заказ на эту дату
+const rootEl = ref(null);
+const showScrollTop = ref(false);
 
 // ── Утилиты ──
 function plural(n, one, few, many) {
@@ -436,6 +410,38 @@ async function init() {
   }
 }
 onMounted(init);
+
+// ── Кнопка «Наверх» ──
+let scrollTarget = null;
+function findScrollParent(el) {
+  let node = el ? el.parentElement : null;
+  while (node && node !== document.body && node !== document.documentElement) {
+    const oy = getComputedStyle(node).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight + 4) return node;
+    node = node.parentElement;
+  }
+  return window;
+}
+function onScroll() {
+  const y = scrollTarget === window
+    ? (window.scrollY || document.documentElement.scrollTop || 0)
+    : scrollTarget.scrollTop;
+  showScrollTop.value = y > 500;
+}
+function scrollToTop() {
+  if (scrollTarget === window) window.scrollTo({ top: 0, behavior: 'smooth' });
+  else if (scrollTarget) scrollTarget.scrollTo({ top: 0, behavior: 'smooth' });
+}
+onMounted(() => {
+  nextTick(() => {
+    scrollTarget = findScrollParent(rootEl.value);
+    scrollTarget.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  });
+});
+onBeforeUnmount(() => {
+  if (scrollTarget) scrollTarget.removeEventListener('scroll', onScroll);
+});
 
 // ── Выбор даты и загрузка заказа ──
 async function selectDate(date) {
@@ -548,12 +554,12 @@ const multErrorsCount = computed(() => orderItems.value.filter(i => i._multError
 const totalItems = computed(() => orderItems.value.filter(i => i.quantity > 0).length);
 const totalQty = computed(() => orderItems.value.reduce((s, i) => s + (Number(i.quantity) || 0), 0));
 
-// Примерный вес: количество (коробок) × вес брутто. Данных может не быть — оценка приблизительная.
+// Примерный вес: количество × вес брутто. weight_brutto хранится в ГРАММАХ — делим на 1000.
 const estWeight = computed(() => {
   let kg = 0;
   for (const i of orderItems.value) {
     const q = Number(i.quantity) || 0;
-    if (q > 0 && i.weight_brutto) kg += q * Number(i.weight_brutto);
+    if (q > 0 && i.weight_brutto) kg += q * Number(i.weight_brutto) / 1000;
   }
   return kg;
 });
@@ -614,71 +620,6 @@ async function handleSave() {
 }
 function backToEditing() {
   state.value = 'editing';
-}
-
-// ── Модалка: товары со склада ──
-const stockModalOpen = ref(false);
-const stockModalLoading = ref(false);
-const stockSearch = ref('');
-const stockProductsList = ref([]);
-const filteredStockProducts = ref([]);
-const stockSelected = ref(new Set());
-
-async function openStockModal() {
-  stockModalOpen.value = true;
-  stockSearch.value = '';
-  stockSelected.value = new Set();
-  if (!stockProductsList.value.length) {
-    stockModalLoading.value = true;
-    try {
-      stockProductsList.value = await store.loadStockProducts();
-    } catch (e) {
-      stockProductsList.value = [];
-    }
-    stockModalLoading.value = false;
-  }
-  filterStockProducts();
-}
-function filterStockProducts() {
-  const q = stockSearch.value.trim().toLowerCase();
-  const existingSkus = new Set(orderItems.value.map(i => i.sku));
-  filteredStockProducts.value = stockProductsList.value.filter(p => {
-    if (existingSkus.has(p.sku)) return false;
-    if (!q) return true;
-    return String(p.sku || '').toLowerCase().includes(q) ||
-           String(p.name || '').toLowerCase().includes(q);
-  });
-}
-function toggleStockSelect(p) {
-  const s = new Set(stockSelected.value);
-  if (s.has(p.sku)) s.delete(p.sku); else s.add(p.sku);
-  stockSelected.value = s;
-}
-function addSelectedFromStock() {
-  const selected = stockProductsList.value.filter(p => stockSelected.value.has(p.sku));
-  for (const p of selected) {
-    if (orderItems.value.find(i => i.sku === p.sku)) continue;
-    orderItems.value.push({
-      sku: p.sku,
-      product_name: p.name,
-      category: canonCategory(p.category),
-      multiplicity: 1,
-      external_code: p.external_code || '',
-      analog_group: p.analog_group || '',
-      qty_per_box: null,
-      weight_brutto: null,
-      boxes_per_pallet: null,
-      stock: p.stock ?? null,
-      quantity: 0,
-      _added: true,
-      _multError: false,
-    });
-  }
-  if (selected.length) {
-    const cat = canonCategory(selected[0].category);
-    if (categories.value.includes(cat)) activeCategory.value = cat;
-  }
-  stockModalOpen.value = false;
 }
 
 // ── Модалка: каталог ──
@@ -744,9 +685,9 @@ let copiedMsgTimer = null;
 const colRefs = {};
 
 const exportCols = [
-  { key: 'code', label: 'Внешний код', flex: '0 0 150px', value: r => r.external_code || '' },
-  { key: 'name', label: 'Наименование', flex: '1 1 auto', value: r => `${r.sku} ${r.product_name}` },
-  { key: 'qty',  label: 'Количество',  flex: '0 0 120px', value: r => String(r.quantity) },
+  { key: 'code', label: 'Внешний код', flex: '0 1 130px', value: r => r.external_code || '' },
+  { key: 'name', label: 'Наименование', flex: '1 1 90px', value: r => `${r.sku} ${r.product_name}` },
+  { key: 'qty',  label: 'Количество',  flex: '0 1 84px', value: r => String(r.quantity) },
 ];
 
 const exportRows = computed(() =>
@@ -1214,10 +1155,77 @@ function copyGroup(cat) {
 .sa-export-cell:last-child { border-bottom: 0; }
 .sa-export-cell.is-invalid { background: #FFF1F0; color: #c0392b; font-weight: 600; }
 
+/* ── Подсказка до выбора даты ── */
+.sa-intro { display: flex; flex-direction: column; gap: 10px; }
+.sa-intro-step {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; line-height: 1.4; color: var(--sa-ink);
+}
+.sa-intro-num {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: 50%; background: var(--sa-bg-soft);
+  border: 1.5px solid var(--sa-line);
+  font-size: 13px; font-weight: 800; color: var(--sa-accent);
+}
+
+/* ── Кнопка «Наверх» ── */
+.sa-scrolltop {
+  position: fixed; right: 16px; bottom: 16px; z-index: 60;
+  width: 46px; height: 46px;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%;
+  background: var(--sa-brown); color: #fff;
+  box-shadow: 0 6px 20px rgba(40,24,14,.35);
+  cursor: pointer;
+}
+.sa-scrolltop:hover { background: #3d1a0f; }
+.sa-scrolltop:active { transform: scale(.94); }
+.sa-scrolltop svg { width: 22px; height: 22px; }
+.sa-fade-enter-active, .sa-fade-leave-active { transition: opacity .2s ease, transform .2s ease; }
+.sa-fade-enter-from, .sa-fade-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* ══ Мобильная компактная версия — без горизонтального скролла ══ */
 @media (max-width: 560px) {
   .sa-card { padding: 14px; border-radius: 14px; }
   .sa-submit-row { flex-direction: column; align-items: stretch; }
   .sa-submit-row .sa-btn { width: 100%; }
   .sa-totals { justify-content: space-between; gap: 12px; }
+
+  /* Даты — переносятся, без скролла вбок */
+  .sa-days { flex-wrap: wrap; overflow-x: visible; }
+  .sa-day { flex: 1 0 auto; min-width: 66px; }
+
+  /* Таблица позиций → карточки */
+  .sa-table-wrap { overflow-x: visible; }
+  .sa-table, .sa-table tbody { display: block; }
+  .sa-table thead { display: none; }
+  .sa-table tbody tr {
+    display: block; position: relative;
+    border: 1.5px solid var(--sa-line); border-radius: 12px;
+    padding: 10px 12px; margin-bottom: 10px; background: #fff;
+  }
+  .sa-table tbody tr.is-filled { border-color: #efd3b3; background: #FFF9F1; }
+  .sa-table tbody tr.is-err { border-color: #e9b4af; background: #FFF1F0; }
+  .sa-table tbody td { display: block; border: 0; padding: 0; }
+
+  .sa-col-name { min-width: 0; font-size: 14px; padding-right: 32px; }
+  .sa-col-analog, .sa-col-mult, .sa-col-stock {
+    display: inline-block; width: auto; margin: 7px 14px 0 0;
+    font-size: 12px; color: var(--sa-muted); text-align: left;
+  }
+  .sa-col-analog::before { content: 'Аналоги: '; }
+  .sa-col-mult::before { content: 'Кратность: '; }
+  .sa-col-stock::before { content: 'Остаток склада: '; }
+  .sa-col-qty {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
+    width: auto; margin-top: 10px;
+  }
+  .sa-col-qty::before {
+    content: 'Количество'; font-size: 12px; font-weight: 700; color: var(--sa-muted);
+  }
+  .sa-col-qty .sa-qty { width: 112px; flex: 0 0 auto; }
+  .sa-mult-hint { flex: 1 0 100%; text-align: left; }
+  .sa-col-act { position: absolute; top: 8px; right: 8px; width: auto; }
 }
 </style>

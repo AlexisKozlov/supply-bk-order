@@ -132,6 +132,7 @@
         <div class="rom-tpl-filter">
           <input v-model="tplFilter" type="text" placeholder="Фильтр по названию или артикулу..." class="rom-input rom-tpl-filter-input" />
           <button v-if="canEdit" class="rom-btn" @click="showTplAddModal = true">+ Добавить товар</button>
+          <button v-if="canEdit" class="rom-btn" @click="openStockImport">Импорт из остатков склада</button>
         </div>
 
         <div v-if="tplMessage" class="rom-tpl-msg" :class="{ success: tplMessageOk }">{{ tplMessage }}</div>
@@ -315,6 +316,47 @@
           </div>
           <div v-else-if="tplAddSearch.length >= 2" class="rom-no-items">Ничего не найдено</div>
           <div v-else class="rom-no-items">Введите минимум 2 символа</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Модалка импорта из остатков склада ═══ -->
+    <div v-if="showStockImportModal" class="rom-modal-overlay" @click.self="showStockImportModal = false">
+      <div class="rom-modal">
+        <div class="rom-modal-header">
+          <h2>Импорт из остатков склада</h2>
+          <button class="rom-modal-close" @click="showStockImportModal = false">&times;</button>
+        </div>
+        <div class="rom-modal-body">
+          <p class="sam-modal-note">
+            Товары из «Сроков годности» для {{ shortLE(tplLegalEntity) }}.
+            Отметьте те, что нужно добавить в шаблон, и нажмите «Добавить».
+          </p>
+          <input
+            v-model="stockImportSearch"
+            type="text"
+            placeholder="Поиск по названию или артикулу..."
+            class="rom-input"
+            style="width:100%;margin-bottom:10px"
+          />
+          <div v-if="stockImportLoading" class="rom-loading"><BurgerSpinner text="Загрузка остатков..." /></div>
+          <div v-else-if="!filteredStockImport.length" class="rom-no-items">Нет товаров для импорта</div>
+          <div v-else class="sam-stock-list">
+            <label v-for="p in filteredStockImport" :key="p.sku || p.name" class="sam-stock-row">
+              <input type="checkbox" :checked="stockImportSelected.has(p.sku || p.name)" @change="toggleStockImport(p)" />
+              <span class="rom-td-sku-tpl">{{ p.sku || '—' }}</span>
+              <span class="sam-stock-name">{{ p.name }}</span>
+              <span class="rom-add-cat">{{ canonCat(p.category) }}</span>
+              <span class="sam-stock-num">{{ p.stock }}</span>
+            </label>
+          </div>
+        </div>
+        <div class="sam-stock-foot">
+          <span v-if="stockImportSelected.size" class="sam-stock-sel">Выбрано: {{ stockImportSelected.size }}</span>
+          <span v-else></span>
+          <button class="rom-btn rom-btn-primary" :disabled="!stockImportSelected.size" @click="addStockToTemplate">
+            Добавить{{ stockImportSelected.size ? ` (${stockImportSelected.size})` : '' }}
+          </button>
         </div>
       </div>
     </div>
@@ -629,6 +671,72 @@ function addToTemplate(product) {
   tplAddSearch.value = '';
 }
 
+// ═══ Импорт из остатков склада (Сроки годности) ═══
+const showStockImportModal = ref(false);
+const stockImportItems = ref([]);
+const stockImportLoading = ref(false);
+const stockImportSearch = ref('');
+const stockImportSelected = ref(new Set());
+
+function canonCat(c) {
+  const s = String(c || '').toLowerCase();
+  if (s.includes('мороз') || s.includes('замор')) return 'Мороз';
+  if (s.includes('холод') || s.includes('охлажд')) return 'Холод';
+  if (s.includes('сух')) return 'Сухой';
+  return 'Сухой';
+}
+
+const filteredStockImport = computed(() => {
+  const existing = new Set(tplItems.value.map(i => i.sku));
+  const q = stockImportSearch.value.trim().toLowerCase();
+  return stockImportItems.value.filter(p => {
+    if (p.sku && existing.has(p.sku)) return false;
+    if (!q) return true;
+    return String(p.sku || '').toLowerCase().includes(q) ||
+           String(p.name || '').toLowerCase().includes(q);
+  });
+});
+
+async function openStockImport() {
+  showStockImportModal.value = true;
+  stockImportSearch.value = '';
+  stockImportSelected.value = new Set();
+  stockImportLoading.value = true;
+  try {
+    stockImportItems.value = await saStore.adminStockProducts(tplLegalEntity.value);
+  } catch (e) {
+    stockImportItems.value = [];
+    toast.error('Ошибка', e.message);
+  } finally {
+    stockImportLoading.value = false;
+  }
+}
+function toggleStockImport(p) {
+  const key = p.sku || p.name;
+  const s = new Set(stockImportSelected.value);
+  if (s.has(key)) s.delete(key); else s.add(key);
+  stockImportSelected.value = s;
+}
+function addStockToTemplate() {
+  const sel = stockImportItems.value.filter(p => stockImportSelected.value.has(p.sku || p.name));
+  let added = 0;
+  for (const p of sel) {
+    if (!p.sku) continue;
+    if (tplItems.value.find(i => i.sku === p.sku)) continue;
+    tplItems.value.push({
+      sku: p.sku,
+      product_name: p.name,
+      category: canonCat(p.category),
+      multiplicity: 1,
+      analog_group: p.analog_group || '',
+      external_code: p.external_code || '',
+    });
+    added++;
+  }
+  showStockImportModal.value = false;
+  if (added) toast.success('Добавлено', `${added} товаров в шаблон. Не забудьте «Сохранить шаблон».`);
+}
+
 onMounted(() => {
   // Загрузим первую страницу заказов сразу
   loadOrders();
@@ -909,6 +1017,29 @@ onMounted(() => {
   margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--p-line-soft);
 }
 .sam-save-error { color: var(--p-danger); font-size: 13px; font-weight: 600; }
+
+/* ── Импорт из остатков склада ── */
+.sam-modal-note { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--p-muted); }
+.sam-stock-list {
+  display: flex; flex-direction: column;
+  max-height: 380px; overflow-y: auto;
+  border: 1px solid var(--p-line); border-radius: 10px;
+}
+.sam-stock-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-bottom: 1px solid var(--p-line-soft);
+  cursor: pointer; font-size: 13px;
+}
+.sam-stock-row:last-child { border-bottom: 0; }
+.sam-stock-row:hover { background: var(--p-soft); }
+.sam-stock-row input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--p-accent); }
+.sam-stock-name { flex: 1; min-width: 0; }
+.sam-stock-num { font-weight: 700; color: var(--p-muted); font-variant-numeric: tabular-nums; }
+.sam-stock-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 18px; border-top: 1px solid var(--p-line);
+}
+.sam-stock-sel { font-size: 13px; color: var(--p-muted); }
 
 @media (max-width: 600px) {
   .sam-page { padding: 14px; }
