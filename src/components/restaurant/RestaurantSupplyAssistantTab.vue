@@ -229,10 +229,21 @@
 
       <!-- ── Подсказка до выбора даты ── -->
       <div v-else class="sa-card sa-intro">
-        <div class="sa-intro-step"><span class="sa-intro-num">1</span> Выберите дату поставки выше</div>
-        <div class="sa-intro-step"><span class="sa-intro-num">2</span> Укажите количество товаров по складам — Сухой, Холод, Мороз</div>
-        <div class="sa-intro-step"><span class="sa-intro-num">3</span> Сохраните заказ</div>
-        <div class="sa-intro-step"><span class="sa-intro-num">4</span> Нажмите «Экспорт 1С УТ» и перенесите заявки в 1С</div>
+        <div class="sa-intro-head">
+          <div class="sa-intro-head-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 13h6M9 17h4"/></svg>
+          </div>
+          <div>
+            <h3>Как собрать заказ</h3>
+            <p>Помощник подготовит заявку для загрузки в 1С УТ</p>
+          </div>
+        </div>
+        <ol class="sa-intro-steps">
+          <li><span class="sa-intro-num">1</span><span class="sa-intro-text">Выберите дату поставки выше</span></li>
+          <li><span class="sa-intro-num">2</span><span class="sa-intro-text">Укажите количество товаров по складам — Сухой, Холод, Мороз</span></li>
+          <li><span class="sa-intro-num">3</span><span class="sa-intro-text">Сохраните заказ</span></li>
+          <li><span class="sa-intro-num">4</span><span class="sa-intro-text">Нажмите «Экспорт 1С УТ» и перенесите заявки в 1С</span></li>
+        </ol>
       </div>
     </template>
 
@@ -1156,18 +1167,37 @@ function copyGroup(cat) {
 .sa-export-cell.is-invalid { background: #FFF1F0; color: #c0392b; font-weight: 600; }
 
 /* ── Подсказка до выбора даты ── */
-.sa-intro { display: flex; flex-direction: column; gap: 10px; }
-.sa-intro-step {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 14px; line-height: 1.4; color: var(--sa-ink);
+.sa-intro-head {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 16px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--sa-line-soft);
+}
+.sa-intro-head-icon {
+  width: 44px; height: 44px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; background: #FFF3EC; color: var(--sa-accent);
+}
+.sa-intro-head-icon svg { width: 24px; height: 24px; }
+.sa-intro-head h3 { margin: 0; font-size: 17px; color: var(--sa-brown); }
+.sa-intro-head p { margin: 3px 0 0; font-size: 13px; color: var(--sa-muted); }
+.sa-intro-steps { list-style: none; margin: 0; padding: 0; }
+.sa-intro-steps li {
+  position: relative; display: flex; gap: 12px; align-items: flex-start;
+  padding-bottom: 16px;
+}
+.sa-intro-steps li:last-child { padding-bottom: 0; }
+.sa-intro-steps li:not(:last-child)::before {
+  content: ''; position: absolute; left: 13px; top: 30px; bottom: 0;
+  width: 2px; background: var(--sa-line);
 }
 .sa-intro-num {
+  position: relative; z-index: 1;
   display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; flex-shrink: 0;
-  border-radius: 50%; background: var(--sa-bg-soft);
-  border: 1.5px solid var(--sa-line);
-  font-size: 13px; font-weight: 800; color: var(--sa-accent);
+  width: 28px; height: 28px; flex-shrink: 0;
+  border-radius: 50%; background: var(--sa-accent); color: #fff;
+  font-size: 14px; font-weight: 800;
 }
+.sa-intro-text { font-size: 14px; line-height: 1.5; color: var(--sa-ink); padding-top: 4px; }
 
 /* ── Кнопка «Наверх» ── */
 .sa-scrolltop {
@@ -1196,36 +1226,27 @@ function copyGroup(cat) {
   .sa-days { flex-wrap: wrap; overflow-x: visible; }
   .sa-day { flex: 1 0 auto; min-width: 66px; }
 
-  /* Таблица позиций → карточки */
+  /* Таблица позиций → компактные строки: товар · ×кратность · количество */
   .sa-table-wrap { overflow-x: visible; }
   .sa-table, .sa-table tbody { display: block; }
   .sa-table thead { display: none; }
   .sa-table tbody tr {
-    display: block; position: relative;
-    border: 1.5px solid var(--sa-line); border-radius: 12px;
-    padding: 10px 12px; margin-bottom: 10px; background: #fff;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    border: 1.5px solid var(--sa-line); border-radius: 10px;
+    padding: 8px 10px; margin-bottom: 8px; background: #fff;
   }
   .sa-table tbody tr.is-filled { border-color: #efd3b3; background: #FFF9F1; }
   .sa-table tbody tr.is-err { border-color: #e9b4af; background: #FFF1F0; }
   .sa-table tbody td { display: block; border: 0; padding: 0; }
 
-  .sa-col-name { min-width: 0; font-size: 14px; padding-right: 32px; }
-  .sa-col-analog, .sa-col-mult, .sa-col-stock {
-    display: inline-block; width: auto; margin: 7px 14px 0 0;
-    font-size: 12px; color: var(--sa-muted); text-align: left;
-  }
-  .sa-col-analog::before { content: 'Аналоги: '; }
-  .sa-col-mult::before { content: 'Кратность: '; }
-  .sa-col-stock::before { content: 'Остаток склада: '; }
-  .sa-col-qty {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
-    width: auto; margin-top: 10px;
-  }
-  .sa-col-qty::before {
-    content: 'Количество'; font-size: 12px; font-weight: 700; color: var(--sa-muted);
-  }
-  .sa-col-qty .sa-qty { width: 112px; flex: 0 0 auto; }
-  .sa-mult-hint { flex: 1 0 100%; text-align: left; }
-  .sa-col-act { position: absolute; top: 8px; right: 8px; width: auto; }
+  /* На телефоне показываем только товар, кратность и количество */
+  .sa-col-analog, .sa-col-stock { display: none; }
+  .sa-col-name { flex: 1 1 130px; min-width: 0; font-size: 13.5px; line-height: 1.35; }
+  .sa-col-mult { width: auto; text-align: center; }
+  .sa-col-mult .sa-dim { display: none; }
+  .sa-col-qty { display: flex; flex-direction: column; align-items: flex-end; width: auto; }
+  .sa-col-qty .sa-qty { width: 76px; }
+  .sa-mult-hint { width: 100%; text-align: right; margin-top: 4px; }
+  .sa-col-act { width: auto; }
 }
 </style>
