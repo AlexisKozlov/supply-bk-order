@@ -79,11 +79,11 @@
 
           <!-- Поиск + добавление -->
           <div class="sa-toolbar">
-            <div class="sa-search">
+            <label class="sa-search">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
               <input v-model="searchQuery" type="text" placeholder="Поиск по названию или артикулу" />
               <button v-if="searchQuery" class="sa-search-clear" @click="searchQuery = ''" aria-label="Очистить">&times;</button>
-            </div>
+            </label>
             <button
               class="sa-btn sa-btn--toggle"
               :class="{ 'is-on': onlyFilled }"
@@ -257,10 +257,10 @@
         </div>
         <div class="sa-modal-body">
           <p class="sa-modal-hint">Поиск по всему каталогу товаров — для позиций, которых нет в шаблоне.</p>
-          <div class="sa-search">
+          <label class="sa-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input v-model="catalogSearch" type="text" placeholder="Поиск по каталогу" @input="doCatalogSearch" ref="catalogSearchInput" />
-          </div>
+          </label>
           <div v-if="catalogLoading" class="sa-state sa-state--inline"><div class="sa-spin"></div></div>
           <div v-else-if="catalogResults.length" class="sa-pick-list">
             <button v-for="p in catalogResults" :key="p.sku" class="sa-pick sa-pick--btn" @click="addFromCatalog(p)">
@@ -887,8 +887,8 @@ function copyGroup(cat) {
 
 /* ── Тулбар ── */
 .sa-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.sa-toolbar .sa-search { flex: 1; min-width: 200px; }
 .sa-search {
-  flex: 1; min-width: 200px;
   display: flex; align-items: center; gap: 8px;
   padding: 0 12px; min-height: 44px;
   background: var(--sa-bg-soft); border: 1px solid var(--sa-line);
@@ -1207,13 +1207,14 @@ function copyGroup(cat) {
 .sa-intro-text { font-size: 14px; line-height: 1.5; color: var(--sa-ink); padding-top: 4px; }
 
 /* ── Кнопка «Наверх» ── */
+/* Кнопка телепортируется в body — переменные --sa-* не наследуются, цвета литералом */
 .sa-scrolltop {
   position: fixed; right: 16px; z-index: 90;
   bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: 46px; height: 46px;
   display: flex; align-items: center; justify-content: center;
   border: 0; border-radius: 50%;
-  background: var(--sa-brown); color: #fff;
+  background: #502314; color: #fff;
   box-shadow: 0 6px 20px rgba(40,24,14,.35);
   cursor: pointer;
 }

@@ -80,7 +80,6 @@
         @click="switchTab('orders', 'reminders')">
         <span class="sb-icon" v-html="cabIconSvg.reminders"></span>
         Напоминания
-        <span class="sb-beta">BETA</span>
       </button>
 
       <div class="sb-label">Другое</div>
@@ -132,9 +131,8 @@
           <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
-        <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров (BETA)">
+        <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="11" y1="8" x2="11" y2="16"/><line x1="15" y1="8" x2="15" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
-          <span class="cab-topbar-scan-beta">BETA</span>
         </button>
       </div>
 
@@ -264,7 +262,7 @@
               <button class="dash-tile dash-tile--scanner" @click="switchTab('scanner')">
                 <span class="dash-tile-icon" v-html="tileIconSvg.scanner"></span>
                 <div class="dash-tile-text">
-                  <div class="dash-tile-title">Сканер товаров <span class="dash-tile-beta">BETA</span></div>
+                  <div class="dash-tile-title">Сканер товаров</div>
                   <div class="dash-tile-sub">Сканировать штрих-код для поиска</div>
                 </div>
                 <span class="dash-tile-arrow">›</span>
@@ -296,7 +294,7 @@
               <button class="dash-tile dash-tile--reminders" @click="switchTab('orders', 'reminders')">
                 <span class="dash-tile-icon" v-html="tileIconSvg.reminders"></span>
                 <div class="dash-tile-text">
-                  <div class="dash-tile-title">Напоминания <span class="dash-tile-beta">BETA</span></div>
+                  <div class="dash-tile-title">Напоминания</div>
                   <div class="dash-tile-sub">О подаче заявок поставщикам</div>
                 </div>
                 <span class="dash-tile-arrow">›</span>
@@ -412,7 +410,6 @@
         <button class="ord-tab" :class="{ active: orderSubTab === 'reminders' }" @click="switchTab('orders', 'reminders')">
           <span class="ord-tab-icon" v-html="cabIconSvg.reminders"></span>
           Напоминания
-          <span class="ord-tab-beta">BETA</span>
         </button>
         <button class="ord-tab" :class="{ active: orderSubTab === 'history' }" @click="switchTab('orders', 'history')">
           История
@@ -1633,7 +1630,7 @@ const mainTabs = computed(() => {
     });
   }
   tabs.push({ id: 'warehouse-stock', label: 'Остатки склада' });
-  tabs.push({ id: 'scanner', label: 'Сканер', beta: true });
+  tabs.push({ id: 'scanner', label: 'Сканер' });
   if (kegReturnsEnabled.value) tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
   return tabs;
 });
