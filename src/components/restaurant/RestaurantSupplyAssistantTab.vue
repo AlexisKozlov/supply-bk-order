@@ -314,7 +314,7 @@
               >
                 <div class="sa-export-colhead">
                   <button class="sa-export-pick" @click="selectColumn(g.category, col.key)" :title="`Выделить столбец «${col.label}»`">
-                    {{ col.label }}
+                    {{ col.short }}
                   </button>
                   <button class="sa-export-copy" @click="copyColumn(g.category, col.key)" :aria-label="`Копировать «${col.label}»`">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
@@ -702,9 +702,9 @@ let copiedMsgTimer = null;
 const colRefs = {};
 
 const exportCols = [
-  { key: 'code', label: 'Внешний код', flex: '0 1 130px', value: r => r.external_code || '' },
-  { key: 'name', label: 'Наименование', flex: '1 1 90px', value: r => `${r.sku} ${r.product_name}` },
-  { key: 'qty',  label: 'Количество',  flex: '0 1 84px', value: r => String(r.quantity) },
+  { key: 'code', label: 'Внешний код', short: 'Код', flex: '0 0 118px', value: r => r.external_code || '' },
+  { key: 'name', label: 'Наименование', short: 'Наименование', flex: '1 1 100px', value: r => `${r.sku} ${r.product_name}` },
+  { key: 'qty',  label: 'Количество',  short: 'Кол-во', flex: '0 0 86px', value: r => String(r.quantity) },
 ];
 
 const exportRows = computed(() =>
@@ -1150,6 +1150,7 @@ function copyGroup(cat) {
   font: inherit; font-size: 11px; font-weight: 800; letter-spacing: .03em;
   text-transform: uppercase; color: var(--sa-brown); text-align: center;
   border-radius: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sa-export-pick:hover { background: #F0E7DC; }
 .sa-export-copy {
