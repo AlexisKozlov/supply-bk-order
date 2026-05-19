@@ -761,7 +761,7 @@ if ($saAction === 'admin') {
                 o.updated_at,
                 r.city,
                 r.address,
-                COUNT(i.id)        AS items_count,
+                COUNT(i.id)        AS item_count,
                 COALESCE(SUM(i.quantity), 0) AS total_qty
             FROM sa_orders o
             LEFT JOIN restaurants r
