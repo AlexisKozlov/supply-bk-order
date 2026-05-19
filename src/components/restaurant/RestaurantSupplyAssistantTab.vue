@@ -703,9 +703,9 @@ let copiedMsgTimer = null;
 const colRefs = {};
 
 const exportCols = [
-  { key: 'code', label: 'Внешний код', short: 'Код', flex: '0 0 118px', value: r => r.external_code || '' },
+  { key: 'code', label: 'Внешний код', short: 'Код', flex: '0 0 116px', value: r => r.external_code || '' },
   { key: 'name', label: 'Наименование', short: 'Наименование', flex: '1 1 100px', value: r => `${r.sku} ${r.product_name}` },
-  { key: 'qty',  label: 'Количество',  short: 'Кол-во', flex: '0 0 86px', value: r => String(r.quantity) },
+  { key: 'qty',  label: 'Количество',  short: 'Кол-во', flex: '0 0 108px', value: r => String(r.quantity) },
 ];
 
 const exportRows = computed(() =>
