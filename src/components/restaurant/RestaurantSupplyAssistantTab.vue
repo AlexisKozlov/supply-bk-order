@@ -37,7 +37,8 @@
             :class="{ 'is-active': selectedDate === day.date, 'has-order': day.has_order }"
             @click="selectDate(day.date)"
           >
-            <span class="sa-day-name">{{ day.day_name }}</span>
+            <span class="sa-day-name sa-day-name--full">{{ day.day_name }}</span>
+            <span class="sa-day-name sa-day-name--short">{{ dayShort(day.day_of_week) }}</span>
             <span class="sa-day-date">{{ fmtShort(day.date) }}</span>
             <span v-if="day.has_order" class="sa-day-mark" v-html="checkSvg"></span>
           </button>
@@ -334,12 +335,14 @@
       </div>
     </div>
 
-    <!-- Кнопка «Наверх» -->
-    <transition name="sa-fade">
-      <button v-show="showScrollTop" class="sa-scrolltop" @click="scrollToTop" aria-label="Наверх">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-      </button>
-    </transition>
+    <!-- Кнопка «Наверх» (в body — чтобы не обрезалась контейнерами) -->
+    <Teleport to="body">
+      <transition name="sa-fade">
+        <button v-show="showScrollTop" class="sa-scrolltop" @click="scrollToTop" aria-label="Наверх">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </button>
+      </transition>
+    </Teleport>
   </div>
 </template>
 
@@ -380,6 +383,9 @@ function fmtShort(dateStr) {
   if (!dateStr) return '';
   const [, m, d] = dateStr.split('-');
   return `${d}.${m}`;
+}
+function dayShort(dow) {
+  return ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][dow] || '';
 }
 function fmtFull(dateStr) {
   if (!dateStr) return '';
@@ -832,6 +838,7 @@ function copyGroup(cat) {
 .sa-day:hover { border-color: #d9cebf; }
 .sa-day:active { transform: scale(.97); }
 .sa-day-name { font-size: 13px; font-weight: 700; color: var(--sa-ink); }
+.sa-day-name--short { display: none; }
 .sa-day-date { font-size: 12px; color: var(--sa-muted); font-variant-numeric: tabular-nums; }
 .sa-day.has-order { border-color: #cfe6cf; background: #F4FBF4; }
 .sa-day.is-active { border-color: var(--sa-brown); background: var(--sa-brown); }
@@ -1201,7 +1208,8 @@ function copyGroup(cat) {
 
 /* ── Кнопка «Наверх» ── */
 .sa-scrolltop {
-  position: fixed; right: 16px; bottom: 16px; z-index: 60;
+  position: fixed; right: 16px; z-index: 90;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: 46px; height: 46px;
   display: flex; align-items: center; justify-content: center;
   border: 0; border-radius: 50%;
@@ -1222,9 +1230,11 @@ function copyGroup(cat) {
   .sa-submit-row .sa-btn { width: 100%; }
   .sa-totals { justify-content: space-between; gap: 12px; }
 
-  /* Даты — переносятся, без скролла вбок */
-  .sa-days { flex-wrap: wrap; overflow-x: visible; }
-  .sa-day { flex: 1 0 auto; min-width: 66px; }
+  /* Даты — 5 узких плиток в один ряд, без переноса и скролла */
+  .sa-days { flex-wrap: nowrap; overflow-x: visible; gap: 6px; }
+  .sa-day { flex: 1 1 0; min-width: 0; padding: 9px 4px; }
+  .sa-day-name--full { display: none; }
+  .sa-day-name--short { display: inline; }
 
   /* Таблица позиций → компактные строки: товар · ×кратность · количество */
   .sa-table-wrap { overflow-x: visible; }
@@ -1239,14 +1249,16 @@ function copyGroup(cat) {
   .sa-table tbody tr.is-err { border-color: #e9b4af; background: #FFF1F0; }
   .sa-table tbody td { display: block; border: 0; padding: 0; }
 
-  /* На телефоне показываем только товар, кратность и количество */
-  .sa-col-analog, .sa-col-stock { display: none; }
-  .sa-col-name { flex: 1 1 130px; min-width: 0; font-size: 13.5px; line-height: 1.35; }
-  .sa-col-mult { width: auto; text-align: center; }
+  /* Только товар, кратность, количество. Селекторы с .sa-table tbody td —
+     иначе их по специфичности перебивает правило td выше. */
+  .sa-table tbody td.sa-col-analog,
+  .sa-table tbody td.sa-col-stock { display: none; }
+  .sa-table tbody td.sa-col-name { flex: 1 1 120px; min-width: 0; font-size: 13.5px; line-height: 1.35; }
+  .sa-table tbody td.sa-col-mult { width: auto; text-align: center; }
   .sa-col-mult .sa-dim { display: none; }
-  .sa-col-qty { display: flex; flex-direction: column; align-items: flex-end; width: auto; }
+  .sa-table tbody td.sa-col-qty { display: flex; flex-direction: column; align-items: flex-end; width: auto; }
   .sa-col-qty .sa-qty { width: 76px; }
   .sa-mult-hint { width: 100%; text-align: right; margin-top: 4px; }
-  .sa-col-act { width: auto; }
+  .sa-table tbody td.sa-col-act { width: auto; }
 }
 </style>
