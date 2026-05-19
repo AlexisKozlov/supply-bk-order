@@ -136,7 +136,9 @@ if ($saAction === 'products' && $method === 'GET') {
             COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity,
             p.external_code,
             p.analog_group,
-            p.qty_per_box
+            p.qty_per_box,
+            p.weight_brutto,
+            p.boxes_per_pallet
         FROM ro_templates t
         LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
         WHERE t.legal_entity = ? AND t.is_active = 1
@@ -295,14 +297,16 @@ if ($saAction === 'products' && $method === 'GET') {
         $stock  = $shelf !== null ? $shelf : ($bal !== null ? $bal : 0.0);
 
         $products[] = [
-            'sku'           => $sku,
-            'name'          => $row['name'],
-            'category'      => $row['category'],
-            'multiplicity'  => (int)$row['multiplicity'],
-            'external_code' => $row['external_code'] ?? null,
-            'analog_group'  => $row['analog_group'] ?? null,
-            'qty_per_box'   => $row['qty_per_box'] !== null ? (float)$row['qty_per_box'] : null,
-            'stock'         => $stock,
+            'sku'              => $sku,
+            'name'             => $row['name'],
+            'category'         => $row['category'],
+            'multiplicity'     => (int)$row['multiplicity'],
+            'external_code'    => $row['external_code'] ?? null,
+            'analog_group'     => $row['analog_group'] ?? null,
+            'qty_per_box'      => $row['qty_per_box'] !== null ? (float)$row['qty_per_box'] : null,
+            'weight_brutto'    => $row['weight_brutto'] !== null ? (float)$row['weight_brutto'] : null,
+            'boxes_per_pallet' => $row['boxes_per_pallet'] !== null ? (float)$row['boxes_per_pallet'] : null,
+            'stock'            => $stock,
         ];
     }
 
@@ -332,7 +336,9 @@ if ($saAction === 'search-products' && $method === 'GET') {
             COALESCE(NULLIF(multiplicity, 0), 1) AS multiplicity,
             external_code,
             analog_group,
-            qty_per_box
+            qty_per_box,
+            weight_brutto,
+            boxes_per_pallet
         FROM products
         WHERE legal_entity = ?
           AND is_active = 1
@@ -346,14 +352,16 @@ if ($saAction === 'search-products' && $method === 'GET') {
     $products = [];
     foreach ($rows as $row) {
         $products[] = [
-            'sku'           => $row['sku'],
-            'name'          => $row['name'],
-            'category'      => $row['category'],
-            'multiplicity'  => (int)$row['multiplicity'],
-            'external_code' => $row['external_code'] ?? null,
-            'analog_group'  => $row['analog_group'] ?? null,
-            'qty_per_box'   => $row['qty_per_box'] !== null ? (float)$row['qty_per_box'] : null,
-            'stock'         => null,
+            'sku'              => $row['sku'],
+            'name'             => $row['name'],
+            'category'         => $row['category'],
+            'multiplicity'     => (int)$row['multiplicity'],
+            'external_code'    => $row['external_code'] ?? null,
+            'analog_group'     => $row['analog_group'] ?? null,
+            'qty_per_box'      => $row['qty_per_box'] !== null ? (float)$row['qty_per_box'] : null,
+            'weight_brutto'    => $row['weight_brutto'] !== null ? (float)$row['weight_brutto'] : null,
+            'boxes_per_pallet' => $row['boxes_per_pallet'] !== null ? (float)$row['boxes_per_pallet'] : null,
+            'stock'            => null,
         ];
     }
 

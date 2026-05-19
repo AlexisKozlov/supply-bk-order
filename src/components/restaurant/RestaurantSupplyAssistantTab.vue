@@ -26,12 +26,12 @@
     </div>
 
     <template v-else>
-      <!-- ── Выбор даты ── -->
+      <!-- ── Выбор даты (ближайшие 5) ── -->
       <div class="sa-section">
         <div class="sa-section-label">Дата поставки</div>
         <div class="sa-days">
           <button
-            v-for="day in deliveryDays"
+            v-for="day in visibleDeliveryDays"
             :key="day.date"
             class="sa-day"
             :class="{ 'is-active': selectedDate === day.date, 'has-order': day.has_order }"
@@ -53,6 +53,15 @@
       <!-- ── Форма заказа ── -->
       <template v-else-if="state === 'editing' || state === 'saving'">
         <div class="sa-card sa-form">
+          <!-- Полоса «заказ сохранён» с экспортом -->
+          <div v-if="loadedOrderExists" class="sa-saved-bar">
+            <span class="sa-saved-bar-text">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17l9-10"/></svg>
+              Заказ на {{ fmtFull(selectedDate) }} сохранён
+            </span>
+            <button class="sa-btn sa-btn--primary sa-btn--sm" @click="openExportModal">Экспорт 1С УТ</button>
+          </div>
+
           <!-- Категории -->
           <div class="sa-cats">
             <button
@@ -74,8 +83,17 @@
               <input v-model="searchQuery" type="text" placeholder="Поиск по названию или артикулу" />
               <button v-if="searchQuery" class="sa-search-clear" @click="searchQuery = ''" aria-label="Очистить">&times;</button>
             </div>
-            <button class="sa-btn sa-btn--ghost" @click="openStockModal">Со склада</button>
-            <button class="sa-btn sa-btn--ghost" @click="openCatalogModal">+ Товар</button>
+            <button
+              class="sa-btn sa-btn--toggle"
+              :class="{ 'is-on': onlyFilled }"
+              :disabled="totalItems === 0"
+              @click="onlyFilled = !onlyFilled"
+            >
+              В заказе
+              <span v-if="totalItems" class="sa-toggle-count">{{ totalItems }}</span>
+            </button>
+            <button class="sa-btn sa-btn--ghost" @click="openStockModal">+ Со склада</button>
+            <button class="sa-btn sa-btn--ghost" @click="openCatalogModal">+ Из каталога</button>
           </div>
 
           <!-- Таблица позиций -->
@@ -136,7 +154,8 @@
               </tbody>
             </table>
             <div v-else class="sa-empty">
-              <template v-if="searchQuery">Ничего не найдено в категории «{{ activeCategory }}»</template>
+              <template v-if="onlyFilled">В заказе пока нет товаров в категории «{{ activeCategory }}»</template>
+              <template v-else-if="searchQuery">Ничего не найдено в категории «{{ activeCategory }}»</template>
               <template v-else>Нет товаров в категории «{{ activeCategory }}»</template>
             </div>
           </div>
@@ -164,6 +183,14 @@
               <div class="sa-total">
                 <span class="sa-total-num">{{ totalQty }}</span>
                 <span class="sa-total-lbl">{{ plural(totalQty, 'единица','единицы','единиц') }}</span>
+              </div>
+              <div v-if="estWeight > 0" class="sa-total sa-total--est">
+                <span class="sa-total-num">≈{{ fmtWeight(estWeight) }}</span>
+                <span class="sa-total-lbl">кг (примерно)</span>
+              </div>
+              <div v-if="estPallets > 0" class="sa-total sa-total--est">
+                <span class="sa-total-num">≈{{ estPallets }}</span>
+                <span class="sa-total-lbl">{{ plural(estPallets, 'паллета','паллеты','паллет') }} (примерно)</span>
               </div>
             </div>
             <button
@@ -210,6 +237,7 @@
           <button class="sa-modal-close" @click="stockModalOpen = false" aria-label="Закрыть">&times;</button>
         </div>
         <div class="sa-modal-body">
+          <p class="sa-modal-hint">Товары с остатком на складе из «Сроков годности» — добавьте те, которых нет в вашем шаблоне.</p>
           <div class="sa-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input v-model="stockSearch" type="text" placeholder="Поиск товара" @input="filterStockProducts" />
@@ -247,10 +275,11 @@
     <div v-if="catalogModalOpen" class="sa-overlay" @click.self="catalogModalOpen = false">
       <div class="sa-modal">
         <div class="sa-modal-head">
-          <h2>Добавить товар</h2>
+          <h2>Добавить из каталога</h2>
           <button class="sa-modal-close" @click="catalogModalOpen = false" aria-label="Закрыть">&times;</button>
         </div>
         <div class="sa-modal-body">
+          <p class="sa-modal-hint">Поиск по всему каталогу товаров — для позиций, которых нет в шаблоне.</p>
           <div class="sa-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input v-model="catalogSearch" type="text" placeholder="Поиск по каталогу" @input="doCatalogSearch" ref="catalogSearchInput" />
@@ -280,8 +309,8 @@
         </div>
         <div class="sa-modal-body">
           <p class="sa-export-hint">
-            Нажмите на заголовок столбца, чтобы выделить его целиком, либо скопируйте кнопкой —
-            затем вставьте в форму импорта 1С УТ.
+            Каждый склад — отдельная заявка в 1С УТ. Скопируйте заявку целиком или
+            отдельный столбец (клик по заголовку выделяет его) и вставьте в 1С УТ.
           </p>
 
           <div v-if="exportInvalidRows.length" class="sa-alert sa-alert--warn">
@@ -292,35 +321,38 @@
 
           <div v-if="copiedMsg" class="sa-copy-toast">{{ copiedMsg }}</div>
 
-          <!-- Три столбца: каждый выделяется и копируется отдельно -->
-          <div class="sa-export">
-            <div
-              v-for="col in exportCols"
-              :key="col.key"
-              class="sa-export-col"
-              :style="{ flex: col.flex }"
-            >
-              <div class="sa-export-colhead">
-                <button class="sa-export-pick" @click="selectColumn(col.key)" :title="`Выделить столбец «${col.label}»`">
-                  {{ col.label }}
-                </button>
-                <button class="sa-export-copy" @click="copyColumn(col.key)" :aria-label="`Копировать «${col.label}»`">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
-                </button>
-              </div>
-              <div class="sa-export-cells" :ref="el => setColRef(col.key, el)">
-                <div
-                  v-for="row in exportRows"
-                  :key="row.sku"
-                  class="sa-export-cell"
-                  :class="{ 'is-invalid': !row.validCode }"
-                >{{ col.value(row) }}</div>
+          <!-- Отдельная заявка на каждый склад -->
+          <div v-for="g in exportGroups" :key="g.category" class="sa-export-group">
+            <div class="sa-export-group-head">
+              <span class="sa-export-group-title">Заявка — {{ g.category }}</span>
+              <span class="sa-dim">{{ g.rows.length }} {{ plural(g.rows.length, 'позиция','позиции','позиций') }}</span>
+              <button class="sa-btn sa-btn--primary sa-btn--sm" @click="copyGroup(g.category)">Копировать заявку</button>
+            </div>
+            <div class="sa-export">
+              <div
+                v-for="col in exportCols"
+                :key="col.key"
+                class="sa-export-col"
+                :style="{ flex: col.flex }"
+              >
+                <div class="sa-export-colhead">
+                  <button class="sa-export-pick" @click="selectColumn(g.category, col.key)" :title="`Выделить столбец «${col.label}»`">
+                    {{ col.label }}
+                  </button>
+                  <button class="sa-export-copy" @click="copyColumn(g.category, col.key)" :aria-label="`Копировать «${col.label}»`">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                  </button>
+                </div>
+                <div class="sa-export-cells" :ref="el => setColRef(g.category, col.key, el)">
+                  <div
+                    v-for="row in g.rows"
+                    :key="row.sku"
+                    class="sa-export-cell"
+                    :class="{ 'is-invalid': !row.validCode }"
+                  >{{ col.value(row) }}</div>
+                </div>
               </div>
             </div>
-          </div>
-
-          <div class="sa-export-actions">
-            <button class="sa-btn sa-btn--primary" @click="copyAll">Копировать всю таблицу</button>
           </div>
         </div>
       </div>
@@ -344,9 +376,11 @@ const selectedDate = ref('');
 const orderItems = ref([]);
 const activeCategory = ref('');
 const searchQuery = ref('');
+const onlyFilled = ref(false);
 const orderComment = ref('');
 const saveError = ref('');
 const successStats = ref({ items: 0, qty: 0 });
+const loadedOrderExists = ref(false); // на сервере уже есть сохранённый заказ на эту дату
 
 // ── Утилиты ──
 function plural(n, one, few, many) {
@@ -368,6 +402,9 @@ function fmtFull(dateStr) {
   const [, m, d] = dateStr.split('-');
   return `${parseInt(d)} ${months[parseInt(m) - 1]}`;
 }
+function fmtWeight(kg) {
+  return kg >= 100 ? String(Math.round(kg)) : (Math.round(kg * 10) / 10).toString();
+}
 
 // «Сухой сток», «сухой склад» и т.п. — это всё «Сухой». Приводим к одной из трёх категорий.
 function canonCategory(c) {
@@ -377,6 +414,13 @@ function canonCategory(c) {
   if (s.includes('сух')) return 'Сухой';
   return c || 'Сухой';
 }
+
+// Ближайшие 5 дат поставки (от сегодня).
+const visibleDeliveryDays = computed(() => {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return deliveryDays.value.filter(x => x.date >= today).slice(0, 5);
+});
 
 // ── Инициализация ──
 async function init() {
@@ -400,6 +444,7 @@ async function selectDate(date) {
   orderComment.value = '';
   saveError.value = '';
   searchQuery.value = '';
+  onlyFilled.value = false;
   state.value = 'loading-order';
   try {
     const [templateProducts, savedOrder] = await Promise.all([
@@ -407,6 +452,7 @@ async function selectDate(date) {
       store.loadOrder(date),
     ]);
     buildOrderItems(templateProducts, savedOrder);
+    loadedOrderExists.value = !!savedOrder;
     if (categories.value.length) activeCategory.value = categories.value[0];
     state.value = 'editing';
   } catch (e) {
@@ -428,6 +474,8 @@ function buildOrderItems(templateProducts, savedOrder) {
     external_code: p.external_code || '',
     analog_group: p.analog_group || '',
     qty_per_box: p.qty_per_box || null,
+    weight_brutto: p.weight_brutto != null ? Number(p.weight_brutto) : null,
+    boxes_per_pallet: p.boxes_per_pallet != null ? Number(p.boxes_per_pallet) : null,
     stock: p.stock ?? null,
     quantity: savedMap[p.sku] ? Number(savedMap[p.sku].quantity) : 0,
     _added: false,
@@ -445,6 +493,8 @@ function buildOrderItems(templateProducts, savedOrder) {
           external_code: it.external_code || '',
           analog_group: it.analog_group || '',
           qty_per_box: null,
+          weight_brutto: null,
+          boxes_per_pallet: null,
           stock: null,
           quantity: Number(it.quantity),
           _added: true,
@@ -474,6 +524,7 @@ const filteredItems = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
   return orderItems.value.filter(item => {
     if (item.category !== activeCategory.value) return false;
+    if (onlyFilled.value && !(item.quantity > 0)) return false;
     if (!q) return true;
     return String(item.sku || '').toLowerCase().includes(q) ||
            String(item.product_name || '').toLowerCase().includes(q);
@@ -496,6 +547,28 @@ const multErrorsCount = computed(() => orderItems.value.filter(i => i._multError
 // ── Итого ──
 const totalItems = computed(() => orderItems.value.filter(i => i.quantity > 0).length);
 const totalQty = computed(() => orderItems.value.reduce((s, i) => s + (Number(i.quantity) || 0), 0));
+
+// Примерный вес: количество (коробок) × вес брутто. Данных может не быть — оценка приблизительная.
+const estWeight = computed(() => {
+  let kg = 0;
+  for (const i of orderItems.value) {
+    const q = Number(i.quantity) || 0;
+    if (q > 0 && i.weight_brutto) kg += q * Number(i.weight_brutto);
+  }
+  return kg;
+});
+// Примерные паллетоместа: считаются по каждому складу отдельно — склады не смешиваются.
+const estPallets = computed(() => {
+  const byCat = {};
+  for (const i of orderItems.value) {
+    const q = Number(i.quantity) || 0;
+    const bpp = Number(i.boxes_per_pallet) || 0;
+    if (q > 0 && bpp > 0) byCat[i.category] = (byCat[i.category] || 0) + q / bpp;
+  }
+  let total = 0;
+  for (const c in byCat) total += Math.ceil(byCat[c]);
+  return total;
+});
 
 // ── Удаление позиции ──
 function removeItem(item) {
@@ -522,6 +595,7 @@ async function handleSave() {
   try {
     await store.saveOrder(selectedDate.value, orderComment.value, items);
     successStats.value = { items: totalItems.value, qty: totalQty.value };
+    loadedOrderExists.value = true;
     const day = deliveryDays.value.find(d => d.date === selectedDate.value);
     if (day) day.has_order = true;
     state.value = 'success';
@@ -592,6 +666,8 @@ function addSelectedFromStock() {
       external_code: p.external_code || '',
       analog_group: p.analog_group || '',
       qty_per_box: null,
+      weight_brutto: null,
+      boxes_per_pallet: null,
       stock: p.stock ?? null,
       quantity: 0,
       _added: true,
@@ -649,6 +725,8 @@ function addFromCatalog(p) {
       external_code: p.external_code || '',
       analog_group: p.analog_group || '',
       qty_per_box: p.qty_per_box || null,
+      weight_brutto: p.weight_brutto != null ? Number(p.weight_brutto) : null,
+      boxes_per_pallet: p.boxes_per_pallet != null ? Number(p.boxes_per_pallet) : null,
       stock: p.stock ?? null,
       quantity: 0,
       _added: true,
@@ -678,7 +756,20 @@ const exportRows = computed(() =>
 );
 const exportInvalidRows = computed(() => exportRows.value.filter(r => !r.validCode));
 
-function setColRef(key, el) { if (el) colRefs[key] = el; }
+// Экспорт делится по складам: каждый склад (категория) — отдельная заявка в 1С УТ.
+const exportGroups = computed(() => {
+  const order = ['Сухой', 'Холод', 'Мороз'];
+  const byCat = {};
+  for (const r of exportRows.value) {
+    (byCat[r.category] = byCat[r.category] || []).push(r);
+  }
+  const cats = order.filter(c => byCat[c]);
+  for (const c of Object.keys(byCat)) if (!order.includes(c)) cats.push(c);
+  return cats.map(c => ({ category: c, rows: byCat[c] }));
+});
+
+function colKey(cat, key) { return cat + ' ' + key; }
+function setColRef(cat, key, el) { if (el) colRefs[colKey(cat, key)] = el; }
 
 function openExportModal() {
   exportModalOpen.value = true;
@@ -689,8 +780,8 @@ function showCopied(msg) {
   clearTimeout(copiedMsgTimer);
   copiedMsgTimer = setTimeout(() => { copiedMsg.value = ''; }, 2500);
 }
-function selectColumn(key) {
-  const el = colRefs[key];
+function selectColumn(cat, key) {
+  const el = colRefs[colKey(cat, key)];
   if (!el) return;
   const sel = window.getSelection();
   const range = document.createRange();
@@ -698,22 +789,20 @@ function selectColumn(key) {
   sel.removeAllRanges();
   sel.addRange(range);
 }
-function colLines(key) {
+function copyColumn(cat, key) {
+  const group = exportGroups.value.find(g => g.category === cat);
+  if (!group) return;
   const col = exportCols.find(c => c.key === key);
-  return exportRows.value.map(r => col.value(r));
-}
-function copyColumn(key) {
-  const col = exportCols.find(c => c.key === key);
-  navigator.clipboard.writeText(colLines(key).join('\n'))
-    .then(() => { selectColumn(key); showCopied(`Столбец «${col.label}» скопирован`); })
+  navigator.clipboard.writeText(group.rows.map(r => col.value(r)).join('\n'))
+    .then(() => { selectColumn(cat, key); showCopied(`«${col.label}» (${cat}) скопирован`); })
     .catch(() => showCopied('Не удалось скопировать'));
 }
-function copyAll() {
-  const lines = exportRows.value.map(r =>
-    exportCols.map(c => c.value(r)).join('\t')
-  );
+function copyGroup(cat) {
+  const group = exportGroups.value.find(g => g.category === cat);
+  if (!group) return;
+  const lines = group.rows.map(r => exportCols.map(c => c.value(r)).join('\t'));
   navigator.clipboard.writeText(lines.join('\n'))
-    .then(() => showCopied('Таблица скопирована'))
+    .then(() => showCopied(`Заявка «${cat}» скопирована`))
     .catch(() => showCopied('Не удалось скопировать'));
 }
 </script>
@@ -742,7 +831,7 @@ function copyAll() {
   padding: 18px;
 }
 
-/* ── Состояния (загрузка/ошибка/пусто) ── */
+/* ── Состояния ── */
 .sa-state { text-align: center; padding: 36px 24px; }
 .sa-state--inline { padding: 28px; }
 .sa-state p { margin: 12px 0 0; color: var(--sa-muted); font-size: 14px; }
@@ -778,12 +867,12 @@ function copyAll() {
 /* ── Дни поставки ── */
 .sa-days {
   display: flex; gap: 8px; overflow-x: auto;
-  padding-bottom: 4px; -webkit-overflow-scrolling: touch;
+  padding: 9px 2px 4px; -webkit-overflow-scrolling: touch;
 }
 .sa-day {
   position: relative; flex: 0 0 auto;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  min-width: 78px; min-height: 60px; padding: 10px 14px;
+  min-width: 80px; min-height: 60px; padding: 10px 14px;
   border: 1.5px solid var(--sa-line); border-radius: 14px;
   background: #fff; cursor: pointer;
   transition: border-color .16s ease, background .16s ease, transform .1s ease;
@@ -802,6 +891,20 @@ function copyAll() {
   border-radius: 50%; background: #3a9d4e; color: #fff;
   box-shadow: 0 0 0 2px #fff;
 }
+
+/* ── Полоса «заказ сохранён» ── */
+.sa-saved-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  margin: -4px 0 14px;
+  padding: 10px 14px;
+  background: #F4FBF4; border: 1px solid #cfe6cf; border-radius: 12px;
+}
+.sa-saved-bar-text {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 700; color: #2e7d32;
+}
+.sa-saved-bar-text svg { width: 17px; height: 17px; flex-shrink: 0; }
 
 /* ── Категории ── */
 .sa-cats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -823,7 +926,7 @@ function copyAll() {
 }
 .sa-cat.is-active .sa-cat-count { background: rgba(255,255,255,.22); }
 
-/* ── Тулбар: поиск + кнопки ── */
+/* ── Тулбар ── */
 .sa-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .sa-search {
   flex: 1; min-width: 200px;
@@ -858,18 +961,29 @@ function copyAll() {
   transition: background .16s ease, border-color .16s ease, opacity .16s ease;
 }
 .sa-btn--lg { min-height: 48px; padding: 12px 26px; font-size: 15px; }
+.sa-btn--sm { min-height: 36px; padding: 7px 14px; font-size: 13px; }
 .sa-btn--primary { background: var(--sa-accent); color: #fff; }
 .sa-btn--primary:hover:not(:disabled) { background: var(--sa-accent-d); }
 .sa-btn--ghost { background: #fff; border-color: #d9cebf; color: var(--sa-brown); }
 .sa-btn--ghost:hover:not(:disabled) { background: var(--sa-bg-soft); border-color: var(--sa-brown); }
+.sa-btn--toggle { background: var(--sa-bg-soft); border-color: var(--sa-line); color: #5f4b38; }
+.sa-btn--toggle:hover:not(:disabled) { border-color: #d9cebf; }
+.sa-btn--toggle.is-on { background: var(--sa-brown); border-color: var(--sa-brown); color: #fff; }
 .sa-btn:disabled { opacity: .5; cursor: default; }
+.sa-toggle-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: 10px; background: var(--sa-accent); color: #fff;
+  font-size: 11px; font-weight: 800;
+}
+.sa-btn--toggle.is-on .sa-toggle-count { background: rgba(255,255,255,.22); }
 
 /* ── Таблица позиций ── */
 .sa-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .sa-table { width: 100%; border-collapse: collapse; }
 .sa-table thead th {
   position: sticky; top: 0;
-  padding: 8px 10px; text-align: left;
+  padding: 8px 10px; text-align: center;
   font-size: 11px; font-weight: 800; letter-spacing: .03em;
   text-transform: uppercase; color: var(--sa-muted);
   background: #fff; border-bottom: 1.5px solid var(--sa-line);
@@ -884,11 +998,10 @@ function copyAll() {
 .sa-table tbody tr.is-filled { background: #FFF9F1; }
 .sa-table tbody tr.is-err { background: #FFF1F0; }
 
-.sa-col-name { min-width: 200px; }
-.sa-col-name { white-space: normal; line-height: 1.4; }
-.sa-col-analog { font-size: 12px; color: var(--sa-muted); max-width: 160px; }
+.sa-col-name { min-width: 200px; white-space: normal; line-height: 1.4; text-align: left; }
+.sa-col-analog { font-size: 12px; color: var(--sa-muted); max-width: 160px; text-align: left; }
 .sa-col-mult { text-align: center; white-space: nowrap; }
-.sa-col-stock { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sa-col-stock { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sa-col-qty { width: 96px; }
 .sa-col-act { width: 40px; }
 
@@ -924,7 +1037,7 @@ function copyAll() {
 
 .sa-row-del {
   display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; padding: 0;
+  width: 32px; height: 32px; padding: 0; margin: 0 auto;
   border: 0; border-radius: 8px; background: transparent;
   color: #c08b8b; cursor: pointer;
   transition: background .16s ease, color .16s ease;
@@ -955,10 +1068,11 @@ function copyAll() {
   display: flex; align-items: center; justify-content: space-between;
   gap: 14px; flex-wrap: wrap;
 }
-.sa-totals { display: flex; gap: 22px; }
+.sa-totals { display: flex; gap: 20px; flex-wrap: wrap; }
 .sa-total { display: flex; flex-direction: column; }
 .sa-total-num { font-size: 22px; font-weight: 800; color: var(--sa-brown); line-height: 1.1; font-variant-numeric: tabular-nums; }
 .sa-total-lbl { font-size: 12px; color: var(--sa-muted); }
+.sa-total--est .sa-total-num { color: var(--sa-muted); }
 .sa-submit-row .sa-btn { flex: 0 0 auto; }
 
 /* ── Алерты ── */
@@ -1015,6 +1129,7 @@ function copyAll() {
 }
 .sa-modal-close:hover { background: #F0E7DC; }
 .sa-modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.sa-modal-hint { margin: 0; font-size: 13px; line-height: 1.5; color: var(--sa-muted); }
 .sa-modal-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 18px; border-top: 1px solid var(--sa-line);
@@ -1052,6 +1167,13 @@ function copyAll() {
   background: #EAF7EC; border: 1px solid #bfe3c4;
   font-size: 13px; font-weight: 700; color: #2e7d32;
 }
+.sa-export-group { display: flex; flex-direction: column; gap: 8px; }
+.sa-export-group + .sa-export-group { margin-top: 4px; }
+.sa-export-group-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.sa-export-group-title { font-size: 14px; font-weight: 800; color: var(--sa-brown); }
+.sa-export-group-head .sa-btn { margin-left: auto; }
 .sa-export {
   display: flex; gap: 0;
   border: 1px solid var(--sa-line); border-radius: 12px; overflow: hidden;
@@ -1067,7 +1189,7 @@ function copyAll() {
   flex: 1; min-width: 0; padding: 4px 6px;
   border: 0; background: transparent; cursor: pointer;
   font: inherit; font-size: 11px; font-weight: 800; letter-spacing: .03em;
-  text-transform: uppercase; color: var(--sa-brown); text-align: left;
+  text-transform: uppercase; color: var(--sa-brown); text-align: center;
   border-radius: 6px;
 }
 .sa-export-pick:hover { background: #F0E7DC; }
@@ -1091,12 +1213,11 @@ function copyAll() {
 }
 .sa-export-cell:last-child { border-bottom: 0; }
 .sa-export-cell.is-invalid { background: #FFF1F0; color: #c0392b; font-weight: 600; }
-.sa-export-actions { display: flex; justify-content: flex-end; }
 
 @media (max-width: 560px) {
   .sa-card { padding: 14px; border-radius: 14px; }
   .sa-submit-row { flex-direction: column; align-items: stretch; }
   .sa-submit-row .sa-btn { width: 100%; }
-  .sa-totals { justify-content: space-around; }
+  .sa-totals { justify-content: space-between; gap: 12px; }
 }
 </style>

@@ -2494,6 +2494,9 @@ function applyRouteToState() {
   } else if (name === 'restaurant-orders-corrections') {
     activeTab.value = 'orders';
     orderSubTab.value = 'corrections';
+  } else if (name === 'restaurant-orders-assistant') {
+    activeTab.value = 'orders';
+    orderSubTab.value = 'assistant';
   }
   ensureSupDeadlineTimer();
 }
@@ -2520,6 +2523,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-reminders' };
   } else if (activeTab.value === 'orders' && orderSubTab.value === 'corrections') {
     target = { name: 'restaurant-orders-corrections' };
+  } else if (activeTab.value === 'orders' && orderSubTab.value === 'assistant') {
+    target = { name: 'restaurant-orders-assistant' };
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
     if (sub === 'delivery' && roStore.restaurantOrdersEnabled) target = { name: 'restaurant-orders-delivery' };
