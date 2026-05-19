@@ -483,6 +483,7 @@ const toolsGroups = [
   { title: 'Управление ресторанами', items: [
     { module: 'restaurant-orders', route: 'restaurant-cabinet-manager', icon: 'building', label: 'Кабинеты ресторанов' },
     { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'restaurantOrders', label: 'Заказы ресторанов' },
+    { module: 'supply-assistant', route: 'supply-assistant', icon: 'restaurantOrders', label: 'Сбор заказа осн. поставки' },
     { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Неизвестные штрихкоды', badgeKey: 'scan-unknown' },
     { module: 'restaurant-orders', route: 'keg-returns', icon: 'kegReturn', label: 'Возврат кег' },
     { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },

@@ -56,6 +56,7 @@ const routes = [
       { path: 'chat', name: 'chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'Чат с ресторанами', module: 'chat' } },
       { path: 'restaurant-cabinet-manager', name: 'restaurant-cabinet-manager', component: () => import('@/views/RestaurantCabinetManagerView.vue'), meta: { title: 'Кабинеты ресторанов', module: 'restaurant-orders' } },
       { path: 'restaurant-orders', name: 'restaurant-orders', component: () => import('@/views/RestaurantOrdersManagerView.vue'), meta: { title: 'Заказы ресторанов', module: 'restaurant-orders' } },
+      { path: 'supply-assistant', name: 'supply-assistant', component: () => import('@/views/SupplyAssistantManagerView.vue'), meta: { title: 'Сбор заказа осн. поставки', module: 'supply-assistant' } },
       { path: 'restaurant-report', name: 'restaurant-report', component: () => import('@/views/RestaurantReportView.vue'), meta: { title: 'Отчёт по заказам', module: 'restaurant-orders' } },
       { path: 'restaurant-unknown-barcodes', name: 'restaurant-unknown-barcodes', component: () => import('@/views/RestaurantUnknownBarcodesView.vue'), meta: { title: 'Неизвестные штрихкоды', module: 'restaurant-orders' } },
       { path: 'surveys', name: 'surveys', component: () => import('@/views/SurveysView.vue'), meta: { title: 'Опросы', module: 'surveys' } },
@@ -214,7 +215,7 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'supplier-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks'];
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'supplier-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks', 'supply-assistant'];
 
 router.beforeEach(async (to) => {
   const userStore = useUserStore();

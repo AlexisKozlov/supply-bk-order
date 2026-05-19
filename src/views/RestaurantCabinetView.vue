@@ -59,6 +59,14 @@
         Корректировки
         <span class="sb-beta">BETA</span>
       </button>
+      <!-- Сбор заказа основной поставки (помощник). Для Пицца Стар не применяется — у них нет 1С УТ. -->
+      <button v-if="!isPizzaStarCabinet" class="sb-item"
+        :class="{ active: activeTab === 'orders' && orderSubTab === 'assistant' }"
+        @click="switchTab('orders', 'assistant')">
+        <span class="sb-icon" v-html="cabIconSvg.orders"></span>
+        Сбор заказа
+        <span class="sb-beta">BETA</span>
+      </button>
       <!-- История заказов -->
       <button class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'history' }"
@@ -396,6 +404,11 @@
           Корректировки
           <span class="ord-tab-beta">BETA</span>
         </button>
+        <button v-if="!isPizzaStarCabinet" class="ord-tab" :class="{ active: orderSubTab === 'assistant' }" @click="switchTab('orders', 'assistant')">
+          <span class="ord-tab-icon" v-html="cabIconSvg.orders"></span>
+          Сбор заказа
+          <span class="ord-tab-beta">BETA</span>
+        </button>
         <button class="ord-tab" :class="{ active: orderSubTab === 'reminders' }" @click="switchTab('orders', 'reminders')">
           <span class="ord-tab-icon" v-html="cabIconSvg.reminders"></span>
           Напоминания
@@ -707,6 +720,11 @@
           </template>
         </div>
       </template>
+
+      <!-- Сбор заказа (помощник). Для Пицца Стар не показывается. -->
+      <div v-if="orderSubTab === 'assistant' && !isPizzaStarCabinet">
+        <RestaurantSupplyAssistantTab />
+      </div>
 
       <!-- Корректировки основной поставки -->
       <div v-if="orderSubTab === 'corrections'">
@@ -1297,6 +1315,7 @@ const RestaurantOrderHistoryTab = defineAsyncComponent(() => import('@/component
 const RestaurantSurveysTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSurveysTab.vue'));
 const RestaurantInfoTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantInfoTab.vue'));
 const RestaurantWarehouseStockTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantWarehouseStockTab.vue'));
+const RestaurantSupplyAssistantTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplyAssistantTab.vue'));
 
 const router = useRouter();
 const route = useRoute();

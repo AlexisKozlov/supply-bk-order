@@ -103,6 +103,9 @@ require_once __DIR__ . '/includes/rpc.php';
 // Заказы ресторанов (временный модуль, своя авторизация)
 require_once __DIR__ . '/includes/restaurant_orders.php';
 
+// Модуль «Сбор заказа основной поставки» (sa_*); подключается после ro, переиспользует ro-функции
+require_once __DIR__ . '/includes/supply_assistant.php';
+
 // Напоминания для ресторанов (своя авторизация по X-RO-Token)
 require_once __DIR__ . '/includes/restaurant_reminders.php';
 

@@ -1,0 +1,1102 @@
+<template>
+  <div class="sa-wrap">
+    <!-- Загрузка дней доставки -->
+    <div v-if="state === 'loading-days'" class="sa-card sa-state">
+      <div class="sa-spin"></div>
+      <p>Загрузка расписания…</p>
+    </div>
+
+    <!-- Ошибка -->
+    <div v-else-if="state === 'error'" class="sa-card sa-state">
+      <div class="sa-state-icon sa-state-icon--warn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      </div>
+      <h2>Не удалось загрузить</h2>
+      <p>{{ errorMsg }}</p>
+      <button class="sa-btn sa-btn--primary" @click="init">Повторить</button>
+    </div>
+
+    <!-- Нет дней доставки -->
+    <div v-else-if="state === 'no-days'" class="sa-card sa-state">
+      <div class="sa-state-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      </div>
+      <h2>Нет дней поставки</h2>
+      <p>Дни поставки пока не запланированы. Обратитесь в отдел закупок.</p>
+    </div>
+
+    <template v-else>
+      <!-- ── Выбор даты ── -->
+      <div class="sa-section">
+        <div class="sa-section-label">Дата поставки</div>
+        <div class="sa-days">
+          <button
+            v-for="day in deliveryDays"
+            :key="day.date"
+            class="sa-day"
+            :class="{ 'is-active': selectedDate === day.date, 'has-order': day.has_order }"
+            @click="selectDate(day.date)"
+          >
+            <span class="sa-day-name">{{ day.day_name }}</span>
+            <span class="sa-day-date">{{ fmtShort(day.date) }}</span>
+            <span v-if="day.has_order" class="sa-day-mark" v-html="checkSvg"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Загрузка данных выбранной даты -->
+      <div v-if="state === 'loading-order'" class="sa-card sa-state">
+        <div class="sa-spin"></div>
+        <p>Загрузка заказа…</p>
+      </div>
+
+      <!-- ── Форма заказа ── -->
+      <template v-else-if="state === 'editing' || state === 'saving'">
+        <div class="sa-card sa-form">
+          <!-- Категории -->
+          <div class="sa-cats">
+            <button
+              v-for="cat in categories"
+              :key="cat"
+              class="sa-cat"
+              :class="{ 'is-active': activeCategory === cat }"
+              @click="activeCategory = cat"
+            >
+              {{ cat }}
+              <span v-if="getCatFilledCount(cat)" class="sa-cat-count">{{ getCatFilledCount(cat) }}</span>
+            </button>
+          </div>
+
+          <!-- Поиск + добавление -->
+          <div class="sa-toolbar">
+            <div class="sa-search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              <input v-model="searchQuery" type="text" placeholder="Поиск по названию или артикулу" />
+              <button v-if="searchQuery" class="sa-search-clear" @click="searchQuery = ''" aria-label="Очистить">&times;</button>
+            </div>
+            <button class="sa-btn sa-btn--ghost" @click="openStockModal">Со склада</button>
+            <button class="sa-btn sa-btn--ghost" @click="openCatalogModal">+ Товар</button>
+          </div>
+
+          <!-- Таблица позиций -->
+          <div class="sa-table-wrap">
+            <table v-if="filteredItems.length" class="sa-table">
+              <thead>
+                <tr>
+                  <th class="sa-col-name">Товар</th>
+                  <th class="sa-col-analog">Группа аналогов</th>
+                  <th class="sa-col-mult">Крат.</th>
+                  <th class="sa-col-stock">Остаток склада</th>
+                  <th class="sa-col-qty">Кол-во</th>
+                  <th class="sa-col-act"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="item in filteredItems"
+                  :key="item.sku"
+                  :class="{ 'is-filled': item.quantity > 0, 'is-err': item._multError }"
+                >
+                  <td class="sa-col-name">
+                    <span class="sa-sku">{{ item.sku }}</span>
+                    <span class="sa-name-text">{{ item.product_name }}</span>
+                    <span v-if="item._added" class="sa-badge-added">добавлен</span>
+                  </td>
+                  <td class="sa-col-analog">{{ item.analog_group || '—' }}</td>
+                  <td class="sa-col-mult">
+                    <span v-if="item.multiplicity > 1" class="sa-mult-chip">×{{ item.multiplicity }}</span>
+                    <span v-else class="sa-dim">—</span>
+                  </td>
+                  <td class="sa-col-stock" :class="{ 'sa-dim': !item.stock }">
+                    {{ item.stock != null ? item.stock : '—' }}
+                  </td>
+                  <td class="sa-col-qty">
+                    <input
+                      v-model.number="item.quantity"
+                      type="number"
+                      inputmode="decimal"
+                      min="0"
+                      :step="item.multiplicity > 1 ? item.multiplicity : 1"
+                      class="sa-qty"
+                      :class="{ 'is-err': item._multError }"
+                      placeholder="0"
+                      @input="checkMult(item)"
+                      @focus="$event.target.select()"
+                    />
+                    <div v-if="item._multError" class="sa-mult-hint">
+                      Кратно {{ item.multiplicity }} → {{ multSuggest(item) }}
+                    </div>
+                  </td>
+                  <td class="sa-col-act">
+                    <button v-if="item._added" class="sa-row-del" @click="removeItem(item)" aria-label="Удалить позицию">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="sa-empty">
+              <template v-if="searchQuery">Ничего не найдено в категории «{{ activeCategory }}»</template>
+              <template v-else>Нет товаров в категории «{{ activeCategory }}»</template>
+            </div>
+          </div>
+        </div>
+
+        <!-- Итоги + сохранение -->
+        <div class="sa-card sa-submit">
+          <div v-if="multErrorsCount" class="sa-alert sa-alert--err">
+            {{ multErrorsCount }} {{ plural(multErrorsCount, 'позиция','позиции','позиций') }} с неверной кратностью — исправьте перед сохранением.
+          </div>
+
+          <input
+            v-model="orderComment"
+            type="text"
+            class="sa-comment"
+            placeholder="Комментарий к заказу (необязательно)"
+          />
+
+          <div class="sa-submit-row">
+            <div class="sa-totals">
+              <div class="sa-total">
+                <span class="sa-total-num">{{ totalItems }}</span>
+                <span class="sa-total-lbl">{{ plural(totalItems, 'позиция','позиции','позиций') }}</span>
+              </div>
+              <div class="sa-total">
+                <span class="sa-total-num">{{ totalQty }}</span>
+                <span class="sa-total-lbl">{{ plural(totalQty, 'единица','единицы','единиц') }}</span>
+              </div>
+            </div>
+            <button
+              class="sa-btn sa-btn--primary sa-btn--lg"
+              :disabled="state === 'saving' || totalItems === 0 || multErrorsCount > 0"
+              @click="handleSave"
+            >
+              <span v-if="state === 'saving'" class="sa-spin sa-spin--sm"></span>
+              {{ state === 'saving' ? 'Сохранение…' : 'Сохранить заказ' }}
+            </button>
+          </div>
+          <div v-if="saveError" class="sa-alert sa-alert--err">{{ saveError }}</div>
+        </div>
+      </template>
+
+      <!-- ── Экран успеха ── -->
+      <div v-else-if="state === 'success'" class="sa-card sa-success">
+        <div class="sa-success-check" v-html="checkSvg"></div>
+        <h2>Заказ сохранён</h2>
+        <div class="sa-success-date">Поставка {{ fmtFull(selectedDate) }}</div>
+        <div class="sa-success-stats">
+          <div class="sa-success-stat">
+            <span class="sa-success-num">{{ successStats.items }}</span>
+            <span class="sa-success-lbl">позиций</span>
+          </div>
+          <div class="sa-success-div"></div>
+          <div class="sa-success-stat">
+            <span class="sa-success-num">{{ successStats.qty }}</span>
+            <span class="sa-success-lbl">единиц</span>
+          </div>
+        </div>
+        <div class="sa-success-btns">
+          <button class="sa-btn sa-btn--ghost" @click="backToEditing">Изменить</button>
+          <button class="sa-btn sa-btn--primary" @click="openExportModal">Экспорт 1С УТ</button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ══ Модалка: добавить со склада ══ -->
+    <div v-if="stockModalOpen" class="sa-overlay" @click.self="stockModalOpen = false">
+      <div class="sa-modal">
+        <div class="sa-modal-head">
+          <h2>Добавить со склада</h2>
+          <button class="sa-modal-close" @click="stockModalOpen = false" aria-label="Закрыть">&times;</button>
+        </div>
+        <div class="sa-modal-body">
+          <div class="sa-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input v-model="stockSearch" type="text" placeholder="Поиск товара" @input="filterStockProducts" />
+          </div>
+          <div v-if="stockModalLoading" class="sa-state sa-state--inline"><div class="sa-spin"></div></div>
+          <div v-else-if="filteredStockProducts.length === 0" class="sa-empty">Нет товаров для добавления</div>
+          <div v-else class="sa-pick-list">
+            <label
+              v-for="p in filteredStockProducts"
+              :key="p.sku"
+              class="sa-pick"
+              :class="{ 'is-checked': stockSelected.has(p.sku) }"
+            >
+              <input type="checkbox" :checked="stockSelected.has(p.sku)" @change="toggleStockSelect(p)" />
+              <span class="sa-pick-main">
+                <span class="sa-sku">{{ p.sku }}</span>
+                <span class="sa-name-text">{{ p.name }}</span>
+                <span class="sa-pick-cat">{{ canonCategory(p.category) }}</span>
+              </span>
+              <span class="sa-pick-qty">{{ p.stock != null ? p.stock : '—' }}</span>
+            </label>
+          </div>
+        </div>
+        <div class="sa-modal-foot">
+          <span v-if="stockSelected.size" class="sa-dim">Выбрано: {{ stockSelected.size }}</span>
+          <span v-else></span>
+          <button class="sa-btn sa-btn--primary" :disabled="stockSelected.size === 0" @click="addSelectedFromStock">
+            Добавить{{ stockSelected.size ? ` (${stockSelected.size})` : '' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Модалка: добавить из каталога ══ -->
+    <div v-if="catalogModalOpen" class="sa-overlay" @click.self="catalogModalOpen = false">
+      <div class="sa-modal">
+        <div class="sa-modal-head">
+          <h2>Добавить товар</h2>
+          <button class="sa-modal-close" @click="catalogModalOpen = false" aria-label="Закрыть">&times;</button>
+        </div>
+        <div class="sa-modal-body">
+          <div class="sa-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input v-model="catalogSearch" type="text" placeholder="Поиск по каталогу" @input="doCatalogSearch" ref="catalogSearchInput" />
+          </div>
+          <div v-if="catalogLoading" class="sa-state sa-state--inline"><div class="sa-spin"></div></div>
+          <div v-else-if="catalogResults.length" class="sa-pick-list">
+            <button v-for="p in catalogResults" :key="p.sku" class="sa-pick sa-pick--btn" @click="addFromCatalog(p)">
+              <span class="sa-pick-main">
+                <span class="sa-sku">{{ p.sku }}</span>
+                <span class="sa-name-text">{{ p.name }}</span>
+              </span>
+              <span class="sa-pick-cat">{{ canonCategory(p.category) }}</span>
+            </button>
+          </div>
+          <div v-else-if="catalogSearch.length >= 2" class="sa-empty">Ничего не найдено</div>
+          <div v-else class="sa-empty">Введите минимум 2 символа</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Модалка: Экспорт 1С УТ ══ -->
+    <div v-if="exportModalOpen" class="sa-overlay" @click.self="exportModalOpen = false">
+      <div class="sa-modal sa-modal--wide">
+        <div class="sa-modal-head">
+          <h2>Экспорт в 1С УТ</h2>
+          <button class="sa-modal-close" @click="exportModalOpen = false" aria-label="Закрыть">&times;</button>
+        </div>
+        <div class="sa-modal-body">
+          <p class="sa-export-hint">
+            Нажмите на заголовок столбца, чтобы выделить его целиком, либо скопируйте кнопкой —
+            затем вставьте в форму импорта 1С УТ.
+          </p>
+
+          <div v-if="exportInvalidRows.length" class="sa-alert sa-alert--warn">
+            <strong>{{ exportInvalidRows.length }}</strong>
+            {{ plural(exportInvalidRows.length, 'позиция','позиции','позиций') }}
+            без корректного 9-значного внешнего кода — они не загрузятся в 1С УТ.
+          </div>
+
+          <div v-if="copiedMsg" class="sa-copy-toast">{{ copiedMsg }}</div>
+
+          <!-- Три столбца: каждый выделяется и копируется отдельно -->
+          <div class="sa-export">
+            <div
+              v-for="col in exportCols"
+              :key="col.key"
+              class="sa-export-col"
+              :style="{ flex: col.flex }"
+            >
+              <div class="sa-export-colhead">
+                <button class="sa-export-pick" @click="selectColumn(col.key)" :title="`Выделить столбец «${col.label}»`">
+                  {{ col.label }}
+                </button>
+                <button class="sa-export-copy" @click="copyColumn(col.key)" :aria-label="`Копировать «${col.label}»`">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                </button>
+              </div>
+              <div class="sa-export-cells" :ref="el => setColRef(col.key, el)">
+                <div
+                  v-for="row in exportRows"
+                  :key="row.sku"
+                  class="sa-export-cell"
+                  :class="{ 'is-invalid': !row.validCode }"
+                >{{ col.value(row) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sa-export-actions">
+            <button class="sa-btn sa-btn--primary" @click="copyAll">Копировать всю таблицу</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, nextTick } from 'vue';
+import { useSupplyAssistantStore } from '@/stores/supplyAssistantStore.js';
+
+const store = useSupplyAssistantStore();
+
+const checkSvg = '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17l9-10"/></svg>';
+
+// ── Состояние ──
+const state = ref('loading-days'); // loading-days | error | no-days | ready | loading-order | editing | saving | success
+const errorMsg = ref('');
+const deliveryDays = ref([]);
+const selectedDate = ref('');
+const orderItems = ref([]);
+const activeCategory = ref('');
+const searchQuery = ref('');
+const orderComment = ref('');
+const saveError = ref('');
+const successStats = ref({ items: 0, qty: 0 });
+
+// ── Утилиты ──
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+}
+function fmtShort(dateStr) {
+  if (!dateStr) return '';
+  const [, m, d] = dateStr.split('-');
+  return `${d}.${m}`;
+}
+function fmtFull(dateStr) {
+  if (!dateStr) return '';
+  const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const [, m, d] = dateStr.split('-');
+  return `${parseInt(d)} ${months[parseInt(m) - 1]}`;
+}
+
+// «Сухой сток», «сухой склад» и т.п. — это всё «Сухой». Приводим к одной из трёх категорий.
+function canonCategory(c) {
+  const s = String(c || '').toLowerCase();
+  if (s.includes('мороз') || s.includes('замор')) return 'Мороз';
+  if (s.includes('холод') || s.includes('охлажд') || s === 'хол') return 'Холод';
+  if (s.includes('сух')) return 'Сухой';
+  return c || 'Сухой';
+}
+
+// ── Инициализация ──
+async function init() {
+  state.value = 'loading-days';
+  errorMsg.value = '';
+  try {
+    const days = await store.loadDeliveryDays();
+    deliveryDays.value = days;
+    state.value = days.length ? 'ready' : 'no-days';
+  } catch (e) {
+    errorMsg.value = e.message || 'Неизвестная ошибка';
+    state.value = 'error';
+  }
+}
+onMounted(init);
+
+// ── Выбор даты и загрузка заказа ──
+async function selectDate(date) {
+  if (selectedDate.value === date && (state.value === 'editing' || state.value === 'success')) return;
+  selectedDate.value = date;
+  orderComment.value = '';
+  saveError.value = '';
+  searchQuery.value = '';
+  state.value = 'loading-order';
+  try {
+    const [templateProducts, savedOrder] = await Promise.all([
+      store.loadProducts(),
+      store.loadOrder(date),
+    ]);
+    buildOrderItems(templateProducts, savedOrder);
+    if (categories.value.length) activeCategory.value = categories.value[0];
+    state.value = 'editing';
+  } catch (e) {
+    errorMsg.value = e.message || 'Ошибка загрузки';
+    state.value = 'error';
+  }
+}
+
+function buildOrderItems(templateProducts, savedOrder) {
+  const savedMap = {};
+  if (savedOrder && savedOrder.items) {
+    for (const it of savedOrder.items) savedMap[it.sku] = it;
+  }
+  const items = templateProducts.map(p => ({
+    sku: p.sku,
+    product_name: p.name,
+    category: canonCategory(p.category),
+    multiplicity: p.multiplicity || 1,
+    external_code: p.external_code || '',
+    analog_group: p.analog_group || '',
+    qty_per_box: p.qty_per_box || null,
+    stock: p.stock ?? null,
+    quantity: savedMap[p.sku] ? Number(savedMap[p.sku].quantity) : 0,
+    _added: false,
+    _multError: false,
+  }));
+  if (savedOrder && savedOrder.items) {
+    const templateSkus = new Set(templateProducts.map(p => p.sku));
+    for (const it of savedOrder.items) {
+      if (!templateSkus.has(it.sku)) {
+        items.push({
+          sku: it.sku,
+          product_name: it.product_name,
+          category: canonCategory(it.category),
+          multiplicity: it.multiplicity || 1,
+          external_code: it.external_code || '',
+          analog_group: it.analog_group || '',
+          qty_per_box: null,
+          stock: null,
+          quantity: Number(it.quantity),
+          _added: true,
+          _multError: false,
+        });
+      }
+    }
+  }
+  if (savedOrder && savedOrder.comment) orderComment.value = savedOrder.comment;
+  orderItems.value = items;
+}
+
+// ── Категории ──
+const categories = computed(() => {
+  const order = ['Сухой', 'Холод', 'Мороз'];
+  const found = new Set(orderItems.value.map(i => i.category).filter(Boolean));
+  const result = order.filter(c => found.has(c));
+  for (const c of found) if (!order.includes(c)) result.push(c);
+  return result;
+});
+function getCatFilledCount(cat) {
+  return orderItems.value.filter(i => i.category === cat && i.quantity > 0).length;
+}
+
+// ── Фильтрация ──
+const filteredItems = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  return orderItems.value.filter(item => {
+    if (item.category !== activeCategory.value) return false;
+    if (!q) return true;
+    return String(item.sku || '').toLowerCase().includes(q) ||
+           String(item.product_name || '').toLowerCase().includes(q);
+  });
+});
+
+// ── Кратность ──
+function checkMult(item) {
+  const qty = Number(item.quantity) || 0;
+  const mult = item.multiplicity || 1;
+  item._multError = mult > 1 && qty > 0 && qty % mult !== 0;
+}
+function multSuggest(item) {
+  const qty = Number(item.quantity) || 0;
+  const mult = item.multiplicity || 1;
+  return Math.ceil(qty / mult) * mult;
+}
+const multErrorsCount = computed(() => orderItems.value.filter(i => i._multError).length);
+
+// ── Итого ──
+const totalItems = computed(() => orderItems.value.filter(i => i.quantity > 0).length);
+const totalQty = computed(() => orderItems.value.reduce((s, i) => s + (Number(i.quantity) || 0), 0));
+
+// ── Удаление позиции ──
+function removeItem(item) {
+  const idx = orderItems.value.indexOf(item);
+  if (idx !== -1) orderItems.value.splice(idx, 1);
+}
+
+// ── Сохранение ──
+async function handleSave() {
+  if (state.value === 'saving') return;
+  saveError.value = '';
+  state.value = 'saving';
+  const items = orderItems.value
+    .filter(i => i.quantity > 0)
+    .map(i => ({
+      sku: i.sku,
+      product_name: i.product_name,
+      category: i.category,
+      quantity: Number(i.quantity),
+      multiplicity: i.multiplicity || 1,
+      external_code: i.external_code || '',
+      analog_group: i.analog_group || '',
+    }));
+  try {
+    await store.saveOrder(selectedDate.value, orderComment.value, items);
+    successStats.value = { items: totalItems.value, qty: totalQty.value };
+    const day = deliveryDays.value.find(d => d.date === selectedDate.value);
+    if (day) day.has_order = true;
+    state.value = 'success';
+  } catch (e) {
+    state.value = 'editing';
+    if (e.multErrors && e.multErrors.length) {
+      for (const me of e.multErrors) {
+        const found = orderItems.value.find(i => i.sku === me.sku);
+        if (found) found._multError = true;
+      }
+      saveError.value = 'Исправьте количества с неверной кратностью';
+    } else {
+      saveError.value = e.message || 'Ошибка сохранения';
+    }
+  }
+}
+function backToEditing() {
+  state.value = 'editing';
+}
+
+// ── Модалка: товары со склада ──
+const stockModalOpen = ref(false);
+const stockModalLoading = ref(false);
+const stockSearch = ref('');
+const stockProductsList = ref([]);
+const filteredStockProducts = ref([]);
+const stockSelected = ref(new Set());
+
+async function openStockModal() {
+  stockModalOpen.value = true;
+  stockSearch.value = '';
+  stockSelected.value = new Set();
+  if (!stockProductsList.value.length) {
+    stockModalLoading.value = true;
+    try {
+      stockProductsList.value = await store.loadStockProducts();
+    } catch (e) {
+      stockProductsList.value = [];
+    }
+    stockModalLoading.value = false;
+  }
+  filterStockProducts();
+}
+function filterStockProducts() {
+  const q = stockSearch.value.trim().toLowerCase();
+  const existingSkus = new Set(orderItems.value.map(i => i.sku));
+  filteredStockProducts.value = stockProductsList.value.filter(p => {
+    if (existingSkus.has(p.sku)) return false;
+    if (!q) return true;
+    return String(p.sku || '').toLowerCase().includes(q) ||
+           String(p.name || '').toLowerCase().includes(q);
+  });
+}
+function toggleStockSelect(p) {
+  const s = new Set(stockSelected.value);
+  if (s.has(p.sku)) s.delete(p.sku); else s.add(p.sku);
+  stockSelected.value = s;
+}
+function addSelectedFromStock() {
+  const selected = stockProductsList.value.filter(p => stockSelected.value.has(p.sku));
+  for (const p of selected) {
+    if (orderItems.value.find(i => i.sku === p.sku)) continue;
+    orderItems.value.push({
+      sku: p.sku,
+      product_name: p.name,
+      category: canonCategory(p.category),
+      multiplicity: 1,
+      external_code: p.external_code || '',
+      analog_group: p.analog_group || '',
+      qty_per_box: null,
+      stock: p.stock ?? null,
+      quantity: 0,
+      _added: true,
+      _multError: false,
+    });
+  }
+  if (selected.length) {
+    const cat = canonCategory(selected[0].category);
+    if (categories.value.includes(cat)) activeCategory.value = cat;
+  }
+  stockModalOpen.value = false;
+}
+
+// ── Модалка: каталог ──
+const catalogModalOpen = ref(false);
+const catalogSearch = ref('');
+const catalogResults = ref([]);
+const catalogLoading = ref(false);
+const catalogSearchInput = ref(null);
+let catalogDebounce = null;
+
+async function openCatalogModal() {
+  catalogModalOpen.value = true;
+  catalogSearch.value = '';
+  catalogResults.value = [];
+  await nextTick();
+  catalogSearchInput.value?.focus();
+}
+function doCatalogSearch() {
+  clearTimeout(catalogDebounce);
+  if (catalogSearch.value.length < 2) {
+    catalogResults.value = [];
+    catalogLoading.value = false;
+    return;
+  }
+  catalogLoading.value = true;
+  catalogDebounce = setTimeout(async () => {
+    try {
+      catalogResults.value = await store.searchProducts(catalogSearch.value);
+    } catch (e) {
+      catalogResults.value = [];
+    }
+    catalogLoading.value = false;
+  }, 300);
+}
+function addFromCatalog(p) {
+  const existing = orderItems.value.find(i => i.sku === p.sku);
+  const cat = canonCategory(p.category);
+  if (!existing) {
+    orderItems.value.push({
+      sku: p.sku,
+      product_name: p.name,
+      category: cat,
+      multiplicity: p.multiplicity || 1,
+      external_code: p.external_code || '',
+      analog_group: p.analog_group || '',
+      qty_per_box: p.qty_per_box || null,
+      stock: p.stock ?? null,
+      quantity: 0,
+      _added: true,
+      _multError: false,
+    });
+  }
+  if (categories.value.includes(cat)) activeCategory.value = cat;
+  catalogModalOpen.value = false;
+}
+
+// ── Модалка: Экспорт 1С УТ ──
+const exportModalOpen = ref(false);
+const copiedMsg = ref('');
+let copiedMsgTimer = null;
+const colRefs = {};
+
+const exportCols = [
+  { key: 'code', label: 'Внешний код', flex: '0 0 150px', value: r => r.external_code || '' },
+  { key: 'name', label: 'Наименование', flex: '1 1 auto', value: r => `${r.sku} ${r.product_name}` },
+  { key: 'qty',  label: 'Количество',  flex: '0 0 120px', value: r => String(r.quantity) },
+];
+
+const exportRows = computed(() =>
+  orderItems.value
+    .filter(i => i.quantity > 0)
+    .map(i => ({ ...i, validCode: /^\d{9}$/.test(String(i.external_code || '')) }))
+);
+const exportInvalidRows = computed(() => exportRows.value.filter(r => !r.validCode));
+
+function setColRef(key, el) { if (el) colRefs[key] = el; }
+
+function openExportModal() {
+  exportModalOpen.value = true;
+  copiedMsg.value = '';
+}
+function showCopied(msg) {
+  copiedMsg.value = msg;
+  clearTimeout(copiedMsgTimer);
+  copiedMsgTimer = setTimeout(() => { copiedMsg.value = ''; }, 2500);
+}
+function selectColumn(key) {
+  const el = colRefs[key];
+  if (!el) return;
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+function colLines(key) {
+  const col = exportCols.find(c => c.key === key);
+  return exportRows.value.map(r => col.value(r));
+}
+function copyColumn(key) {
+  const col = exportCols.find(c => c.key === key);
+  navigator.clipboard.writeText(colLines(key).join('\n'))
+    .then(() => { selectColumn(key); showCopied(`Столбец «${col.label}» скопирован`); })
+    .catch(() => showCopied('Не удалось скопировать'));
+}
+function copyAll() {
+  const lines = exportRows.value.map(r =>
+    exportCols.map(c => c.value(r)).join('\t')
+  );
+  navigator.clipboard.writeText(lines.join('\n'))
+    .then(() => showCopied('Таблица скопирована'))
+    .catch(() => showCopied('Не удалось скопировать'));
+}
+</script>
+
+<style scoped>
+.sa-wrap {
+  --sa-ink: #2b1a0e;
+  --sa-brown: #502314;
+  --sa-muted: #8b7355;
+  --sa-accent: #E76F51;
+  --sa-accent-d: #d65f43;
+  --sa-line: #EDE8E3;
+  --sa-line-soft: #F3EEE8;
+  --sa-bg-soft: #FAFAF8;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--sa-ink);
+}
+
+/* ── Карточка ── */
+.sa-card {
+  background: #fff;
+  border: 1px solid var(--sa-line);
+  border-radius: 18px;
+  padding: 18px;
+}
+
+/* ── Состояния (загрузка/ошибка/пусто) ── */
+.sa-state { text-align: center; padding: 36px 24px; }
+.sa-state--inline { padding: 28px; }
+.sa-state p { margin: 12px 0 0; color: var(--sa-muted); font-size: 14px; }
+.sa-state h2 { margin: 14px 0 6px; color: var(--sa-brown); font-size: 18px; }
+.sa-state-icon {
+  width: 56px; height: 56px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 16px; background: var(--sa-bg-soft);
+  color: var(--sa-muted);
+}
+.sa-state-icon svg { width: 30px; height: 30px; }
+.sa-state-icon--warn { background: #FFF3EC; color: var(--sa-accent); }
+.sa-state .sa-btn { margin-top: 14px; }
+
+/* ── Спиннер ── */
+.sa-spin {
+  width: 32px; height: 32px; margin: 0 auto;
+  border: 3px solid var(--sa-line);
+  border-top-color: var(--sa-accent);
+  border-radius: 50%;
+  animation: sa-rotate .7s linear infinite;
+}
+.sa-spin--sm { width: 16px; height: 16px; border-width: 2px; margin: 0; }
+@keyframes sa-rotate { to { transform: rotate(360deg); } }
+
+/* ── Секция с подписью ── */
+.sa-section { display: flex; flex-direction: column; gap: 8px; }
+.sa-section-label {
+  font-size: 12px; font-weight: 800; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--sa-muted);
+}
+
+/* ── Дни поставки ── */
+.sa-days {
+  display: flex; gap: 8px; overflow-x: auto;
+  padding-bottom: 4px; -webkit-overflow-scrolling: touch;
+}
+.sa-day {
+  position: relative; flex: 0 0 auto;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-width: 78px; min-height: 60px; padding: 10px 14px;
+  border: 1.5px solid var(--sa-line); border-radius: 14px;
+  background: #fff; cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, transform .1s ease;
+}
+.sa-day:hover { border-color: #d9cebf; }
+.sa-day:active { transform: scale(.97); }
+.sa-day-name { font-size: 13px; font-weight: 700; color: var(--sa-ink); }
+.sa-day-date { font-size: 12px; color: var(--sa-muted); font-variant-numeric: tabular-nums; }
+.sa-day.has-order { border-color: #cfe6cf; background: #F4FBF4; }
+.sa-day.is-active { border-color: var(--sa-brown); background: var(--sa-brown); }
+.sa-day.is-active .sa-day-name { color: #fff; }
+.sa-day.is-active .sa-day-date { color: rgba(255,255,255,.72); }
+.sa-day-mark {
+  position: absolute; top: -7px; right: -7px;
+  width: 20px; height: 20px; padding: 3px;
+  border-radius: 50%; background: #3a9d4e; color: #fff;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* ── Категории ── */
+.sa-cats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.sa-cat {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 40px; padding: 8px 16px;
+  border: 1.5px solid var(--sa-line); border-radius: 10px;
+  background: var(--sa-bg-soft); color: #5f4b38;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, color .16s ease;
+}
+.sa-cat:hover { border-color: #d9cebf; }
+.sa-cat.is-active { background: var(--sa-brown); border-color: var(--sa-brown); color: #fff; }
+.sa-cat-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: 10px; background: var(--sa-accent); color: #fff;
+  font-size: 11px; font-weight: 800;
+}
+.sa-cat.is-active .sa-cat-count { background: rgba(255,255,255,.22); }
+
+/* ── Тулбар: поиск + кнопки ── */
+.sa-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.sa-search {
+  flex: 1; min-width: 200px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px; min-height: 44px;
+  background: var(--sa-bg-soft); border: 1px solid var(--sa-line);
+  border-radius: 10px;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.sa-search:focus-within {
+  background: #fff; border-color: var(--sa-brown);
+  box-shadow: 0 0 0 3px rgba(80,35,20,.1);
+}
+.sa-search svg { width: 18px; height: 18px; stroke: var(--sa-muted); flex-shrink: 0; }
+.sa-search input {
+  flex: 1; min-width: 0; appearance: none;
+  border: 0; outline: 0; background: transparent;
+  font: inherit; font-size: 15px; color: var(--sa-ink); min-height: 42px;
+}
+.sa-search-clear {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 22px; line-height: 1; color: var(--sa-muted);
+  padding: 0 2px;
+}
+
+/* ── Кнопки ── */
+.sa-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 10px 18px;
+  border-radius: 10px; border: 1.5px solid transparent;
+  font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, opacity .16s ease;
+}
+.sa-btn--lg { min-height: 48px; padding: 12px 26px; font-size: 15px; }
+.sa-btn--primary { background: var(--sa-accent); color: #fff; }
+.sa-btn--primary:hover:not(:disabled) { background: var(--sa-accent-d); }
+.sa-btn--ghost { background: #fff; border-color: #d9cebf; color: var(--sa-brown); }
+.sa-btn--ghost:hover:not(:disabled) { background: var(--sa-bg-soft); border-color: var(--sa-brown); }
+.sa-btn:disabled { opacity: .5; cursor: default; }
+
+/* ── Таблица позиций ── */
+.sa-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sa-table { width: 100%; border-collapse: collapse; }
+.sa-table thead th {
+  position: sticky; top: 0;
+  padding: 8px 10px; text-align: left;
+  font-size: 11px; font-weight: 800; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--sa-muted);
+  background: #fff; border-bottom: 1.5px solid var(--sa-line);
+  white-space: nowrap;
+}
+.sa-table tbody td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--sa-line-soft);
+  font-size: 14px; vertical-align: middle;
+}
+.sa-table tbody tr:last-child td { border-bottom: 0; }
+.sa-table tbody tr.is-filled { background: #FFF9F1; }
+.sa-table tbody tr.is-err { background: #FFF1F0; }
+
+.sa-col-name { min-width: 200px; }
+.sa-col-name { white-space: normal; line-height: 1.4; }
+.sa-col-analog { font-size: 12px; color: var(--sa-muted); max-width: 160px; }
+.sa-col-mult { text-align: center; white-space: nowrap; }
+.sa-col-stock { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sa-col-qty { width: 96px; }
+.sa-col-act { width: 40px; }
+
+.sa-sku { font-weight: 800; color: var(--sa-accent); font-size: 12.5px; margin-right: 5px; }
+.sa-name-text { color: var(--sa-ink); }
+.sa-dim { color: #c2b6a6; }
+
+.sa-mult-chip {
+  display: inline-block; padding: 1px 7px;
+  border-radius: 6px; background: #F0E7DC;
+  font-size: 12px; font-weight: 700; color: #7a5c3a;
+}
+.sa-badge-added {
+  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  border-radius: 6px; background: #EAF3FB;
+  font-size: 11px; font-weight: 700; color: #3b6ea3; vertical-align: middle;
+}
+
+.sa-qty {
+  width: 100%; min-height: 40px; padding: 6px 8px;
+  border: 1.5px solid var(--sa-line); border-radius: 9px;
+  background: var(--sa-bg-soft);
+  font: inherit; font-size: 15px; font-weight: 700; text-align: center;
+  color: var(--sa-ink); font-variant-numeric: tabular-nums;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.sa-qty:focus {
+  outline: 0; background: #fff; border-color: var(--sa-brown);
+  box-shadow: 0 0 0 3px rgba(80,35,20,.1);
+}
+.sa-qty.is-err { border-color: #e5736b; background: #FFF1F0; color: #c0392b; }
+.sa-mult-hint { margin-top: 3px; font-size: 11px; color: #c0392b; font-weight: 600; text-align: center; }
+
+.sa-row-del {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 8px; background: transparent;
+  color: #c08b8b; cursor: pointer;
+  transition: background .16s ease, color .16s ease;
+}
+.sa-row-del:hover { background: #FFF1F0; color: #c0392b; }
+.sa-row-del svg { width: 16px; height: 16px; }
+
+/* ── Пусто ── */
+.sa-empty {
+  padding: 28px 16px; text-align: center;
+  color: var(--sa-muted); font-size: 14px;
+}
+
+/* ── Блок сохранения ── */
+.sa-submit { display: flex; flex-direction: column; gap: 12px; }
+.sa-comment {
+  width: 100%; min-height: 44px; padding: 10px 14px;
+  border: 1px solid var(--sa-line); border-radius: 10px;
+  background: var(--sa-bg-soft);
+  font: inherit; font-size: 14px; color: var(--sa-ink);
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.sa-comment:focus {
+  outline: 0; background: #fff; border-color: var(--sa-brown);
+  box-shadow: 0 0 0 3px rgba(80,35,20,.1);
+}
+.sa-submit-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+}
+.sa-totals { display: flex; gap: 22px; }
+.sa-total { display: flex; flex-direction: column; }
+.sa-total-num { font-size: 22px; font-weight: 800; color: var(--sa-brown); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sa-total-lbl { font-size: 12px; color: var(--sa-muted); }
+.sa-submit-row .sa-btn { flex: 0 0 auto; }
+
+/* ── Алерты ── */
+.sa-alert {
+  padding: 9px 13px; border-radius: 10px;
+  font-size: 13px; font-weight: 600; line-height: 1.4;
+}
+.sa-alert--err { background: #FFF1F0; border: 1px solid #f3c9c5; color: #b23b30; }
+.sa-alert--warn { background: #FFF8E8; border: 1px solid #f0dca0; color: #8a6400; }
+.sa-alert strong { font-weight: 800; }
+
+/* ── Экран успеха ── */
+.sa-success { text-align: center; padding: 34px 24px; }
+.sa-success-check {
+  width: 64px; height: 64px; margin: 0 auto 14px; padding: 16px;
+  border-radius: 50%; background: #EAF7EC; color: #3a9d4e;
+}
+.sa-success h2 { margin: 0; font-size: 21px; color: var(--sa-brown); }
+.sa-success-date { margin-top: 4px; color: var(--sa-muted); font-size: 14px; }
+.sa-success-stats {
+  display: flex; align-items: center; justify-content: center; gap: 22px;
+  margin: 18px 0 20px;
+}
+.sa-success-stat { display: flex; flex-direction: column; }
+.sa-success-num { font-size: 26px; font-weight: 800; color: var(--sa-brown); font-variant-numeric: tabular-nums; }
+.sa-success-lbl { font-size: 12px; color: var(--sa-muted); }
+.sa-success-div { width: 1px; height: 34px; background: var(--sa-line); }
+.sa-success-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/* ── Модалки ── */
+.sa-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(40,24,14,.5);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.sa-modal {
+  display: flex; flex-direction: column;
+  width: 100%; max-width: 460px; max-height: 88vh;
+  background: #fff; border-radius: 18px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(40,24,14,.3);
+}
+.sa-modal--wide { max-width: 680px; }
+.sa-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px; border-bottom: 1px solid var(--sa-line);
+}
+.sa-modal-head h2 { margin: 0; font-size: 17px; color: var(--sa-brown); }
+.sa-modal-close {
+  width: 34px; height: 34px; flex-shrink: 0;
+  border: 0; border-radius: 8px; background: var(--sa-bg-soft);
+  font-size: 22px; line-height: 1; color: var(--sa-muted); cursor: pointer;
+  transition: background .16s ease;
+}
+.sa-modal-close:hover { background: #F0E7DC; }
+.sa-modal-body { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.sa-modal-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px; border-top: 1px solid var(--sa-line);
+}
+
+/* ── Список выбора в модалках ── */
+.sa-pick-list {
+  display: flex; flex-direction: column;
+  max-height: 52vh; overflow-y: auto;
+  border: 1px solid var(--sa-line); border-radius: 12px;
+}
+.sa-pick {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--sa-line-soft);
+  font: inherit; text-align: left; background: transparent;
+}
+.sa-pick:last-child { border-bottom: 0; }
+.sa-pick--btn { border-width: 0 0 1px; width: 100%; }
+.sa-pick:hover { background: var(--sa-bg-soft); }
+.sa-pick.is-checked { background: #FFF7F2; }
+.sa-pick input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--sa-accent); }
+.sa-pick-main { flex: 1; min-width: 0; font-size: 14px; line-height: 1.4; }
+.sa-pick-cat {
+  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  border-radius: 6px; background: var(--sa-bg-soft); border: 1px solid var(--sa-line);
+  font-size: 11px; font-weight: 700; color: var(--sa-muted); white-space: nowrap;
+}
+.sa-pick-qty { font-size: 13px; font-weight: 700; color: var(--sa-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── Экспорт 1С УТ ── */
+.sa-export-hint { margin: 0; font-size: 13px; line-height: 1.5; color: var(--sa-muted); }
+.sa-copy-toast {
+  padding: 8px 12px; border-radius: 9px;
+  background: #EAF7EC; border: 1px solid #bfe3c4;
+  font-size: 13px; font-weight: 700; color: #2e7d32;
+}
+.sa-export {
+  display: flex; gap: 0;
+  border: 1px solid var(--sa-line); border-radius: 12px; overflow: hidden;
+}
+.sa-export-col { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--sa-line); }
+.sa-export-col:last-child { border-right: 0; }
+.sa-export-colhead {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; background: var(--sa-bg-soft);
+  border-bottom: 1.5px solid var(--sa-line);
+}
+.sa-export-pick {
+  flex: 1; min-width: 0; padding: 4px 6px;
+  border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-size: 11px; font-weight: 800; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--sa-brown); text-align: left;
+  border-radius: 6px;
+}
+.sa-export-pick:hover { background: #F0E7DC; }
+.sa-export-copy {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex-shrink: 0;
+  border: 1px solid var(--sa-line); border-radius: 7px;
+  background: #fff; color: var(--sa-muted); cursor: pointer;
+  transition: color .16s ease, border-color .16s ease;
+}
+.sa-export-copy:hover { color: var(--sa-accent); border-color: var(--sa-accent); }
+.sa-export-copy svg { width: 15px; height: 15px; }
+.sa-export-cells { display: flex; flex-direction: column; user-select: text; cursor: text; }
+.sa-export-cell {
+  padding: 5px 10px; height: 30px;
+  display: flex; align-items: center;
+  font-size: 13px; line-height: 1.3; color: var(--sa-ink);
+  border-bottom: 1px solid var(--sa-line-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.sa-export-cell:last-child { border-bottom: 0; }
+.sa-export-cell.is-invalid { background: #FFF1F0; color: #c0392b; font-weight: 600; }
+.sa-export-actions { display: flex; justify-content: flex-end; }
+
+@media (max-width: 560px) {
+  .sa-card { padding: 14px; border-radius: 14px; }
+  .sa-submit-row { flex-direction: column; align-items: stretch; }
+  .sa-submit-row .sa-btn { width: 100%; }
+  .sa-totals { justify-content: space-around; }
+}
+</style>
