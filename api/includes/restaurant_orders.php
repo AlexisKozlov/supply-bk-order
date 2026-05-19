@@ -1868,7 +1868,13 @@ if ($roAction === 'change-password' && $method === 'POST') {
         roRespond(['error' => 'Неверный текущий пароль']);
     }
     $newHash = password_hash($newPass, PASSWORD_DEFAULT);
-    $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE id = ?")->execute([$newHash, $user['id']]);
+    $pdo->prepare("UPDATE ro_users SET password_hash = ?, password_changed_at = NOW() WHERE id = ?")->execute([$newHash, $user['id']]);
+    roLogAudit($pdo, [
+        'action'            => 'password_changed',
+        'actor_type'        => 'restaurant',
+        'restaurant_number' => $rest['restaurant_number'],
+        'actor_name'        => 'Ресторан ' . $rest['restaurant_number'],
+    ]);
     roRespond(['success' => true]);
 }
 
@@ -4573,6 +4579,7 @@ if (strpos($roAction, 'admin') === 0) {
                 ru.legal_entity,
                 ru.is_active,
                 ru.last_login_at,
+                ru.password_changed_at,
                 ru.telegram_chat_id,
                 CASE WHEN ru.password_hash IS NULL OR ru.password_hash = '' THEN 0 ELSE 1 END AS has_password
             FROM restaurants r
@@ -4610,8 +4617,14 @@ if (strpos($roAction, 'admin') === 0) {
             $le = roGetLegalEntity($pdo, $restNum, $restGroup);
             $hash = password_hash($password, PASSWORD_BCRYPT);
 
-            $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1")
+            $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity, password_changed_at) VALUES (?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1, password_changed_at = NOW()")
                 ->execute([$restNum, $restGroup, $hash, $le]);
+            roLogAudit($pdo, [
+                'action'            => 'password_changed',
+                'actor_type'        => 'admin',
+                'restaurant_number' => $restNum,
+                'actor_name'        => resolveActorName($pdo, $sessionUser),
+            ]);
 
             roRespond(['success' => true, 'restaurant_number' => $restNum, 'legal_entity_group' => $restGroup]);
         }
@@ -4633,7 +4646,8 @@ if (strpos($roAction, 'admin') === 0) {
             $rests = $pdo->prepare($restsSql);
             $rests->execute($restsParams);
             $changed = 0;
-            $insert = $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1");
+            $bulkActorName = resolveActorName($pdo, $sessionUser);
+            $insert = $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity, password_changed_at) VALUES (?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1, password_changed_at = NOW()");
             $check = $pdo->prepare("SELECT password_hash FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ?");
             foreach ($rests->fetchAll() as $r) {
                 if ($mode === 'missing') {
@@ -4643,6 +4657,12 @@ if (strpos($roAction, 'admin') === 0) {
                 }
                 $le = roGetLegalEntity($pdo, $r['number'], $r['legal_entity_group']);
                 $insert->execute([$r['number'], $r['legal_entity_group'], $hash, $le]);
+                roLogAudit($pdo, [
+                    'action'            => 'password_changed',
+                    'actor_type'        => 'admin',
+                    'restaurant_number' => (int)$r['number'],
+                    'actor_name'        => $bulkActorName,
+                ]);
                 $changed++;
             }
             roRespond(['success' => true, 'created' => $changed, 'mode' => $mode]);
@@ -4665,7 +4685,13 @@ if (strpos($roAction, 'admin') === 0) {
             if (mb_strlen($password) < 8) roRespond(['error' => 'Пароль слишком короткий (минимум 8 символов)'], 400);
             roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
             $hash = password_hash($password, PASSWORD_BCRYPT);
-            $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$hash, $restNum, $restGroup]);
+            $pdo->prepare("UPDATE ro_users SET password_hash = ?, password_changed_at = NOW() WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$hash, $restNum, $restGroup]);
+            roLogAudit($pdo, [
+                'action'            => 'password_changed',
+                'actor_type'        => 'admin',
+                'restaurant_number' => $restNum,
+                'actor_name'        => resolveActorName($pdo, $sessionUser),
+            ]);
             roRespond(['success' => true]);
         }
 

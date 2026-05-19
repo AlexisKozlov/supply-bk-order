@@ -426,6 +426,7 @@
             <option value="item_deleted">Позиция удалена</option>
             <option value="status_changed">Смена статуса</option>
             <option value="delivery_date_changed">Смена даты</option>
+            <option value="password_changed">Пароль изменён</option>
           </select>
           <input type="text" v-model="auditFilters.search" @input="debouncedAuditSearch" placeholder="SKU или название товара…" class="rom-input rom-input-sm" style="flex:1;min-width:180px" />
           <button class="rom-btn rom-btn-sm" @click="loadAuditLog" :disabled="auditLoading">
@@ -837,6 +838,7 @@
                 </span>
                 <span class="rom-user-login">
                   {{ u.last_login_at ? 'Вход: ' + formatTime(u.last_login_at) : '—' }}
+                  <template v-if="u.password_changed_at"><br><small>{{ 'Пароль изменён: ' + formatTime(u.password_changed_at) }}</small></template>
                 </span>
                 <button class="rom-btn-sm" @click="handleSetPassword(u)" :disabled="usersBusy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
                   {{ u.has_password ? 'Сменить пароль' : 'Задать пароль' }}
@@ -1469,6 +1471,7 @@ function auditIcon(action) {
     item_deleted: '➖',
     status_changed: '🏷',
     delivery_date_changed: '📅',
+    password_changed: '🔑',
   };
   return map[action] || '•';
 }
@@ -1483,6 +1486,7 @@ function auditActionLabel(action) {
     item_deleted: 'Позиция удалена',
     status_changed: 'Смена статуса',
     delivery_date_changed: 'Смена даты доставки',
+    password_changed: 'Пароль изменён',
   };
   return map[action] || action;
 }
