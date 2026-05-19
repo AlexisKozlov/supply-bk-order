@@ -286,8 +286,9 @@
         </div>
         <div class="sa-modal-body">
           <p class="sa-export-hint">
-            Каждый склад — отдельная заявка в 1С УТ. Скопируйте заявку целиком или
-            отдельный столбец (клик по заголовку выделяет его) и вставьте в 1С УТ.
+            Каждый склад — отдельная заявка в 1С УТ. «Копировать заявку» даёт данные
+            в формате импорта: внешний код, два пустых столбца, количество.
+            Можно скопировать и отдельный столбец — клик по его заголовку выделяет его.
           </p>
 
           <div v-if="exportInvalidRows.length" class="sa-alert sa-alert--warn">
@@ -758,7 +759,8 @@ function copyColumn(cat, key) {
 function copyGroup(cat) {
   const group = exportGroups.value.find(g => g.category === cat);
   if (!group) return;
-  const lines = group.rows.map(r => exportCols.map(c => c.value(r)).join('\t'));
+  // Формат импорта 1С УТ: внешний код, два пустых столбца, количество.
+  const lines = group.rows.map(r => [r.external_code || '', '', '', String(r.quantity)].join('\t'));
   navigator.clipboard.writeText(lines.join('\n'))
     .then(() => showCopied(`Заявка «${cat}» скопирована`))
     .catch(() => showCopied('Не удалось скопировать'));
