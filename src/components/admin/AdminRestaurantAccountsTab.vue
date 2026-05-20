@@ -75,7 +75,7 @@
               <th class="arat-col-rest">Ресторан</th>
               <th class="arat-col-status">Статус</th>
               <th class="arat-col-email">Email</th>
-              <th class="arat-col-meta">Активность</th>
+              <th class="arat-col-meta">Последний вход</th>
               <th class="arat-col-actions">Действия</th>
             </tr>
           </thead>
@@ -83,27 +83,26 @@
             <tr v-for="u in filteredUsers" :key="(u.legal_entity_group || 'BK_VM') + '-' + u.restaurant_number">
               <td class="arat-col-num">№{{ formatRestaurantNumber(u.restaurant_number, u.legal_entity_group) }}</td>
               <td class="arat-col-rest">
-                <div class="arat-rest-addr">{{ u.city || '—' }} {{ u.address || '' }}</div>
-                <div class="arat-rest-le">{{ shortLegalEntity(u.legal_entity) }}</div>
+                <span class="arat-rest-addr">{{ u.city || '—' }} {{ u.address || '' }}</span>
+                <span class="arat-rest-le" v-if="u.legal_entity"> · {{ shortLegalEntity(u.legal_entity) }}</span>
               </td>
               <td class="arat-col-status">
                 <span class="arat-badge" :class="statusBadgeClass(u)">{{ statusLabel(u) }}</span>
               </td>
               <td class="arat-col-email">
                 <template v-if="u.email">
-                  <div class="arat-email-addr">{{ u.email }}</div>
-                  <span class="arat-badge" :class="u.email_verified_at ? 'ok' : 'warn'">
-                    {{ u.email_verified_at ? '✓ подтверждён' : 'не подтверждён' }}
-                  </span>
+                  <span class="arat-email-addr">{{ u.email }}</span>
+                  <span
+                    class="arat-email-dot"
+                    :class="u.email_verified_at ? 'ok' : 'warn'"
+                    :title="u.email_verified_at ? 'Email подтверждён' : 'Email не подтверждён'"
+                  >{{ u.email_verified_at ? '✓' : '!' }}</span>
                 </template>
                 <span v-else class="arat-email-empty">не указан</span>
               </td>
-              <td class="arat-col-meta">
-                <div v-if="u.last_login_at">Вход: {{ formatTime(u.last_login_at) }}</div>
-                <div v-else class="arat-muted">Вход: —</div>
-                <div v-if="u.password_changed_at" class="arat-muted">
-                  Пароль: {{ formatTime(u.password_changed_at) }}
-                </div>
+              <td class="arat-col-meta" :title="u.password_changed_at ? 'Пароль: ' + formatTime(u.password_changed_at) : ''">
+                <span v-if="u.last_login_at">{{ formatTime(u.last_login_at) }}</span>
+                <span v-else class="arat-muted">—</span>
               </td>
               <td class="arat-col-actions">
                 <div class="arat-actions">
@@ -416,12 +415,15 @@ async function handleToggleUser(u) {
 
 .arat-table th,
 .arat-table td {
-  padding: 6px 10px;
+  padding: 5px 10px;
   text-align: left;
   vertical-align: middle;
   border-bottom: 1px solid #f0ebe4;
-  line-height: 1.35;
+  line-height: 1.3;
+  font-size: 12.5px;
+  white-space: nowrap;
 }
+.arat-col-rest, .arat-col-email { white-space: normal; }
 .arat-table tbody tr:last-child td { border-bottom: none; }
 .arat-table thead th {
   background: #faf8f5;
@@ -442,14 +444,26 @@ async function handleToggleUser(u) {
 .arat-col-meta    { width: 170px; font-size: 12px; color: #6f5948; }
 .arat-col-actions { width: 1%; white-space: nowrap; }
 
-.arat-rest-addr { color: #502314; line-height: 1.3; }
-.arat-rest-le { color: #a08570; font-size: 11px; line-height: 1.2; }
+.arat-rest-addr { color: #502314; }
+.arat-rest-le { color: #a08570; font-size: 11.5px; }
 
-.arat-email-addr { color: #502314; word-break: break-all; line-height: 1.3; }
-.arat-email-empty { color: #c4b8a8; font-style: italic; font-size: 12px; }
+.arat-email-addr { color: #502314; word-break: break-all; margin-right: 6px; }
+.arat-email-empty { color: #c4b8a8; font-style: italic; }
+.arat-email-dot {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.arat-email-dot.ok   { background: #ecfdf5; color: #16a34a; }
+.arat-email-dot.warn { background: #fef3c7; color: #b45309; }
 
-.arat-muted { color: #a08570; font-size: 11px; }
-.arat-col-meta div + div { margin-top: 1px; }
+.arat-muted { color: #a08570; }
 
 .arat-badge {
   display: inline-block;
@@ -486,7 +500,8 @@ async function handleToggleUser(u) {
 .arat-btn:hover:not(:disabled) { background: #faf6ef; border-color: #d4c4ad; }
 .arat-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.arat-btn-sm { padding: 6px 10px; font-size: 12px; }
+.arat-btn-sm { padding: 4px 9px; font-size: 12px; }
+.arat-actions { gap: 4px; }
 
 .arat-btn-primary {
   background: #E76F51;
