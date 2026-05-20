@@ -30,6 +30,7 @@ if (!function_exists('sendEmail')) {
      *   account?: 'default'|'order',
      *   reply_to?: string,            // переопределить Reply-To
      *   from_name?: string,           // переопределить отправителя
+     *   cc?: string|array,            // адреса в копию
      * }
      * @return array{success: bool, error?: string}
      */
@@ -82,6 +83,17 @@ if (!function_exists('sendEmail')) {
             }
             if (empty($mail->getToAddresses())) {
                 return ['success' => false, 'error' => 'Нет валидных получателей'];
+            }
+
+            // CC (копия) — если указано в опциях
+            if (!empty($opts['cc'])) {
+                $ccList = is_array($opts['cc']) ? $opts['cc'] : [$opts['cc']];
+                foreach ($ccList as $ccAddr) {
+                    $ccAddr = trim((string)$ccAddr);
+                    if ($ccAddr !== '' && filter_var($ccAddr, FILTER_VALIDATE_EMAIL)) {
+                        $mail->addCC($ccAddr);
+                    }
+                }
             }
 
             $mail->Subject = $subject;

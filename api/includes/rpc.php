@@ -795,7 +795,13 @@ if ($endpoint === 'rpc') {
 
         $supplierLabel = $supplier !== '' ? $supplier : 'поставщику';
         $deliveryLabel = $delivery !== '' ? $delivery : '';
-        $subject = 'Заказ ' . $supplierLabel . ($deliveryLabel ? ' на ' . $deliveryLabel : '');
+        // Тема: «Заказ от <юрлицо> для <supplier> на <дата>».
+        // Юрлицо в теме важно — поставщик работает с несколькими нашими компаниями.
+        $subjParts = ['Заказ'];
+        if ($legalEntity !== '') $subjParts[] = 'от ' . $legalEntity;
+        if ($supplier !== '')    $subjParts[] = 'для ' . $supplier;
+        if ($deliveryLabel !== '') $subjParts[] = 'на ' . $deliveryLabel;
+        $subject = implode(' ', $subjParts);
         if (mb_strlen($subject) > 200) $subject = mb_substr($subject, 0, 200);
 
         require_once __DIR__ . '/mail_send.php';
@@ -804,22 +810,43 @@ if ($endpoint === 'rpc') {
         $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
 
         // Тело письма поставщику — деловой стиль, без брендинга «портал».
-        // Просто текст заказа в моноширинном блоке, как привычно поставщикам
-        // от mailto-отправки. Без логотипа и без footer'а про автоотправку.
+        // Текст заказа в небольшом блоке, с заголовком сверху.
         $bodyEscaped = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
-        $html = '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-              . '<body style="margin:0;padding:20px;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;color:#1f1f1f;line-height:1.55;font-size:15px;">'
-              . '<div style="max-width:680px;margin:0 auto;">'
-              . $bodyEscaped
-              . '</div></body></html>';
+        $titleParts = [];
+        if ($supplier !== '')      $titleParts[] = htmlspecialchars($supplier, ENT_QUOTES, 'UTF-8');
+        if ($deliveryLabel !== '') $titleParts[] = 'дата поставки <strong>' . htmlspecialchars($deliveryLabel, ENT_QUOTES, 'UTF-8') . '</strong>';
+        $title    = $titleParts ? implode(' · ', $titleParts) : 'Заявка на поставку';
+        $fromLine = $legalEntity !== ''
+            ? '<div style="font-size:13px;color:#6b6b6b;margin-bottom:18px;">От <strong style="color:#3a3a3a;">' . htmlspecialchars($legalEntity, ENT_QUOTES, 'UTF-8') . '</strong></div>'
+            : '';
 
-        // Слать с заказного ящика order@, Reply-To — туда же (ответы поставщика
-        // приходят на тот же ящик, который читают закупщики).
+        $html = '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+              . '<body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;color:#1f1f1f;line-height:1.55;font-size:15px;">'
+              . '<div style="padding:24px 28px;">'
+              . '<h2 style="margin:0 0 6px;font-size:18px;font-weight:600;color:#222;line-height:1.35;">' . $title . '</h2>'
+              . $fromLine
+              . '<div style="border-left:3px solid #2a78c2;background:#f6f9fc;padding:14px 18px;border-radius:0 6px 6px 0;font-size:14.5px;line-height:1.6;color:#222;">'
+              . $bodyEscaped
+              . '</div>'
+              . '</div>'
+              . '</body></html>';
+
+        // Slать с заказного ящика order@, Reply-To — туда же.
+        // CC — отправителю (сотруднику, который нажал кнопку): подтверждение, что
+        // письмо ушло, плюс копия в почте для архивации.
         $orderEmail = $_ENV['SMTP_ORDER_USER'] ?? 'order@supply-department.online';
-        $sendResult = sendEmail($recipients, $subject, $html, true, [
-            'account'  => 'order',
-            'reply_to' => $orderEmail,
-        ]);
+        $senderEmail = '';
+        try {
+            $eStmt = $pdo->prepare("SELECT email FROM users WHERE id = ? LIMIT 1");
+            $eStmt->execute([(string)($authUser['id'] ?? '')]);
+            $senderEmail = trim((string)($eStmt->fetchColumn() ?: ''));
+        } catch (Throwable $e) {}
+
+        $opts = ['account' => 'order', 'reply_to' => $orderEmail];
+        if ($senderEmail !== '' && filter_var($senderEmail, FILTER_VALIDATE_EMAIL)) {
+            $opts['cc'] = $senderEmail;
+        }
+        $sendResult = sendEmail($recipients, $subject, $html, true, $opts);
 
         $userId = $authUser['id'] ?? null;
         try {
