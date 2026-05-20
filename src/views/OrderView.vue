@@ -189,7 +189,8 @@
             <button @click.stop="share('whatsapp')"><span class="share-dot" style="background:#25D366"></span>WhatsApp</button>
             <button @click.stop="share('telegram')"><span class="share-dot" style="background:#0088cc"></span>Telegram</button>
             <button @click.stop="share('viber')"><span class="share-dot" style="background:#7360f2"></span>Viber</button>
-            <button @click.stop="share('email')"><span class="share-dot" style="background:#8B7355"></span>Email</button>
+            <button @click.stop="share('email-portal')" :disabled="emailSending"><span class="share-dot" style="background:#E76F51"></span>{{ emailSending ? 'Отправка…' : 'Email с портала' }}</button>
+            <button @click.stop="share('email-mailto')"><span class="share-dot" style="background:#8B7355"></span>Email в почтовом клиенте</button>
           </div>
         </div>
         <button class="btn" @click="exportExcel" v-if="orderStore.items.length" :disabled="!itemsWithOrderCount"><BkIcon name="excel" size="sm"/> Excel</button>
@@ -321,6 +322,7 @@ const settingsExpanded      = ref(false);
 const supplierLoading       = ref(false);
 let _supplierLoadGen = 0;
 const showShareDropdown     = ref(false);
+const emailSending          = ref(false);
 
 const showManualModal       = ref(false);
 
@@ -1276,12 +1278,38 @@ async function share(channel) {
     else window.open(`viber://forward?text=${encoded}`, '_blank');
     return;
   }
-  if (channel === 'email') {
+  if (channel === 'email-mailto') {
     const to = (contacts?.email || '').split(/[,;]/).map(e => e.trim()).filter(Boolean).join(';');
+    if (!to) { toast.error('У поставщика не указан email', 'Заполните в карточке поставщика'); return; }
     const subject = encodeURIComponent(`Заказ ${supplier} на ${deliveryDate}`);
     const body = encoded;
-    // outlook: URI scheme открывает именно десктопный Outlook
     window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+    return;
+  }
+  if (channel === 'email-portal') {
+    const to = (contacts?.email || '').trim();
+    if (!to) { toast.error('У поставщика не указан email', 'Заполните в карточке поставщика'); return; }
+    if (emailSending.value) return;
+    emailSending.value = true;
+    try {
+      const { data, error } = await db.rpc('send_supplier_order_email', {
+        to,
+        body_text: text,
+        supplier,
+        legal_entity: le,
+        delivery_date: deliveryDate,
+        items_count: lines.length,
+      });
+      if (error) throw new Error(error);
+      if (data?.error) throw new Error(data.error);
+      const recipients = Array.isArray(data?.sent_to) ? data.sent_to.join(', ') : to;
+      toast.success('Письмо отправлено', `На ${recipients}`);
+    } catch (e) {
+      toast.error('Не удалось отправить', e?.message || 'Ошибка соединения');
+    } finally {
+      emailSending.value = false;
+    }
+    return;
   }
 }
 

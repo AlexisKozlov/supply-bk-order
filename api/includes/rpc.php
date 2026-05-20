@@ -768,6 +768,91 @@ if ($endpoint === 'rpc') {
     $authUserName = $authUser ? $authUser['name'] : '';
 
     // Конфигурация RBAC — единый источник правды для фронтенда
+    // ════════════════════════════════════════════════════════════════════
+    // Отправка заявки поставщику по email с портала (с фирменного ящика
+    // noreply@). Reply-To = info@, чтобы поставщик мог ответить нормально.
+    // Логируется в order_email_log для аудита.
+    // ════════════════════════════════════════════════════════════════════
+    if ($fn === 'send_supplier_order_email') {
+        if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
+
+        $rawTo       = trim((string)($body['to'] ?? ''));
+        $bodyText    = (string)($body['body_text'] ?? '');
+        $supplier    = trim((string)($body['supplier'] ?? ''));
+        $legalEntity = trim((string)($body['legal_entity'] ?? ''));
+        $delivery    = trim((string)($body['delivery_date'] ?? ''));
+        $itemsCount  = (int)($body['items_count'] ?? 0);
+
+        if ($rawTo === '') respond(['error' => 'Не указан email получателя'], 400);
+        if ($bodyText === '') respond(['error' => 'Пустое тело письма'], 400);
+
+        // Парсим список адресов (запятая, точка с запятой, пробел).
+        $recipients = array_values(array_filter(array_map('trim', preg_split('/[,;\s]+/', $rawTo)), function ($e) {
+            return $e !== '' && filter_var($e, FILTER_VALIDATE_EMAIL);
+        }));
+        if (!$recipients) respond(['error' => 'Не указан корректный email получателя'], 400);
+        if (count($recipients) > 10) respond(['error' => 'Слишком много адресов (максимум 10)'], 400);
+
+        $supplierLabel = $supplier !== '' ? $supplier : 'поставщику';
+        $deliveryLabel = $delivery !== '' ? $delivery : '';
+        $subject = 'Заказ ' . $supplierLabel . ($deliveryLabel ? ' на ' . $deliveryLabel : '');
+        if (mb_strlen($subject) > 200) $subject = mb_substr($subject, 0, 200);
+
+        require_once __DIR__ . '/mail_send.php';
+        require_once __DIR__ . '/mail_templates.php';
+
+        $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
+
+        // Тело: текст «как в mailto», обернём в <pre>-блок для сохранения переносов.
+        $bodyEscaped = htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8');
+        $intro = $legalEntity !== '' ? "Заявка для {$legalEntity}" : 'Заявка на поставку';
+        $bodyHtml = '<div style="font-family:Consolas,Menlo,monospace;white-space:pre-wrap;background:#fafaf7;border:1px solid #eee2d4;border-radius:8px;padding:14px 16px;font-size:13.5px;color:#3a2818;line-height:1.55;">'
+                  . $bodyEscaped
+                  . '</div>';
+
+        $html = renderMailHtml([
+            'title'   => 'Заявка на поставку',
+            'preview' => $intro . ($deliveryLabel ? ' · доставка ' . $deliveryLabel : ''),
+            'intro'   => 'Здравствуйте!',
+            'body'    => '<p style="margin:0 0 14px;">' . htmlspecialchars($intro, ENT_QUOTES, 'UTF-8') . ($deliveryLabel ? ', дата поставки <strong>' . htmlspecialchars($deliveryLabel, ENT_QUOTES, 'UTF-8') . '</strong>' : '') . '.</p>' . $bodyHtml,
+            'footer'  => 'Письмо отправлено через портал supply-department.online. Отвечайте на это письмо — ответ придёт на ' . ($_ENV['SMTP_REPLY_TO'] ?? 'info@supply-department.online') . '.',
+        ]);
+
+        // Reply-To выставим временно через .env, чтобы потом не было в спам-репутации noreply.
+        $prevReplyTo = $_ENV['SMTP_REPLY_TO'] ?? null;
+        $_ENV['SMTP_REPLY_TO'] = $_ENV['SMTP_REPLY_TO'] ?? 'info@supply-department.online';
+
+        $sendResult = sendEmail($recipients, $subject, $html, true);
+
+        if ($prevReplyTo === null) unset($_ENV['SMTP_REPLY_TO']);
+        else $_ENV['SMTP_REPLY_TO'] = $prevReplyTo;
+
+        $userId = $authUser['id'] ?? null;
+        try {
+            $pdo->prepare("INSERT INTO order_email_log (sender_user_id, sender_user_name, recipients, subject, supplier, legal_entity, delivery_date, items_count, success, error_message, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                ->execute([
+                    $userId,
+                    $authUserName,
+                    implode(', ', $recipients),
+                    $subject,
+                    $supplier !== '' ? $supplier : null,
+                    $legalEntity !== '' ? $legalEntity : null,
+                    $delivery !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $delivery) ? $delivery : null,
+                    $itemsCount ?: null,
+                    $sendResult['success'] ? 1 : 0,
+                    $sendResult['success'] ? null : mb_substr((string)($sendResult['error'] ?? ''), 0, 500),
+                    $clientIp ?? null,
+                ]);
+        } catch (Throwable $e) {
+            error_log('[send_supplier_order_email] log insert failed: ' . $e->getMessage());
+        }
+
+        if (!$sendResult['success']) {
+            respond(['error' => 'Не удалось отправить письмо: ' . ($sendResult['error'] ?? 'неизвестная ошибка')], 500);
+        }
+        respond(['success' => true, 'sent_to' => $recipients]);
+    }
+
     if ($fn === 'get_rbac_config') {
         respond([
             'modules' => array_keys($ROLE_TEMPLATES['admin']),
