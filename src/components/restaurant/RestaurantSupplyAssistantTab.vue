@@ -1388,6 +1388,12 @@ function copyGroup(cat) {
 .sa-scrolltop:hover { background: #3d1a0f; }
 .sa-scrolltop:active { transform: scale(.94); }
 .sa-scrolltop svg { width: 22px; height: 22px; }
+/* На мобилке снизу таб-бар кабинета — поднимаем кнопку выше */
+@media (max-width: 768px) {
+  .sa-scrolltop {
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+  }
+}
 .sa-fade-enter-active, .sa-fade-leave-active { transition: opacity .2s ease, transform .2s ease; }
 .sa-fade-enter-from, .sa-fade-leave-to { opacity: 0; transform: translateY(8px); }
 

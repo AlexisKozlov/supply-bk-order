@@ -283,6 +283,14 @@
                 </div>
                 <span class="dash-tile-arrow">›</span>
               </button>
+              <button v-if="!isPizzaStarCabinet" class="dash-tile dash-tile--assistant" @click="switchTab('orders', 'assistant')">
+                <span class="dash-tile-icon" v-html="tileIconSvg.assistant"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Сбор заказа</div>
+                  <div class="dash-tile-sub">Помощник для загрузки в 1С УТ</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
+              </button>
               <button class="dash-tile dash-tile--corrections" @click="switchTab('orders', 'corrections')">
                 <span class="dash-tile-icon" v-html="tileIconSvg.corrections"></span>
                 <div class="dash-tile-text">
@@ -4573,6 +4581,7 @@ tr.del-err { background: #fef2f2; }
 .dash-tile--cards .dash-tile-icon { background: #E0F2FE; color: #1D4ED8; }
 .dash-tile--reminders .dash-tile-icon { background: #FEEFCB; color: #B45309; }
 .dash-tile--corrections .dash-tile-icon { background: #FFE9D6; color: #8B4513; }
+.dash-tile--assistant .dash-tile-icon { background: #FCE7DE; color: #C53C1B; }
 
 @media (max-width: 640px) {
   .dash-tiles { grid-template-columns: 1fr; gap: 8px; }
