@@ -1818,41 +1818,57 @@ async function downloadPptx() {
     }
   }
 
-  // KPI-плашка с поддержкой дельты. Сейчас в KPI используется deltaPct (число %).
+  // KPI-плашка. Высота h=1.7 разложена так:
+  //   0.00-0.08  верхняя цветная полоса
+  //   0.18-0.42  label  (h=0.24, fs=11)
+  //   0.46-1.04  value  (h=0.58, fs=24)
+  //   1.18-1.50  delta / subtitle (h=0.32, fs=11)
+  // Раньше большое число (fs=28, h=0.7) занимало 0.55-1.25, а delta стартовала
+  // с 1.15 — нижняя линия 28pt-цифры залезала на стрелку с %. Снизили шрифт
+  // value и развели блоки явными отступами.
   function drawKpiCard(slide, x, y, w, h, k) {
     slide.addShape(pptx.ShapeType.rect, { x, y, w, h, fill: { color: 'FFFFFF' }, line: { color: 'ECE3D6', width: 1 } });
     slide.addShape(pptx.ShapeType.rect, { x, y, w, h: 0.08, fill: { color: toneColor[k.tone] || '8B7355' }, line: { color: toneColor[k.tone] || '8B7355' } });
-    slide.addText(k.label, { x: x + 0.15, y: y + 0.18, w: w - 0.3, h: 0.3, fontSize: 12, color: '8B7355', fontFace: 'Calibri' });
-    slide.addText(String(k.value) + (k.unit ? ' ' + k.unit : ''), { x: x + 0.15, y: y + 0.55, w: w - 0.3, h: 0.7, fontSize: 28, bold: true, color: '2C1A12', fontFace: 'Calibri' });
-    // Дельта к прошлому периоду (если есть comparePrev и считается).
+    slide.addText(k.label, { x: x + 0.15, y: y + 0.18, w: w - 0.3, h: 0.24, fontSize: 11, color: '8B7355', fontFace: 'Calibri' });
+    slide.addText(String(k.value) + (k.unit ? ' ' + k.unit : ''), {
+      x: x + 0.15, y: y + 0.46, w: w - 0.3, h: 0.58,
+      fontSize: 24, bold: true, color: '2C1A12', fontFace: 'Calibri', valign: 'middle',
+    });
     if (k.deltaPct !== null && k.deltaPct !== undefined) {
       const isFlat = Math.abs(k.deltaPct) < 0.05;
       const arrow = isFlat ? '→' : (k.deltaPct >= 0 ? '↑' : '↓');
       const col = isFlat ? '8B7355' : (k.deltaPct >= 0 ? '1E7E34' : 'C62828');
       const pctStr = Math.abs(k.deltaPct) >= 10 ? Math.round(Math.abs(k.deltaPct)) : Math.abs(k.deltaPct).toFixed(1);
       slide.addText(`${arrow} ${pctStr}% к прошлому периоду`, {
-        x: x + 0.15, y: y + h - 0.55, w: w - 0.3, h: 0.3, fontSize: 11, bold: true, color: col, fontFace: 'Calibri',
+        x: x + 0.15, y: y + 1.20, w: w - 0.3, h: 0.32, fontSize: 11, bold: true, color: col, fontFace: 'Calibri',
       });
     } else if (k.subtitle) {
-      slide.addText(k.subtitle, { x: x + 0.15, y: y + h - 0.45, w: w - 0.3, h: 0.4, fontSize: 11, color: '8B7355', fontFace: 'Calibri' });
+      slide.addText(k.subtitle, { x: x + 0.15, y: y + 1.20, w: w - 0.3, h: 0.32, fontSize: 11, color: '8B7355', fontFace: 'Calibri' });
     }
   }
 
-  // Плашка «По складам»: цветная полоса + два числа (среднее + дельта).
+  // Плашка «По складам». Высота h=1.6 разложена с такими же запасами:
+  //   0.10-0.40  label (h=0.30, fs=12 bold)
+  //   0.42-0.92  value (h=0.50, fs=22)
+  //   0.95-1.15  subtext (h=0.20, fs=9)
+  //   1.22-1.52  delta (h=0.30, fs=11)
   function drawWarehouseCard(slide, x, y, w, h, b) {
     slide.addShape(pptx.ShapeType.rect, { x, y, w, h, fill: { color: 'FFFFFF' }, line: { color: 'ECE3D6', width: 1 } });
     slide.addShape(pptx.ShapeType.rect, { x, y, w: 0.10, h, fill: { color: b.color }, line: { color: b.color } });
-    slide.addText(b.label, { x: x + 0.25, y: y + 0.10, w: w - 0.35, h: 0.3, fontSize: 12, color: '8B7355', fontFace: 'Calibri', bold: true });
-    slide.addText(String(b.avgCur), { x: x + 0.25, y: y + 0.40, w: w - 0.35, h: 0.7, fontSize: 26, bold: true, color: '2C1A12', fontFace: 'Calibri' });
-    slide.addText('ячеек в среднем', { x: x + 0.25, y: y + 1.10, w: w - 0.35, h: 0.25, fontSize: 10, color: '8B7355', fontFace: 'Calibri' });
+    slide.addText(b.label, { x: x + 0.25, y: y + 0.10, w: w - 0.35, h: 0.30, fontSize: 12, color: '8B7355', fontFace: 'Calibri', bold: true });
+    slide.addText(String(b.avgCur), {
+      x: x + 0.25, y: y + 0.42, w: w - 0.35, h: 0.50,
+      fontSize: 22, bold: true, color: '2C1A12', fontFace: 'Calibri', valign: 'middle',
+    });
+    slide.addText('ячеек в среднем', { x: x + 0.25, y: y + 0.95, w: w - 0.35, h: 0.20, fontSize: 9, color: '8B7355', fontFace: 'Calibri' });
     if (b.deltaPct !== null && b.deltaPct !== undefined) {
       const isFlat = Math.abs(b.deltaPct) < 0.05;
       const arrow = isFlat ? '→' : (b.deltaPct >= 0 ? '↑' : '↓');
       const col = isFlat ? '8B7355' : (b.deltaPct >= 0 ? '1E7E34' : 'C62828');
       const pctStr = Math.abs(b.deltaPct) >= 10 ? Math.round(Math.abs(b.deltaPct)) : Math.abs(b.deltaPct).toFixed(1);
       const absStr = (b.deltaAbs > 0 ? '+' : (b.deltaAbs < 0 ? '−' : '')) + Math.abs(b.deltaAbs);
-      slide.addText(`${arrow} ${absStr}  (${pctStr}%)`, {
-        x: x + 0.25, y: y + h - 0.45, w: w - 0.35, h: 0.3, fontSize: 12, bold: true, color: col, fontFace: 'Calibri',
+      slide.addText(`${arrow} ${absStr} (${pctStr}%)`, {
+        x: x + 0.25, y: y + 1.22, w: w - 0.35, h: 0.30, fontSize: 11, bold: true, color: col, fontFace: 'Calibri',
       });
     }
   }
@@ -1931,14 +1947,19 @@ async function downloadPptx() {
         const bar = isFlat ? '8B7355' : (isUp ? '1E7E34' : 'C62828');
         sTop.addShape(pptx.ShapeType.rect, { x, y: cardStartY, w: cardW, h: cardH, fill: { color: bg }, line: { color: 'ECE3D6', width: 1 } });
         sTop.addShape(pptx.ShapeType.rect, { x, y: cardStartY, w: cardW, h: 0.12, fill: { color: bar }, line: { color: bar } });
-        sTop.addText(c.label, { x: x + 0.2, y: cardStartY + 0.3, w: cardW - 0.4, h: 0.4, fontSize: 16, bold: true, color: '502314', fontFace: 'Calibri' });
+        sTop.addText(c.label, { x: x + 0.2, y: cardStartY + 0.30, w: cardW - 0.4, h: 0.45, fontSize: 16, bold: true, color: '502314', fontFace: 'Calibri' });
         const absStr = (c.deltaAbs > 0 ? '+' : (c.deltaAbs < 0 ? '−' : '')) + Math.abs(c.deltaAbs);
         const pctStr = Math.abs(c.deltaPct) >= 10 ? Math.round(Math.abs(c.deltaPct)) : Math.abs(c.deltaPct).toFixed(1);
         const arrow = isFlat ? '→' : (isUp ? '↑' : '↓');
-        sTop.addText(`${arrow} ${absStr}`, { x: x + 0.2, y: cardStartY + 0.75, w: cardW - 0.4, h: 1.1, fontSize: 44, bold: true, color: bar, fontFace: 'Calibri' });
-        sTop.addText(`${pctStr}% к прошлому периоду`, { x: x + 0.2, y: cardStartY + 1.9, w: cardW - 0.4, h: 0.4, fontSize: 14, bold: true, color: bar, fontFace: 'Calibri' });
-        sTop.addText(`Сейчас ${c.avgCur} · было ${c.avgPrev}`, { x: x + 0.2, y: cardStartY + 2.35, w: cardW - 0.4, h: 0.4, fontSize: 12, color: '8B7355', fontFace: 'Calibri' });
-        sTop.addText('ячеек в среднем в день', { x: x + 0.2, y: cardStartY + 2.7, w: cardW - 0.4, h: 0.4, fontSize: 10, color: '8B7355', fontFace: 'Calibri', italic: true });
+        // Большое число дельты — теперь fs=40 (с 44 числа вроде «↑ +1234»
+        // переполняли ширину 4.0") и с автовыравниванием по середине.
+        sTop.addText(`${arrow} ${absStr}`, {
+          x: x + 0.2, y: cardStartY + 0.85, w: cardW - 0.4, h: 0.95,
+          fontSize: 40, bold: true, color: bar, fontFace: 'Calibri', valign: 'middle',
+        });
+        sTop.addText(`${pctStr}% к прошлому периоду`, { x: x + 0.2, y: cardStartY + 1.95, w: cardW - 0.4, h: 0.35, fontSize: 14, bold: true, color: bar, fontFace: 'Calibri' });
+        sTop.addText(`Сейчас ${c.avgCur} · было ${c.avgPrev}`, { x: x + 0.2, y: cardStartY + 2.45, w: cardW - 0.4, h: 0.30, fontSize: 12, color: '8B7355', fontFace: 'Calibri' });
+        sTop.addText('ячеек в среднем в день', { x: x + 0.2, y: cardStartY + 2.80, w: cardW - 0.4, h: 0.25, fontSize: 10, color: '8B7355', fontFace: 'Calibri', italic: true });
       });
     } else {
       sTop.addShape(pptx.ShapeType.rect, { x: 0.4, y: 1.5, w: 12.5, h: 4.5, fill: { color: 'FAF6EF' }, line: { color: 'ECE3D6', width: 1 } });
