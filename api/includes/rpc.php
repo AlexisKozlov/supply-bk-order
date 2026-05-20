@@ -535,7 +535,9 @@ if ($endpoint === 'rpc') {
             ->execute([$restaurantNumber, $resetGroup]);
 
         // Сбрасываем активные сессии в кабинете, чтобы старая вкладка не работала.
+        // Чистим и новую таблицу мультисессий, и legacy-колонки в ro_users.
         try {
+            roRevokeAllSessionsForRestaurant($pdo, $restaurantNumber, $resetGroup);
             $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE restaurant_number = ? AND legal_entity_group = ?")
                 ->execute([$restaurantNumber, $resetGroup]);
         } catch (Exception $e) {}

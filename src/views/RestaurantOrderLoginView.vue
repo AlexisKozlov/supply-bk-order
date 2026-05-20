@@ -122,23 +122,12 @@
             <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
           </label>
 
-          <!-- Диалог: кто-то уже в аккаунте -->
-          <div v-if="sessionConflict" class="ro-conflict">
-            <div class="ro-conflict-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            </div>
-            <p>В этом аккаунте сейчас работает другой пользователь <span v-if="sessionConflictAgo">(вошёл {{ sessionConflictAgo }})</span>.</p>
-            <p class="ro-conflict-hint">Если вы продолжите, его сессия будет завершена.</p>
-            <div class="ro-conflict-btns">
-              <button type="button" class="ro-submit-btn" @click="forceLogin" :disabled="loading">
-                <span v-if="loading" class="ro-spinner"></span>
-                <template v-else>Войти и завершить другую сессию</template>
-              </button>
-              <button type="button" class="ro-cancel-btn" @click="sessionConflict = false">Отмена</button>
-            </div>
-          </div>
+          <label class="ro-consent ro-remember">
+            <input v-model="rememberDevice" type="checkbox" :disabled="loading" />
+            <span>Запомнить это устройство на 30 дней</span>
+          </label>
 
-          <button v-if="!sessionConflict" type="submit" class="ro-submit-btn" :disabled="loading || !restaurantNumber || !password || !acceptedDataRules">
+          <button type="submit" class="ro-submit-btn" :disabled="loading || !restaurantNumber || !password || !acceptedDataRules">
             <span v-if="loading" class="ro-spinner"></span>
             <template v-else>
               Войти
@@ -180,10 +169,9 @@ const password = ref('');
 const loading = ref(false);
 const error = ref('');
 const showPassword = ref(false);
-const sessionConflict = ref(false);
-const sessionConflictAgo = ref('');
 const tgLoading = ref(false);
 const acceptedDataRules = ref(false);
+const rememberDevice = ref(true);
 const pendingTgToken = ref('');
 const pendingTgRedirect = ref(null);
 
@@ -301,7 +289,6 @@ function parsedRestaurant() {
 
 async function handleLogin() {
   error.value = '';
-  sessionConflict.value = false;
   if (!acceptedDataRules.value) {
     error.value = 'Подтвердите согласие с правилами использования портала';
     return;
@@ -313,47 +300,15 @@ async function handleLogin() {
   }
   loading.value = true;
   try {
-    const result = await store.login(parsed.number, password.value, parsed.group, false, acceptedDataRules.value);
-    if (result.success) {
-      const redirectTarget = safeRedirect(route.query.redirect);
-      router.push(redirectTarget || { name: 'restaurant-cabinet' });
-    } else if (result.active_session) {
-      sessionConflict.value = true;
-      sessionConflictAgo.value = result.last_login_ago || '';
-    } else {
-      error.value = result.error || 'Ошибка входа';
-    }
-  } catch (e) {
-    error.value = e.message || 'Ошибка соединения с сервером';
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function forceLogin() {
-  error.value = '';
-  if (!acceptedDataRules.value) {
-    error.value = 'Подтвердите согласие с правилами использования портала';
-    return;
-  }
-  const parsed = parsedRestaurant();
-  if (!parsed?.number) {
-    error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
-    return;
-  }
-  loading.value = true;
-  try {
-    const result = await store.login(parsed.number, password.value, parsed.group, true, acceptedDataRules.value);
+    const result = await store.login(parsed.number, password.value, parsed.group, rememberDevice.value, acceptedDataRules.value);
     if (result.success) {
       const redirectTarget = safeRedirect(route.query.redirect);
       router.push(redirectTarget || { name: 'restaurant-cabinet' });
     } else {
       error.value = result.error || 'Ошибка входа';
-      sessionConflict.value = false;
     }
   } catch (e) {
     error.value = e.message || 'Ошибка соединения с сервером';
-    sessionConflict.value = false;
   } finally {
     loading.value = false;
   }
@@ -669,25 +624,9 @@ a.ro-hint:hover { background: rgba(255,255,255,0.18); }
   text-underline-offset: 3px;
 }
 
-/* Конфликт сессий */
-.ro-conflict {
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 12px;
-  padding: 18px;
-  margin-bottom: 18px;
-  text-align: center;
+.ro-remember {
+  margin-top: -4px;
 }
-.ro-conflict-icon { margin-bottom: 8px; }
-.ro-conflict p { margin: 0 0 6px; font-size: 14px; color: #502314; }
-.ro-conflict-hint { font-size: 12px; color: #92400e; margin-bottom: 14px !important; }
-.ro-conflict-btns { display: flex; flex-direction: column; gap: 8px; }
-.ro-cancel-btn {
-  width: 100%; padding: 12px; border-radius: 10px;
-  border: 2px solid #e8e0d6; background: white; color: #502314;
-  font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer;
-}
-.ro-cancel-btn:hover { background: #faf8f5; }
 
 /* Мобильная адаптация */
 @media (max-width: 480px) {

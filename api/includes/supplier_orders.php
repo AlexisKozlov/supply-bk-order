@@ -42,20 +42,9 @@ function soRespond($data, $code = 200) {
 }
 
 function soGetRestaurantSession($pdo) {
-    $token = roGetSessionToken();
-    if (!$token) return null;
-    $s = $pdo->prepare("
-        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.session_active_until
-        FROM ro_users ru
-        WHERE ru.session_token = ? AND ru.is_active = 1
-    ");
-    $s->execute([$token]);
-    $user = $s->fetch();
+    // Сессии живут в ro_user_sessions (см. helpers.php roReadActiveSessionRow).
+    $user = roReadActiveSessionRow($pdo);
     if (!$user) return null;
-    if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) return null;
-    // Продлеваем сессию при каждом запросе (сброс таймера неактивности)
-    $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
-        ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
     $rest = roGetRestaurantRow($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
     $user['restaurant_id'] = isset($rest['id']) ? (int)$rest['id'] : null;
     $user['region'] = $rest['region'] ?? '';

@@ -83,6 +83,178 @@ function roClearSessionCookie() {
     ]);
 }
 
+// ═══ Мультисессии кабинета ресторана ═══
+//
+// Сессии живут в ro_user_sessions: по одной строке на каждое устройство.
+// Колонки ro_users.session_token / session_active_until остаются для совместимости
+// (отчёты/RPC сброса пароля ещё на них смотрят), но логика сессий теперь здесь.
+
+define('RO_SESSION_MAX_DEVICES', 5);             // активных устройств на ресторан
+define('RO_SESSION_IDLE_HOURS', 12);             // потолок неактивности (last_seen → expire)
+define('RO_SESSION_TTL_DEFAULT_HOURS', 24);      // без галки «запомнить»
+define('RO_SESSION_TTL_REMEMBER_DAYS', 30);      // с галкой «запомнить»
+
+/**
+ * Создаёт сессию для ro_user_id, возвращает токен и unix-таймштамп expires_at.
+ * Гасит самую старую сессию по last_seen_at, если активных уже >= лимита.
+ */
+function roIssueSession(PDO $pdo, $roUserId, $remember, $ip = null, $userAgent = null) {
+    $roUserId = (int)$roUserId;
+    if ($roUserId <= 0) return null;
+    $token = bin2hex(random_bytes(32));
+    $ttlSec = $remember
+        ? RO_SESSION_TTL_REMEMBER_DAYS * 86400
+        : RO_SESSION_TTL_DEFAULT_HOURS * 3600;
+    $expiresUnix = time() + $ttlSec;
+    $expiresStr  = date('Y-m-d H:i:s', $expiresUnix);
+    $ip = $ip ? mb_substr((string)$ip, 0, 45) : null;
+    $userAgent = $userAgent ? mb_substr((string)$userAgent, 0, 512) : null;
+    $deviceLabel = roMakeDeviceLabel($userAgent);
+
+    // LRU-вытеснение: если активных уже >= лимита, удаляем самую старую.
+    $cnt = $pdo->prepare("SELECT COUNT(*) FROM ro_user_sessions WHERE ro_user_id = ? AND expires_at > NOW()");
+    $cnt->execute([$roUserId]);
+    $active = (int)$cnt->fetchColumn();
+    if ($active >= RO_SESSION_MAX_DEVICES) {
+        $toDelete = $active - RO_SESSION_MAX_DEVICES + 1;
+        $del = $pdo->prepare("DELETE FROM ro_user_sessions WHERE ro_user_id = ? ORDER BY last_seen_at ASC LIMIT $toDelete");
+        $del->execute([$roUserId]);
+    }
+    // Заодно подметаем заведомо протухшие — таблица не будет расти бесконечно.
+    $pdo->prepare("DELETE FROM ro_user_sessions WHERE ro_user_id = ? AND expires_at <= NOW()")->execute([$roUserId]);
+
+    $ins = $pdo->prepare("
+        INSERT INTO ro_user_sessions
+          (ro_user_id, token, expires_at, remember, ip_address, user_agent, device_label)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ");
+    $ins->execute([$roUserId, $token, $expiresStr, $remember ? 1 : 0, $ip, $userAgent, $deviceLabel]);
+    return ['token' => $token, 'expires_unix' => $expiresUnix, 'id' => (int)$pdo->lastInsertId()];
+}
+
+/**
+ * Возвращает запись активной сессии (с полями ro_users) или null.
+ * Делает touch last_seen_at и продляет cookie. Идемпотентно в рамках запроса.
+ *
+ * Поля результата: id, restaurant_number, legal_entity, legal_entity_group,
+ * last_login_at, _session_id, _session_token, _session_expires_at, _session_remember.
+ */
+function roReadActiveSessionRow(PDO $pdo) {
+    static $cache = null;
+    if ($cache !== null) return $cache ?: null;
+    $token = roGetSessionToken();
+    if (!$token) { $cache = false; return null; }
+    $s = $pdo->prepare("
+        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.last_login_at,
+               s.id AS _session_id, s.token AS _session_token,
+               s.expires_at AS _session_expires_at, s.remember AS _session_remember,
+               s.last_seen_at AS _session_last_seen_at
+        FROM ro_user_sessions s
+        JOIN ro_users ru ON ru.id = s.ro_user_id
+        WHERE s.token = ? AND ru.is_active = 1 AND s.expires_at > NOW()
+        LIMIT 1
+    ");
+    $s->execute([$token]);
+    $row = $s->fetch();
+    if (!$row) { $cache = false; return null; }
+
+    // Потолок неактивности: 12 часов от last_seen_at, но не больше expires_at.
+    $idleDeadline = strtotime($row['_session_last_seen_at']) + RO_SESSION_IDLE_HOURS * 3600;
+    if ($idleDeadline < time()) {
+        $pdo->prepare("DELETE FROM ro_user_sessions WHERE id = ?")->execute([(int)$row['_session_id']]);
+        roClearSessionCookie();
+        $cache = false; return null;
+    }
+    // Сдвигаем last_seen_at вперёд, чтобы протухание считалось от свежего касания.
+    $pdo->prepare("UPDATE ro_user_sessions SET last_seen_at = NOW() WHERE id = ?")
+        ->execute([(int)$row['_session_id']]);
+    // Освежаем cookie на оставшийся срок жизни сессии.
+    roSetSessionCookie($token, strtotime($row['_session_expires_at']));
+    $cache = $row;
+    return $row;
+}
+
+/**
+ * Удаляет сессию по токену. Используется при logout текущего устройства.
+ */
+function roRevokeSessionByToken(PDO $pdo, $token) {
+    if (!$token) return 0;
+    $st = $pdo->prepare("DELETE FROM ro_user_sessions WHERE token = ?");
+    $st->execute([$token]);
+    return $st->rowCount();
+}
+
+/**
+ * Удаляет все сессии ресторана. Опционально можно сохранить текущую (для
+ * «выйти со всех остальных»).
+ */
+function roRevokeAllSessionsForUser(PDO $pdo, $roUserId, $exceptToken = null) {
+    $roUserId = (int)$roUserId;
+    if ($roUserId <= 0) return 0;
+    if ($exceptToken) {
+        $st = $pdo->prepare("DELETE FROM ro_user_sessions WHERE ro_user_id = ? AND token <> ?");
+        $st->execute([$roUserId, $exceptToken]);
+    } else {
+        $st = $pdo->prepare("DELETE FROM ro_user_sessions WHERE ro_user_id = ?");
+        $st->execute([$roUserId]);
+    }
+    return $st->rowCount();
+}
+
+/**
+ * Удаляет все сессии для пары (restaurant_number, legal_entity_group).
+ * Используется при сбросе пароля — сбрасываем у всех учёток ресторана.
+ */
+function roRevokeAllSessionsForRestaurant(PDO $pdo, $restaurantNumber, $legalEntityGroup) {
+    $st = $pdo->prepare("
+        DELETE s FROM ro_user_sessions s
+        JOIN ro_users ru ON ru.id = s.ro_user_id
+        WHERE ru.restaurant_number = ? AND ru.legal_entity_group = ?
+    ");
+    $st->execute([(int)$restaurantNumber, $legalEntityGroup]);
+    return $st->rowCount();
+}
+
+/**
+ * Знакомо ли устройство (есть ли активная сессия с таким же UA у того же
+ * ro_user_id). Чистое сравнение строки UA: если UA новый — считаем устройство
+ * новым и отправим уведомление в Telegram-подписки ресторана.
+ */
+function roIsKnownDevice(PDO $pdo, $roUserId, $userAgent) {
+    if (!$userAgent) return true; // нет UA — не спамим
+    $st = $pdo->prepare("
+        SELECT 1 FROM ro_user_sessions
+        WHERE ro_user_id = ? AND user_agent = ? AND expires_at > NOW()
+        LIMIT 1
+    ");
+    $st->execute([(int)$roUserId, mb_substr($userAgent, 0, 512)]);
+    return (bool)$st->fetchColumn();
+}
+
+/**
+ * Короткая человекочитаемая метка устройства из UA: «iPhone · Safari»,
+ * «Windows · Chrome» и т.п. Для страницы «Активные устройства».
+ */
+function roMakeDeviceLabel($ua) {
+    $ua = (string)$ua;
+    if ($ua === '') return null;
+    $os = 'Устройство';
+    if (preg_match('/iPhone/i', $ua)) $os = 'iPhone';
+    elseif (preg_match('/iPad/i', $ua)) $os = 'iPad';
+    elseif (preg_match('/Android/i', $ua)) $os = 'Android';
+    elseif (preg_match('/Windows NT/i', $ua)) $os = 'Windows';
+    elseif (preg_match('/Mac OS X|Macintosh/i', $ua)) $os = 'Mac';
+    elseif (preg_match('/Linux/i', $ua)) $os = 'Linux';
+    $br = '';
+    if (preg_match('/Edg\//i', $ua)) $br = 'Edge';
+    elseif (preg_match('/OPR\/|Opera/i', $ua)) $br = 'Opera';
+    elseif (preg_match('/YaBrowser/i', $ua)) $br = 'Яндекс';
+    elseif (preg_match('/Firefox/i', $ua)) $br = 'Firefox';
+    elseif (preg_match('/Chrome/i', $ua)) $br = 'Chrome';
+    elseif (preg_match('/Safari/i', $ua)) $br = 'Safari';
+    return $br ? ($os . ' · ' . $br) : $os;
+}
+
 // ═══ Telegram уведомления ═══
 
 /**

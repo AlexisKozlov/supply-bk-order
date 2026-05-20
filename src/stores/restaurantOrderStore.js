@@ -111,16 +111,37 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
-  async function login(restaurantNumber, password, legalEntityGroup = null, force = false, acceptedDataRules = false) {
+  async function login(restaurantNumber, password, legalEntityGroup = null, remember = true, acceptedDataRules = false) {
     const data = await api('login', {
       method: 'POST',
-      body: JSON.stringify({ restaurant_number: restaurantNumber, password, legal_entity_group: legalEntityGroup, force, accepted_data_rules: acceptedDataRules }),
+      body: JSON.stringify({
+        restaurant_number: restaurantNumber,
+        password,
+        legal_entity_group: legalEntityGroup,
+        remember,
+        accepted_data_rules: acceptedDataRules,
+      }),
     });
     if (data.success) {
       localStorage.setItem(REST_KEY, JSON.stringify(data.restaurant));
       restaurant.value = data.restaurant;
     }
     return data;
+  }
+
+  async function loadSessions() {
+    return api('sessions', { method: 'GET' });
+  }
+
+  async function revokeSession(sessionId) {
+    return api('sessions-revoke', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  }
+
+  async function revokeOtherSessions() {
+    return api('sessions-revoke-others', { method: 'POST' });
   }
 
   async function validate() {
@@ -696,7 +717,8 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     serverTimeOffset, nowFromServer,
-    login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
+    login, loginByTelegram, validate, logout, logoutLocal, loadSessions, revokeSession, revokeOtherSessions,
+    loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
     loadBroadcasts, heartbeat, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,

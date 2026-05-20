@@ -62,42 +62,45 @@ function roGetRestaurantRow($pdo, $restaurantNumber, $group = null) {
     return $s->fetch() ?: null;
 }
 
+/**
+ * Отправляет в Telegram-подписки ресторана уведомление о входе с нового
+ * устройства. «Новое» = UA отсутствует среди активных сессий ресторана.
+ * Тихая функция: если бот не настроен или подписок нет — ничего не делает.
+ */
+function roNotifyNewDeviceLogin($pdo, $restaurantNumber, $legalEntityGroup, $ip, $ua, $loginSource) {
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+    if (!$botToken) return;
+    try {
+        $subs = $pdo->prepare("
+            SELECT DISTINCT chat_id FROM ro_telegram_subs
+            WHERE restaurant_number = ? AND legal_entity_group = ?
+              AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+        ");
+        $subs->execute([(int)$restaurantNumber, $legalEntityGroup]);
+        $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
+        if (!$chatIds) return;
+        $label = roMakeDeviceLabel($ua) ?: 'Неизвестное устройство';
+        $displayNumber = function_exists('formatRestaurantNumber')
+            ? formatRestaurantNumber((int)$restaurantNumber)
+            : (string)$restaurantNumber;
+        $when = date('d.m.Y H:i');
+        $ipText = $ip ? htmlspecialchars((string)$ip, ENT_QUOTES) : '—';
+        $sourceText = $loginSource === 'Telegram' ? 'через Telegram-ссылку' : 'по паролю';
+        $msg  = "🔔 <b>Новый вход в кабинет ресторана {$displayNumber}</b>\n\n";
+        $msg .= "Устройство: <b>" . htmlspecialchars($label, ENT_QUOTES) . "</b>\n";
+        $msg .= "IP: <code>{$ipText}</code>\n";
+        $msg .= "Когда: {$when}\n";
+        $msg .= "Способ: {$sourceText}\n\n";
+        $msg .= "Если это не вы — смените пароль через бота и нажмите «Выйти со всех устройств» в кабинете.";
+        sendTelegramBulk($botToken, $chatIds, $msg);
+    } catch (Throwable $e) {
+        // Уведомление — best effort; не должно ломать логин.
+    }
+}
+
 function roGetRestaurantSession($pdo) {
-    $token = roGetSessionToken();
-    if (!$token) return null;
-    $s = $pdo->prepare("
-        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group,
-               ru.session_active_until, ru.last_login_at
-        FROM ro_users ru
-        WHERE ru.session_token = ? AND ru.is_active = 1
-    ");
-    $s->execute([$token]);
-    $user = $s->fetch();
+    $user = roReadActiveSessionRow($pdo);
     if (!$user) return null;
-    // Проверяем активность сессии (3 часа неактивности).
-    if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) {
-        return null;
-    }
-    // Абсолютный потолок: 24 часа от последнего логина. Без него сессия живёт
-    // бесконечно, пока кто-то стучит в API — утёкший токен валиден навсегда.
-    if (!empty($user['last_login_at'])) {
-        $loginTs = strtotime($user['last_login_at']);
-        if ($loginTs && (time() - $loginTs) > 24 * 3600) {
-            // Сессия истекла абсолютно — гасим токен, чтобы дальнейшие запросы
-            // (даже с этим токеном) уже ничего не возвращали.
-            $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
-                ->execute([$user['id']]);
-            roClearSessionCookie();
-            return null;
-        }
-    }
-    // Продлеваем сессию при каждом запросе (сброс таймера неактивности).
-    $newActiveUntil = strtotime('+3 hours');
-    $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
-        ->execute([date('Y-m-d H:i:s', $newActiveUntil), $user['id']]);
-    // Параллельно — освежаем cookie. Это незаметно мигрирует старых клиентов
-    // с localStorage-токеном на cookie: на первом же запросе они получат куку.
-    roSetSessionCookie($token, $newActiveUntil);
     $rest = roGetRestaurantRow($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
     $user['region'] = $rest['region'] ?? '';
     $user['city'] = $rest['city'] ?? '';
@@ -1695,12 +1698,17 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
         roRespond(['success' => false, 'error' => "Учётная запись ресторана {$restNum} не найдена. Обратитесь в отдел закупок."]);
     }
 
-    // Создаём сессию — аналогично обычному логину
-    $token = bin2hex(random_bytes(32));
-    $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
-    $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
-        ->execute([$token, $activeUntil, $user['id']]);
-    roSetSessionCookie($token, strtotime($activeUntil));
+    // Создаём сессию. Логин через Telegram-ссылку = подтверждённое доверенное
+    // устройство, поэтому remember=true (живёт 30 дней).
+    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? null;
+    $isNewDevice = !roIsKnownDevice($pdo, $user['id'], $ua);
+    $session = roIssueSession($pdo, $user['id'], true, $ip, $ua);
+    if (!$session) {
+        roRespond(['success' => false, 'error' => 'Не удалось создать сессию'], 500);
+    }
+    $pdo->prepare("UPDATE ro_users SET last_login_at = NOW() WHERE id = ?")->execute([$user['id']]);
+    roSetSessionCookie($session['token'], $session['expires_unix']);
     recordPortalConsent($pdo, 'restaurant', $restGroup . ':' . $restNum, 'Ресторан ' . $restNum . ' ' . $restGroup);
 
     $rest = roGetRestaurantRow($pdo, $restNum, $restGroup);
@@ -1708,9 +1716,13 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
         roRespond(['success' => false, 'error' => "Ресторан {$restNum} не найден или отключён"]);
     }
 
+    if ($isNewDevice) {
+        roNotifyNewDeviceLogin($pdo, $restNum, $restGroup, $ip, $ua, 'Telegram');
+    }
+
     roRespond([
         'success' => true,
-        'token' => $token,
+        'token' => $session['token'],
         'restaurant' => [
             'number' => $restNum,
             'legal_entity' => $user['legal_entity'],
@@ -1745,7 +1757,7 @@ if ($roAction === 'login' && $method === 'POST') {
         roRespond(['success' => false, 'error' => 'Слишком много неудачных попыток для этого ресторана. Подождите 10 минут'], 429);
     }
 
-    $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, legal_entity_group, session_token, session_active_until, last_login_at FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+    $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, legal_entity_group, last_login_at FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
     $s->execute([$restNum, $restGroup]);
     $user = $s->fetch();
 
@@ -1754,37 +1766,20 @@ if ($roAction === 'login' && $method === 'POST') {
         roRespond(['success' => false, 'error' => 'Неверный номер ресторана или пароль']);
     }
 
-    // Проверяем: есть ли активная сессия (кто-то работает)
-    $force = !empty($body['force']);
-    if (!$force && $user['session_token'] && $user['session_active_until']) {
-        $activeUntil = strtotime($user['session_active_until']);
-        if ($activeUntil > time()) {
-            // Сессия активна — вычисляем когда был последний вход
-            $lastLogin = $user['last_login_at'] ?? null;
-            $ago = '';
-            if ($lastLogin) {
-                $diff = time() - strtotime($lastLogin);
-                if ($diff < 60) $ago = 'только что';
-                elseif ($diff < 3600) $ago = floor($diff / 60) . ' мин. назад';
-                elseif ($diff < 86400) $ago = floor($diff / 3600) . ' ч. назад';
-                else $ago = floor($diff / 86400) . ' дн. назад';
-            }
-            roRespond([
-                'success' => false,
-                'error' => 'active_session',
-                'active_session' => true,
-                'last_login_at' => $lastLogin,
-                'last_login_ago' => $ago,
-            ]);
-        }
-    }
+    // Параллельные сессии разрешены — больше не блокируем логин из-за чужой
+    // активной сессии. Лимит и LRU-вытеснение делает roIssueSession.
+    $remember = array_key_exists('remember', $body) ? !empty($body['remember']) : true;
+    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? null;
+    // Проверяем «новое устройство» до записи сессии — иначе сами же будем найдены.
+    $isNewDevice = !roIsKnownDevice($pdo, $user['id'], $ua);
 
-    // Создаём новую сессию
-    $token = bin2hex(random_bytes(32));
-    $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
-    $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
-        ->execute([$token, $activeUntil, $user['id']]);
-    roSetSessionCookie($token, strtotime($activeUntil));
+    $session = roIssueSession($pdo, $user['id'], $remember, $ip, $ua);
+    if (!$session) {
+        roRespond(['success' => false, 'error' => 'Не удалось создать сессию'], 500);
+    }
+    $pdo->prepare("UPDATE ro_users SET last_login_at = NOW() WHERE id = ?")->execute([$user['id']]);
+    roSetSessionCookie($session['token'], $session['expires_unix']);
     recordPortalConsent($pdo, 'restaurant', $restGroup . ':' . $restNum, 'Ресторан ' . $restNum . ' ' . $restGroup);
 
     // Инфо о ресторане
@@ -1793,9 +1788,13 @@ if ($roAction === 'login' && $method === 'POST') {
         roRespond(['success' => false, 'error' => "Ресторан {$restNum} не найден или отключён"]);
     }
 
+    if ($isNewDevice) {
+        roNotifyNewDeviceLogin($pdo, $restNum, $restGroup, $ip, $ua, 'пароль');
+    }
+
     roRespond([
         'success' => true,
-        'token' => $token,
+        'token' => $session['token'],
         'restaurant' => [
             'number' => $restNum,
             'legal_entity' => $user['legal_entity'],
@@ -1823,17 +1822,74 @@ if ($roAction === 'validate' && $method === 'POST') {
     ]]);
 }
 
-// --- Выход ---
+// --- Выход (с текущего устройства) ---
 if ($roAction === 'logout' && $method === 'POST') {
-    $rest = roGetRestaurantSession($pdo);
-    if ($rest) {
-        $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
-            ->execute([$rest['id']]);
+    // Удаляем только сессию этого устройства; параллельные сессии в других
+    // браузерах/телефонах продолжают жить.
+    $token = roGetSessionToken();
+    if ($token) {
+        roRevokeSessionByToken($pdo, $token);
     }
-    // Cookie стираем безусловно: даже если сессия в БД уже была отозвана,
-    // в браузере мог остаться устаревший cookie.
     roClearSessionCookie();
     roRespond(['success' => true]);
+}
+
+// --- Активные устройства ресторана ---
+if ($roAction === 'sessions' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $currentToken = roGetSessionToken();
+    $s = $pdo->prepare("
+        SELECT id, created_at, last_seen_at, expires_at, remember,
+               ip_address, user_agent, device_label, token
+        FROM ro_user_sessions
+        WHERE ro_user_id = ? AND expires_at > NOW()
+        ORDER BY last_seen_at DESC
+    ");
+    $s->execute([(int)$rest['id']]);
+    $list = [];
+    foreach ($s->fetchAll() as $row) {
+        $list[] = [
+            'id'            => (int)$row['id'],
+            'created_at'    => $row['created_at'],
+            'last_seen_at'  => $row['last_seen_at'],
+            'expires_at'    => $row['expires_at'],
+            'remember'      => (int)$row['remember'] === 1,
+            'ip_address'    => $row['ip_address'],
+            'device_label'  => $row['device_label'] ?: 'Устройство',
+            'is_current'    => hash_equals((string)$row['token'], (string)$currentToken),
+        ];
+    }
+    roRespond(['success' => true, 'sessions' => $list]);
+}
+
+// --- Отозвать конкретную сессию ---
+if ($roAction === 'sessions-revoke' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $sessionId = (int)($body['session_id'] ?? 0);
+    if ($sessionId <= 0) roRespond(['success' => false, 'error' => 'Не указана сессия'], 400);
+    // Удалить можно только сессию своего ресторана. Если это текущая сессия —
+    // тоже удаляем и стираем cookie, фронт после этого получит 401 и редиректнет на логин.
+    $st = $pdo->prepare("SELECT token FROM ro_user_sessions WHERE id = ? AND ro_user_id = ? LIMIT 1");
+    $st->execute([$sessionId, (int)$rest['id']]);
+    $row = $st->fetch();
+    if (!$row) roRespond(['success' => false, 'error' => 'Сессия не найдена'], 404);
+    $pdo->prepare("DELETE FROM ro_user_sessions WHERE id = ?")->execute([$sessionId]);
+    $currentToken = roGetSessionToken();
+    if ($currentToken && hash_equals((string)$row['token'], (string)$currentToken)) {
+        roClearSessionCookie();
+    }
+    roRespond(['success' => true]);
+}
+
+// --- Выйти со всех остальных устройств ---
+if ($roAction === 'sessions-revoke-others' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $currentToken = roGetSessionToken();
+    $removed = roRevokeAllSessionsForUser($pdo, (int)$rest['id'], $currentToken);
+    roRespond(['success' => true, 'removed' => $removed]);
 }
 
 // --- Heartbeat: где сейчас ресторан в кабинете (для /admin → «Рестораны онлайн») ---
@@ -1869,6 +1925,9 @@ if ($roAction === 'change-password' && $method === 'POST') {
     }
     $newHash = password_hash($newPass, PASSWORD_DEFAULT);
     $pdo->prepare("UPDATE ro_users SET password_hash = ?, password_changed_at = NOW() WHERE id = ?")->execute([$newHash, $user['id']]);
+    // После смены пароля гасим все ОСТАЛЬНЫЕ сессии этого ресторана.
+    // Текущую (этого устройства) оставляем — иначе сразу выкинуло бы на логин.
+    roRevokeAllSessionsForUser($pdo, (int)$user['id'], roGetSessionToken());
     roLogAudit($pdo, [
         'action'            => 'password_changed',
         'actor_type'        => 'restaurant',
@@ -4674,6 +4733,11 @@ if (strpos($roAction, 'admin') === 0) {
             $active = (int)($body['is_active'] ?? 1);
             roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
             $pdo->prepare("UPDATE ro_users SET is_active = ? WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$active, $restNum, $restGroup]);
+            // Если деактивируем — гасим все живые сессии, иначе ресторан останется
+            // внутри по уже выданным токенам.
+            if ($active === 0) {
+                roRevokeAllSessionsForRestaurant($pdo, $restNum, $restGroup);
+            }
             roRespond(['success' => true]);
         }
 
@@ -4686,6 +4750,9 @@ if (strpos($roAction, 'admin') === 0) {
             roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
             $hash = password_hash($password, PASSWORD_BCRYPT);
             $pdo->prepare("UPDATE ro_users SET password_hash = ?, password_changed_at = NOW() WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$hash, $restNum, $restGroup]);
+            // После сброса пароля закупщиком гасим ВСЕ сессии — мы не знаем, кто
+            // в моменте внутри, и пароль уже не его.
+            roRevokeAllSessionsForRestaurant($pdo, $restNum, $restGroup);
             roLogAudit($pdo, [
                 'action'            => 'password_changed',
                 'actor_type'        => 'admin',

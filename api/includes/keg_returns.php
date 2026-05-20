@@ -109,34 +109,11 @@ function kegCalcCutoff(string $returnDate): DateTime {
 
 /**
  * Сессия ресторана через cookie ro_session или legacy X-RO-Token.
- * Включает абсолютный потолок 24 часа от last_login_at — иначе утёкший
- * токен живёт неограниченно, пока кто-то стучит в API.
+ * Сессии живут в ro_user_sessions (мультисессии, см. helpers.php).
  */
 function krGetRestaurantSession($pdo) {
-    $token = roGetSessionToken();
-    if (!$token) return null;
-    $s = $pdo->prepare("
-        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group,
-               ru.session_active_until, ru.last_login_at
-        FROM ro_users ru
-        WHERE ru.session_token = ? AND ru.is_active = 1
-    ");
-    $s->execute([$token]);
-    $user = $s->fetch();
+    $user = roReadActiveSessionRow($pdo);
     if (!$user) return null;
-    if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) return null;
-    // Абсолютный потолок 24 часа от логина. Без него таймер «3 часа неактивности»
-    // продлевает сессию бесконечно, пока есть запросы.
-    if (!empty($user['last_login_at'])) {
-        $loginTs = strtotime($user['last_login_at']);
-        if ($loginTs && (time() - $loginTs) > 24 * 3600) {
-            $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
-                ->execute([$user['id']]);
-            return null;
-        }
-    }
-    $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
-        ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
     $rest = krGetRestaurantByNumber($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
     $user['restaurant_id'] = isset($rest['id']) ? (int)$rest['id'] : null;
     $user['pickup_address'] = $rest['pickup_address'] ?? null;

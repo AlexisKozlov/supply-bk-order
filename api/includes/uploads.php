@@ -21,18 +21,10 @@ function canDownloadRestaurantInfoFile($pdo, $fileId) {
             if (($ACCESS_LEVELS[$p['restaurant-orders'] ?? 'none'] ?? 0) >= $ACCESS_LEVELS['view']) return true;
         }
     }
-    $token = roGetSessionToken();
-    if (!$token) return false;
-    $s = $pdo->prepare("
-        SELECT restaurant_number, legal_entity_group, session_active_until
-        FROM ro_users
-        WHERE session_token = ? AND is_active = 1
-        LIMIT 1
-    ");
-    $s->execute([$token]);
-    $rest = $s->fetch();
+    // Сессии живут в ro_user_sessions (см. helpers.php). Тут нам важна только
+    // принадлежность токена к активной сессии конкретного ресторана.
+    $rest = roReadActiveSessionRow($pdo);
     if (!$rest) return false;
-    if (!empty($rest['session_active_until']) && strtotime($rest['session_active_until']) < time()) return false;
     $group = $rest['legal_entity_group'] ?: (((int)$rest['restaurant_number'] >= 1000) ? 'PS' : 'BK_VM');
     $q = $pdo->prepare("
         SELECT p.id

@@ -204,21 +204,6 @@
             <button class="dash-push-onboard-skip" @click="dismissPushOnboarding" aria-label="Не сейчас">×</button>
           </div>
 
-          <!-- Сводка «Сегодня нужно сделать» -->
-          <div v-if="todaySignals.length" class="dash-today">
-            <div class="dash-today-head">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
-              <h3>Сегодня нужно сделать</h3>
-            </div>
-            <ul class="dash-today-list">
-              <li v-for="s in todaySignals" :key="s.key" class="dash-today-item" :class="'is-' + s.tone" @click="s.action">
-                <span class="dash-today-num">{{ s.count }}</span>
-                <span class="dash-today-text">{{ s.label }}</span>
-                <svg class="dash-today-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-              </li>
-            </ul>
-          </div>
-
           <!-- Напоминания на сегодня -->
           <RestaurantTodayReminders />
 
@@ -1105,6 +1090,60 @@
         </form>
       </div>
 
+      <!-- Активные устройства -->
+      <div class="pf-card">
+        <div class="pf-card-head">
+          <span class="pf-card-icon pf-icon-devices">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="11" rx="2"/><path d="M6 19h6"/><path d="M9 15v4"/><rect x="16" y="9" width="6" height="11" rx="1.5"/></svg>
+          </span>
+          <div class="pf-card-title">
+            <h3>Активные устройства</h3>
+            <p>Где сейчас открыт кабинет ресторана</p>
+          </div>
+        </div>
+
+        <div v-if="sessionsLoading && !sessionsList.length" class="pf-msg" style="text-align:center;">
+          <span class="cab-spin cab-spin-sm"></span>
+        </div>
+        <div v-else-if="sessionsError" class="pf-msg pf-msg-err">{{ sessionsError }}</div>
+        <div v-else-if="!sessionsList.length" class="pf-msg" style="color:#8b7355;">Активных сессий нет</div>
+        <ul v-else class="pf-tg-list">
+          <li v-for="s in sessionsList" :key="s.id" class="pf-tg-item">
+            <div class="pf-tg-item-info">
+              <div class="pf-tg-item-name">
+                {{ s.device_label || 'Устройство' }}
+                <span v-if="s.is_current" class="pf-tg-item-ok" style="margin-left:6px;">это устройство</span>
+              </div>
+              <div class="pf-tg-item-meta">
+                <span>Активность: {{ sessionRelativeTime(s.last_seen_at) }}</span>
+                <span v-if="s.ip_address"> · IP {{ s.ip_address }}</span>
+                <span v-if="s.remember"> · запомнено на 30 дней</span>
+              </div>
+            </div>
+            <button
+              class="pf-btn ghost sm"
+              :class="{ danger: !s.is_current }"
+              :disabled="sessionRevoking === s.id"
+              @click="revokeSessionById(s)"
+            >
+              {{ s.is_current ? 'Выйти' : 'Завершить' }}
+            </button>
+          </li>
+        </ul>
+
+        <div v-if="sessionsMessage" class="pf-msg pf-msg-ok" style="margin-top:10px;">{{ sessionsMessage }}</div>
+        <button
+          v-if="sessionsList.filter(s => !s.is_current).length"
+          class="pf-btn ghost danger block"
+          style="margin-top:10px;"
+          :disabled="sessionRevoking === 'others'"
+          @click="revokeOtherSessions"
+        >
+          <span v-if="sessionRevoking === 'others'" class="cab-spin cab-spin-sm"></span>
+          Выйти со всех остальных устройств
+        </button>
+      </div>
+
       <!-- Контакты -->
       <div class="pf-card">
         <div class="pf-card-head">
@@ -1524,6 +1563,13 @@ const pwError = ref('');
 const pwSuccess = ref(false);
 const pwLoading = ref(false);
 
+// ═══ Активные устройства ═══
+const sessionsList = ref([]);
+const sessionsLoading = ref(false);
+const sessionsError = ref('');
+const sessionRevoking = ref(null);   // id отзываемой сессии или 'others'
+const sessionsMessage = ref('');
+
 // ═══ History ═══
 const historyLoading = ref(false);
 const historyOrders = ref([]);
@@ -1584,20 +1630,13 @@ const dashOrdersPending = computed(() => {
   return total;
 });
 
-// ═══ PWA push онбординг + Сводка «Сегодня нужно сделать» (см. composable) ═══
+// ═══ PWA push онбординг (см. composable) ═══
 const {
   push,
   showPushOnboarding,
   dismissPushOnboarding,
   enablePushOnboarding,
-  todaySignals,
-} = useCabinetDashboard({
-  stockCollection,
-  stockCollectionUnfilledCount,
-  surveyPendingCount,
-  switchTab: (tab, sub) => switchTab(tab, sub),
-  toast,
-});
+} = useCabinetDashboard({ toast });
 
 const urgentItems = computed(() => {
   const items = [];
@@ -2682,10 +2721,76 @@ async function changePassword() {
   pwLoading.value = true;
   try {
     const data = await roStore.changePassword(pwOld.value, pwNew.value);
-    if (data.success) { pwSuccess.value = true; pwOld.value = ''; pwNew.value = ''; pwConfirm.value = ''; }
-    else { pwError.value = data.error || 'Ошибка'; }
+    if (data.success) {
+      pwSuccess.value = true; pwOld.value = ''; pwNew.value = ''; pwConfirm.value = '';
+      // Список устройств мог поменяться — другие сессии гасятся на сервере.
+      loadSessions().catch(() => {});
+    } else { pwError.value = data.error || 'Ошибка'; }
   } catch (e) { pwError.value = e.message || 'Ошибка соединения'; }
   finally { pwLoading.value = false; }
+}
+
+// ═══ Активные устройства ═══
+async function loadSessions() {
+  sessionsLoading.value = true;
+  sessionsError.value = '';
+  try {
+    const data = await roStore.loadSessions();
+    sessionsList.value = data.sessions || [];
+  } catch (e) {
+    sessionsError.value = e.message || 'Не удалось загрузить устройства';
+  } finally {
+    sessionsLoading.value = false;
+  }
+}
+
+async function revokeSessionById(session) {
+  if (!session?.id) return;
+  if (!confirm(session.is_current
+      ? 'Выйти с этого устройства? Вас перебросит на экран входа.'
+      : `Завершить сессию устройства «${session.device_label || 'Устройство'}»?`)) return;
+  sessionRevoking.value = session.id;
+  try {
+    await roStore.revokeSession(session.id);
+    if (session.is_current) {
+      // Эта сессия и есть текущая — фронт всё равно получит 401, лучше явный logout.
+      roStore.logout();
+      return;
+    }
+    sessionsMessage.value = 'Сессия завершена';
+    await loadSessions();
+  } catch (e) {
+    sessionsError.value = e.message || 'Не удалось завершить сессию';
+  } finally {
+    sessionRevoking.value = null;
+  }
+}
+
+async function revokeOtherSessions() {
+  if (!confirm('Выйти со всех остальных устройств? На них появится экран входа.')) return;
+  sessionRevoking.value = 'others';
+  try {
+    const data = await roStore.revokeOtherSessions();
+    sessionsMessage.value = data.removed > 0
+      ? `Завершено сессий: ${data.removed}`
+      : 'Других активных устройств не было';
+    await loadSessions();
+  } catch (e) {
+    sessionsError.value = e.message || 'Не удалось завершить сессии';
+  } finally {
+    sessionRevoking.value = null;
+  }
+}
+
+function sessionRelativeTime(value) {
+  if (!value) return '';
+  const ts = new Date(value.replace(' ', 'T')).getTime();
+  if (Number.isNaN(ts)) return '';
+  const diff = (Date.now() - ts) / 1000;
+  if (diff < 60) return 'только что';
+  if (diff < 3600) return Math.floor(diff / 60) + ' мин. назад';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' ч. назад';
+  return Math.floor(diff / 86400) + ' дн. назад';
 }
 
 // Telegram
@@ -3151,7 +3256,7 @@ async function loadCabinetData() {
   if (activeTab.value === 'info') await loadImportantPostsWithOptions({ previewAll: true });
   if (activeTab.value === 'surveys') await loadSurveyList();
   if (activeTab.value === 'stock') await checkStockCollection();
-  if (activeTab.value === 'profile') await loadTgStatus();
+  if (activeTab.value === 'profile') { await loadTgStatus(); loadSessions().catch(() => {}); }
   startCabinetBackgroundLoading();
 }
 
@@ -3494,48 +3599,6 @@ onUnmounted(() => {
   .dash-push-onboard-text strong { font-size: 13.5px; }
   .dash-push-onboard-text span { font-size: 12px; }
 }
-
-/* «Сегодня нужно сделать» — сводка ключевых дел сверху дашборда */
-.dash-today {
-  background: linear-gradient(180deg, #FFF8F0 0%, #FFFFFF 100%);
-  border: 1.5px solid #F4D8B8;
-  border-radius: 14px;
-  padding: 12px 16px;
-  box-shadow: 0 2px 8px rgba(231,111,81,.08);
-}
-.dash-today-head {
-  display: flex; align-items: center; gap: 8px;
-  color: #b35900; font-size: 13px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.04em;
-  margin-bottom: 10px;
-}
-.dash-today-head h3 { margin: 0; font: inherit; }
-.dash-today-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-.dash-today-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px;
-  background: #fff;
-  border: 1px solid #f0e0c8;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: border-color .15s, transform .12s;
-}
-.dash-today-item:hover { border-color: #E76F51; transform: translateX(2px); }
-.dash-today-item.is-warn { border-color: #f6c878; background: #fff8ec; }
-.dash-today-item.is-alert { border-color: #f6a8a8; background: #fde8e8; }
-.dash-today-item.is-info { border-color: #c4d8e8; background: #f3f8fb; }
-.dash-today-num {
-  flex-shrink: 0;
-  min-width: 28px; height: 28px; padding: 0 8px;
-  background: #E76F51; color: #fff;
-  border-radius: 14px;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 14px;
-}
-.dash-today-item.is-alert .dash-today-num { background: #c62828; }
-.dash-today-item.is-info .dash-today-num { background: #1976d2; }
-.dash-today-text { flex: 1; font-size: 14px; color: #2C1A12; line-height: 1.35; }
-.dash-today-arrow { color: #B0A090; flex-shrink: 0; }
 
 @media (min-width: 960px) {
   .dash-wrap { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); column-gap: 24px; row-gap: 0; align-items: start; }
@@ -4624,6 +4687,7 @@ tr.del-err { background: #fef2f2; }
 }
 .pf-icon-tg { background: #E1F5FE; color: #0277BD; }
 .pf-icon-lock { background: #F3E5F5; color: #6B46C1; }
+.pf-icon-devices { background: #E8F5E9; color: #2E7D32; }
 .pf-icon-contact { background: #FFF1E0; color: #C16B4D; }
 .pf-card-title { min-width: 0; flex: 1; }
 .pf-card-title h3 { margin: 0; font-size: 15px; font-weight: 700; color: #2C1A12; }
