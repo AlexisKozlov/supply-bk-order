@@ -67,6 +67,96 @@ function roGetRestaurantRow($pdo, $restaurantNumber, $group = null) {
  * устройства. «Новое» = UA отсутствует среди активных сессий ресторана.
  * Тихая функция: если бот не настроен или подписок нет — ничего не делает.
  */
+/**
+ * Отправка письма на подтверждённый email учётки ресторана.
+ *
+ * @param string $type 'welcome' | 'pwd_changed' | 'new_device'
+ * @param array  $ctx  доп. контекст для шаблона (ip, user_agent, source...)
+ */
+function roSendAccountEmail($pdo, $userId, $type, array $ctx = []) {
+    try {
+        $stmt = $pdo->prepare("SELECT id, restaurant_number, legal_entity_group, email, email_verified_at FROM ro_users WHERE id = ? LIMIT 1");
+        $stmt->execute([(int)$userId]);
+        $u = $stmt->fetch();
+        if (!$u || empty($u['email']) || empty($u['email_verified_at'])) return;
+
+        require_once __DIR__ . '/mail_send.php';
+        require_once __DIR__ . '/mail_templates.php';
+
+        $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
+        $restNum = function_exists('formatRestaurantNumber')
+            ? formatRestaurantNumber((int)$u['restaurant_number'])
+            : (string)$u['restaurant_number'];
+        $when = date('d.m.Y H:i');
+
+        switch ($type) {
+            case 'welcome': {
+                $subject = 'Добро пожаловать — Supply Department';
+                $bodyHtml = '<p style="margin:0 0 12px;">Для ресторана №<strong>' . htmlspecialchars($restNum, ENT_QUOTES, 'UTF-8') . '</strong> открыт вход в кабинет на портале закупок.</p>'
+                          . '<p style="margin:0 0 6px;"><strong>Куда заходить:</strong> ' . htmlspecialchars($siteUrl, ENT_QUOTES, 'UTF-8') . '/restaurant/login</p>'
+                          . '<p style="margin:0 0 6px;"><strong>Логин:</strong> номер ресторана <code>' . htmlspecialchars($restNum, ENT_QUOTES, 'UTF-8') . '</code> или ваш email <code>' . htmlspecialchars($u['email'], ENT_QUOTES, 'UTF-8') . '</code></p>'
+                          . '<p style="margin:0;"><strong>Пароль</strong> вам сообщил закупщик. Если не помните — нажмите «Забыли пароль?» на странице входа.</p>';
+                $html = renderMailHtml([
+                    'title'   => 'Добро пожаловать в Supply Department',
+                    'preview' => 'Вход в кабинет открыт',
+                    'intro'   => 'Здравствуйте!',
+                    'body'    => $bodyHtml,
+                    'cta'     => ['text' => 'Перейти ко входу', 'url' => $siteUrl . '/restaurant/login'],
+                    'footer'  => 'Если письмо пришло по ошибке — просто проигнорируйте его.',
+                ]);
+                break;
+            }
+            case 'pwd_changed': {
+                $subject = 'Пароль кабинета изменён — Supply Department';
+                $source = $ctx['source'] ?? 'через портал';
+                $ip = !empty($ctx['ip']) ? htmlspecialchars((string)$ctx['ip'], ENT_QUOTES, 'UTF-8') : '—';
+                $bodyHtml = '<p style="margin:0 0 12px;">Пароль кабинета ресторана №<strong>' . htmlspecialchars($restNum, ENT_QUOTES, 'UTF-8') . '</strong> был изменён.</p>'
+                          . '<p style="margin:0 0 6px;"><strong>Когда:</strong> ' . $when . '</p>'
+                          . '<p style="margin:0 0 6px;"><strong>Способ:</strong> ' . htmlspecialchars((string)$source, ENT_QUOTES, 'UTF-8') . '</p>'
+                          . '<p style="margin:0;"><strong>IP:</strong> ' . $ip . '</p>';
+                $html = renderMailHtml([
+                    'title'   => 'Пароль изменён',
+                    'preview' => 'Пароль кабинета ресторана был изменён ' . $when,
+                    'intro'   => 'Здравствуйте!',
+                    'body'    => $bodyHtml,
+                    'cta'     => ['text' => 'Войти в кабинет', 'url' => $siteUrl . '/restaurant/login'],
+                    'footer'  => 'Если это не вы — немедленно обратитесь к закупщику. Свяжитесь в Telegram: @alexiskozlov',
+                ]);
+                break;
+            }
+            case 'new_device': {
+                $subject = 'Новый вход в кабинет — Supply Department';
+                $deviceLabel = $ctx['device'] ?? 'Неизвестное устройство';
+                $ip = !empty($ctx['ip']) ? htmlspecialchars((string)$ctx['ip'], ENT_QUOTES, 'UTF-8') : '—';
+                $source = $ctx['source'] ?? 'по паролю';
+                $bodyHtml = '<p style="margin:0 0 12px;">В кабинет ресторана №<strong>' . htmlspecialchars($restNum, ENT_QUOTES, 'UTF-8') . '</strong> зашли с нового устройства.</p>'
+                          . '<p style="margin:0 0 6px;"><strong>Устройство:</strong> ' . htmlspecialchars((string)$deviceLabel, ENT_QUOTES, 'UTF-8') . '</p>'
+                          . '<p style="margin:0 0 6px;"><strong>IP:</strong> ' . $ip . '</p>'
+                          . '<p style="margin:0 0 6px;"><strong>Когда:</strong> ' . $when . '</p>'
+                          . '<p style="margin:0;"><strong>Способ:</strong> ' . htmlspecialchars((string)$source, ENT_QUOTES, 'UTF-8') . '</p>';
+                $html = renderMailHtml([
+                    'title'   => 'Новый вход в кабинет',
+                    'preview' => 'Вход с нового устройства ' . $when,
+                    'intro'   => 'Здравствуйте!',
+                    'body'    => $bodyHtml,
+                    'cta'     => ['text' => 'Это были не вы? Сбросьте пароль', 'url' => $siteUrl . '/forgot-password'],
+                    'footer'  => 'Если это были вы — никаких действий не требуется. Если нет — немедленно сбросьте пароль.',
+                ]);
+                break;
+            }
+            default:
+                return;
+        }
+
+        $r = sendEmail($u['email'], $subject, $html, true);
+        if (!$r['success']) {
+            error_log('[roSendAccountEmail] type=' . $type . ' failed: ' . ($r['error'] ?? 'unknown'));
+        }
+    } catch (Throwable $e) {
+        error_log('[roSendAccountEmail] exception: ' . $e->getMessage());
+    }
+}
+
 function roNotifyNewDeviceLogin($pdo, $restaurantNumber, $legalEntityGroup, $ip, $ua, $loginSource) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
@@ -96,6 +186,21 @@ function roNotifyNewDeviceLogin($pdo, $restaurantNumber, $legalEntityGroup, $ip,
     } catch (Throwable $e) {
         // Уведомление — best effort; не должно ломать логин.
     }
+    // Дублируем уведомление на подтверждённый email.
+    try {
+        $userStmt = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? LIMIT 1");
+        $userStmt->execute([(int)$restaurantNumber, $legalEntityGroup]);
+        $userId = (int)($userStmt->fetchColumn() ?: 0);
+        if ($userId) {
+            $deviceLabel = function_exists('roMakeDeviceLabel') ? (roMakeDeviceLabel($ua) ?: 'Неизвестное устройство') : 'Неизвестное устройство';
+            $sourceText = $loginSource === 'Telegram' ? 'через Telegram-ссылку' : 'по паролю';
+            roSendAccountEmail($pdo, $userId, 'new_device', [
+                'device' => $deviceLabel,
+                'ip'     => $ip,
+                'source' => $sourceText,
+            ]);
+        }
+    } catch (Throwable $e) {}
 }
 
 function roGetRestaurantSession($pdo) {
@@ -2007,6 +2112,10 @@ if ($roAction === 'change-password' && $method === 'POST') {
         'restaurant_number' => $rest['restaurant_number'],
         'actor_name'        => 'Ресторан ' . $rest['restaurant_number'],
     ]);
+    roSendAccountEmail($pdo, (int)$user['id'], 'pwd_changed', [
+        'source' => 'из кабинета (раздел «Смена пароля»)',
+        'ip'     => $clientIp,
+    ]);
     roRespond(['success' => true]);
 }
 
@@ -3388,6 +3497,11 @@ if ($roAction === 'reset-password-by-email' && $method === 'POST') {
         $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'reset_ok')")
             ->execute([$row['email'], $clientIp]);
     } catch (Throwable $e) {}
+
+    roSendAccountEmail($pdo, (int)$row['user_id'], 'pwd_changed', [
+        'source' => 'по ссылке из email',
+        'ip'     => $clientIp,
+    ]);
 
     roRespond(['success' => true]);
 }
@@ -5300,6 +5414,12 @@ if (strpos($roAction, 'admin') === 0) {
             $le = roGetLegalEntity($pdo, $restNum, $restGroup);
             $hash = password_hash($password, PASSWORD_BCRYPT);
 
+            // Определяем — это первое задание пароля (welcome) или смена существующего.
+            $beforeStmt = $pdo->prepare("SELECT id, password_hash FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? LIMIT 1");
+            $beforeStmt->execute([$restNum, $restGroup]);
+            $beforeRow = $beforeStmt->fetch();
+            $wasFresh = !$beforeRow || empty($beforeRow['password_hash']);
+
             $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity, password_changed_at) VALUES (?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1, password_changed_at = NOW()")
                 ->execute([$restNum, $restGroup, $hash, $le]);
             roLogAudit($pdo, [
@@ -5308,6 +5428,17 @@ if (strpos($roAction, 'admin') === 0) {
                 'restaurant_number' => $restNum,
                 'actor_name'        => resolveActorName($pdo, $sessionUser),
             ]);
+
+            // Перечитываем id (для случая, когда учётки не было).
+            $afterStmt = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? LIMIT 1");
+            $afterStmt->execute([$restNum, $restGroup]);
+            $userId = (int)$afterStmt->fetchColumn();
+            if ($userId) {
+                roSendAccountEmail($pdo, $userId, $wasFresh ? 'welcome' : 'pwd_changed', [
+                    'source' => 'закупщик задал ' . ($wasFresh ? 'первый пароль' : 'новый пароль') . ' через админку',
+                    'ip'     => $_SERVER['REMOTE_ADDR'] ?? null,
+                ]);
+            }
 
             roRespond(['success' => true, 'restaurant_number' => $restNum, 'legal_entity_group' => $restGroup]);
         }
@@ -5332,11 +5463,17 @@ if (strpos($roAction, 'admin') === 0) {
             $bulkActorName = resolveActorName($pdo, $sessionUser);
             $insert = $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity, password_changed_at) VALUES (?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1, password_changed_at = NOW()");
             $check = $pdo->prepare("SELECT password_hash FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ?");
+            $idLookup = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? LIMIT 1");
             foreach ($rests->fetchAll() as $r) {
+                $wasFresh = true;
                 if ($mode === 'missing') {
                     $check->execute([$r['number'], $r['legal_entity_group']]);
                     $existing = $check->fetchColumn();
                     if ($existing) continue;
+                } else {
+                    $check->execute([$r['number'], $r['legal_entity_group']]);
+                    $existing = $check->fetchColumn();
+                    $wasFresh = empty($existing);
                 }
                 $le = roGetLegalEntity($pdo, $r['number'], $r['legal_entity_group']);
                 $insert->execute([$r['number'], $r['legal_entity_group'], $hash, $le]);
@@ -5346,6 +5483,14 @@ if (strpos($roAction, 'admin') === 0) {
                     'restaurant_number' => (int)$r['number'],
                     'actor_name'        => $bulkActorName,
                 ]);
+                $idLookup->execute([$r['number'], $r['legal_entity_group']]);
+                $uid = (int)$idLookup->fetchColumn();
+                if ($uid) {
+                    roSendAccountEmail($pdo, $uid, $wasFresh ? 'welcome' : 'pwd_changed', [
+                        'source' => 'массовая выдача пароля закупщиком',
+                        'ip'     => $_SERVER['REMOTE_ADDR'] ?? null,
+                    ]);
+                }
                 $changed++;
             }
             roRespond(['success' => true, 'created' => $changed, 'mode' => $mode]);
@@ -5447,6 +5592,15 @@ if (strpos($roAction, 'admin') === 0) {
                 'restaurant_number' => $restNum,
                 'actor_name'        => resolveActorName($pdo, $sessionUser),
             ]);
+            $idStmt = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? LIMIT 1");
+            $idStmt->execute([$restNum, $restGroup]);
+            $userId = (int)$idStmt->fetchColumn();
+            if ($userId) {
+                roSendAccountEmail($pdo, $userId, 'pwd_changed', [
+                    'source' => 'сброс пароля закупщиком через админку',
+                    'ip'     => $_SERVER['REMOTE_ADDR'] ?? null,
+                ]);
+            }
             roRespond(['success' => true]);
         }
 

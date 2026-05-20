@@ -530,6 +530,19 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Ресторан не найден'], 404);
         }
 
+        // Уведомление на email (если у учётки есть подтверждённый адрес).
+        try {
+            $uidStmt = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? LIMIT 1");
+            $uidStmt->execute([$restaurantNumber, $resetGroup]);
+            $userId = (int)$uidStmt->fetchColumn();
+            if ($userId && function_exists('roSendAccountEmail')) {
+                roSendAccountEmail($pdo, $userId, 'pwd_changed', [
+                    'source' => 'через код из Telegram',
+                    'ip'     => $clientIp ?? ($_SERVER['REMOTE_ADDR'] ?? null),
+                ]);
+            }
+        } catch (Throwable $e) {}
+
         // Сбрасываем все коды по этому ресторану в этой группе.
         $pdo->prepare("DELETE FROM password_reset_codes WHERE restaurant_number = ? AND legal_entity_group = ?")
             ->execute([$restaurantNumber, $resetGroup]);
