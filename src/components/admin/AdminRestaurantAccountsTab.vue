@@ -416,10 +416,11 @@ async function handleToggleUser(u) {
 
 .arat-table th,
 .arat-table td {
-  padding: 10px 12px;
+  padding: 6px 10px;
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
   border-bottom: 1px solid #f0ebe4;
+  line-height: 1.35;
 }
 .arat-table tbody tr:last-child td { border-bottom: none; }
 .arat-table thead th {
@@ -442,12 +443,13 @@ async function handleToggleUser(u) {
 .arat-col-actions { width: 1%; white-space: nowrap; }
 
 .arat-rest-addr { color: #502314; line-height: 1.3; }
-.arat-rest-le { color: #a08570; font-size: 11px; line-height: 1.3; margin-top: 2px; }
+.arat-rest-le { color: #a08570; font-size: 11px; line-height: 1.2; }
 
-.arat-email-addr { color: #502314; word-break: break-all; line-height: 1.3; margin-bottom: 3px; }
-.arat-email-empty { color: #c4b8a8; font-style: italic; }
+.arat-email-addr { color: #502314; word-break: break-all; line-height: 1.3; }
+.arat-email-empty { color: #c4b8a8; font-style: italic; font-size: 12px; }
 
-.arat-muted { color: #a08570; }
+.arat-muted { color: #a08570; font-size: 11px; }
+.arat-col-meta div + div { margin-top: 1px; }
 
 .arat-badge {
   display: inline-block;

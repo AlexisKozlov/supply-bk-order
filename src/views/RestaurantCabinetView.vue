@@ -1025,6 +1025,33 @@
         </div>
       </div>
 
+      <!-- Email -->
+      <div class="pf-card">
+        <div class="pf-card-head">
+          <span class="pf-card-icon pf-icon-email">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </span>
+          <div class="pf-card-title">
+            <h3>Email</h3>
+            <p>Восстановление пароля и важные уведомления</p>
+          </div>
+        </div>
+
+        <div v-if="roStore.accountInfo?.email" class="pf-email-row">
+          <div class="pf-email-info">
+            <div class="pf-email-addr">{{ roStore.accountInfo.email }}</div>
+            <span class="pf-email-badge" :class="roStore.accountInfo.email_verified ? 'ok' : 'warn'">
+              {{ roStore.accountInfo.email_verified ? '✓ подтверждён' : 'не подтверждён' }}
+            </span>
+          </div>
+          <button class="pf-btn ghost sm" @click="showEmailModal = true">Изменить</button>
+        </div>
+        <div v-else class="pf-email-empty">
+          <p class="pf-email-empty-text">Email не указан. Без него восстановить пароль можно будет только через Telegram.</p>
+          <button class="pf-btn primary block" @click="showEmailModal = true">Указать email</button>
+        </div>
+      </div>
+
       <!-- Telegram -->
       <div class="pf-card">
         <div class="pf-card-head">
@@ -4735,6 +4762,37 @@ tr.del-err { background: #fef2f2; }
 }
 .pf-icon-tg { background: #E1F5FE; color: #0277BD; }
 .pf-icon-lock { background: #F3E5F5; color: #6B46C1; }
+.pf-icon-email { background: #FFF3E0; color: #E76F51; }
+
+.pf-email-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pf-email-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.pf-email-addr {
+  font-size: 15px;
+  font-weight: 600;
+  color: #502314;
+  word-break: break-all;
+}
+.pf-email-badge {
+  align-self: flex-start;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.pf-email-badge.ok   { background: #ecfdf5; color: #16a34a; }
+.pf-email-badge.warn { background: #fef3c7; color: #b45309; }
+.pf-email-empty-text {
+  margin: 0 0 12px;
+  color: #8b7355;
+  font-size: 13px;
+  line-height: 1.5;
+}
 .pf-icon-devices { background: #E8F5E9; color: #2E7D32; }
 .pf-icon-contact { background: #FFF1E0; color: #C16B4D; }
 .pf-card-title { min-width: 0; flex: 1; }
