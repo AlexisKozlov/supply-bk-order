@@ -12,11 +12,81 @@
           </div>
           <div>
             <h1>Сброс пароля</h1>
-            <p>Введите номер ресторана, чтобы получить код в Telegram</p>
+            <p>Выберите, как восстановить пароль кабинета</p>
           </div>
         </div>
 
-        <form @submit.prevent="handleRequest">
+        <!-- Переключатель способа -->
+        <div class="ro-method-tabs">
+          <button
+            type="button"
+            class="ro-method-tab"
+            :class="{ active: method === 'email' }"
+            @click="switchMethod('email')"
+            :disabled="loading"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            По email
+          </button>
+          <button
+            type="button"
+            class="ro-method-tab"
+            :class="{ active: method === 'telegram' }"
+            @click="switchMethod('telegram')"
+            :disabled="loading"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            По Telegram
+          </button>
+        </div>
+
+        <!-- Email-форма -->
+        <form v-if="method === 'email'" @submit.prevent="handleRequestByEmail">
+          <div class="ro-field">
+            <label>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              Email кабинета ресторана
+            </label>
+            <div class="ro-input-wrap">
+              <input
+                v-model="email"
+                type="email"
+                inputmode="email"
+                autocomplete="email"
+                placeholder="your-name@example.com"
+                required
+                autofocus
+                :disabled="loading || success"
+              />
+              <span class="ro-input-icon">@</span>
+            </div>
+          </div>
+
+          <div v-if="error" class="ro-error">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            {{ error }}
+          </div>
+
+          <div v-if="success" class="ro-success">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            {{ successMessage }}
+          </div>
+
+          <button v-if="!success" type="submit" class="ro-submit-btn" :disabled="loading || !email">
+            <span v-if="loading" class="ro-spinner"></span>
+            <template v-else>
+              Отправить ссылку
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            </template>
+          </button>
+
+          <p class="ro-method-hint">
+            Email-способ работает, если адрес был указан и подтверждён в кабинете. Если нет — выберите «По Telegram».
+          </p>
+        </form>
+
+        <!-- Telegram-форма (как было раньше) -->
+        <form v-else @submit.prevent="handleRequestByTelegram">
           <div class="ro-field">
             <label>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -30,7 +100,6 @@
                 autocapitalize="characters"
                 placeholder="Например: 24 или PS01"
                 required
-                autofocus
                 :disabled="loading"
               />
               <span class="ro-input-icon">#</span>
@@ -54,6 +123,10 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </template>
           </button>
+
+          <p class="ro-method-hint">
+            Код придёт в Telegram-бот, к которому привязан ресторан. Если бот не подключён — выберите «По email» или обратитесь к закупщику.
+          </p>
         </form>
 
         <div class="ro-back-link">
@@ -70,36 +143,61 @@ import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 
 const router = useRouter();
+
+const method = ref('email');
+const email = ref('');
 const restaurantNumber = ref('');
 const loading = ref(false);
 const error = ref('');
 const success = ref(false);
 const successMessage = ref('');
 
-async function handleRequest() {
+function switchMethod(m) {
+  if (loading.value) return;
+  method.value = m;
+  error.value = '';
+  success.value = false;
+  successMessage.value = '';
+}
+
+async function handleRequestByEmail() {
   error.value = '';
   success.value = false;
   loading.value = true;
-
   try {
-    const { data, error: rpcError } = await db.rpc('request_password_reset', {
-      restaurant_number: restaurantNumber.value,
+    const apiBase = `${window.location.origin}/api/ro`;
+    const res = await fetch(`${apiBase}/request-password-reset-by-email`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.value.trim() }),
     });
-
-    if (rpcError) {
-      error.value = rpcError;
-      return;
-    }
-
+    const data = await res.json().catch(() => ({}));
     if (data?.error) {
       error.value = data.error;
       return;
     }
+    success.value = true;
+    successMessage.value = 'Если email указан и подтверждён в кабинете — на него отправлена ссылка для сброса пароля. Проверьте папку «Входящие» и «Спам». Ссылка действительна 30 минут.';
+  } catch (e) {
+    error.value = e?.message || 'Ошибка соединения с сервером';
+  } finally {
+    loading.value = false;
+  }
+}
 
+async function handleRequestByTelegram() {
+  error.value = '';
+  success.value = false;
+  loading.value = true;
+  try {
+    const { data, error: rpcError } = await db.rpc('request_password_reset', {
+      restaurant_number: restaurantNumber.value,
+    });
+    if (rpcError) { error.value = rpcError; return; }
+    if (data?.error) { error.value = data.error; return; }
     success.value = true;
     successMessage.value = 'Если ресторан подписан на Telegram, код будет отправлен. Проверьте Telegram.';
-
-    // Через 2 секунды переходим на страницу ввода кода
     setTimeout(() => {
       router.push({
         name: 'VerifyResetCode',
@@ -127,7 +225,7 @@ async function handleRequest() {
 
 .ro-login-content {
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
 }
 
 .ro-login-card {
@@ -137,6 +235,7 @@ async function handleRequest() {
   width: 100%;
   box-shadow: 0 20px 60px rgba(80, 35, 20, 0.3), 0 4px 16px rgba(0, 0, 0, 0.1);
   animation: cardAppear 0.4s ease-out;
+  box-sizing: border-box;
 }
 
 @keyframes cardAppear {
@@ -148,8 +247,8 @@ async function handleRequest() {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 28px;
-  padding-bottom: 20px;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
   border-bottom: 1px solid #f0ebe4;
 }
 
@@ -177,9 +276,41 @@ async function handleRequest() {
   font-size: 13px;
 }
 
-.ro-field {
-  margin-bottom: 18px;
+.ro-method-tabs {
+  display: flex;
+  gap: 6px;
+  background: #faf6ef;
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 22px;
 }
+
+.ro-method-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #8b7355;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.ro-method-tab:hover:not(:disabled):not(.active) { color: #502314; }
+.ro-method-tab.active {
+  background: white;
+  color: #502314;
+  box-shadow: 0 1px 4px rgba(80, 35, 20, 0.1);
+}
+.ro-method-tab:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ro-field { margin-bottom: 18px; }
 
 .ro-field label {
   display: flex;
@@ -193,9 +324,7 @@ async function handleRequest() {
 
 .ro-field label svg { color: #8b7355; }
 
-.ro-input-wrap {
-  position: relative;
-}
+.ro-input-wrap { position: relative; }
 
 .ro-input-wrap input {
   width: 100%;
@@ -217,6 +346,7 @@ async function handleRequest() {
   box-shadow: 0 0 0 4px rgba(231, 111, 81, 0.08);
 }
 
+.ro-input-wrap input:disabled { opacity: 0.6; }
 .ro-input-wrap input::placeholder { color: #c4b8a8; }
 
 .ro-input-icon {
@@ -225,34 +355,33 @@ async function handleRequest() {
   top: 50%;
   transform: translateY(-50%);
   color: #b0a090;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
 }
 
-.ro-error {
+.ro-error,
+.ro-success {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  background: #fef2f2;
-  color: #dc2626;
   padding: 12px 14px;
   border-radius: 10px;
   font-size: 13px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.ro-error svg, .ro-success svg { flex-shrink: 0; margin-top: 2px; }
+
+.ro-error {
+  background: #fef2f2;
+  color: #dc2626;
   border: 1px solid #fecaca;
   animation: shake 0.4s ease;
 }
 
 .ro-success {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   background: #f0fdf4;
   color: #16a34a;
-  padding: 12px 14px;
-  border-radius: 10px;
-  font-size: 13px;
-  margin-bottom: 18px;
   border: 1px solid #bbf7d0;
 }
 
@@ -308,6 +437,14 @@ async function handleRequest() {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.ro-method-hint {
+  margin: 14px 0 0;
+  color: #a08570;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
 
 .ro-back-link {
   margin-top: 20px;

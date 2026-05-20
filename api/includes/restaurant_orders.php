@@ -3170,6 +3170,200 @@ if ($roAction === 'verify-email' && $method === 'POST') {
     roRespond(['valid' => true, 'email' => $row['email']]);
 }
 
+// ════════════════════════════════════════════════════════════════════
+// Сброс пароля ресторана по email (этап B).
+// Работает только для ro_users с email_verified_at IS NOT NULL.
+// Telegram-сброс остаётся рядом как fallback.
+// ════════════════════════════════════════════════════════════════════
+
+if ($roAction === 'request-password-reset-by-email' && $method === 'POST') {
+    $email = trim((string)($body['email'] ?? ''));
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        roRespond(['error' => 'Введите корректный email'], 400);
+    }
+    $email = mb_strtolower($email);
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? null;
+
+    // Тихий троттлинг — не палим лимиты.
+    //   - не более 5 запросов с одного IP за 10 минут;
+    //   - не более 1 запроса на email за 60 секунд.
+    try {
+        $ipStmt = $pdo->prepare("SELECT COUNT(*) FROM ro_password_reset_logs WHERE ip_address = ? AND created_at > (NOW() - INTERVAL 10 MINUTE)");
+        $ipStmt->execute([$clientIp]);
+        $ipCount = (int)$ipStmt->fetchColumn();
+
+        $emStmt = $pdo->prepare("SELECT COUNT(*) FROM ro_password_reset_logs WHERE email = ? AND created_at > (NOW() - INTERVAL 1 MINUTE)");
+        $emStmt->execute([$email]);
+        $emCount = (int)$emStmt->fetchColumn();
+
+        if ($ipCount >= 5 || $emCount >= 1) {
+            $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'rate_limited')")
+                ->execute([$email, $clientIp]);
+            roRespond(['success' => true]);
+        }
+    } catch (Throwable $e) {}
+
+    // Ищем учётку с подтверждённым email. Если нет/не подтверждена — всё равно success.
+    $userStmt = $pdo->prepare("SELECT id, restaurant_number, legal_entity_group, email, email_verified_at FROM ro_users WHERE email = ? AND is_active = 1 LIMIT 1");
+    $userStmt->execute([$email]);
+    $user = $userStmt->fetch();
+
+    if (!$user) {
+        try {
+            $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'not_found')")
+                ->execute([$email, $clientIp]);
+        } catch (Throwable $e) {}
+        roRespond(['success' => true]);
+    }
+    if (empty($user['email_verified_at'])) {
+        try {
+            $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'unverified')")
+                ->execute([$email, $clientIp]);
+        } catch (Throwable $e) {}
+        // Не палим, что email есть, но не подтверждён.
+        roRespond(['success' => true]);
+    }
+
+    $token = bin2hex(random_bytes(32));
+    $userAgent = mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+    try {
+        $pdo->prepare("INSERT INTO ro_password_reset_tokens (user_id, email, token, expires_at, ip_address, user_agent) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE), ?, ?)")
+            ->execute([(int)$user['id'], $email, $token, $clientIp, $userAgent]);
+    } catch (Throwable $e) {
+        error_log('[ro_pwd_reset] insert token failed: ' . $e->getMessage());
+        roRespond(['success' => true]);
+    }
+
+    require_once __DIR__ . '/mail_send.php';
+    require_once __DIR__ . '/mail_templates.php';
+
+    $siteUrl  = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
+    $resetUrl = $siteUrl . '/restaurant/reset-password-by-email?token=' . $token;
+    $restNum  = function_exists('formatRestaurantNumber')
+        ? formatRestaurantNumber($user['restaurant_number'])
+        : (string)$user['restaurant_number'];
+
+    $bodyHtml = '<p style="margin:0 0 12px;">Был получен запрос на сброс пароля кабинета ресторана №<strong>' . htmlspecialchars($restNum, ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
+              . '<p style="margin:0;">Нажмите кнопку ниже, чтобы задать новый пароль. Ссылка действительна <strong>30 минут</strong>.</p>';
+
+    $html = renderMailHtml([
+        'title'   => 'Сброс пароля',
+        'preview' => 'Ссылка для сброса пароля действительна 30 минут',
+        'intro'   => 'Здравствуйте!',
+        'body'    => $bodyHtml,
+        'cta'     => ['text' => 'Сбросить пароль', 'url' => $resetUrl],
+        'footer'  => 'Если вы не запрашивали сброс пароля — просто проигнорируйте это письмо, ваш текущий пароль останется без изменений.',
+    ]);
+
+    $sendResult = sendEmail($email, 'Сброс пароля кабинета ресторана — Supply Department', $html, true);
+
+    try {
+        $logRes = $sendResult['success'] ? 'sent' : 'not_found';
+        $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, ?)")
+            ->execute([$email, $clientIp, $logRes]);
+    } catch (Throwable $e) {}
+
+    if (!$sendResult['success']) {
+        error_log('[ro_pwd_reset] email send failed: ' . ($sendResult['error'] ?? 'unknown'));
+    }
+    roRespond(['success' => true]);
+}
+
+if ($roAction === 'verify-password-reset-by-email' && $method === 'POST') {
+    $token = trim((string)($body['token'] ?? ''));
+    if ($token === '' || !preg_match('/^[a-f0-9]{64}$/', $token)) {
+        roRespond(['valid' => false, 'reason' => 'invalid']);
+    }
+    $stmt = $pdo->prepare("SELECT t.id, t.user_id, t.email, t.used_at, (t.expires_at < NOW()) AS is_expired, ru.restaurant_number, ru.legal_entity_group FROM ro_password_reset_tokens t JOIN ro_users ru ON ru.id = t.user_id WHERE t.token = ? LIMIT 1");
+    $stmt->execute([$token]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        roRespond(['valid' => false, 'reason' => 'invalid']);
+    }
+    if ($row['used_at'] !== null) {
+        roRespond(['valid' => false, 'reason' => 'used']);
+    }
+    if ((int)$row['is_expired'] === 1) {
+        roRespond(['valid' => false, 'reason' => 'expired']);
+    }
+
+    $restNum = function_exists('formatRestaurantNumber')
+        ? formatRestaurantNumber($row['restaurant_number'])
+        : (string)$row['restaurant_number'];
+
+    // Маскированный email — чтобы пользователь убедился, что сбрасывает свой пароль.
+    $parts = explode('@', $row['email']);
+    $local = $parts[0] ?? '';
+    $domain = $parts[1] ?? '';
+    $maskedLocal = mb_strlen($local) <= 2 ? $local : mb_substr($local, 0, 1) . str_repeat('*', max(1, mb_strlen($local) - 2)) . mb_substr($local, -1);
+
+    roRespond([
+        'valid' => true,
+        'restaurant_label' => '№' . $restNum,
+        'email' => $maskedLocal . '@' . $domain,
+    ]);
+}
+
+if ($roAction === 'reset-password-by-email' && $method === 'POST') {
+    $token = trim((string)($body['token'] ?? ''));
+    $newPassword = (string)($body['new_password'] ?? '');
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? null;
+
+    if ($token === '' || !preg_match('/^[a-f0-9]{64}$/', $token)) {
+        roRespond(['error' => 'Неверный токен'], 400);
+    }
+    if (mb_strlen($newPassword) < 8) {
+        roRespond(['error' => 'Пароль должен быть не менее 8 символов'], 400);
+    }
+
+    $stmt = $pdo->prepare("SELECT t.id, t.user_id, t.email, t.used_at, (t.expires_at < NOW()) AS is_expired, ru.restaurant_number, ru.legal_entity_group FROM ro_password_reset_tokens t JOIN ro_users ru ON ru.id = t.user_id WHERE t.token = ? LIMIT 1");
+    $stmt->execute([$token]);
+    $row = $stmt->fetch();
+
+    if (!$row) {
+        try { $pdo->prepare("INSERT INTO ro_password_reset_logs (ip_address, result) VALUES (?, 'token_invalid')")->execute([$clientIp]); } catch (Throwable $e) {}
+        roRespond(['error' => 'Ссылка недействительна'], 400);
+    }
+    if ($row['used_at'] !== null) {
+        try { $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'token_used')")->execute([$row['email'], $clientIp]); } catch (Throwable $e) {}
+        roRespond(['error' => 'Ссылка уже была использована'], 400);
+    }
+    if ((int)$row['is_expired'] === 1) {
+        try { $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'token_expired')")->execute([$row['email'], $clientIp]); } catch (Throwable $e) {}
+        roRespond(['error' => 'Срок действия ссылки истёк. Запросите новую.'], 400);
+    }
+
+    $hash = password_hash($newPassword, PASSWORD_BCRYPT);
+
+    try {
+        $pdo->beginTransaction();
+        $pdo->prepare("UPDATE ro_users SET password_hash = ?, password_changed_at = NOW() WHERE id = ?")
+            ->execute([$hash, (int)$row['user_id']]);
+        $pdo->prepare("UPDATE ro_password_reset_tokens SET used_at = NOW() WHERE id = ?")
+            ->execute([(int)$row['id']]);
+        // Инвалидируем остальные неиспользованные токены этого юзера.
+        $pdo->prepare("UPDATE ro_password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL")
+            ->execute([(int)$row['user_id']]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('[ro_pwd_reset] reset failed: ' . $e->getMessage());
+        roRespond(['error' => 'Не удалось сменить пароль, попробуйте ещё раз'], 500);
+    }
+
+    // Гасим все активные сессии ресторана — после сброса все устройства должны перелогиниться.
+    try {
+        roRevokeAllSessionsForRestaurant($pdo, (int)$row['restaurant_number'], (string)$row['legal_entity_group']);
+    } catch (Throwable $e) {}
+
+    try {
+        $pdo->prepare("INSERT INTO ro_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'reset_ok')")
+            ->execute([$row['email'], $clientIp]);
+    } catch (Throwable $e) {}
+
+    roRespond(['success' => true]);
+}
+
 // --- Товары для формы ---
 if ($roAction === 'products' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
