@@ -49,41 +49,43 @@
       </div>
 
       <div class="sla-toolbar-row">
-        <span class="sla-toolbar-label">Гранулярность:</span>
+        <span class="sla-toolbar-label" title="Размер столбика на графике: каждый столбик — это день, неделя или месяц">Шаг времени:</span>
         <button
           v-for="g in GRANULARITY"
           :key="g.key"
           class="sla-chip"
           :class="{ active: granularity === g.key }"
           @click="granularity = g.key"
+          :title="`Группировать данные по ${g.label.toLowerCase()}`"
         >{{ g.label }}</button>
 
         <span class="sla-toolbar-divider"></span>
 
-        <span class="sla-toolbar-label">Группировка:</span>
+        <span class="sla-toolbar-label" title="Что показывают цветные группы на графике">Цвета по:</span>
         <button
           v-for="g in GROUPING"
           :key="g.key"
           class="sla-chip"
           :class="{ active: groupBy === g.key }"
           @click="groupBy = g.key"
+          :title="g.key === 'entity' ? 'Каждое юрлицо своим цветом' : 'Каждый тип хранения (сухой/холод/мороз) своим цветом'"
         >{{ g.label }}</button>
 
         <span class="sla-toolbar-divider"></span>
 
-        <label class="sla-toggle">
+        <label class="sla-toggle" title="Показывает на графике пунктирную линию с данными за такой же по длине предыдущий период">
           <input type="checkbox" v-model="comparePrev" />
           Сравнить с прошлым периодом
         </label>
 
-        <label v-if="!filterEntity && availableEntities.length > 1" class="sla-toggle">
+        <label v-if="!filterEntity && availableEntities.length > 1" class="sla-toggle" title="Сложить значения всех юрлиц в один общий показатель">
           <input type="checkbox" v-model="mergeEntities" @change="syncToUrl" />
-          Свести юрлица
+          Сложить склады в один
         </label>
 
-        <label class="sla-toggle">
+        <label class="sla-toggle" title="Подписать каждый столбик графика цифрой">
           <input type="checkbox" v-model="showValueLabels" />
-          Показать значения
+          Подписи на графике
         </label>
       </div>
     </div>
@@ -175,7 +177,7 @@
           <h3>Динамика загрузки</h3>
           <div class="sla-chart-legend">
             <span
-              v-for="s in [...chartSeries, ...forecastSeries, ...comparisonSeries]"
+              v-for="s in [...chartSeries, ...comparisonSeries]"
               :key="s.key"
               class="sla-legend-item"
               :class="{ off: hiddenSeries.has(s.key), dashed: s.dashed }"
@@ -210,14 +212,6 @@
                     :d="pathFor(s.points)" :stroke="s.color"
                     stroke-width="2" stroke-dasharray="4 4" fill="none"
                     opacity="0.45"/>
-            </template>
-
-            <!-- Линии прогноза -->
-            <template v-for="s in forecastSeries" :key="s.key">
-              <path v-if="!hiddenSeries.has(s.key)"
-                    :d="pathFor(s.points)" :stroke="s.color"
-                    stroke-width="2" stroke-dasharray="3 3" fill="none"
-                    opacity="0.6"/>
             </template>
 
             <!-- Аннотации событий -->
@@ -294,8 +288,18 @@
               <tbody>
                 <tr v-for="m in g.months" :key="m.key">
                   <td class="sla-table-month">{{ m.label }}</td>
-                  <td v-for="t in monthlyAverages.types" :key="t" class="sla-table-num">{{ m.byType[t] || '—' }}</td>
-                  <td class="sla-table-num sla-table-total">{{ m.total || '—' }}</td>
+                  <td v-for="t in monthlyAverages.types" :key="t" class="sla-table-num">
+                    <div class="sla-cell-num">{{ m.byType[t] || '—' }}</div>
+                    <div v-if="m.deltaPctByType && m.deltaPctByType[t] !== undefined" class="sla-cell-delta" :class="deltaTone(m.deltaPctByType[t])">
+                      {{ deltaArrow(m.deltaPctByType[t]) }} {{ formatDeltaAbs(m.deltaByType[t]) }} ({{ formatDelta(m.deltaPctByType[t]) }})
+                    </div>
+                  </td>
+                  <td class="sla-table-num sla-table-total">
+                    <div class="sla-cell-num">{{ m.total || '—' }}</div>
+                    <div v-if="m.deltaPctTotal !== null && m.deltaPctTotal !== undefined" class="sla-cell-delta" :class="deltaTone(m.deltaPctTotal)">
+                      {{ deltaArrow(m.deltaPctTotal) }} {{ formatDeltaAbs(m.deltaTotal) }} ({{ formatDelta(m.deltaPctTotal) }})
+                    </div>
+                  </td>
                   <td class="sla-table-days">{{ m.daysCount }}</td>
                 </tr>
               </tbody>
@@ -655,8 +659,12 @@ async function loadData() {
   loading.value = true;
   error.value = '';
   try {
-    // Если включено сравнение — расширяем запрос на длину периода назад,
-    // чтобы получить и предыдущий период одним запросом.
+    // Расширяем запрос двумя способами:
+    //  1) Если включено сравнение — берём столько же длины назад, чтобы
+    //     посчитать «прошлый период».
+    //  2) Всегда тянем минимум 12 месяцев — диаграмма (при шаге «Месяц») и
+    //     таблица «Среднемесячные значения» должны показывать историю,
+    //     даже если пользователь выбрал короткий период вроде «Этот месяц».
     let queryStart = start;
     if (comparePrev.value) {
       const days = (new Date(end) - new Date(start)) / 86400000 + 1;
@@ -664,6 +672,13 @@ async function loadData() {
       ext.setDate(ext.getDate() - days);
       queryStart = fmtDate(ext);
     }
+    // Минимум 12 полных месяцев. Идём от конца выбранного периода назад.
+    const minStartDate = new Date(end);
+    minStartDate.setMonth(minStartDate.getMonth() - 11);
+    minStartDate.setDate(1);
+    const minStart = fmtDate(minStartDate);
+    if (minStart < queryStart) queryStart = minStart;
+
     const { data, error: err } = await db.rpc('cell_analytics_get', {
       start: queryStart,
       end,
@@ -880,8 +895,16 @@ function aggregateBuckets(days, gran, getValue) {
   return [...buckets.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
+// Для диаграммы при шаге «Месяц» берём ВСЕ доступные дни (loadData грузит
+// минимум 12 месяцев). Иначе короткий период вроде «Этот месяц» рисовал бы
+// один столбик — пользователю некуда смотреть.
+const chartDays = computed(() => {
+  if (granularity.value === 'month') return dailyTotals.value;
+  return currentDays.value;
+});
+
 const chartSeries = computed(() => {
-  const cur = currentDays.value;
+  const cur = chartDays.value;
   if (!cur.length) return [];
   const gran = granularity.value;
   // Для дня берём как есть; для недели/месяца — среднее (более «гладкое» для презентации).
@@ -1295,6 +1318,125 @@ async function downloadChartSvg(dark = false) {
   const blob = new Blob([svgStr], { type: 'image/svg+xml' });
   downloadBlob(blob, 'cell-load-chart' + (dark ? '-dark' : '') + '.svg');
 }
+/**
+ * Прокачанный рендер графика для PowerPoint-слайда: заголовок сверху, подписи
+ * осей, крупная легенда снизу. Возвращает PNG нужного размера.
+ *
+ * Базовый SVG (.sla-chart-svg) встраивается внутрь обёрточного через <use>-
+ * подобную технику: клон, помещаемый в <g transform="translate...">.
+ */
+async function renderRichChartPng({ title = 'Динамика загрузки ячеек склада', scale = 2 } = {}) {
+  const baseSvg = document.querySelector('.sla-chart-svg');
+  if (!baseSvg) return null;
+
+  // Размер слайдовой картинки 16:9 (под LAYOUT_WIDE PptxGenJS 13.33×7.5).
+  const W = 1600;
+  const H = 900;
+  // Поля
+  const padTop = 70;     // под заголовок
+  const padSubtitle = 30; // под подзаголовок (диапазон)
+  const padLegend = 120;  // снизу под легенду + ось X label
+  const padLeftLabel = 60; // место для подписи оси Y
+  // Размер графика внутри обёртки
+  const innerW = W - padLeftLabel - 20;
+  const innerH = H - padTop - padSubtitle - padLegend;
+
+  // Клонируем SVG, чистим интерактив.
+  const inner = baseSvg.cloneNode(true);
+  inner.removeAttribute('class');
+  inner.removeAttribute('preserveAspectRatio');
+  inner.setAttribute('viewBox', `0 0 ${CHART_W} ${CHART_H}`);
+  inner.setAttribute('width', String(innerW));
+  inner.setAttribute('height', String(innerH));
+  // Увеличим шрифт текстов внутри, чтобы при масштабировании оставались читаемые.
+  inner.querySelectorAll('text').forEach(t => {
+    const fs = parseFloat(t.getAttribute('font-size') || '10');
+    t.setAttribute('font-size', String(fs * (innerH / CHART_H) * 0.85));
+  });
+
+  const subtitleText = `Период: ${dateRange.value.start} — ${dateRange.value.end}`;
+  const allSeries = [...chartSeries.value, ...comparisonSeries.value];
+  // Сериализуем inner-SVG в строку и подставляем в обёртку.
+  const innerStr = new XMLSerializer().serializeToString(inner);
+
+  // Легенда: чипы N в ряду, авто-перенос.
+  const chipFs = 18;
+  const chipPadX = 18;
+  const dotR = 6;
+  // Оцениваем ширину текста через скрытый canvas.
+  const canvasMeasure = document.createElement('canvas').getContext('2d');
+  canvasMeasure.font = `${chipFs}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif`;
+  const chips = allSeries.map(s => {
+    const text = s.label + (s.dashed ? ' (сравнение)' : '');
+    const tw = canvasMeasure.measureText(text).width;
+    return { text, color: s.color, width: dotR * 2 + 10 + tw + chipPadX };
+  });
+  // Расставляем чипы по строкам.
+  const legendY0 = padTop + padSubtitle + innerH + 30;
+  const legendMaxW = W - 40;
+  let rowX = 20, rowY = legendY0, rowH = 30;
+  const placedChips = [];
+  for (const ch of chips) {
+    if (rowX + ch.width > legendMaxW) {
+      rowY += rowH;
+      rowX = 20;
+    }
+    placedChips.push({ ...ch, x: rowX, y: rowY });
+    rowX += ch.width;
+  }
+
+  const titleColor = '502314';
+  const subColor = '8B7355';
+  const axisLabelColor = '4B3527';
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
+  // Заголовок
+  svg += `<text x="${W / 2}" y="40" text-anchor="middle" font-size="28" font-weight="700" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" fill="#${titleColor}">${escapeXml(title)}</text>`;
+  // Подзаголовок
+  svg += `<text x="${W / 2}" y="${40 + 28}" text-anchor="middle" font-size="16" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" fill="#${subColor}">${escapeXml(subtitleText)}</text>`;
+  // Подпись оси Y (вертикальная)
+  svg += `<text x="${20}" y="${padTop + padSubtitle + innerH / 2}" text-anchor="middle" transform="rotate(-90 20 ${padTop + padSubtitle + innerH / 2})" font-size="16" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" fill="#${axisLabelColor}">Ячеек, шт</text>`;
+  // Подпись оси X
+  svg += `<text x="${padLeftLabel + innerW / 2}" y="${legendY0 - 6}" text-anchor="middle" font-size="16" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" fill="#${axisLabelColor}">${escapeXml(granularity.value === 'day' ? 'День' : granularity.value === 'week' ? 'Неделя' : 'Месяц')}</text>`;
+  // Внутренний график (с переносом координат через group)
+  svg += `<g transform="translate(${padLeftLabel}, ${padTop + padSubtitle})">${innerStr}</g>`;
+  // Легенда
+  for (const c of placedChips) {
+    svg += `<circle cx="${c.x + dotR}" cy="${c.y + 12}" r="${dotR}" fill="${c.color}"/>`;
+    svg += `<text x="${c.x + dotR * 2 + 8}" y="${c.y + 17}" font-size="${chipFs}" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" fill="#${titleColor}">${escapeXml(c.text)}</text>`;
+  }
+  svg += `</svg>`;
+
+  // SVG → PNG через canvas.
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+    const canvas = document.createElement('canvas');
+    canvas.width = W * scale;
+    canvas.height = H * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function escapeXml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Рендерит SVG графика в blob/data-url PNG с retina-масштабом
 async function renderChartAsPng(dark = false, scale = 2) {
   const svgStr = buildChartSvgString(dark ? '#2C1A12' : '#ffffff');
@@ -1535,48 +1677,373 @@ async function downloadPdf() {
 }
 
 // ─── Экспорт PPTX ───
+
+// Разбивка по типам хранения для одного блока (юрлица):
+// среднее за период + дельта к предыдущему периоду (если comparePrev включён).
+function buildWarehouseBreakdown(block) {
+  const cur = block.currentDays || [];
+  const prev = block.prevDays || [];
+  if (!cur.length) return [];
+  const types = new Set();
+  cur.forEach(d => Object.keys(d.byType || {}).forEach(t => types.add(t)));
+  prev.forEach(d => Object.keys(d.byType || {}).forEach(t => types.add(t)));
+  const order = { dry: 1, cold: 2, frozen: 3, shabany: 4 };
+  return [...types].sort((a, b) => (order[a] || 99) - (order[b] || 99)).map(t => {
+    const sumCur = cur.reduce((s, d) => s + (d.byType[t] || 0), 0);
+    const avgCur = cur.length ? Math.round(sumCur / cur.length) : 0;
+    let avgPrev = null, deltaAbs = null, deltaPct = null;
+    if (prev.length) {
+      const sumPrev = prev.reduce((s, d) => s + (d.byType[t] || 0), 0);
+      avgPrev = Math.round(sumPrev / prev.length);
+      deltaAbs = avgCur - avgPrev;
+      deltaPct = avgPrev > 0 ? Math.round(((avgCur - avgPrev) / avgPrev) * 1000) / 10 : (avgCur > 0 ? 100 : 0);
+    }
+    return {
+      type: t,
+      label: STOCK_TYPE_LABELS[t] || t,
+      color: (TYPE_COLORS[t] || '#8B7355').replace('#', ''),
+      avgCur,
+      avgPrev,
+      deltaAbs,
+      deltaPct,
+    };
+  });
+}
+
+// Рендерит heatmap-календарь блока как PNG для слайда. Возвращает null если данных нет.
+async function renderHeatmapPng(block) {
+  const hm = block.heatmap;
+  if (!hm || !hm.months?.length) return null;
+  const months = hm.months;
+  const W = 1600;
+  const H = 900;
+  const padTop = 90;
+  const padBottom = 100;
+  const monthW = Math.min(360, (W - 80) / months.length);
+  const cellSize = Math.min(36, (monthW - 50) / 7);
+  const cellGap = 3;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
+  svg += `<text x="${W / 2}" y="40" text-anchor="middle" font-size="28" font-weight="700" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" fill="#502314">Календарь загрузки — ${escapeXml(block.label)}</text>`;
+  svg += `<text x="${W / 2}" y="${40 + 28}" text-anchor="middle" font-size="16" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" fill="#8B7355">${escapeXml(`Период: ${dateRange.value.start} — ${dateRange.value.end}. Чем темнее, тем больше ячеек занято в этот день`)}</text>`;
+
+  const startX = (W - months.length * monthW) / 2;
+  months.forEach((m, mi) => {
+    const x0 = startX + mi * monthW + 20;
+    const y0 = padTop + 10;
+    svg += `<text x="${x0}" y="${y0}" font-size="16" font-weight="700" fill="#502314" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">${escapeXml(fmtMonthHeader(m.key))}</text>`;
+    const daysInM = daysInMonth(m.key);
+    const [yearStr, monStr] = m.key.split('-');
+    const firstDay = new Date(parseInt(yearStr, 10), parseInt(monStr, 10) - 1, 1).getDay();
+    // 0=Sun → 6, 1..6 → -1; чтобы пн был 0.
+    const firstOffset = (firstDay + 6) % 7;
+    // Подписи дней недели
+    const dayNames = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+    dayNames.forEach((dn, i) => {
+      svg += `<text x="${x0 + i * (cellSize + cellGap) + cellSize / 2}" y="${y0 + 24}" text-anchor="middle" font-size="10" fill="#8B7355" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">${dn}</text>`;
+    });
+    for (let d = 1; d <= daysInM; d++) {
+      const slot = firstOffset + d - 1;
+      const col = slot % 7;
+      const row = Math.floor(slot / 7);
+      const x = x0 + col * (cellSize + cellGap);
+      const y = y0 + 32 + row * (cellSize + cellGap);
+      const dayInfo = m.days[d];
+      let fill = '#F4ECE0';
+      if (dayInfo) {
+        const intensity = Math.min(1, dayInfo.total / Math.max(1, hm.max));
+        // Бренд-градиент: от светло-бежевого к насыщенному оранжевому.
+        const r = Math.round(255 - (255 - 231) * intensity);
+        const g = Math.round(243 - (243 - 111) * intensity);
+        const b = Math.round(220 - (220 - 81) * intensity);
+        fill = `rgb(${r},${g},${b})`;
+      }
+      svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="4" fill="${fill}" stroke="#ECE3D6" stroke-width="0.5"/>`;
+      svg += `<text x="${x + cellSize / 2}" y="${y + cellSize / 2 + 4}" text-anchor="middle" font-size="9.5" fill="#2C1A12" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">${d}</text>`;
+    }
+  });
+
+  // Легенда
+  const legendY = H - 60;
+  svg += `<text x="${W / 2 - 200}" y="${legendY}" font-size="13" fill="#8B7355" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">Меньше загрузка</text>`;
+  for (let i = 0; i < 6; i++) {
+    const intensity = i / 5;
+    const r = Math.round(255 - (255 - 231) * intensity);
+    const g = Math.round(243 - (243 - 111) * intensity);
+    const b = Math.round(220 - (220 - 81) * intensity);
+    svg += `<rect x="${W / 2 - 50 + i * 26}" y="${legendY - 14}" width="22" height="18" fill="rgb(${r},${g},${b})" stroke="#ECE3D6"/>`;
+  }
+  svg += `<text x="${W / 2 + 120}" y="${legendY}" font-size="13" fill="#8B7355" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">Больше загрузка</text>`;
+  svg += `</svg>`;
+
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+    const canvas = document.createElement('canvas');
+    canvas.width = W * 2; canvas.height = H * 2;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { dataUrl: canvas.toDataURL('image/png') };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function downloadPptx() {
   const { default: PptxGenJS } = await import('pptxgenjs');
   const pptx = new PptxGenJS();
   pptx.title = 'Аналитика ячеек склада';
   pptx.layout = 'LAYOUT_WIDE'; // 13.33 × 7.5
 
+  const toneColor = { orange: 'E76F51', red: 'C62828', green: '2E7D32', blue: '1976D2', neutral: '8B7355' };
+  const todayStr = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  // Брендирующий футер на каждом слайде. Slide footer: тонкая оранжевая линия,
+  // слева «Supply Portal · Аналитика ячеек · {дата}», справа номер слайда.
+  function drawFooter(slide, pageNum, totalPages) {
+    slide.addShape(pptx.ShapeType.rect, { x: 0, y: 7.30, w: 13.33, h: 0.04, fill: { color: 'E76F51' }, line: { color: 'E76F51' } });
+    slide.addText(`Supply Portal · Аналитика ячеек склада · ${todayStr}`, {
+      x: 0.4, y: 7.35, w: 9.5, h: 0.18, fontSize: 9, color: '8B7355', fontFace: 'Calibri',
+    });
+    if (pageNum) {
+      slide.addText(`${pageNum}${totalPages ? ' / ' + totalPages : ''}`, {
+        x: 12.4, y: 7.35, w: 0.9, h: 0.18, fontSize: 9, color: '8B7355', fontFace: 'Calibri', align: 'right',
+      });
+    }
+  }
+
+  // KPI-плашка с поддержкой дельты. Сейчас в KPI используется deltaPct (число %).
+  function drawKpiCard(slide, x, y, w, h, k) {
+    slide.addShape(pptx.ShapeType.rect, { x, y, w, h, fill: { color: 'FFFFFF' }, line: { color: 'ECE3D6', width: 1 } });
+    slide.addShape(pptx.ShapeType.rect, { x, y, w, h: 0.08, fill: { color: toneColor[k.tone] || '8B7355' }, line: { color: toneColor[k.tone] || '8B7355' } });
+    slide.addText(k.label, { x: x + 0.15, y: y + 0.18, w: w - 0.3, h: 0.3, fontSize: 12, color: '8B7355', fontFace: 'Calibri' });
+    slide.addText(String(k.value) + (k.unit ? ' ' + k.unit : ''), { x: x + 0.15, y: y + 0.55, w: w - 0.3, h: 0.7, fontSize: 28, bold: true, color: '2C1A12', fontFace: 'Calibri' });
+    // Дельта к прошлому периоду (если есть comparePrev и считается).
+    if (k.deltaPct !== null && k.deltaPct !== undefined) {
+      const isFlat = Math.abs(k.deltaPct) < 0.05;
+      const arrow = isFlat ? '→' : (k.deltaPct >= 0 ? '↑' : '↓');
+      const col = isFlat ? '8B7355' : (k.deltaPct >= 0 ? '1E7E34' : 'C62828');
+      const pctStr = Math.abs(k.deltaPct) >= 10 ? Math.round(Math.abs(k.deltaPct)) : Math.abs(k.deltaPct).toFixed(1);
+      slide.addText(`${arrow} ${pctStr}% к прошлому периоду`, {
+        x: x + 0.15, y: y + h - 0.55, w: w - 0.3, h: 0.3, fontSize: 11, bold: true, color: col, fontFace: 'Calibri',
+      });
+    } else if (k.subtitle) {
+      slide.addText(k.subtitle, { x: x + 0.15, y: y + h - 0.45, w: w - 0.3, h: 0.4, fontSize: 11, color: '8B7355', fontFace: 'Calibri' });
+    }
+  }
+
+  // Плашка «По складам»: цветная полоса + два числа (среднее + дельта).
+  function drawWarehouseCard(slide, x, y, w, h, b) {
+    slide.addShape(pptx.ShapeType.rect, { x, y, w, h, fill: { color: 'FFFFFF' }, line: { color: 'ECE3D6', width: 1 } });
+    slide.addShape(pptx.ShapeType.rect, { x, y, w: 0.10, h, fill: { color: b.color }, line: { color: b.color } });
+    slide.addText(b.label, { x: x + 0.25, y: y + 0.10, w: w - 0.35, h: 0.3, fontSize: 12, color: '8B7355', fontFace: 'Calibri', bold: true });
+    slide.addText(String(b.avgCur), { x: x + 0.25, y: y + 0.40, w: w - 0.35, h: 0.7, fontSize: 26, bold: true, color: '2C1A12', fontFace: 'Calibri' });
+    slide.addText('ячеек в среднем', { x: x + 0.25, y: y + 1.10, w: w - 0.35, h: 0.25, fontSize: 10, color: '8B7355', fontFace: 'Calibri' });
+    if (b.deltaPct !== null && b.deltaPct !== undefined) {
+      const isFlat = Math.abs(b.deltaPct) < 0.05;
+      const arrow = isFlat ? '→' : (b.deltaPct >= 0 ? '↑' : '↓');
+      const col = isFlat ? '8B7355' : (b.deltaPct >= 0 ? '1E7E34' : 'C62828');
+      const pctStr = Math.abs(b.deltaPct) >= 10 ? Math.round(Math.abs(b.deltaPct)) : Math.abs(b.deltaPct).toFixed(1);
+      const absStr = (b.deltaAbs > 0 ? '+' : (b.deltaAbs < 0 ? '−' : '')) + Math.abs(b.deltaAbs);
+      slide.addText(`${arrow} ${absStr}  (${pctStr}%)`, {
+        x: x + 0.25, y: y + h - 0.45, w: w - 0.35, h: 0.3, fontSize: 12, bold: true, color: col, fontFace: 'Calibri',
+      });
+    }
+  }
+
+  // Считаем общее число слайдов заранее для нумерации (титул + по N юрлиц × 4 + 1 график).
+  const blocks = entityBlocks.value;
+  const ma = monthlyAverages.value;
+  const totalPages = 1 + blocks.length * 2 + 1 + (ma && ma.groups.length ? ma.groups.length : 0);
+  let page = 1;
+
   // Слайд 1: титул
   const s1 = pptx.addSlide();
   s1.background = { color: 'FAF6EF' };
+  s1.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.25, fill: { color: 'E76F51' }, line: { color: 'E76F51' } });
   s1.addText('Аналитика ячеек склада', { x: 0.5, y: 2.0, w: 12, h: 1, fontSize: 44, bold: true, color: '502314', fontFace: 'Calibri' });
   s1.addText(`Период: ${dateRange.value.start} — ${dateRange.value.end}`, { x: 0.5, y: 3.2, w: 12, h: 0.5, fontSize: 18, color: '8B7355', fontFace: 'Calibri' });
   s1.addText('Supply Portal · Отдел закупок', { x: 0.5, y: 6.7, w: 12, h: 0.4, fontSize: 12, color: 'C16B4D', italic: true, fontFace: 'Calibri' });
+  drawFooter(s1, page, totalPages); page++;
 
-  // Слайд 2: KPI + инсайт
-  const s2 = pptx.addSlide();
-  s2.background = { color: 'FFFFFF' };
-  s2.addText('Ключевые метрики', { x: 0.5, y: 0.3, w: 12, h: 0.6, fontSize: 24, bold: true, color: '502314', fontFace: 'Calibri' });
-  // 4 KPI-плашки в ряд
-  const kpiW = 3.0, kpiH = 2.0, gap = 0.15;
-  const startX = 0.5;
-  const startY = 1.2;
-  const toneColor = { orange: 'E76F51', red: 'C62828', green: '2E7D32', blue: '1976D2', neutral: '8B7355' };
-  kpis.value.slice(0, 4).forEach((k, i) => {
-    const x = startX + i * (kpiW + gap);
-    s2.addShape(pptx.ShapeType.rect, { x, y: startY, w: kpiW, h: kpiH, fill: { color: 'FFFFFF' }, line: { color: 'ECE3D6', width: 1 } });
-    s2.addShape(pptx.ShapeType.rect, { x, y: startY, w: kpiW, h: 0.08, fill: { color: toneColor[k.tone] || '8B7355' }, line: { color: toneColor[k.tone] || '8B7355' } });
-    s2.addText(k.label, { x: x + 0.15, y: startY + 0.18, w: kpiW - 0.3, h: 0.3, fontSize: 12, color: '8B7355', fontFace: 'Calibri' });
-    s2.addText(String(k.value) + (k.unit ? ' ' + k.unit : ''), { x: x + 0.15, y: startY + 0.55, w: kpiW - 0.3, h: 0.7, fontSize: 28, bold: true, color: '2C1A12', fontFace: 'Calibri' });
-    if (k.subtitle) s2.addText(k.subtitle, { x: x + 0.15, y: startY + 1.4, w: kpiW - 0.3, h: 0.4, fontSize: 11, color: '8B7355', fontFace: 'Calibri' });
-  });
-  s2.addShape(pptx.ShapeType.rect, { x: 0.5, y: 3.6, w: 12.3, h: 1.5, fill: { color: 'FFF8F0' }, line: { color: 'ECE3D6', width: 1 } });
-  s2.addText('💡 ' + autoInsight.value, { x: 0.7, y: 3.7, w: 12.0, h: 1.3, fontSize: 13, color: '2C1A12', fontFace: 'Calibri', wrap: true, valign: 'top' });
+  // Для каждого юрлица — три слайда: KPI, Топ изменений, Heatmap.
+  for (const block of blocks) {
+    // ── Слайд KPI ─────────────────────────────────────────────────────
+    const sk = pptx.addSlide();
+    sk.background = { color: 'FFFFFF' };
+    sk.addText(`Ключевые метрики — ${block.label}`, { x: 0.4, y: 0.25, w: 12, h: 0.5, fontSize: 22, bold: true, color: '502314', fontFace: 'Calibri' });
+    sk.addText(`Период ${dateRange.value.start} — ${dateRange.value.end}`, { x: 0.4, y: 0.72, w: 12, h: 0.3, fontSize: 11, color: '8B7355', fontFace: 'Calibri', italic: true });
 
-  // Слайд 3: график
-  const s3 = pptx.addSlide();
-  s3.background = { color: 'FFFFFF' };
-  s3.addText('Динамика загрузки', { x: 0.5, y: 0.3, w: 12, h: 0.6, fontSize: 24, bold: true, color: '502314', fontFace: 'Calibri' });
-  const png = await renderChartAsPng(false, 2);
-  // Wide layout: 13.33 × 7.5; график занимает большую часть
-  s3.addImage({ data: png.dataUrl, x: 0.5, y: 1.1, w: 12.3, h: 5.6 });
+    // 4 общих KPI в ряд
+    const kpiW = 3.0, kpiH = 1.7, gap = 0.15;
+    const startX = 0.4;
+    const startY = 1.15;
+    block.kpis.slice(0, 4).forEach((k, i) => {
+      const x = startX + i * (kpiW + gap);
+      drawKpiCard(sk, x, startY, kpiW, kpiH, k);
+    });
+
+    // Разбивка по складам (типам хранения) — ряд цветных плашек
+    const breakdown = buildWarehouseBreakdown(block);
+    if (breakdown.length) {
+      sk.addText('По типам хранения (среднее за период)', { x: 0.4, y: 3.0, w: 12, h: 0.35, fontSize: 13, bold: true, color: '502314', fontFace: 'Calibri' });
+      const bH = 1.6, bGap = 0.15;
+      const bN = breakdown.length;
+      const bW = (12.5 - bGap * (bN - 1)) / bN;
+      breakdown.forEach((b, i) => {
+        const x = 0.4 + i * (bW + bGap);
+        drawWarehouseCard(sk, x, 3.4, bW, bH, b);
+      });
+    }
+
+    // Авто-инсайт внизу
+    sk.addShape(pptx.ShapeType.rect, { x: 0.4, y: 5.2, w: 12.5, h: 1.85, fill: { color: 'FFF8F0' }, line: { color: 'ECE3D6', width: 1 } });
+    sk.addText('💡 ' + (block.insight || ''), { x: 0.6, y: 5.3, w: 12.1, h: 1.65, fontSize: 13, color: '2C1A12', fontFace: 'Calibri', wrap: true, valign: 'top' });
+    drawFooter(sk, page, totalPages); page++;
+
+    // ── Слайд «Топ изменений по складам» ─────────────────────────────
+    const sTop = pptx.addSlide();
+    sTop.background = { color: 'FFFFFF' };
+    sTop.addText(`Топ изменений по складам — ${block.label}`, { x: 0.4, y: 0.25, w: 12, h: 0.5, fontSize: 22, bold: true, color: '502314', fontFace: 'Calibri' });
+    sTop.addText('Где изменилась загрузка сильнее всего относительно предыдущего периода', { x: 0.4, y: 0.72, w: 12, h: 0.3, fontSize: 11, color: '8B7355', fontFace: 'Calibri', italic: true });
+
+    const changes = breakdown
+      .filter(b => b.deltaPct !== null && b.deltaPct !== undefined)
+      .sort((a, b) => Math.abs(b.deltaAbs) - Math.abs(a.deltaAbs));
+    if (changes.length) {
+      // Большие плашки: до 3 шт в ряд по 4.0×3.2 — главные изменения
+      const topN = Math.min(3, changes.length);
+      const cardW = 4.0, cardH = 3.2, cardGap = 0.3;
+      const totalW = topN * cardW + (topN - 1) * cardGap;
+      const cardStartX = (13.33 - totalW) / 2;
+      const cardStartY = 1.5;
+      changes.slice(0, topN).forEach((c, i) => {
+        const x = cardStartX + i * (cardW + cardGap);
+        const isFlat = Math.abs(c.deltaPct) < 0.05;
+        const isUp = c.deltaPct >= 0 && !isFlat;
+        const bg = isFlat ? 'F5EFE6' : (isUp ? 'E8F5EC' : 'FCEAE9');
+        const bar = isFlat ? '8B7355' : (isUp ? '1E7E34' : 'C62828');
+        sTop.addShape(pptx.ShapeType.rect, { x, y: cardStartY, w: cardW, h: cardH, fill: { color: bg }, line: { color: 'ECE3D6', width: 1 } });
+        sTop.addShape(pptx.ShapeType.rect, { x, y: cardStartY, w: cardW, h: 0.12, fill: { color: bar }, line: { color: bar } });
+        sTop.addText(c.label, { x: x + 0.2, y: cardStartY + 0.3, w: cardW - 0.4, h: 0.4, fontSize: 16, bold: true, color: '502314', fontFace: 'Calibri' });
+        const absStr = (c.deltaAbs > 0 ? '+' : (c.deltaAbs < 0 ? '−' : '')) + Math.abs(c.deltaAbs);
+        const pctStr = Math.abs(c.deltaPct) >= 10 ? Math.round(Math.abs(c.deltaPct)) : Math.abs(c.deltaPct).toFixed(1);
+        const arrow = isFlat ? '→' : (isUp ? '↑' : '↓');
+        sTop.addText(`${arrow} ${absStr}`, { x: x + 0.2, y: cardStartY + 0.75, w: cardW - 0.4, h: 1.1, fontSize: 44, bold: true, color: bar, fontFace: 'Calibri' });
+        sTop.addText(`${pctStr}% к прошлому периоду`, { x: x + 0.2, y: cardStartY + 1.9, w: cardW - 0.4, h: 0.4, fontSize: 14, bold: true, color: bar, fontFace: 'Calibri' });
+        sTop.addText(`Сейчас ${c.avgCur} · было ${c.avgPrev}`, { x: x + 0.2, y: cardStartY + 2.35, w: cardW - 0.4, h: 0.4, fontSize: 12, color: '8B7355', fontFace: 'Calibri' });
+        sTop.addText('ячеек в среднем в день', { x: x + 0.2, y: cardStartY + 2.7, w: cardW - 0.4, h: 0.4, fontSize: 10, color: '8B7355', fontFace: 'Calibri', italic: true });
+      });
+    } else {
+      sTop.addShape(pptx.ShapeType.rect, { x: 0.4, y: 1.5, w: 12.5, h: 4.5, fill: { color: 'FAF6EF' }, line: { color: 'ECE3D6', width: 1 } });
+      sTop.addText('Сравнение с предыдущим периодом отключено — включите галку «Сравнить с прошлым периодом», чтобы увидеть динамику.',
+        { x: 1.0, y: 3.0, w: 11.3, h: 1.5, fontSize: 16, color: '8B7355', fontFace: 'Calibri', align: 'center' });
+    }
+    sTop.addShape(pptx.ShapeType.rect, { x: 0.4, y: 5.4, w: 12.5, h: 1.65, fill: { color: 'FFF8F0' }, line: { color: 'ECE3D6', width: 1 } });
+    sTop.addText('💡 ' + buildBreakdownInsight(breakdown), { x: 0.6, y: 5.5, w: 12.1, h: 1.45, fontSize: 13, color: '2C1A12', fontFace: 'Calibri', wrap: true, valign: 'top' });
+    drawFooter(sTop, page, totalPages); page++;
+
+  }
+
+  // Слайд: общий график с заголовком, осями, легендой.
+  const sChart = pptx.addSlide();
+  sChart.background = { color: 'FFFFFF' };
+  const rich = await renderRichChartPng({ title: 'Динамика загрузки ячеек склада', scale: 2 });
+  if (rich) {
+    sChart.addImage({ data: rich.dataUrl, x: 0.15, y: 0.15, w: 13.0, h: 7.05 });
+  } else {
+    sChart.addText('Динамика загрузки', { x: 0.5, y: 0.3, w: 12, h: 0.6, fontSize: 24, bold: true, color: '502314', fontFace: 'Calibri' });
+    const png = await renderChartAsPng(false, 2);
+    sChart.addImage({ data: png.dataUrl, x: 0.5, y: 1.1, w: 12.3, h: 5.6 });
+  }
+  drawFooter(sChart, page, totalPages); page++;
+
+  // Слайды «Среднемесячные значения по складам» — по одному на каждое юрлицо.
+  if (ma && ma.groups.length) {
+    for (const g of ma.groups) {
+      const sm = pptx.addSlide();
+      sm.background = { color: 'FFFFFF' };
+      sm.addText(`Среднемесячные значения — ${g.entity}`, { x: 0.4, y: 0.25, w: 12, h: 0.5, fontSize: 22, bold: true, color: '502314', fontFace: 'Calibri' });
+      sm.addText('Под числом — изменение к прошлому месяцу (стрелка, абсолют и %)', { x: 0.4, y: 0.72, w: 12, h: 0.3, fontSize: 11, color: '8B7355', fontFace: 'Calibri', italic: true });
+
+      const headerRow = [
+        { text: 'Месяц', options: { bold: true, color: 'FFFFFF', fill: { color: '502314' }, align: 'left', valign: 'middle', fontSize: 12, fontFace: 'Calibri' } },
+        ...ma.types.map(t => ({ text: STOCK_TYPE_LABELS[t] || t, options: { bold: true, color: 'FFFFFF', fill: { color: '502314' }, align: 'center', valign: 'middle', fontSize: 12, fontFace: 'Calibri' } })),
+        { text: 'Дней', options: { bold: true, color: 'FFFFFF', fill: { color: '502314' }, align: 'center', valign: 'middle', fontSize: 12, fontFace: 'Calibri' } },
+      ];
+      const bodyRows = g.months.map((m, i) => {
+        const stripe = i % 2 === 1 ? 'FFF8F0' : 'FFFFFF';
+        const monthCell = { text: m.label, options: { bold: true, color: '502314', fill: { color: stripe }, align: 'left', valign: 'middle', fontSize: 12, fontFace: 'Calibri' } };
+        const typeCells = ma.types.map(t => {
+          const val = m.byType[t];
+          const valText = (val === undefined || val === null) ? '—' : String(val);
+          const pct = m.deltaPctByType ? m.deltaPctByType[t] : undefined;
+          const abs = m.deltaByType ? m.deltaByType[t] : undefined;
+          let deltaText = '';
+          let deltaColor = '8B7355';
+          if (pct !== undefined && pct !== null) {
+            if (Math.abs(pct) < 0.05) { deltaText = '→ 0'; deltaColor = '8B7355'; }
+            else {
+              const arrow = pct > 0 ? '↑' : '↓';
+              const absStr = (abs > 0 ? '+' : (abs < 0 ? '−' : '')) + Math.abs(abs || 0);
+              const pctStr = Math.abs(pct) >= 10 ? Math.round(Math.abs(pct)) : Math.abs(pct).toFixed(1);
+              deltaText = `${arrow} ${absStr} (${pctStr}%)`;
+              deltaColor = pct > 0 ? '1E7E34' : 'C62828';
+            }
+          }
+          return {
+            text: [
+              { text: valText, options: { fontSize: 13, bold: true, color: '2C1A12' } },
+              ...(deltaText ? [{ text: '\n' + deltaText, options: { fontSize: 10, color: deltaColor, bold: true } }] : []),
+            ],
+            options: { fill: { color: stripe }, align: 'right', valign: 'middle', fontFace: 'Calibri' },
+          };
+        });
+        const daysCell = { text: String(m.daysCount), options: { color: '8B7355', fill: { color: stripe }, align: 'center', valign: 'middle', fontSize: 11, fontFace: 'Calibri' } };
+        return [monthCell, ...typeCells, daysCell];
+      });
+      const tableWidth = 12.5;
+      const monthW = 1.6;
+      const daysW = 0.8;
+      const typeW = (tableWidth - monthW - daysW) / Math.max(1, ma.types.length);
+      sm.addTable([headerRow, ...bodyRows], {
+        x: 0.4,
+        y: 1.2,
+        w: tableWidth,
+        colW: [monthW, ...ma.types.map(() => typeW), daysW],
+        border: { type: 'solid', color: 'ECE3D6', pt: 0.5 },
+        autoPage: false,
+        rowH: 0.55,
+      });
+      drawFooter(sm, page, totalPages); page++;
+    }
+  }
 
   await pptx.writeFile({ fileName: 'cell-analytics-' + dateRange.value.start + '_' + dateRange.value.end + '.pptx' });
+}
+
+// Короткий авто-вывод по разбивке складов (для слайда «Топ изменений»).
+function buildBreakdownInsight(breakdown) {
+  const changes = breakdown.filter(b => b.deltaPct !== null && b.deltaPct !== undefined && Math.abs(b.deltaPct) >= 0.05);
+  if (!changes.length) return 'За период изменения по складам несущественные — загрузка стабильна.';
+  const up = changes.filter(c => c.deltaPct > 0).sort((a, b) => b.deltaAbs - a.deltaAbs);
+  const down = changes.filter(c => c.deltaPct < 0).sort((a, b) => a.deltaAbs - b.deltaAbs);
+  const parts = [];
+  if (up.length) {
+    const u = up[0];
+    parts.push(`Заметнее всего вырос «${u.label}» — на ${Math.abs(u.deltaAbs)} ячеек (${Math.abs(u.deltaPct) >= 10 ? Math.round(Math.abs(u.deltaPct)) : Math.abs(u.deltaPct).toFixed(1)}%) к прошлому периоду.`);
+  }
+  if (down.length) {
+    const d = down[0];
+    parts.push(`Сильнее всего снизился «${d.label}» — на ${Math.abs(d.deltaAbs)} ячеек (${Math.abs(d.deltaPct) >= 10 ? Math.round(Math.abs(d.deltaPct)) : Math.abs(d.deltaPct).toFixed(1)}%).`);
+  }
+  return parts.join(' ');
 }
 
 // ─── Среднемесячные значения по типу хранения (и по юрлицу, если выбрано «Все») ───
@@ -1627,8 +2094,32 @@ const monthlyAverages = computed(() => {
     });
   }
 
-  // Сортировка месяцев
-  for (const arr of byEntity.values()) arr.sort((a, b) => a.key.localeCompare(b.key));
+  // Сортировка месяцев + считаем дельты к предыдущему месяцу прямо здесь,
+  // чтобы шаблон таблицы и PPT-генератор не дублировали логику.
+  for (const arr of byEntity.values()) {
+    arr.sort((a, b) => a.key.localeCompare(b.key));
+    for (let i = 0; i < arr.length; i++) {
+      const cur = arr[i];
+      const prev = i > 0 ? arr[i - 1] : null;
+      cur.deltaByType = {};
+      cur.deltaPctByType = {};
+      if (prev) {
+        for (const t of Object.keys(cur.byType)) {
+          const a = cur.byType[t] || 0;
+          const b = prev.byType[t] || 0;
+          cur.deltaByType[t] = a - b;
+          cur.deltaPctByType[t] = b > 0 ? Math.round(((a - b) / b) * 1000) / 10 : (a > 0 ? 100 : 0);
+        }
+        cur.deltaTotal = (cur.total || 0) - (prev.total || 0);
+        cur.deltaPctTotal = (prev.total || 0) > 0
+          ? Math.round((((cur.total || 0) - prev.total) / prev.total) * 1000) / 10
+          : ((cur.total || 0) > 0 ? 100 : 0);
+      } else {
+        cur.deltaTotal = null;
+        cur.deltaPctTotal = null;
+      }
+    }
+  }
 
   // Подсчёт средних/итого по юрлицу
   const result = [];
@@ -1654,6 +2145,30 @@ const monthlyAverages = computed(() => {
   }
   return { groups: result, types };
 });
+
+// Помощники для отображения дельты в таблице среднемесячных.
+function deltaArrow(pct) {
+  if (pct === null || pct === undefined) return '';
+  if (Math.abs(pct) < 0.05) return '→';
+  return pct > 0 ? '↑' : '↓';
+}
+function deltaTone(pct) {
+  if (pct === null || pct === undefined) return '';
+  if (Math.abs(pct) < 0.05) return 'flat';
+  return pct > 0 ? 'up' : 'down';
+}
+function formatDelta(pct) {
+  if (pct === null || pct === undefined) return '';
+  const v = Math.abs(pct);
+  if (v < 0.05) return '0%';
+  // ≥10% — без дробной; меньше — одна цифра после запятой.
+  return (v >= 10 ? Math.round(v) : v.toFixed(1)) + '%';
+}
+function formatDeltaAbs(n) {
+  if (n === null || n === undefined) return '';
+  const v = Math.abs(Math.round(Number(n) || 0));
+  return v.toLocaleString('ru-RU');
+}
 
 // Возвращает координаты Y-области для рендера вертикальной линии аннотации
 const chartAnnotations = computed(() => {
@@ -1956,6 +2471,11 @@ onMounted(() => {
 .sla-table tbody tr:hover { background: #FAFAF8; }
 .sla-table-month { color: #2C1A12; font-weight: 600; }
 .sla-table-num { text-align: right; font-variant-numeric: tabular-nums; color: #2C1A12; }
+.sla-table-num .sla-cell-num { font-weight: 600; }
+.sla-table-num .sla-cell-delta { font-size: 10.5px; font-weight: 700; margin-top: 1px; line-height: 1.1; }
+.sla-cell-delta.up { color: #1E7E34; }
+.sla-cell-delta.down { color: #C62828; }
+.sla-cell-delta.flat { color: #8B7355; }
 .sla-table-total { background: rgba(231,111,81,0.06); color: #C16B4D; font-weight: 700; }
 .sla-table-days { text-align: center; color: #8B7355; font-size: 11.5px; }
 .sla-table tfoot td {
