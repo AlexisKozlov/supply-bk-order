@@ -168,8 +168,8 @@
               <template v-else>
                 <div class="login-form-sub">Введите номер ресторана и пароль</div>
                 <div class="login-field">
-                  <label>Номер ресторана</label>
-                  <input v-model="roNumber" type="text" inputmode="text" placeholder="Например: 24 или PS01" :disabled="loginLoading" @keydown.enter="roPasswordInput?.focus()" />
+                  <label>Номер ресторана или email</label>
+                  <input v-model="roNumber" type="text" inputmode="text" placeholder="24, PS01 или name@example.com" :disabled="loginLoading" @keydown.enter="roPasswordInput?.focus()" />
                 </div>
                 <div class="login-field">
                   <label>Пароль</label>
@@ -552,13 +552,22 @@ async function doRoLogin() {
   loginError.value = '';
   loginLoading.value = true;
   try {
-    const parsed = parseRestaurantInput(roNumber.value);
-    if (!parsed?.number) {
-      loginError.value = 'Неверный номер ресторана. Пример: 24 или PS01';
-      roForceLogin.value = false;
-      return;
+    // Поле принимает либо номер ресторана, либо email. По @ определяем.
+    const raw = roNumber.value.trim();
+    let identifier, group = null;
+    if (raw.includes('@')) {
+      identifier = raw; // email — бэк сам подберёт группу и номер
+    } else {
+      const parsed = parseRestaurantInput(raw);
+      if (!parsed?.number) {
+        loginError.value = 'Неверный номер ресторана или email. Пример: 24, PS01 или name@example.com';
+        roForceLogin.value = false;
+        return;
+      }
+      identifier = parsed.number;
+      group = parsed.group;
     }
-    const result = await roStore.login(parsed.number, roPassword.value, parsed.group, roForceLogin.value, acceptedDataRules.value);
+    const result = await roStore.login(identifier, roPassword.value, group, roForceLogin.value, acceptedDataRules.value);
     if (result.success) {
       roForceLogin.value = false;
       showLoginModal.value = false;
@@ -567,7 +576,7 @@ async function doRoLogin() {
       loginError.value = `В аккаунте работает другой пользователь${result.last_login_ago ? ' (вошёл ' + result.last_login_ago + ')' : ''}. Нажмите «Войти» ещё раз, чтобы завершить его сессию.`;
       roForceLogin.value = true;
     } else {
-      loginError.value = result.error || 'Неверный номер или пароль';
+      loginError.value = result.error || 'Неверные данные для входа';
       roForceLogin.value = false;
     }
   } catch (e) { loginError.value = e.message || 'Ошибка соединения'; roForceLogin.value = false; }

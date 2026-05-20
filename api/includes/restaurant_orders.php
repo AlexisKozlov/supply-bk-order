@@ -1781,14 +1781,25 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
 
 // --- Логин ---
 if ($roAction === 'login' && $method === 'POST') {
-    $restNum = intval($body['restaurant_number'] ?? 0);
+    $rawEmail = trim((string)($body['email'] ?? ''));
+    $restNum  = intval($body['restaurant_number'] ?? 0);
     $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
     $password = $body['password'] ?? '';
     $acceptedDataRules = !empty($body['accepted_data_rules']);
     $clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 
-    if (!$restNum || !$password) {
+    // Можно прислать либо restaurant_number, либо email — но что-то одно должно быть.
+    $loginByEmail = ($rawEmail !== '');
+    if ($loginByEmail) {
+        if (!filter_var($rawEmail, FILTER_VALIDATE_EMAIL)) {
+            roRespond(['success' => false, 'error' => 'Введите корректный email или номер ресторана'], 400);
+        }
+        $rawEmail = mb_strtolower($rawEmail);
+    } elseif (!$restNum) {
         roRespond(['success' => false, 'error' => 'Введите номер ресторана и пароль'], 400);
+    }
+    if (!$password) {
+        roRespond(['success' => false, 'error' => 'Введите пароль'], 400);
     }
     if (!$acceptedDataRules) {
         roRespond(['success' => false, 'error' => 'Подтвердите согласие с правилами использования портала'], 400);
@@ -1797,18 +1808,35 @@ if ($roAction === 'login' && $method === 'POST') {
     if (!checkRateLimit($pdo, $clientIp, 15, 10)) {
         roRespond(['success' => false, 'error' => 'Слишком много попыток. Подождите 10 минут'], 429);
     }
-    // Защита от распределённого подбора пароля одного ресторана с разных IP.
-    if (!checkAccountRateLimit($pdo, "rest_{$restNum}", 5, 10)) {
-        roRespond(['success' => false, 'error' => 'Слишком много неудачных попыток для этого ресторана. Подождите 10 минут'], 429);
+    // Ключ rate-limit отдельный для email и для номера, чтобы атака на один ресторан
+    // не блокировала вход других через email и наоборот.
+    $rateKey = $loginByEmail ? "rest_email_{$rawEmail}" : "rest_{$restNum}";
+    if (!checkAccountRateLimit($pdo, $rateKey, 5, 10)) {
+        roRespond(['success' => false, 'error' => 'Слишком много неудачных попыток. Подождите 10 минут'], 429);
     }
 
-    $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, legal_entity_group, last_login_at FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
-    $s->execute([$restNum, $restGroup]);
-    $user = $s->fetch();
+    if ($loginByEmail) {
+        // Логин по email — только для подтверждённых адресов. Иначе любой
+        // подбросит свой неподтверждённый email и сможет атаковать чужой пароль.
+        $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, legal_entity_group, last_login_at FROM ro_users WHERE email = ? AND email_verified_at IS NOT NULL AND is_active = 1 LIMIT 1");
+        $s->execute([$rawEmail]);
+        $user = $s->fetch();
+        // restGroup может прийти неверным (фронт не знает группу по email) —
+        // используем фактический из найденной учётки.
+        if ($user) {
+            $restGroup = $user['legal_entity_group'];
+            $restNum   = (int)$user['restaurant_number'];
+        }
+    } else {
+        $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, legal_entity_group, last_login_at FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+        $s->execute([$restNum, $restGroup]);
+        $user = $s->fetch();
+    }
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
-        recordFailedLogin($pdo, $clientIp, "rest_{$restNum}");
-        roRespond(['success' => false, 'error' => 'Неверный номер ресторана или пароль']);
+        recordFailedLogin($pdo, $clientIp, $rateKey);
+        $errMsg = $loginByEmail ? 'Неверный email или пароль' : 'Неверный номер ресторана или пароль';
+        roRespond(['success' => false, 'error' => $errMsg]);
     }
 
     // Параллельные сессии разрешены — больше не блокируем логин из-за чужой

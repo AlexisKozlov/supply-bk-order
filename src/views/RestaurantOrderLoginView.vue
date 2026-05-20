@@ -76,15 +76,14 @@
           <div class="ro-field">
             <label>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-              Номер ресторана
+              Номер ресторана или email
             </label>
             <div class="ro-input-wrap">
               <input
                 v-model="restaurantNumber"
                 type="text"
                 inputmode="text"
-                autocapitalize="characters"
-                placeholder="Например: 24 или PS01"
+                placeholder="24, PS01 или name@example.com"
                 required
                 autofocus
                 :disabled="loading"
@@ -141,7 +140,7 @@
       <div class="ro-hints">
         <router-link class="ro-hint" :to="{ name: 'ForgotPassword' }">
           <span class="ro-hint-icon">🔐</span>
-          <span>Забыли пароль? <strong>Сбросить через Telegram</strong></span>
+          <span><strong>Забыли пароль?</strong></span>
         </router-link>
       </div>
 
@@ -293,14 +292,23 @@ async function handleLogin() {
     error.value = 'Подтвердите согласие с правилами использования портала';
     return;
   }
-  const parsed = parsedRestaurant();
-  if (!parsed?.number) {
-    error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
-    return;
+  // Поле принимает либо номер ресторана, либо email. По @ определяем.
+  const raw = (restaurantNumber.value || '').trim();
+  let identifier, group = null;
+  if (raw.includes('@')) {
+    identifier = raw;
+  } else {
+    const parsed = parsedRestaurant();
+    if (!parsed?.number) {
+      error.value = 'Неверный номер ресторана или email. Пример: 24, PS01 или name@example.com';
+      return;
+    }
+    identifier = parsed.number;
+    group = parsed.group;
   }
   loading.value = true;
   try {
-    const result = await store.login(parsed.number, password.value, parsed.group, rememberDevice.value, acceptedDataRules.value);
+    const result = await store.login(identifier, password.value, group, rememberDevice.value, acceptedDataRules.value);
     if (result.success) {
       const redirectTarget = safeRedirect(route.query.redirect);
       router.push(redirectTarget || { name: 'restaurant-cabinet' });

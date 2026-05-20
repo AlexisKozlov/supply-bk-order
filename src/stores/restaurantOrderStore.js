@@ -113,16 +113,24 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
-  async function login(restaurantNumber, password, legalEntityGroup = null, remember = true, acceptedDataRules = false) {
+  async function login(identifier, password, legalEntityGroup = null, remember = true, acceptedDataRules = false) {
+    // identifier может быть либо номером ресторана (число/строка), либо email (со @).
+    // Бэк сам решит, по чему искать. Если поле email — group игнорируется (бэк подставит реальную).
+    const isEmail = typeof identifier === 'string' && identifier.includes('@');
+    const body = {
+      password,
+      remember,
+      accepted_data_rules: acceptedDataRules,
+    };
+    if (isEmail) {
+      body.email = identifier.trim();
+    } else {
+      body.restaurant_number = identifier;
+      body.legal_entity_group = legalEntityGroup;
+    }
     const data = await api('login', {
       method: 'POST',
-      body: JSON.stringify({
-        restaurant_number: restaurantNumber,
-        password,
-        legal_entity_group: legalEntityGroup,
-        remember,
-        accepted_data_rules: acceptedDataRules,
-      }),
+      body: JSON.stringify(body),
     });
     if (data.success) {
       localStorage.setItem(REST_KEY, JSON.stringify(data.restaurant));
