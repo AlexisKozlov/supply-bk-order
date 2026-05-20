@@ -306,31 +306,17 @@
           <button class="sa-modal-close" @click="exportModalOpen = false" aria-label="Закрыть">&times;</button>
         </div>
         <div class="sa-modal-body">
-          <p class="sa-export-hint">
-            Каждый склад — отдельная заявка в 1С УТ. «Копировать заявку» даёт данные
-            в формате импорта: внешний код, два пустых столбца, количество.
-            Можно скопировать и отдельный столбец — клик по его заголовку выделяет его.
-          </p>
-
-          <details class="sa-howto sa-howto--in-modal">
-            <summary>
-              <svg class="sa-howto-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/></svg>
-              <span>Как импортировать в 1С УТ</span>
-              <svg class="sa-howto-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-            </summary>
-            <div class="sa-howto-body">
-              <ol class="sa-howto-steps">
-                <li>Откройте 1С УТ</li>
-                <li>Создайте новый <b>Заказ на перемещение</b></li>
-                <li>Нажмите кнопку <b>Заполнить</b></li>
-                <li>В выпадающем списке выберите <b>Загрузка из внешнего файла</b></li>
-                <li>Скопируйте из таблицы ниже колонки <b>Внешний код</b> и <b>Количество</b> и вставьте в соответствующие колонки открывшейся таблицы 1С (Ctrl+V)</li>
-                <li>Нажмите <b>Далее</b> — подгрузится номенклатура</li>
-                <li>Перенесите позиции в документ</li>
-              </ol>
-              <p class="sa-howto-note">Повторите для каждого режима хранения — <b>один режим хранения = один заказ на перемещение</b>.</p>
-            </div>
-          </details>
+          <div class="sa-export-top">
+            <p class="sa-export-hint">
+              Каждый склад — отдельная заявка в 1С УТ. «Копировать заявку» даёт данные
+              в формате импорта: внешний код, два пустых столбца, количество.
+              Можно скопировать и отдельный столбец — клик по его заголовку выделяет его.
+            </p>
+            <button class="sa-howto-btn" @click="howtoModalOpen = true" type="button">
+              <svg class="sa-howto-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/></svg>
+              Как импортировать в 1С УТ
+            </button>
+          </div>
 
           <div v-if="exportInvalidRows.length" class="sa-alert sa-alert--warn">
             <strong>{{ exportInvalidRows.length }}</strong>
@@ -373,6 +359,31 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Модалка: Как импортировать в 1С УТ ══ -->
+    <div v-if="howtoModalOpen" class="sa-overlay sa-overlay--top" @click.self="howtoModalOpen = false">
+      <div class="sa-modal sa-modal--howto">
+        <div class="sa-modal-head">
+          <h2>Как импортировать в 1С УТ</h2>
+          <button class="sa-modal-close" @click="howtoModalOpen = false" aria-label="Закрыть">&times;</button>
+        </div>
+        <div class="sa-modal-body">
+          <ol class="sa-howto-steps">
+            <li>Откройте 1С УТ</li>
+            <li>Создайте новый <b>Заказ на перемещение</b></li>
+            <li>Нажмите кнопку <b>Заполнить</b></li>
+            <li>В выпадающем списке выберите <b>Загрузка из внешнего файла</b></li>
+            <li>Скопируйте из таблицы экспорта колонки <b>Внешний код</b> и <b>Количество</b> и вставьте в соответствующие колонки открывшейся таблицы 1С (Ctrl+V)</li>
+            <li>Нажмите <b>Далее</b> — подгрузится номенклатура</li>
+            <li>Перенесите позиции в документ</li>
+          </ol>
+          <p class="sa-howto-note">Повторите для каждого режима хранения — <b>один режим хранения = один заказ на перемещение</b>.</p>
+        </div>
+        <div class="sa-modal-foot">
+          <button class="sa-btn sa-btn--primary" @click="howtoModalOpen = false">Понятно</button>
         </div>
       </div>
     </div>
@@ -739,6 +750,7 @@ function addFromCatalog(p) {
 
 // ── Модалка: Экспорт 1С УТ ──
 const exportModalOpen = ref(false);
+const howtoModalOpen = ref(false);
 const copiedMsg = ref('');
 let copiedMsgTimer = null;
 const colRefs = {};
@@ -1120,6 +1132,9 @@ function copyGroup(cat) {
   box-shadow: 0 24px 60px rgba(40,24,14,.3);
 }
 .sa-modal--wide { max-width: 680px; }
+.sa-modal--howto { max-width: 520px; }
+/* Поверх окна экспорта */
+.sa-overlay--top { z-index: 1100; }
 .sa-modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 18px; border-bottom: 1px solid var(--sa-line);
@@ -1333,6 +1348,30 @@ function copyGroup(cat) {
   color: var(--sa-ink);
 }
 .sa-howto-note b { color: var(--sa-brown); }
+
+/* Шапка окна экспорта: подсказка слева + кнопка справа */
+.sa-export-top {
+  display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
+}
+.sa-export-top .sa-export-hint { flex: 1 1 240px; min-width: 0; }
+.sa-howto-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 12px;
+  background: #FCFAF6;
+  border: 1px solid var(--sa-line);
+  border-radius: 9px;
+  color: var(--sa-brown);
+  font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease;
+}
+.sa-howto-btn:hover { background: #F6EFE4; border-color: var(--sa-accent); }
+.sa-howto-btn-icon { width: 16px; height: 16px; color: var(--sa-accent); }
+@media (max-width: 560px) {
+  .sa-export-top { flex-direction: column; }
+  .sa-howto-btn { width: 100%; justify-content: center; }
+}
 
 /* ── Кнопка «Наверх» ── */
 /* Кнопка телепортируется в body — переменные --sa-* не наследуются, цвета литералом */
