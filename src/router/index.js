@@ -82,6 +82,12 @@ const routes = [
     meta: { title: 'Заказы — Вход' },
   },
   {
+    path: '/restaurant/verify-email',
+    name: 'restaurant-verify-email',
+    component: () => import('@/views/RestaurantVerifyEmail.vue'),
+    meta: { title: 'Подтверждение email' },
+  },
+  {
     path: '/forgot-password',
     name: 'ForgotPassword',
     component: () => import('@/views/ForgotPassword.vue'),
@@ -242,7 +248,7 @@ router.beforeEach(async (to) => {
   // из JS не виден, поэтому ориентируемся на кэш ресторана в сторе:
   // если ресторан сохранён — пускаем (cookie долетит к серверу), иначе
   // редиректим на форму входа. Серверная валидация делается в кабинете.
-  if (to.path.startsWith('/restaurant/') && to.path !== '/restaurant/login' && to.path !== '/restaurant/reset-password') {
+  if (to.path.startsWith('/restaurant/') && to.path !== '/restaurant/login' && to.path !== '/restaurant/reset-password' && to.path !== '/restaurant/verify-email') {
     const roStore = useRestaurantOrderStore();
     if (!roStore.isAuthenticated) {
       return { path: '/restaurant/login', query: { redirect: to.fullPath } };

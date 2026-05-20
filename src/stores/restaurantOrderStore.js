@@ -91,6 +91,8 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   const deliveryDays = ref([]);
   const restaurantOrdersEnabled = ref(true);
   const loading = ref(false);
+  // Учётная запись ресторана: email и статус подтверждения. Заполняется в loadMyInfo.
+  const accountInfo = ref({ email: null, email_verified: false });
   // Дельта между серверным и клиентским временем (мс): server_time - client_time.
   // Считается при каждом loadMyInfo. Применяется при расчёте обратного отсчёта
   // дедлайна, чтобы сбитые часы устройства не показывали ложное «осталось N мин».
@@ -201,9 +203,25 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
       if (typeof data.server_time === 'number' && Number.isFinite(data.server_time)) {
         serverTimeOffset.value = data.server_time - Date.now();
       }
+      if (data.account) {
+        accountInfo.value = {
+          email: data.account.email || null,
+          email_verified: !!data.account.email_verified,
+        };
+      }
     } finally {
       loading.value = false;
     }
+  }
+
+  async function setAccountEmail(email) {
+    const data = await api('set-email', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    // После сохранения сразу актуализируем стейт (без полного перезапроса my-info).
+    accountInfo.value = { email: data.sent_to || email, email_verified: false };
+    return data;
   }
 
   async function loadProducts(category, search) {
@@ -410,6 +428,13 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api('admin/users', {
       method: 'POST',
       body: JSON.stringify({ action: 'reset-password', restaurant_number: restaurantNumber, legal_entity_group: legalEntityGroup, password }),
+    });
+  }
+
+  async function adminSetUserEmail(restaurantNumber, legalEntityGroup, email) {
+    return await api('admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'set-email', restaurant_number: restaurantNumber, legal_entity_group: legalEntityGroup, email }),
     });
   }
 
@@ -753,6 +778,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     serverTimeOffset, nowFromServer,
+    accountInfo, setAccountEmail,
     login, loginByTelegram, validate, logout, logoutLocal, loadSessions, revokeSession, revokeOtherSessions,
     loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
@@ -764,7 +790,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,
     adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock, adminSearchProducts,
-    adminGetUsers, adminCreateUser, adminCreateBulkUsers, adminToggleUser, adminResetPassword,
+    adminGetUsers, adminCreateUser, adminCreateBulkUsers, adminToggleUser, adminResetPassword, adminSetUserEmail,
     adminGetExportData, adminGetSessions, adminDeleteItem,
     adminPreviewUtImport, adminConfirmUtImport,
     adminGetAuditLog, adminGetOrderHistory,

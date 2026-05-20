@@ -1337,6 +1337,9 @@
     <!-- Скрытый router-view: дочерние маршруты используют пустой компонент-заглушку,
          сам кабинет управляет содержимым через состояние табов -->
     <router-view v-slot="{ Component }"><component :is="Component" v-if="false" /></router-view>
+
+    <!-- Модалка «укажите email» (для восстановления пароля) -->
+    <RestaurantEmailModal v-model="showEmailModal" />
   </div>
 </template>
 
@@ -1369,6 +1372,7 @@ const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components
 const RestaurantOrderHistoryTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantOrderHistoryTab.vue'));
 const RestaurantSurveysTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSurveysTab.vue'));
 const RestaurantInfoTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantInfoTab.vue'));
+const RestaurantEmailModal = defineAsyncComponent(() => import('@/components/restaurant/RestaurantEmailModal.vue'));
 const RestaurantWarehouseStockTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantWarehouseStockTab.vue'));
 const RestaurantSupplyAssistantTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplyAssistantTab.vue'));
 
@@ -1380,6 +1384,20 @@ const toast = useToastStore();
 
 const globalLoading = ref(true);
 const globalError = ref('');
+
+// Модалка «укажите email» — открывается один раз за сессию кабинета, если у
+// ресторана не сохранён email. После закрытия крестиком в этой же сессии не
+// показываем (но при новом логине покажется снова, пока email не указан).
+const showEmailModal = ref(false);
+let emailModalShownThisSession = false;
+function maybePromptForEmail() {
+  if (emailModalShownThisSession) return;
+  const account = roStore.accountInfo;
+  if (account && !account.email) {
+    emailModalShownThisSession = true;
+    showEmailModal.value = true;
+  }
+}
 // У кабинета ресторана собственный роутинг — каждый раздел это свой под-роут
 // (/restaurant/dashboard, /restaurant/orders и т.д.). Синхронизацию с URL делают
 // applyRouteToState/syncStateToRoute ниже, поэтому useTabRoute сюда не нужен —
@@ -3366,6 +3384,9 @@ onMounted(async () => {
     startRestaurantBroadcastPolling();
     startHeartbeat();
     ensureSupDeadlineTimer();
+    // После загрузки данных проверим, есть ли у ресторана email — если нет,
+    // мягко предложим указать (через модалку, можно закрыть крестиком).
+    maybePromptForEmail();
   } catch (e) {
     globalError.value = e.message || 'Ошибка загрузки кабинета';
   } finally { globalLoading.value = false; }

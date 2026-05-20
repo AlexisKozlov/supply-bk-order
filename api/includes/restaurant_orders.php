@@ -2934,18 +2934,30 @@ if ($roAction === 'my-info' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
 
+    // Данные учётной записи ресторана для UI (модалка с email и т.п.).
+    $accountInfo = [
+        'email'          => $rest['email'] ?? null,
+        'email_verified' => !empty($rest['email_verified_at']),
+    ];
+
     $group = $rest['legal_entity_group'] ?? 'BK_VM';
     if (!roRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $group)) {
         roRespond([
             'restaurant_orders_enabled' => false,
             'session' => null,
             'delivery_days' => [],
+            'account' => $accountInfo,
         ]);
     }
 
     $session = roGetActiveSession($pdo, $group);
     if (!$session) {
-        roRespond(['restaurant_orders_enabled' => true, 'session' => null, 'delivery_days' => []]);
+        roRespond([
+            'restaurant_orders_enabled' => true,
+            'session' => null,
+            'delivery_days' => [],
+            'account' => $accountInfo,
+        ]);
     }
 
     // Расписание основной доставки этого ресторана. Дни, где заполнено только
@@ -3038,7 +3050,124 @@ if ($roAction === 'my-info' && $method === 'GET') {
             'status' => $session['status'],
         ],
         'delivery_days' => $deliveryDays,
+        'account' => $accountInfo,
     ]);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Email учётной записи ресторана: сохранение и подтверждение по ссылке.
+// Логин по-прежнему по номеру + паролю. Email — для уведомлений и
+// будущего сброса пароля через email (этап B).
+// ════════════════════════════════════════════════════════════════════
+
+if ($roAction === 'set-email' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $email = trim((string)($body['email'] ?? ''));
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        roRespond(['error' => 'Введите корректный email'], 400);
+    }
+    $email = mb_strtolower($email);
+    if (mb_strlen($email) > 255) {
+        roRespond(['error' => 'Слишком длинный email'], 400);
+    }
+
+    $userId = (int)$rest['id'];
+    $currentEmail = $rest['email'] ?? null;
+    $alreadyVerified = !empty($rest['email_verified_at']);
+
+    // Если уже подтверждён и адрес тот же — ничего не делаем.
+    if ($alreadyVerified && $currentEmail === $email) {
+        roRespond(['success' => true, 'already_verified' => true]);
+    }
+
+    // Сохраняем email. При смене email сбрасываем verified.
+    if ($currentEmail !== $email) {
+        $upd = $pdo->prepare("UPDATE ro_users SET email = ?, email_verified_at = NULL WHERE id = ?");
+        $upd->execute([$email, $userId]);
+    }
+
+    // Чистим старые неиспользованные токены этого юзера, чтобы письма не плодились.
+    $pdo->prepare("UPDATE ro_email_verification_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL")
+        ->execute([$userId]);
+
+    $token = bin2hex(random_bytes(32));
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? null;
+    $pdo->prepare("INSERT INTO ro_email_verification_tokens (user_id, email, token, expires_at, ip_address) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR), ?)")
+        ->execute([$userId, $email, $token, $clientIp]);
+
+    require_once __DIR__ . '/mail_send.php';
+    require_once __DIR__ . '/mail_templates.php';
+
+    $siteUrl   = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
+    $verifyUrl = $siteUrl . '/restaurant/verify-email?token=' . $token;
+    $restNum   = function_exists('formatRestaurantNumber')
+        ? formatRestaurantNumber($rest['restaurant_number'])
+        : (string)$rest['restaurant_number'];
+
+    $bodyHtml = '<p style="margin:0 0 12px;">Для ресторана №<strong>' . htmlspecialchars($restNum, ENT_QUOTES, 'UTF-8') . '</strong> в кабинете Supply Department был указан этот email.</p>'
+              . '<p style="margin:0;">Подтвердите адрес, чтобы можно было восстанавливать пароль кабинета по email. Ссылка действительна <strong>24 часа</strong>.</p>';
+
+    $html = renderMailHtml([
+        'title'   => 'Подтвердите email',
+        'preview' => 'Подтвердите email для ресторана №' . $restNum,
+        'intro'   => 'Здравствуйте!',
+        'body'    => $bodyHtml,
+        'cta'     => ['text' => 'Подтвердить email', 'url' => $verifyUrl],
+        'footer'  => 'Если вы не указывали этот email в кабинете ресторана — просто проигнорируйте письмо.',
+    ]);
+
+    $sendResult = sendEmail($email, 'Подтверждение email — Supply Department', $html, true);
+    if (!$sendResult['success']) {
+        error_log('[ro_set_email] mail failed: ' . ($sendResult['error'] ?? 'unknown'));
+        // Сам email сохранён, токен есть — пользователь увидит «письмо отправлено».
+        // Если SMTP реально сломан — он сможет нажать «отправить снова» в модалке.
+    }
+
+    roRespond(['success' => true, 'sent_to' => $email]);
+}
+
+if ($roAction === 'verify-email' && $method === 'POST') {
+    $token = trim((string)($body['token'] ?? ''));
+    if ($token === '' || !preg_match('/^[a-f0-9]{64}$/', $token)) {
+        roRespond(['valid' => false, 'reason' => 'invalid']);
+    }
+
+    $stmt = $pdo->prepare("SELECT id, user_id, email, used_at, (expires_at < NOW()) AS is_expired FROM ro_email_verification_tokens WHERE token = ? LIMIT 1");
+    $stmt->execute([$token]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        roRespond(['valid' => false, 'reason' => 'invalid']);
+    }
+    if ($row['used_at'] !== null) {
+        roRespond(['valid' => false, 'reason' => 'used']);
+    }
+    if ((int)$row['is_expired'] === 1) {
+        roRespond(['valid' => false, 'reason' => 'expired']);
+    }
+
+    // Подтверждаем — но только если email пользователя совпадает с email в токене.
+    // Если ресторан успел сменить email после отправки этой ссылки — старая ссылка не сработает.
+    $check = $pdo->prepare("SELECT email FROM ro_users WHERE id = ? LIMIT 1");
+    $check->execute([(int)$row['user_id']]);
+    $current = $check->fetchColumn();
+    if ($current !== $row['email']) {
+        roRespond(['valid' => false, 'reason' => 'invalid']);
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("UPDATE ro_users SET email_verified_at = NOW() WHERE id = ?")->execute([(int)$row['user_id']]);
+        $pdo->prepare("UPDATE ro_email_verification_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('[ro_verify_email] failed: ' . $e->getMessage());
+        roRespond(['valid' => false, 'reason' => 'invalid']);
+    }
+
+    roRespond(['valid' => true, 'email' => $row['email']]);
 }
 
 // --- Товары для формы ---
@@ -4911,6 +5040,8 @@ if (strpos($roAction, 'admin') === 0) {
                 ru.last_login_at,
                 ru.password_changed_at,
                 ru.telegram_chat_id,
+                ru.email,
+                ru.email_verified_at,
                 CASE WHEN ru.password_hash IS NULL OR ru.password_hash = '' THEN 0 ELSE 1 END AS has_password
             FROM restaurants r
             LEFT JOIN ro_users ru
@@ -5010,6 +5141,70 @@ if (strpos($roAction, 'admin') === 0) {
                 roRevokeAllSessionsForRestaurant($pdo, $restNum, $restGroup);
             }
             roRespond(['success' => true]);
+        }
+
+        if ($action === 'set-email') {
+            // Закупщик задаёт/меняет email ресторана. После — отправляем
+            // ресторану письмо для подтверждения адреса.
+            $restNum = (int)($body['restaurant_number'] ?? 0);
+            $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
+            $email = trim((string)($body['email'] ?? ''));
+            if (!$restNum) roRespond(['error' => 'Не указан номер ресторана'], 400);
+            if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                roRespond(['error' => 'Введите корректный email'], 400);
+            }
+            if (mb_strlen($email) > 255) roRespond(['error' => 'Слишком длинный email'], 400);
+            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
+
+            $email = $email === '' ? null : mb_strtolower($email);
+
+            $userRow = $pdo->prepare("SELECT id, email FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? LIMIT 1");
+            $userRow->execute([$restNum, $restGroup]);
+            $userRowData = $userRow->fetch();
+            if (!$userRowData) {
+                roRespond(['error' => 'У ресторана нет учётной записи. Сначала создайте пароль.'], 404);
+            }
+
+            // Запись/очистка. При смене email сбрасываем verified.
+            if ($email === null) {
+                $pdo->prepare("UPDATE ro_users SET email = NULL, email_verified_at = NULL WHERE id = ?")->execute([(int)$userRowData['id']]);
+                $pdo->prepare("UPDATE ro_email_verification_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL")->execute([(int)$userRowData['id']]);
+                roRespond(['success' => true, 'cleared' => true]);
+            }
+
+            $changed = ($userRowData['email'] !== $email);
+            if ($changed) {
+                $pdo->prepare("UPDATE ro_users SET email = ?, email_verified_at = NULL WHERE id = ?")->execute([$email, (int)$userRowData['id']]);
+                $pdo->prepare("UPDATE ro_email_verification_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL")->execute([(int)$userRowData['id']]);
+            }
+
+            // Отправляем письмо подтверждения (даже если адрес не сменился —
+            // закупщик мог нажать кнопку «повторно отправить»).
+            $token = bin2hex(random_bytes(32));
+            $pdo->prepare("INSERT INTO ro_email_verification_tokens (user_id, email, token, expires_at, ip_address) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR), ?)")
+                ->execute([(int)$userRowData['id'], $email, $token, $_SERVER['REMOTE_ADDR'] ?? null]);
+
+            require_once __DIR__ . '/mail_send.php';
+            require_once __DIR__ . '/mail_templates.php';
+            $siteUrl   = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
+            $verifyUrl = $siteUrl . '/restaurant/verify-email?token=' . $token;
+            $restDisp  = function_exists('formatRestaurantNumber') ? formatRestaurantNumber($restNum) : (string)$restNum;
+            $bodyHtml = '<p style="margin:0 0 12px;">Закупщик указал этот email для кабинета ресторана №<strong>' . htmlspecialchars($restDisp, ENT_QUOTES, 'UTF-8') . '</strong>.</p>'
+                      . '<p style="margin:0;">Подтвердите адрес, чтобы можно было восстанавливать пароль кабинета по email. Ссылка действительна <strong>24 часа</strong>.</p>';
+            $html = renderMailHtml([
+                'title'   => 'Подтвердите email',
+                'preview' => 'Подтвердите email для ресторана №' . $restDisp,
+                'intro'   => 'Здравствуйте!',
+                'body'    => $bodyHtml,
+                'cta'     => ['text' => 'Подтвердить email', 'url' => $verifyUrl],
+                'footer'  => 'Если этот email указан по ошибке — обратитесь к закупщику.',
+            ]);
+            $sendResult = sendEmail($email, 'Подтверждение email — Supply Department', $html, true);
+            if (!$sendResult['success']) {
+                error_log('[admin set-email] mail failed: ' . ($sendResult['error'] ?? 'unknown'));
+            }
+
+            roRespond(['success' => true, 'email' => $email, 'sent' => !!$sendResult['success']]);
         }
 
         if ($action === 'reset-password') {

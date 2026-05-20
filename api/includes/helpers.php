@@ -146,6 +146,7 @@ function roReadActiveSessionRow(PDO $pdo) {
     if (!$token) { $cache = false; return null; }
     $s = $pdo->prepare("
         SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.last_login_at,
+               ru.email, ru.email_verified_at,
                s.id AS _session_id, s.token AS _session_token,
                s.expires_at AS _session_expires_at, s.remember AS _session_remember,
                s.last_seen_at AS _session_last_seen_at

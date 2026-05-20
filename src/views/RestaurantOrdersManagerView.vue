@@ -840,6 +840,19 @@
                   {{ u.last_login_at ? 'Вход: ' + formatTime(u.last_login_at) : '—' }}
                   <template v-if="u.password_changed_at"><br><small>{{ 'Пароль изменён: ' + formatTime(u.password_changed_at) }}</small></template>
                 </span>
+                <span class="rom-user-email" :class="{ 'is-unverified': u.email && !u.email_verified_at, 'is-empty': !u.email }">
+                  <template v-if="u.email">
+                    <span class="rom-user-email-addr">{{ u.email }}</span>
+                    <small v-if="u.email_verified_at" class="rom-email-badge rom-email-badge-ok" title="Подтверждён">✓ подтверждён</small>
+                    <small v-else class="rom-email-badge rom-email-badge-pending" title="Не подтверждён">не подтверждён</small>
+                  </template>
+                  <template v-else>
+                    <span class="rom-user-email-empty">Email не указан</span>
+                  </template>
+                </span>
+                <button class="rom-btn-sm" @click="handleSetEmail(u)" :disabled="usersBusy" :title="u.email ? 'Изменить email' : 'Указать email'">
+                  {{ u.email ? 'Email' : 'Email…' }}
+                </button>
                 <button class="rom-btn-sm" @click="handleSetPassword(u)" :disabled="usersBusy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
                   {{ u.has_password ? 'Сменить пароль' : 'Задать пароль' }}
                 </button>
@@ -2458,6 +2471,32 @@ async function handleBulkCreate() {
   }
 }
 
+async function handleSetEmail(u) {
+  const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
+  const current = u.email || '';
+  const value = prompt(`Email для ресторана ${label}:\n\nПосле сохранения на этот адрес уйдёт письмо для подтверждения. Чтобы очистить email — оставьте поле пустым.`, current);
+  if (value === null) return; // отмена
+  const trimmed = value.trim();
+  if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
+    toast.error('Похоже, email указан с ошибкой', '');
+    return;
+  }
+  usersBusy.value = true;
+  try {
+    const result = await store.adminSetUserEmail(u.restaurant_number, u.legal_entity_group, trimmed);
+    if (result?.cleared) {
+      toast.success('Готово', `Email ресторана ${label} удалён`);
+    } else {
+      toast.success('Готово', `Email сохранён. На ${trimmed} отправлено письмо для подтверждения.`);
+    }
+    await reloadUsers();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    usersBusy.value = false;
+  }
+}
+
 async function handleSetPassword(u) {
   const verb = u.has_password ? 'Новый пароль' : 'Задайте пароль';
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
@@ -3370,6 +3409,12 @@ async function doUnifiedExport() {
 .rom-user-pwd-status.nopwd { background: #fef3c7; color: #b45309; }
 .rom-user-pwd-status.off { background: #fef2f2; color: #b91c1c; }
 .rom-user-login { font-size: 11px; color: #8b7355; min-width: 110px; text-align: right; }
+.rom-user-email { display: flex; flex-direction: column; gap: 2px; min-width: 180px; max-width: 220px; font-size: 12px; }
+.rom-user-email-addr { color: #502314; word-break: break-all; line-height: 1.25; }
+.rom-user-email-empty { color: #c4b8a8; font-style: italic; }
+.rom-email-badge { font-size: 10px; padding: 1px 7px; border-radius: 10px; font-weight: 600; align-self: flex-start; }
+.rom-email-badge-ok { background: #ecfdf5; color: #16a34a; }
+.rom-email-badge-pending { background: #fef3c7; color: #b45309; }
 .rom-user-toggle-placeholder { display: inline-block; min-width: 90px; }
 
 .rom-users-summary { display: flex; gap: 10px; margin-bottom: 14px; }
