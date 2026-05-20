@@ -126,7 +126,8 @@ if ($saAction === 'products' && $method === 'GET') {
 
     $le = $rest['legal_entity'];
 
-    // Шаблон с JOIN к products для external_code, analog_group, qty_per_box
+    // Шаблон с JOIN к products для external_code, analog_group, qty_per_box.
+    // is_active намеренно не фильтруем — у скрытых товаров справочные параметры тоже нужны.
     $tplStmt = $pdo->prepare("
         SELECT
             t.sku,
@@ -140,7 +141,7 @@ if ($saAction === 'products' && $method === 'GET') {
             p.weight_brutto,
             p.boxes_per_pallet
         FROM ro_templates t
-        LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
+        LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ?
         WHERE t.legal_entity = ? AND t.is_active = 1
         ORDER BY t.sort_order, t.product_name
     ");
@@ -929,6 +930,8 @@ if ($saAction === 'admin') {
 
         if (!$le) saRespond(['error' => 'Не указан legal_entity'], 400);
 
+        // is_active по products намеренно не фильтруем — справочные параметры
+        // нужны и для скрытых товаров (вкл. в шаблоне).
         $q      = "
             SELECT
                 t.*,
@@ -939,7 +942,6 @@ if ($saAction === 'admin') {
             LEFT JOIN products p
                 ON p.sku = t.sku
                AND p.legal_entity = ?
-               AND p.is_active = 1
             WHERE t.legal_entity = ?
               AND t.is_active = 1
         ";

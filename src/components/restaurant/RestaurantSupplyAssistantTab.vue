@@ -119,6 +119,7 @@
                     <span class="sa-sku">{{ item.sku }}</span>
                     <span class="sa-name-text">{{ item.product_name }}</span>
                     <span v-if="item._added" class="sa-badge-added">добавлен</span>
+                    <span v-if="item.analog_group" class="sa-name-ag">{{ item.analog_group }}</span>
                   </td>
                   <td class="sa-col-analog">{{ item.analog_group || '—' }}</td>
                   <td class="sa-col-mult">
@@ -1008,6 +1009,8 @@ function copyGroup(cat) {
 
 .sa-sku { font-weight: 800; color: var(--sa-accent); font-size: 12.5px; margin-right: 5px; }
 .sa-name-text { color: var(--sa-ink); }
+/* Группа аналогов — отдельная мелкая строчка под названием (видна только на мобилке) */
+.sa-name-ag { display: none; }
 .sa-dim { color: #c2b6a6; }
 
 .sa-mult-chip {
@@ -1380,6 +1383,16 @@ function copyGroup(cat) {
   .sa-table tbody td.sa-col-analog,
   .sa-table tbody td.sa-col-stock { display: none; }
   .sa-table tbody td.sa-col-name { flex: 1 1 120px; min-width: 0; font-size: 13.5px; line-height: 1.35; }
+  .sa-name-ag {
+    display: block;
+    margin-top: 3px;
+    font-size: 11.5px;
+    line-height: 1.25;
+    color: var(--sa-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .sa-table tbody td.sa-col-mult { width: auto; text-align: center; }
   .sa-col-mult .sa-dim { display: none; }
   .sa-table tbody td.sa-col-qty { display: flex; flex-direction: column; align-items: flex-end; width: auto; }
