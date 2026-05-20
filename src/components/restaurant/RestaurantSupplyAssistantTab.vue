@@ -245,6 +245,26 @@
           <li><span class="sa-intro-num">3</span><span class="sa-intro-text">Сохраните заказ</span></li>
           <li><span class="sa-intro-num">4</span><span class="sa-intro-text">Нажмите «Экспорт 1С УТ» и перенесите заявки в 1С</span></li>
         </ol>
+
+        <details class="sa-howto">
+          <summary>
+            <svg class="sa-howto-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/></svg>
+            <span>Как импортировать в 1С УТ</span>
+            <svg class="sa-howto-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </summary>
+          <div class="sa-howto-body">
+            <ol class="sa-howto-steps">
+              <li>Откройте 1С УТ</li>
+              <li>Создайте новый <b>Заказ на перемещение</b></li>
+              <li>Нажмите кнопку <b>Заполнить</b></li>
+              <li>В выпадающем списке выберите <b>Загрузка из внешнего файла</b></li>
+              <li>Скопируйте в окне экспорта колонки <b>Внешний код</b> и <b>Количество</b> и вставьте в соответствующие колонки открывшейся таблицы 1С (Ctrl+V)</li>
+              <li>Нажмите <b>Далее</b> — подгрузится номенклатура</li>
+              <li>Перенесите позиции в документ</li>
+            </ol>
+            <p class="sa-howto-note">Повторите для каждого режима хранения — <b>один режим хранения = один заказ на перемещение</b>.</p>
+          </div>
+        </details>
       </div>
     </template>
 
@@ -290,6 +310,26 @@
             в формате импорта: внешний код, два пустых столбца, количество.
             Можно скопировать и отдельный столбец — клик по его заголовку выделяет его.
           </p>
+
+          <details class="sa-howto sa-howto--in-modal">
+            <summary>
+              <svg class="sa-howto-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/></svg>
+              <span>Как импортировать в 1С УТ</span>
+              <svg class="sa-howto-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </summary>
+            <div class="sa-howto-body">
+              <ol class="sa-howto-steps">
+                <li>Откройте 1С УТ</li>
+                <li>Создайте новый <b>Заказ на перемещение</b></li>
+                <li>Нажмите кнопку <b>Заполнить</b></li>
+                <li>В выпадающем списке выберите <b>Загрузка из внешнего файла</b></li>
+                <li>Скопируйте из таблицы ниже колонки <b>Внешний код</b> и <b>Количество</b> и вставьте в соответствующие колонки открывшейся таблицы 1С (Ctrl+V)</li>
+                <li>Нажмите <b>Далее</b> — подгрузится номенклатура</li>
+                <li>Перенесите позиции в документ</li>
+              </ol>
+              <p class="sa-howto-note">Повторите для каждого режима хранения — <b>один режим хранения = один заказ на перемещение</b>.</p>
+            </div>
+          </details>
 
           <div v-if="exportInvalidRows.length" class="sa-alert sa-alert--warn">
             <strong>{{ exportInvalidRows.length }}</strong>
@@ -1208,6 +1248,88 @@ function copyGroup(cat) {
   font-size: 14px; font-weight: 800;
 }
 .sa-intro-text { font-size: 14px; line-height: 1.5; color: var(--sa-ink); padding-top: 4px; }
+
+/* ── Свёрнутая инструкция «Как импортировать в 1С УТ» ── */
+.sa-howto {
+  margin: 14px 0 0;
+  border: 1px solid var(--sa-line);
+  border-radius: 10px;
+  background: #FCFAF6;
+  overflow: hidden;
+}
+.sa-howto--in-modal { margin: 12px 0 14px; }
+.sa-howto summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: var(--sa-brown);
+  font-size: 14px;
+  user-select: none;
+}
+.sa-howto summary::-webkit-details-marker { display: none; }
+.sa-howto summary:hover { background: #F6EFE4; }
+.sa-howto-icon {
+  width: 18px; height: 18px;
+  color: var(--sa-accent);
+  flex-shrink: 0;
+}
+.sa-howto-arrow {
+  width: 16px; height: 16px;
+  margin-left: auto;
+  color: var(--sa-muted);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.sa-howto[open] .sa-howto-arrow { transform: rotate(180deg); }
+.sa-howto-body {
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--sa-line);
+  background: #fff;
+}
+.sa-howto-steps {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  counter-reset: howto;
+}
+.sa-howto-steps li {
+  counter-increment: howto;
+  position: relative;
+  padding: 5px 0 5px 30px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--sa-ink);
+}
+.sa-howto-steps li::before {
+  content: counter(howto);
+  position: absolute;
+  left: 0; top: 5px;
+  width: 22px; height: 22px;
+  background: #EFE6D9;
+  color: var(--sa-brown);
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sa-howto-steps li b { color: var(--sa-brown); }
+.sa-howto-note {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  background: #FFF6E6;
+  border-left: 3px solid var(--sa-accent);
+  border-radius: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--sa-ink);
+}
+.sa-howto-note b { color: var(--sa-brown); }
 
 /* ── Кнопка «Наверх» ── */
 /* Кнопка телепортируется в body — переменные --sa-* не наследуются, цвета литералом */
