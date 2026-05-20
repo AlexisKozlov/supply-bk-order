@@ -135,11 +135,11 @@
                   @click="prod.need_expiry ? toggleExpand(prod) : toggleSort('prod_' + prod.id)"
                 >
                   <div>
+                    <span v-if="prod.product_sku" class="th-sku-inline">{{ prod.product_sku }}</span>
                     {{ prod.product_name }}
                     <span v-if="prod.need_expiry" class="prod-toggle-icon">{{ isExpanded(prod) ? '▾' : '▸' }}</span>
                     <span v-else class="sort-arrow">{{ sortKey === 'prod_' + prod.id ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span>
                   </div>
-                  <div v-if="prod.product_sku" class="th-sku">{{ prod.product_sku }}</div>
                   <div class="th-unit">{{ unitLabel(prod.unit) }}</div>
                   <div v-if="prod.need_expiry && !isExpanded(prod)" class="th-flag">срок · нажмите для разбивки</div>
                   <div v-if="prod.note" class="th-note" :title="prod.note">{{ prod.note }}</div>
@@ -1581,8 +1581,9 @@ async function exportExcel() {
 
   for (const p of products) {
     const ul = unitLabel(p.unit);
-    // Артикул впереди, потом название/ед, и цена в правом верхнем углу.
-    const skuPrefix = p.product_sku ? `[${p.product_sku}] ` : '';
+    // Артикул впереди — без скобок. Потом название, единица в скобках, и
+    // цена в правом верхнем углу (если задана).
+    const skuPrefix = p.product_sku ? `${p.product_sku} ` : '';
     const pricePart = priceById.has(p.id) ? `\n${priceById.get(p.id).toFixed(2)} Br/${ul}` : '';
     const headerText = `${skuPrefix}${p.product_name} (${ul})${pricePart}`;
     if (p.need_expiry) {
@@ -1928,7 +1929,7 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 }
 .sc-tbl thead th.col-prod { white-space: normal; word-break: break-word; max-width: 80px; font-size: 10px; line-height: 1.3; }
 .sc-tbl thead th .th-unit { font-weight: 400; font-size: 9px; opacity: 0.7; margin-top: 1px; }
-.sc-tbl thead th .th-sku { font-weight: 600; font-size: 9.5px; color: #FFCFA8; margin-top: 1px; letter-spacing: 0.02em; }
+.sc-tbl thead th .th-sku-inline { font-weight: 700; color: #FFD8B0; margin-right: 4px; letter-spacing: 0.02em; }
 .sc-tbl thead th .th-price { font-weight: 700; font-size: 9.5px; color: #FFE0AA; margin-top: 2px; letter-spacing: 0.02em; }
 .sc-tbl .col-rest-sum { text-align: right; padding-right: 10px; font-weight: 700; }
 .sc-tbl tfoot .foot-val-cost { color: var(--brown); background: #FBF1E0; font-weight: 700; }
