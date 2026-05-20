@@ -151,6 +151,9 @@
                   <label>Пароль</label>
                   <input ref="passwordInput" v-model="password" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doLogin" :disabled="loginLoading" />
                 </div>
+                <div class="login-forgot-row">
+                  <router-link to="/staff-forgot-password" class="login-forgot-link">Забыли пароль?</router-link>
+                </div>
                 <label class="login-consent">
                   <input v-model="acceptedDataRules" type="checkbox" :disabled="loginLoading" />
                   <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
@@ -691,6 +694,9 @@ function confirmLogout() {
 .login-field input[type="number"]::-webkit-inner-spin-button,
 .login-field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .login-error { color: #E76F51; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.login-forgot-row { display: flex; justify-content: flex-end; margin: -6px 0 10px; }
+.login-forgot-link { color: #8b7355; font-size: 12px; font-weight: 600; text-decoration: none; }
+.login-forgot-link:hover { color: #E76F51; text-decoration: underline; }
 .login-consent { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 12px; color: #6f5948; font-size: 12px; line-height: 1.35; cursor: pointer; }
 .login-consent input { width: 15px; height: 15px; margin-top: 1px; accent-color: #E76F51; flex-shrink: 0; }
 .login-consent a { color: #B52200; font-weight: 700; text-decoration: none; }

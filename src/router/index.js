@@ -88,6 +88,18 @@ const routes = [
     meta: { title: 'Сброс пароля' },
   },
   {
+    path: '/staff-forgot-password',
+    name: 'StaffForgotPassword',
+    component: () => import('@/views/StaffForgotPassword.vue'),
+    meta: { title: 'Восстановление пароля' },
+  },
+  {
+    path: '/staff-reset-password',
+    name: 'StaffResetPassword',
+    component: () => import('@/views/StaffResetPassword.vue'),
+    meta: { title: 'Новый пароль' },
+  },
+  {
     path: '/verify-reset-code',
     name: 'VerifyResetCode',
     component: () => import('@/views/VerifyResetCode.vue'),
