@@ -979,6 +979,28 @@ if ($saAction === 'admin') {
         if (!$category) saRespond(['error' => 'Не указана категория'], 400);
 
         if ($action === 'save') {
+            // Дедупликация по SKU в пределах категории/юрлица. Без неё две одинаковые
+            // строки от пользователя ронят INSERT по uq_ro_tpl и весь шаблон не
+            // сохраняется. Оставляем первое вхождение; mult и name берём оттуда же.
+            $deduped = [];
+            $skipped = 0;
+            $seenSku = [];
+            $seenName = [];
+            foreach ($items as $item) {
+                $sku = trim((string)($item['sku'] ?? ''));
+                $name = trim((string)($item['product_name'] ?? ''));
+                if ($sku !== '') {
+                    if (isset($seenSku[$sku])) { $skipped++; continue; }
+                    $seenSku[$sku] = true;
+                } else {
+                    // Без SKU дедуплицируем по имени, чтобы не плодить копий.
+                    $nameKey = mb_strtolower($name);
+                    if ($nameKey !== '' && isset($seenName[$nameKey])) { $skipped++; continue; }
+                    if ($nameKey !== '') $seenName[$nameKey] = true;
+                }
+                $deduped[] = $item;
+            }
+
             // Удаляем старые позиции категории
             $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
 
@@ -986,7 +1008,7 @@ if ($saAction === 'admin') {
                 INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order, is_active)
                 VALUES (?, ?, ?, ?, ?, ?, 1)
             ");
-            foreach ($items as $i => $item) {
+            foreach ($deduped as $i => $item) {
                 $mult = intval($item['multiplicity'] ?? 0);
                 $insert->execute([
                     $le,
@@ -997,7 +1019,7 @@ if ($saAction === 'admin') {
                     $i,
                 ]);
             }
-            saRespond(['success' => true, 'count' => count($items)]);
+            saRespond(['success' => true, 'count' => count($deduped), 'skipped_duplicates' => $skipped]);
         }
 
         saRespond(['error' => 'Unknown action'], 400);

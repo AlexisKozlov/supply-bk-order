@@ -4799,11 +4799,32 @@ if (strpos($roAction, 'admin') === 0) {
 
             if (!$category) roRespond(['error' => 'Не указана категория'], 400);
 
+            // Дедупликация по SKU (или по имени, если SKU нет) внутри категории.
+            // uq_ro_tpl уникален по (legal_entity, category, sku) — дубли в payload
+            // ронят весь INSERT и шаблон не сохраняется. Молча отбрасываем повторы.
+            $deduped = [];
+            $skipped = 0;
+            $seenSku = [];
+            $seenName = [];
+            foreach ($items as $item) {
+                $sku = trim((string)($item['sku'] ?? ''));
+                $name = trim((string)($item['product_name'] ?? ''));
+                if ($sku !== '') {
+                    if (isset($seenSku[$sku])) { $skipped++; continue; }
+                    $seenSku[$sku] = true;
+                } else {
+                    $nameKey = mb_strtolower($name);
+                    if ($nameKey !== '' && isset($seenName[$nameKey])) { $skipped++; continue; }
+                    if ($nameKey !== '') $seenName[$nameKey] = true;
+                }
+                $deduped[] = $item;
+            }
+
             // Удаляем старые для этой категории + юрлица
             $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
 
             $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?, ?)");
-            foreach ($items as $i => $item) {
+            foreach ($deduped as $i => $item) {
                 $mult = intval($item['multiplicity'] ?? 0);
                 $insert->execute([
                     $le,
@@ -4814,7 +4835,7 @@ if (strpos($roAction, 'admin') === 0) {
                     $i,
                 ]);
             }
-            roRespond(['success' => true, 'count' => count($items)]);
+            roRespond(['success' => true, 'count' => count($deduped), 'skipped_duplicates' => $skipped]);
         }
 
         if ($action === 'import-from-stock') {
