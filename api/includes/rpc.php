@@ -803,29 +803,23 @@ if ($endpoint === 'rpc') {
 
         $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
 
-        // Тело: текст «как в mailto», обернём в <pre>-блок для сохранения переносов.
-        $bodyEscaped = htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8');
-        $intro = $legalEntity !== '' ? "Заявка для {$legalEntity}" : 'Заявка на поставку';
-        $bodyHtml = '<div style="font-family:Consolas,Menlo,monospace;white-space:pre-wrap;background:#fafaf7;border:1px solid #eee2d4;border-radius:8px;padding:14px 16px;font-size:13.5px;color:#3a2818;line-height:1.55;">'
-                  . $bodyEscaped
-                  . '</div>';
+        // Тело письма поставщику — деловой стиль, без брендинга «портал».
+        // Просто текст заказа в моноширинном блоке, как привычно поставщикам
+        // от mailto-отправки. Без логотипа и без footer'а про автоотправку.
+        $bodyEscaped = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
+        $html = '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+              . '<body style="margin:0;padding:20px;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;color:#1f1f1f;line-height:1.55;font-size:15px;">'
+              . '<div style="max-width:680px;margin:0 auto;">'
+              . $bodyEscaped
+              . '</div></body></html>';
 
-        $html = renderMailHtml([
-            'title'   => 'Заявка на поставку',
-            'preview' => $intro . ($deliveryLabel ? ' · доставка ' . $deliveryLabel : ''),
-            'intro'   => 'Здравствуйте!',
-            'body'    => '<p style="margin:0 0 14px;">' . htmlspecialchars($intro, ENT_QUOTES, 'UTF-8') . ($deliveryLabel ? ', дата поставки <strong>' . htmlspecialchars($deliveryLabel, ENT_QUOTES, 'UTF-8') . '</strong>' : '') . '.</p>' . $bodyHtml,
-            'footer'  => 'Письмо отправлено через портал supply-department.online. Отвечайте на это письмо — ответ придёт на ' . ($_ENV['SMTP_REPLY_TO'] ?? 'info@supply-department.online') . '.',
+        // Слать с заказного ящика order@, Reply-To — туда же (ответы поставщика
+        // приходят на тот же ящик, который читают закупщики).
+        $orderEmail = $_ENV['SMTP_ORDER_USER'] ?? 'order@supply-department.online';
+        $sendResult = sendEmail($recipients, $subject, $html, true, [
+            'account'  => 'order',
+            'reply_to' => $orderEmail,
         ]);
-
-        // Reply-To выставим временно через .env, чтобы потом не было в спам-репутации noreply.
-        $prevReplyTo = $_ENV['SMTP_REPLY_TO'] ?? null;
-        $_ENV['SMTP_REPLY_TO'] = $_ENV['SMTP_REPLY_TO'] ?? 'info@supply-department.online';
-
-        $sendResult = sendEmail($recipients, $subject, $html, true);
-
-        if ($prevReplyTo === null) unset($_ENV['SMTP_REPLY_TO']);
-        else $_ENV['SMTP_REPLY_TO'] = $prevReplyTo;
 
         $userId = $authUser['id'] ?? null;
         try {
