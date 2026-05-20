@@ -47,7 +47,7 @@
             <span v-if="!post.is_read" class="info-card-dot" aria-label="Новое"></span>
           </header>
           <h3 v-if="post.title" class="info-card-title">{{ post.title }}</h3>
-          <p class="info-card-message">{{ post.message }}</p>
+          <div class="info-card-message ro-post-body" v-html="renderPostMessage(post.message)"></div>
 
           <div v-if="post.files?.length" class="info-card-files">
             <button v-for="file in post.files" :key="file.id"
@@ -88,6 +88,11 @@
 import { ref, reactive, computed } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { formatDateTime as fmtDateTime } from '@/lib/roUtils.js';
+import { renderMarkdown } from '@/lib/markdown.js';
+
+function renderPostMessage(text) {
+  return renderMarkdown(text || '');
+}
 import { useToastStore } from '@/stores/toastStore.js';
 
 const props = defineProps({
@@ -270,8 +275,15 @@ function closePreview() {
 }
 .info-card-message {
   margin: 0; color: #4B3527; font-size: 14.5px; line-height: 1.55;
-  white-space: pre-line;
 }
+.info-card-message.ro-post-body { white-space: normal; }
+.info-card-message.ro-post-body p { margin: 0 0 8px; }
+.info-card-message.ro-post-body p:last-child { margin-bottom: 0; }
+.info-card-message.ro-post-body ul, .info-card-message.ro-post-body ol { margin: 6px 0 10px 20px; padding: 0; }
+.info-card-message.ro-post-body li { margin: 2px 0; }
+.info-card-message.ro-post-body a { color: #b81e00; text-decoration: underline; word-break: break-word; }
+.info-card-message.ro-post-body a:hover { color: #E76F51; }
+.info-card-message.ro-post-body code { background: #f6efe8; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
 .info-card-files {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px; margin-top: 14px;

@@ -232,6 +232,56 @@ function roIsKnownDevice(PDO $pdo, $roUserId, $userAgent) {
 }
 
 /**
+ * Markdown-ссылки и автолинки → HTML для Telegram (parse_mode=HTML).
+ * Поддерживает [текст](url) и голые http(s)-ссылки. Остальной текст
+ * экранируется. Используется в постах кабинета: фронт рендерит то же
+ * через renderMarkdown(), бэк — для рассылки в Telegram-бот.
+ *
+ * Telegram умеет очень узкий набор HTML — только <b>, <i>, <a>, <code> и
+ * подобные. Параграфы/списки/заголовки оставляем плоским текстом, чтобы
+ * не словить «Bad Request: can't parse entities».
+ */
+function tgFormatPostMessage($message) {
+    if ($message === null || $message === '') return '';
+    // Прячем готовые markdown-ссылки и автолинки под NUL-плейсхолдером —
+    // тогда htmlspecialchars не сломает href, а парсер markdown ниже
+    // отработает по уже подменённой строке.
+    $links = [];
+    $stash = function ($html) use (&$links) {
+        $links[] = $html;
+        return "\x00L" . (count($links) - 1) . "\x00";
+    };
+
+    // [текст](url) — только http(s).
+    $message = preg_replace_callback('/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/u', function ($m) use ($stash) {
+        $url = htmlspecialchars($m[2], ENT_QUOTES, 'UTF-8');
+        $text = htmlspecialchars($m[1], ENT_QUOTES, 'UTF-8');
+        return $stash('<a href="' . $url . '">' . $text . '</a>');
+    }, $message);
+
+    // Голые URL: переводим в кликабельные, утянутые хвостовые знаки препинания возвращаем наружу.
+    $message = preg_replace_callback('/(^|[\s(<])(https?:\/\/[^\s<]+)/u', function ($m) use ($stash) {
+        $pre = $m[1];
+        $url = $m[2];
+        $tail = '';
+        while ($url !== '' && preg_match('/[),.!?;:]$/u', $url)) {
+            $tail = substr($url, -1) . $tail;
+            $url = substr($url, 0, -1);
+        }
+        $safeUrl = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+        return $pre . $stash('<a href="' . $safeUrl . '">' . $safeUrl . '</a>') . htmlspecialchars($tail, ENT_QUOTES, 'UTF-8');
+    }, $message);
+
+    // Экранируем остаток и возвращаем ссылки на место.
+    $message = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
+    $message = preg_replace_callback('/\x00L(\d+)\x00/', function ($m) use ($links) {
+        return $links[(int)$m[1]] ?? '';
+    }, $message);
+
+    return $message;
+}
+
+/**
  * Короткая человекочитаемая метка устройства из UA: «iPhone · Safari»,
  * «Windows · Chrome» и т.п. Для страницы «Активные устройства».
  */

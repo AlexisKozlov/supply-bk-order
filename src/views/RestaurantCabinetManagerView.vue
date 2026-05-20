@@ -30,6 +30,10 @@
         <label class="rcm-field">
           <span>Текст</span>
           <textarea v-model="form.message" rows="6" placeholder="Введите сообщение для ресторанов"></textarea>
+          <small class="rcm-hint">
+            Ссылку — <code>[Сбор заказа](https://supply-department.online/restaurant/orders/assistant)</code>.
+            Голый адрес тоже станет кликабельным. Жирный — <code>**текст**</code>, курсив — <code>*текст*</code>.
+          </small>
         </label>
 
         <div class="rcm-field">
@@ -355,6 +359,8 @@ onBeforeUnmount(() => {
 .rcm-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 13px; font-size: 13px; font-weight: 700; color: #502314; }
 .rcm-field input, .rcm-field textarea, .rcm-field select, .rcm-list-head select { border: 1px solid #ddd2c8; border-radius: 6px; padding: 10px 11px; font: inherit; background: #fff; color: #2d2420; }
 .rcm-field textarea { resize: vertical; min-height: 130px; }
+.rcm-hint { font-weight: 400; font-size: 11.5px; color: #8b7355; line-height: 1.5; }
+.rcm-hint code { background: #f6efe8; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #502314; }
 .rcm-segments { display: flex; gap: 6px; background: #f7f1eb; border-radius: 8px; padding: 4px; }
 .rcm-segments button { flex: 1; border: 0; border-radius: 6px; padding: 8px; background: transparent; cursor: pointer; font-weight: 700; color: #6f5f55; }
 .rcm-segments button.active { background: #fff; color: #502314; box-shadow: 0 1px 4px rgba(80,35,20,.12); }

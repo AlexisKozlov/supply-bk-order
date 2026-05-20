@@ -330,7 +330,7 @@
               </div>
               <span v-if="!latestImportantPost.is_read" class="info-unread">Новое</span>
             </div>
-            <p>{{ latestImportantPost.message }}</p>
+            <div class="dash-important-msg ro-post-body" v-html="renderPostMessage(latestImportantPost.message)"></div>
             <div v-if="latestImportantPost.files?.length" class="info-attachments">
               <button
                 v-for="file in latestImportantPost.files"
@@ -900,6 +900,7 @@
                         class="sc-input sc-input-num sc-stock-qty"
                         placeholder="0"
                         @keydown="onStockKeyNav"
+                        @wheel="onStockWheel"
                       />
                     </div>
                     <button
@@ -950,6 +951,7 @@
                     class="sc-input sc-input-num sc-card-input sc-stock-qty"
                     placeholder="0"
                     @keydown="onStockKeyNav"
+                    @wheel="onStockWheel"
                   />
                   <span class="sc-card-input-unit">{{ stockUnitShort(p.unit) }}</span>
                 </div>
@@ -1179,7 +1181,7 @@
           <button class="cab-modal-close" @click="dismissCurrentImportantPost">&times;</button>
         </div>
         <div class="cab-modal-body">
-          <p class="cab-info-text cab-info-text-broadcast">{{ currentImportantPost.message }}</p>
+          <div class="cab-info-text cab-info-text-broadcast ro-post-body" v-html="renderPostMessage(currentImportantPost.message)"></div>
           <div v-if="currentImportantPost.files?.length" class="info-attachments info-files-modal">
             <button
               v-for="file in currentImportantPost.files"
@@ -1212,7 +1214,7 @@
           <button class="cab-modal-close" @click="dismissCurrentBroadcast">&times;</button>
         </div>
         <div class="cab-modal-body">
-          <p class="cab-info-text cab-info-text-broadcast">{{ currentBroadcast.message }}</p>
+          <div class="cab-info-text cab-info-text-broadcast ro-post-body" v-html="renderPostMessage(currentBroadcast.message)"></div>
           <div class="cab-info-meta">
             {{ currentBroadcast.created_by || 'Отдел закупок' }} · {{ fmtDateTime(currentBroadcast.created_at) }}
           </div>
@@ -1349,6 +1351,13 @@ import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime 
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
 import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg } from '@/lib/cabinetIcons.js';
 import { roFetch } from '@/lib/roUtils.js';
+import { renderMarkdown } from '@/lib/markdown.js';
+
+// Рендер сообщения поста: markdown-ссылки [текст](url), голые URL и форматирование.
+// HTML экранируется внутри renderMarkdown, поэтому v-html безопасен.
+function renderPostMessage(text) {
+  return renderMarkdown(text || '');
+}
 import { useCabinetDashboard } from '@/composables/useCabinetDashboard.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
@@ -3039,6 +3048,13 @@ function addStockBatch(productId) {
 
 // Навигация по полям ввода остатков: Enter и ↓ — следующее поле, ↑ — предыдущее.
 // Иначе у input type="number" стрелки увеличивают/уменьшают цифру, что мешает.
+// Колесо мыши на input[type=number] по умолчанию меняет значение поля. На сборе
+// остатков это легко сбивает уже введённую цифру случайным прокруткой. Снимаем
+// фокус — страница продолжит скроллиться, число останется как было.
+function onStockWheel(ev) {
+  if (ev.target && typeof ev.target.blur === 'function') ev.target.blur();
+}
+
 function onStockKeyNav(ev) {
   const key = ev.key;
   if (key !== 'Enter' && key !== 'ArrowDown' && key !== 'ArrowUp') return;
@@ -4356,6 +4372,17 @@ tr.del-err { background: #fef2f2; }
 .cab-info-text { color: #502314; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
 .cab-info-text.cab-info-error { color: #b91c1c; }
 .cab-info-text-broadcast { white-space: pre-line; }
+
+/* Рендер markdown-постов: ссылки и компактные параграфы. */
+.ro-post-body { white-space: normal; }
+.ro-post-body p { margin: 0 0 8px; white-space: normal; }
+.ro-post-body p:last-child { margin-bottom: 0; }
+.ro-post-body ul, .ro-post-body ol { margin: 6px 0 10px 20px; padding: 0; }
+.ro-post-body li { margin: 2px 0; }
+.ro-post-body h3, .ro-post-body h4 { margin: 10px 0 6px; color: #502314; }
+.ro-post-body a { color: #b81e00; text-decoration: underline; word-break: break-word; }
+.ro-post-body a:hover { color: #E76F51; }
+.ro-post-body code { background: #f6efe8; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
 
 /* Старые .info-toolbar/.info-posts/.info-post оставлены пустыми — стили
    полностью заменены на .info-section/.info-card ниже. */
