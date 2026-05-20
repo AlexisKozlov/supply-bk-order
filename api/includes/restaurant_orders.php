@@ -4746,10 +4746,13 @@ if (strpos($roAction, 'admin') === 0) {
                 $catParams[] = $category;
             }
             $st = $pdo->prepare("SELECT oi.id, oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
+                       p.weight_brutto,
                        (SELECT pp.price FROM product_prices pp JOIN ro_orders o2 ON o2.id = oi.order_id
                            WHERE pp.sku = oi.sku AND pp.legal_entity_group = o2.legal_entity_group AND pp.price_type = 'deposit'
                            ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
-                FROM ro_order_items oi WHERE oi.order_id IN ({$ph}){$catWhere} ORDER BY oi.category, oi.product_name");
+                FROM ro_order_items oi
+                LEFT JOIN products p ON p.sku = oi.sku
+                WHERE oi.order_id IN ({$ph}){$catWhere} ORDER BY oi.category, oi.product_name");
             $st->execute($catParams);
             $items = $st->fetchAll();
         }

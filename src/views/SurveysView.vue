@@ -150,6 +150,11 @@
               <span>Результаты</span>
               <span v-if="detail?.responses?.length" class="sv-tab-count">{{ detail.responses.length }}</span>
             </button>
+            <button class="sv-tab" :class="{ active: activeTab === 'table' }" @click="activeTab = 'table'">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+              <span>Таблица</span>
+              <span v-if="detail?.responses?.length" class="sv-tab-count">{{ detail.responses.length }}</span>
+            </button>
           </div>
 
           <!-- ═══ ВКЛАДКА: Настройки ═══ -->
@@ -386,6 +391,151 @@
               Ответили все рестораны
             </div>
           </div>
+
+          <!-- ═══ ВКЛАДКА: Таблица ═══ -->
+          <div v-if="!isCreating && activeTab === 'table'" class="sv-tab-body">
+            <div v-if="!detail?.responses?.length" class="sv-empty">Пока никто не ответил.</div>
+            <template v-else>
+              <div class="sv-table-toolbar">
+                <div class="sv-search sv-table-search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input v-model="tableSearch" type="text" placeholder="Поиск по ресторану, городу, адресу…" />
+                </div>
+                <div class="sv-table-toolbar-actions">
+                  <span class="sv-table-count">{{ tableRows.length }} из {{ detail.responses.length }}</span>
+                  <button v-if="hasActiveTableFilters" class="sv-btn ghost small" @click="resetTableFilters">Сбросить фильтры</button>
+                  <button class="sv-btn primary small" @click="downloadExcel" :disabled="exportingExcel">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>{{ exportingExcel ? 'Готовлю…' : 'Скачать Excel' }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="sv-table-wrap" ref="tableWrapEl" @mousedown="onTableDragStart">
+                <table class="sv-table">
+                  <thead>
+                    <tr>
+                      <th class="sv-th sv-th-rest" @click="toggleSort('__rest')">
+                        <span>№ / Город / Адрес</span>
+                        <span class="sv-th-sort" :class="sortClass('__rest')"></span>
+                      </th>
+                      <th class="sv-th sv-th-date" @click="toggleSort('__date')">
+                        <span>Дата ответа</span>
+                        <span class="sv-th-sort" :class="sortClass('__date')"></span>
+                      </th>
+                      <th
+                        v-for="q in detail.questions"
+                        :key="q.id"
+                        class="sv-th sv-th-q"
+                        :class="{ active: hasColumnFilter(q.id) }"
+                      >
+                        <div class="sv-th-q-row">
+                          <span class="sv-th-q-text" :title="q.text" @click="toggleSort(q.id)">{{ q.text }}</span>
+                          <button
+                            v-if="q.type !== 'text' || textHasValues(q.id)"
+                            class="sv-th-filter-btn"
+                            :class="{ active: hasColumnFilter(q.id) }"
+                            @click.stop="openFilter(q.id, $event)"
+                            title="Фильтр"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                          </button>
+                          <span class="sv-th-sort" @click="toggleSort(q.id)" :class="sortClass(q.id)"></span>
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="resp in tableRows" :key="resp.id" class="sv-tr">
+                      <td class="sv-td sv-td-rest">
+                        <div class="sv-td-rest-num">{{ formatRestaurantNumber(resp.restaurant_number, resp.legal_entity_group) }}</div>
+                        <div v-if="resp.city || resp.address" class="sv-td-rest-addr">{{ [resp.city, resp.address].filter(Boolean).join(', ') }}</div>
+                      </td>
+                      <td class="sv-td sv-td-date">{{ formatDate(resp.submitted_at) }}</td>
+                      <td
+                        v-for="q in detail.questions"
+                        :key="q.id"
+                        class="sv-td sv-td-a"
+                        :class="{ 'sv-td-center': q.type === 'scale' }"
+                      >
+                        <span :title="cellTextFor(resp, q.id)">{{ cellTextFor(resp, q.id) || '—' }}</span>
+                      </td>
+                    </tr>
+                    <tr v-if="!tableRows.length">
+                      <td :colspan="2 + detail.questions.length" class="sv-td sv-td-empty">Ничего не найдено по фильтрам</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div v-if="commentsList.length" class="sv-comments sv-table-comments">
+                <h3 class="sv-block-title">Комментарии <span class="sv-muted">{{ commentsList.length }}</span></h3>
+                <div class="sv-comment" v-for="c in commentsList" :key="c.id">
+                  <div class="sv-comment-head">
+                    <span class="sv-comment-rest">{{ formatRestaurantNumber(c.restaurant_number, c.legal_entity_group) }}</span>
+                    <span class="sv-muted small">{{ formatDate(c.submitted_at) }}</span>
+                  </div>
+                  <div class="sv-comment-text">{{ c.comment }}</div>
+                </div>
+              </div>
+
+              <div v-if="detail?.pending_restaurants?.length" class="sv-pending sv-table-pending">
+                <h3 class="sv-block-title">Не ответили <span class="sv-muted">{{ detail.pending_restaurants.length }}</span></h3>
+                <div class="sv-pending-chips">
+                  <span v-for="item in detail.pending_restaurants" :key="`${item.legal_entity_group}-${item.restaurant_number}`" class="sv-pending-chip">
+                    {{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}
+                  </span>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Поповер фильтра колонки -->
+          <div
+            v-if="filterPopover.questionId !== null"
+            class="sv-filter-popover"
+            :style="filterPopoverStyle"
+            @click.stop
+          >
+            <div class="sv-filter-popover-head">
+              <span>Фильтр</span>
+              <button class="sv-filter-popover-close" @click="closeFilter" title="Закрыть">×</button>
+            </div>
+
+            <template v-if="filterPopoverQuestion?.type === 'text'">
+              <input
+                v-model="filterPopover.textQuery"
+                type="text"
+                class="sv-input"
+                placeholder="Содержит…"
+                @keyup.enter="applyTextFilter"
+              />
+              <div class="sv-filter-popover-actions">
+                <button class="sv-btn ghost small" @click="clearColumnFilter(filterPopover.questionId); closeFilter()">Сбросить</button>
+                <button class="sv-btn primary small" @click="applyTextFilter">Применить</button>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="sv-filter-popover-list">
+                <label v-for="val in filterPopoverValues" :key="val.key" class="sv-filter-row">
+                  <input
+                    type="checkbox"
+                    :checked="filterPopover.selected.has(val.key)"
+                    @change="toggleFilterValue(val.key)"
+                  />
+                  <span class="sv-filter-row-label">{{ val.label }}</span>
+                  <span class="sv-filter-row-count">{{ val.count }}</span>
+                </label>
+                <div v-if="!filterPopoverValues.length" class="sv-filter-empty">Нет ответов</div>
+              </div>
+              <div class="sv-filter-popover-actions">
+                <button class="sv-btn ghost small" @click="selectAllFilterValues">Все</button>
+                <button class="sv-btn ghost small" @click="clearFilterSelection">Очистить</button>
+                <button class="sv-btn primary small" @click="applyChoiceFilter">Применить</button>
+              </div>
+            </template>
+          </div>
         </div>
       </section>
     </div>
@@ -398,6 +548,7 @@ import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useUserStore } from '@/stores/userStore.js'
+import { exportSurveyToExcel } from '@/lib/surveyExport.js'
 
 const userStore = useUserStore()
 
@@ -440,7 +591,7 @@ const detail = ref(null)
 const form = ref(makeEmptySurvey())
 const formSnapshot = ref('')
 const isCreating = ref(false)
-const activeTab = useTabRoute('settings', ['settings', 'results'])
+const activeTab = useTabRoute('settings', ['settings', 'results', 'table'])
 const searchText = ref('')
 const statusFilter = ref('all')
 const menuOpen = ref(false)
@@ -506,6 +657,333 @@ const hasUnsavedChanges = computed(() => JSON.stringify(form.value) !== formSnap
 const commentsList = computed(() =>
   (detail.value?.responses || []).filter(r => (r.comment || '').trim()),
 )
+
+// ══════ Табличный вид: поиск / сортировка / фильтры ══════
+const tableSearch = ref('')
+const tableSort = ref({ key: '__rest', dir: 'asc' }) // dir: 'asc' | 'desc' | null
+const columnFilters = reactive({}) // questionId -> { type, selected?: Set, query?: string }
+
+const exportingExcel = ref(false)
+
+const filterPopover = reactive({
+  questionId: null,
+  selected: new Set(),
+  textQuery: '',
+  top: 0,
+  left: 0,
+})
+const filterPopoverStyle = computed(() => ({ top: filterPopover.top + 'px', left: filterPopover.left + 'px' }))
+const filterPopoverQuestion = computed(() => {
+  if (filterPopover.questionId === null) return null
+  return (detail.value?.questions || []).find(q => Number(q.id) === Number(filterPopover.questionId)) || null
+})
+
+// Текст значения ответа для отображения / поиска / сортировки
+function cellTextFor(resp, questionId) {
+  const a = (resp.answers || []).find(x => Number(x.question_id) === Number(questionId))
+  if (!a) return ''
+  if (a.type === 'scale') return a.numeric_value != null ? String(a.numeric_value) : ''
+  if (a.type === 'text') return a.text_value || ''
+  return a.option_text || ''
+}
+
+function cellSortValue(resp, questionId, type) {
+  const a = (resp.answers || []).find(x => Number(x.question_id) === Number(questionId))
+  if (!a) return { empty: true, num: null, str: '' }
+  if (type === 'scale') {
+    const n = a.numeric_value
+    return { empty: n == null, num: n != null ? Number(n) : null, str: n != null ? String(n) : '' }
+  }
+  const str = type === 'text' ? (a.text_value || '') : (a.option_text || '')
+  return { empty: !str, num: null, str }
+}
+
+// Все встречающиеся значения в колонке (для фильтра с галочками)
+function valuesInColumn(questionId) {
+  const q = (detail.value?.questions || []).find(x => Number(x.id) === Number(questionId))
+  if (!q) return []
+  const map = new Map()
+  ;(detail.value?.responses || []).forEach(resp => {
+    const a = (resp.answers || []).find(x => Number(x.question_id) === Number(questionId))
+    let key, label
+    if (!a) { key = '__empty__'; label = '— нет ответа —' }
+    else if (q.type === 'scale') {
+      if (a.numeric_value == null) { key = '__empty__'; label = '— нет ответа —' }
+      else { key = String(a.numeric_value); label = String(a.numeric_value) }
+    } else if (q.type === 'choice') {
+      if (!a.option_text) { key = '__empty__'; label = '— нет ответа —' }
+      else { key = String(a.option_id ?? a.option_text); label = a.option_text }
+    } else {
+      // text — не сюда (фильтр текстовый), но на всякий случай
+      key = a.text_value || '__empty__'
+      label = a.text_value || '— пусто —'
+    }
+    if (!map.has(key)) map.set(key, { key, label, count: 0 })
+    map.get(key).count++
+  })
+  const arr = Array.from(map.values())
+  arr.sort((a, b) => {
+    if (a.key === '__empty__') return 1
+    if (b.key === '__empty__') return -1
+    const an = Number(a.label), bn = Number(b.label)
+    if (!Number.isNaN(an) && !Number.isNaN(bn)) return an - bn
+    return String(a.label).localeCompare(String(b.label), 'ru')
+  })
+  return arr
+}
+
+const filterPopoverValues = computed(() => {
+  if (filterPopover.questionId === null) return []
+  return valuesInColumn(filterPopover.questionId)
+})
+
+function textHasValues(questionId) {
+  return (detail.value?.responses || []).some(resp => {
+    const a = (resp.answers || []).find(x => Number(x.question_id) === Number(questionId))
+    return a && (a.text_value || '').trim() !== ''
+  })
+}
+
+function hasColumnFilter(questionId) {
+  const f = columnFilters[questionId]
+  if (!f) return false
+  if (f.type === 'text') return !!(f.query || '').trim()
+  return f.selected instanceof Set && f.selected.size > 0
+}
+const hasActiveTableFilters = computed(() => {
+  if (tableSearch.value.trim()) return true
+  return Object.keys(columnFilters).some(id => hasColumnFilter(id))
+})
+
+function rowMatchesValueFilter(resp, questionId, type, selected) {
+  const a = (resp.answers || []).find(x => Number(x.question_id) === Number(questionId))
+  let key
+  if (!a) key = '__empty__'
+  else if (type === 'scale') key = a.numeric_value != null ? String(a.numeric_value) : '__empty__'
+  else if (type === 'choice') key = a.option_text ? String(a.option_id ?? a.option_text) : '__empty__'
+  else key = a.text_value || '__empty__'
+  return selected.has(key)
+}
+
+function rowMatchesTextFilter(resp, questionId, query) {
+  const a = (resp.answers || []).find(x => Number(x.question_id) === Number(questionId))
+  const txt = a?.text_value || ''
+  return txt.toLowerCase().includes(query.toLowerCase())
+}
+
+const tableRows = computed(() => {
+  const rows = (detail.value?.responses || []).slice()
+  const q = tableSearch.value.trim().toLowerCase()
+  const questions = detail.value?.questions || []
+
+  const filtered = rows.filter(resp => {
+    if (q) {
+      const haystack = [
+        formatRestaurantNumber(resp.restaurant_number, resp.legal_entity_group),
+        resp.city || '',
+        resp.address || '',
+      ].join(' ').toLowerCase()
+      if (!haystack.includes(q)) return false
+    }
+    for (const [qid, f] of Object.entries(columnFilters)) {
+      if (!hasColumnFilter(qid)) continue
+      const qDef = questions.find(x => Number(x.id) === Number(qid))
+      if (!qDef) continue
+      if (f.type === 'text') {
+        if (!rowMatchesTextFilter(resp, qid, f.query)) return false
+      } else {
+        if (!rowMatchesValueFilter(resp, qid, qDef.type, f.selected)) return false
+      }
+    }
+    return true
+  })
+
+  const { key, dir } = tableSort.value
+  if (!dir) return filtered
+
+  const sign = dir === 'asc' ? 1 : -1
+  filtered.sort((a, b) => {
+    if (key === '__rest') {
+      const an = Number(a.restaurant_number) || 0
+      const bn = Number(b.restaurant_number) || 0
+      return (an - bn) * sign
+    }
+    if (key === '__date') {
+      const at = a.submitted_at ? new Date(a.submitted_at).getTime() : 0
+      const bt = b.submitted_at ? new Date(b.submitted_at).getTime() : 0
+      return (at - bt) * sign
+    }
+    const qDef = questions.find(x => Number(x.id) === Number(key))
+    if (!qDef) return 0
+    const av = cellSortValue(a, key, qDef.type)
+    const bv = cellSortValue(b, key, qDef.type)
+    if (av.empty && bv.empty) return 0
+    if (av.empty) return 1
+    if (bv.empty) return -1
+    if (av.num != null && bv.num != null) return (av.num - bv.num) * sign
+    return av.str.localeCompare(bv.str, 'ru') * sign
+  })
+
+  return filtered
+})
+
+function toggleSort(key) {
+  const cur = tableSort.value
+  if (cur.key !== key) {
+    tableSort.value = { key, dir: 'asc' }
+    return
+  }
+  if (cur.dir === 'asc') tableSort.value = { key, dir: 'desc' }
+  else if (cur.dir === 'desc') tableSort.value = { key: '__rest', dir: 'asc' }
+  else tableSort.value = { key, dir: 'asc' }
+}
+function sortClass(key) {
+  if (tableSort.value.key !== key) return ''
+  return tableSort.value.dir === 'asc' ? 'asc' : 'desc'
+}
+
+const POPOVER_W = 260
+const POPOVER_H_EST = 320
+
+function openFilter(questionId, ev) {
+  const q = (detail.value?.questions || []).find(x => Number(x.id) === Number(questionId))
+  if (!q) return
+  const rect = ev.currentTarget.getBoundingClientRect()
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const margin = 8
+
+  // По умолчанию открываем вправо от кнопки. Если не влезает — сдвигаем влево.
+  let left = rect.left
+  if (left + POPOVER_W + margin > vw) left = vw - POPOVER_W - margin
+  if (left < margin) left = margin
+
+  // По умолчанию ниже кнопки. Если не влезает — выше.
+  let top = rect.bottom + 6
+  if (top + POPOVER_H_EST + margin > vh) {
+    const above = rect.top - POPOVER_H_EST - 6
+    top = above >= margin ? above : Math.max(margin, vh - POPOVER_H_EST - margin)
+  }
+
+  filterPopover.questionId = questionId
+  filterPopover.top = top
+  filterPopover.left = left
+  const existing = columnFilters[questionId]
+  if (q.type === 'text') {
+    filterPopover.textQuery = existing?.query || ''
+    filterPopover.selected = new Set()
+  } else {
+    filterPopover.textQuery = ''
+    filterPopover.selected = new Set(existing?.selected instanceof Set ? Array.from(existing.selected) : [])
+  }
+}
+function closeFilter() { filterPopover.questionId = null }
+function toggleFilterValue(key) {
+  if (filterPopover.selected.has(key)) filterPopover.selected.delete(key)
+  else filterPopover.selected.add(key)
+  filterPopover.selected = new Set(filterPopover.selected)
+}
+function selectAllFilterValues() {
+  filterPopover.selected = new Set(filterPopoverValues.value.map(v => v.key))
+}
+function clearFilterSelection() { filterPopover.selected = new Set() }
+function applyChoiceFilter() {
+  const qid = filterPopover.questionId
+  if (qid === null) return
+  if (filterPopover.selected.size === 0) delete columnFilters[qid]
+  else columnFilters[qid] = { type: 'choice', selected: new Set(filterPopover.selected) }
+  closeFilter()
+}
+function applyTextFilter() {
+  const qid = filterPopover.questionId
+  if (qid === null) return
+  const q = (filterPopover.textQuery || '').trim()
+  if (!q) delete columnFilters[qid]
+  else columnFilters[qid] = { type: 'text', query: q }
+  closeFilter()
+}
+function clearColumnFilter(qid) { delete columnFilters[qid] }
+function resetTableFilters() {
+  tableSearch.value = ''
+  for (const k of Object.keys(columnFilters)) delete columnFilters[k]
+}
+
+// Закрываем поповер по Esc и при смене опроса/вкладки
+watch([selectedId, activeTab], () => {
+  closeFilter()
+  resetTableFilters()
+  tableSort.value = { key: '__rest', dir: 'asc' }
+})
+
+// ══════ Grab-to-pan по таблице (горизонтально) ══════
+const tableWrapEl = ref(null)
+const tableDrag = {
+  active: false,
+  startX: 0,
+  startScrollLeft: 0,
+  moved: false,
+}
+const DRAG_THRESHOLD = 5
+
+function onTableDragStart(ev) {
+  if (ev.button !== 0) return
+  // Не начинаем драг на интерактивных элементах — клик по сортировке/фильтру должен работать
+  const target = ev.target
+  if (target.closest('button, input, select, textarea, a')) return
+  const wrap = tableWrapEl.value
+  if (!wrap) return
+  tableDrag.active = true
+  tableDrag.moved = false
+  tableDrag.startX = ev.clientX
+  tableDrag.startScrollLeft = wrap.scrollLeft
+  document.addEventListener('mousemove', onTableDragMove)
+  document.addEventListener('mouseup', onTableDragEnd)
+}
+function onTableDragMove(ev) {
+  if (!tableDrag.active) return
+  const wrap = tableWrapEl.value
+  if (!wrap) return
+  const dx = ev.clientX - tableDrag.startX
+  if (!tableDrag.moved && Math.abs(dx) >= DRAG_THRESHOLD) {
+    tableDrag.moved = true
+    wrap.classList.add('dragging')
+    // Чтобы тащить можно было даже за пределами таблицы
+    document.body.style.userSelect = 'none'
+  }
+  if (tableDrag.moved) {
+    wrap.scrollLeft = tableDrag.startScrollLeft - dx
+    ev.preventDefault()
+  }
+}
+function onTableDragEnd(ev) {
+  if (!tableDrag.active) return
+  document.removeEventListener('mousemove', onTableDragMove)
+  document.removeEventListener('mouseup', onTableDragEnd)
+  const wasMoved = tableDrag.moved
+  tableDrag.active = false
+  tableDrag.moved = false
+  const wrap = tableWrapEl.value
+  if (wrap) wrap.classList.remove('dragging')
+  document.body.style.userSelect = ''
+  if (wasMoved) {
+    // Гасим ближайший click, чтобы не сработала сортировка/фильтр после драга
+    const suppress = (e) => { e.stopPropagation(); e.preventDefault() }
+    window.addEventListener('click', suppress, { capture: true, once: true })
+    setTimeout(() => window.removeEventListener('click', suppress, { capture: true }), 100)
+  }
+}
+
+async function downloadExcel() {
+  if (!detail.value) return
+  exportingExcel.value = true
+  try {
+    await exportSurveyToExcel(detail.value, tableRows.value)
+  } catch (e) {
+    setMessage('Не удалось скачать Excel: ' + (e.message || e), false)
+  } finally {
+    exportingExcel.value = false
+  }
+}
 
 // ══════ API ══════
 function setMessage(text, ok = true) {
@@ -738,7 +1216,10 @@ function surveyAnswerText(answer) {
 }
 
 // Закрытие выпадающего меню
-function onGlobalClick() { menuOpen.value = false }
+function onGlobalClick() {
+  menuOpen.value = false
+  if (filterPopover.questionId !== null) closeFilter()
+}
 
 // Сбрасываем открытые ответы при смене опроса
 watch(selectedId, () => {
@@ -746,12 +1227,19 @@ watch(selectedId, () => {
   responsesExpanded.value = false
 })
 
+function onGlobalScroll() { if (filterPopover.questionId !== null) closeFilter() }
+function onGlobalKeydown(ev) { if (ev.key === 'Escape' && filterPopover.questionId !== null) closeFilter() }
+
 onMounted(() => {
   loadSurveys()
   document.addEventListener('click', onGlobalClick)
+  window.addEventListener('scroll', onGlobalScroll, true)
+  document.addEventListener('keydown', onGlobalKeydown)
 })
 onUnmounted(() => {
   document.removeEventListener('click', onGlobalClick)
+  window.removeEventListener('scroll', onGlobalScroll, true)
+  document.removeEventListener('keydown', onGlobalKeydown)
 })
 </script>
 
@@ -1728,6 +2216,248 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 600;
   align-self: flex-start;
+}
+
+/* ══════ Табличный вид ══════ */
+.sv-table-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.sv-table-search {
+  flex: 1;
+  min-width: 240px;
+  max-width: 420px;
+}
+.sv-table-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+.sv-table-count {
+  font-size: 12px;
+  color: var(--sv-muted);
+  font-weight: 600;
+}
+.sv-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--sv-border-soft);
+  border-radius: 12px;
+  background: #fff;
+  cursor: grab;
+}
+.sv-table-wrap.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+.sv-table-wrap.dragging * {
+  cursor: grabbing !important;
+}
+.sv-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.sv-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--sv-primary);
+  color: #fff;
+  text-align: left;
+  font-weight: 600;
+  padding: 10px 10px;
+  border-right: 1px solid rgba(255, 255, 255, .12);
+  user-select: none;
+  white-space: nowrap;
+}
+.sv-table thead th:last-child { border-right: none; }
+.sv-th {
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.sv-th:hover { background: #5e3a22; }
+.sv-th.active { background: #6b4225; }
+.sv-th-q-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+}
+.sv-th-q-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.sv-th-filter-btn {
+  border: none;
+  background: transparent;
+  color: #fff;
+  opacity: .65;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sv-th-filter-btn:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
+.sv-th-filter-btn.active { opacity: 1; background: var(--sv-accent); color: #fff; }
+.sv-th-sort {
+  width: 10px;
+  height: 14px;
+  display: inline-block;
+  position: relative;
+  opacity: .5;
+}
+.sv-th-sort::before,
+.sv-th-sort::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+}
+.sv-th-sort::before {
+  top: 1px;
+  border-bottom: 4px solid currentColor;
+}
+.sv-th-sort::after {
+  bottom: 1px;
+  border-top: 4px solid currentColor;
+}
+.sv-th-sort.asc { opacity: 1; }
+.sv-th-sort.asc::after { opacity: .25; }
+.sv-th-sort.desc { opacity: 1; }
+.sv-th-sort.desc::before { opacity: .25; }
+
+.sv-table tbody td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--sv-border-soft);
+  border-right: 1px solid var(--sv-border-soft);
+  vertical-align: top;
+  color: var(--sv-text);
+}
+.sv-table tbody td:last-child { border-right: none; }
+.sv-table tbody tr:last-child td { border-bottom: none; }
+.sv-table tbody tr:hover td { background: var(--sv-bg-soft); }
+.sv-td-rest-num {
+  font-weight: 700;
+  color: var(--sv-primary);
+  white-space: nowrap;
+}
+.sv-td-rest-addr {
+  font-size: 11px;
+  color: var(--sv-muted);
+  margin-top: 2px;
+  max-width: 240px;
+}
+.sv-td-date {
+  white-space: nowrap;
+  color: var(--sv-muted);
+  font-size: 12px;
+}
+.sv-td-a {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-td-center { text-align: center; font-weight: 600; }
+.sv-td-empty {
+  text-align: center;
+  padding: 24px !important;
+  color: var(--sv-muted);
+}
+.sv-table-comments { margin-top: 20px; }
+.sv-table-pending { margin-top: 20px; }
+
+/* Поповер фильтра колонки */
+.sv-filter-popover {
+  position: fixed;
+  z-index: 100;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--sv-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(60, 30, 0, .18);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sv-filter-popover-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--sv-primary);
+}
+.sv-filter-popover-close {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--sv-muted);
+  padding: 0 4px;
+}
+.sv-filter-popover-close:hover { color: var(--sv-text); }
+.sv-filter-popover-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--sv-border-soft);
+  border-radius: 8px;
+  padding: 4px;
+}
+.sv-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.sv-filter-row:hover { background: var(--sv-bg-soft); }
+.sv-filter-row input { cursor: pointer; }
+.sv-filter-row-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sv-text);
+}
+.sv-filter-row-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sv-muted);
+}
+.sv-filter-popover-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.sv-filter-empty {
+  text-align: center;
+  font-size: 12px;
+  color: var(--sv-muted);
+  padding: 12px 0;
 }
 
 /* ══════ Адаптив ══════ */

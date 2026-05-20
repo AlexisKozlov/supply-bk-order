@@ -904,8 +904,9 @@
                         min="0"
                         step="any"
                         v-model="batch.stock"
-                        class="sc-input sc-input-num"
+                        class="sc-input sc-input-num sc-stock-qty"
                         placeholder="0"
+                        @keydown="onStockKeyNav"
                       />
                     </div>
                     <button
@@ -953,8 +954,9 @@
                     min="0"
                     step="any"
                     v-model="stockDrafts[p.id][0].stock"
-                    class="sc-input sc-input-num sc-card-input"
+                    class="sc-input sc-input-num sc-card-input sc-stock-qty"
                     placeholder="0"
+                    @keydown="onStockKeyNav"
                   />
                   <span class="sc-card-input-unit">{{ stockUnitShort(p.unit) }}</span>
                 </div>
@@ -1419,6 +1421,28 @@ const stockDirty = computed(() => {
 });
 const stockSavedSnapshot = reactive({}); // последние сохранённые значения
 
+// Снапшот «заполненности» товаров для СОРТИРОВКИ И ФИЛЬТРАЦИИ карточек.
+// Нужен, чтобы карточка не «прыгала» вниз и не исчезала, пока пользователь
+// набирает многозначное число. Обновляется только при загрузке списка,
+// смене фильтра/поиска и после сохранения.
+const stockFillSnapshot = reactive({}); // productId -> true/false
+function rebuildStockFillSnapshot() {
+  const seen = new Set();
+  for (const p of stockProducts.value || []) {
+    stockFillSnapshot[p.id] = stockProductFilled(p.id);
+    seen.add(p.id);
+  }
+  for (const k of Object.keys(stockFillSnapshot)) {
+    if (!seen.has(Number(k)) && !seen.has(k)) delete stockFillSnapshot[k];
+  }
+}
+function stockFilledForSort(productId) {
+  return productId in stockFillSnapshot ? stockFillSnapshot[productId] : stockProductFilled(productId);
+}
+watch([stockFilter, stockSearch, () => stockProducts.value], () => {
+  rebuildStockFillSnapshot();
+});
+
 // Видим ли поиск/фильтры (показываем только если товаров много)
 const stockShowSearch = computed(() => stockProducts.value.length > 8);
 
@@ -1450,15 +1474,19 @@ const stockFilteredGrouped = computed(() => {
       const hay = [p.product_sku, p.product_name].filter(Boolean).join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
-    const filled = stockProductFilled(p.id);
+    // Используем СНАПШОТ заполненности — чтобы карточка не исчезала из
+    // фильтра прямо во время ввода (пользователь должен успеть набрать число
+    // полностью).
+    const filled = stockFilledForSort(p.id);
     if (filter === 'unfilled' && filled) return false;
     if (filter === 'filled' && !filled) return false;
     return true;
   };
   // Сортировка: незаполненные первыми, среди равных — по исходному порядку.
+  // Тоже по снапшоту, иначе карточка прыгнет вниз после первой же цифры.
   const sortFn = (a, b) => {
-    const fa = stockProductFilled(a.id) ? 1 : 0;
-    const fb = stockProductFilled(b.id) ? 1 : 0;
+    const fa = stockFilledForSort(a.id) ? 1 : 0;
+    const fb = stockFilledForSort(b.id) ? 1 : 0;
     return fa - fb;
   };
   const withExpiry = [];
@@ -2896,6 +2924,25 @@ function addStockBatch(productId) {
   stockDrafts[productId].push(makeStockBatchRow());
 }
 
+// Навигация по полям ввода остатков: Enter и ↓ — следующее поле, ↑ — предыдущее.
+// Иначе у input type="number" стрелки увеличивают/уменьшают цифру, что мешает.
+function onStockKeyNav(ev) {
+  const key = ev.key;
+  if (key !== 'Enter' && key !== 'ArrowDown' && key !== 'ArrowUp') return;
+  ev.preventDefault();
+  const inputs = Array.from(document.querySelectorAll('input.sc-stock-qty'));
+  const idx = inputs.indexOf(ev.target);
+  if (idx === -1) return;
+  const next = (key === 'ArrowUp') ? inputs[idx - 1] : inputs[idx + 1];
+  if (next) {
+    next.focus();
+    if (typeof next.select === 'function') next.select();
+  } else if (key !== 'ArrowUp') {
+    // На последнем поле просто снимаем фокус — пользователь может нажать «Сохранить»
+    ev.target.blur();
+  }
+}
+
 function removeStockBatch(productId, idx) {
   if (!stockDrafts[productId]) return;
   stockDrafts[productId].splice(idx, 1);
@@ -3040,6 +3087,8 @@ async function submitStockInline() {
     for (const p of stockProducts.value) {
       stockSavedSnapshot[p.id] = JSON.stringify(normalizeStockDraft(p.id));
     }
+    // Обновляем снапшот заполненности — заполненные карточки уезжают вниз/прячутся фильтром
+    rebuildStockFillSnapshot();
     stockLastSubmittedAt.value = new Date().toISOString().slice(0, 19).replace('T', ' ');
     stockSavedFlash.value = true;
     setTimeout(() => { stockSavedFlash.value = false; }, 2000);
@@ -4026,7 +4075,7 @@ tr.del-err { background: #fef2f2; }
   border-radius: 999px; background: #F0E5D6; color: #6B5344;
   font-size: 11.5px; font-weight: 700;
 }
-.sc-list { display: flex; flex-direction: column; gap: 8px; }
+.sc-list { display: flex; flex-direction: column; gap: 4px; }
 
 /* Карточка товара */
 .sc-card {
@@ -4102,6 +4151,60 @@ tr.del-err { background: #fef2f2; }
 }
 .sc-card-input { max-width: 180px; justify-self: end; }
 .sc-card-input-unit { font-size: 13px; color: #8b7355; font-weight: 600; min-width: 28px; }
+
+/* Десктоп: карточки без срока — компактная горизонтальная строка */
+@media (min-width: 769px) {
+  .sc-card-simple {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas:
+      "title  total input"
+      "note   note  note";
+    column-gap: 12px;
+    row-gap: 4px;
+    padding: 6px 12px;
+    align-items: center;
+  }
+  .sc-card-simple .sc-card-head {
+    display: contents;
+  }
+  .sc-card-simple .sc-card-title {
+    grid-area: title;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .sc-card-simple .sc-card-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sc-card-simple .sc-card-total {
+    grid-area: total;
+    padding: 2px 8px;
+  }
+  .sc-card-simple .sc-card-total-num { font-size: 14px; }
+  .sc-card-simple .sc-card-note { grid-area: note; margin: 0; }
+  .sc-card-simple .sc-card-input-row {
+    grid-area: input;
+    grid-template-columns: 140px auto;
+    gap: 6px;
+  }
+  .sc-card-simple .sc-card-input {
+    max-width: none;
+    width: 100%;
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  /* Карточки со сроком — тоже немного плотнее. Поле «Количество» фиксируем
+     на ту же ширину, что и в простой карточке (140px), чтобы столбец ввода
+     выглядел ровным сверху вниз. */
+  .sc-card { padding: 10px 12px; gap: 8px; }
+  .sc-batches { gap: 6px; }
+  .sc-batch-row { grid-template-columns: 1fr 140px 32px; gap: 8px; }
+  .sc-input { min-height: 34px; padding: 6px 10px; font-size: 14px; }
+}
 
 /* Sticky-полоса сохранения */
 .sc-savebar {

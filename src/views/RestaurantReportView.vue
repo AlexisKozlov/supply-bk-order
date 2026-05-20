@@ -141,6 +141,7 @@
             <th class="rr-th-name" @click="sortTable('name')">Товар {{ sortIcon('name') }}</th>
             <th class="rr-th-cat" @click="sortTable('category')">Режим {{ sortIcon('category') }}</th>
             <th class="rr-th-num" @click="sortTable('totalQty')">Всего (кор.) {{ sortIcon('totalQty') }}</th>
+            <th class="rr-th-num" @click="sortTable('totalWeightKg')">Вес {{ sortIcon('totalWeightKg') }}</th>
             <th class="rr-th-num" @click="sortTable('orderCount')">Заказов {{ sortIcon('orderCount') }}</th>
             <th class="rr-th-num" @click="sortTable('restCount')">Ресторанов {{ sortIcon('restCount') }}</th>
             <th class="rr-th-num" @click="sortTable('avgQty')">Ср. на заказ {{ sortIcon('avgQty') }}</th>
@@ -151,6 +152,10 @@
             <td><span class="rr-sku">{{ row.sku }}</span> {{ row.name }}</td>
             <td><span class="rr-cat-badge" :class="'cat-' + row.category">{{ row.category }}</span></td>
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
+            <td class="rr-num">
+              {{ fmtKg(row.totalWeightKg) }}
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+            </td>
             <td class="rr-num">{{ row.orderCount }}</td>
             <td class="rr-num">{{ row.restCount }}</td>
             <td class="rr-num">{{ fmtNum(row.avgQty) }}</td>
@@ -160,6 +165,10 @@
           <tr>
             <td colspan="2"><strong>Итого: {{ sortedProductData.length }} товаров</strong></td>
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
+            <td class="rr-num">
+              <strong>{{ fmtKg(totalWeightKg) }}</strong>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+            </td>
             <td class="rr-num"><strong>{{ totalOrders }}</strong></td>
             <td></td><td></td>
           </tr>
@@ -175,6 +184,7 @@
             <th @click="sortTable('number')">Ресторан {{ sortIcon('number') }}</th>
             <th @click="sortTable('city')">Город {{ sortIcon('city') }}</th>
             <th class="rr-th-num" @click="sortTable('totalQty')">Коробок {{ sortIcon('totalQty') }}</th>
+            <th class="rr-th-num" @click="sortTable('totalWeightKg')">Вес {{ sortIcon('totalWeightKg') }}</th>
             <th class="rr-th-num" @click="sortTable('itemCount')">Позиций {{ sortIcon('itemCount') }}</th>
             <th class="rr-th-num" @click="sortTable('orderCount')">Заказов {{ sortIcon('orderCount') }}</th>
           </tr>
@@ -184,6 +194,10 @@
             <td><strong>{{ formatRestaurantNumber(row.number, row.legal_entity_group) }}</strong></td>
             <td>{{ row.city }}</td>
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
+            <td class="rr-num">
+              {{ fmtKg(row.totalWeightKg) }}
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+            </td>
             <td class="rr-num">{{ row.itemCount }}</td>
             <td class="rr-num">{{ row.orderCount }}</td>
           </tr>
@@ -192,6 +206,10 @@
           <tr>
             <td colspan="2"><strong>Итого: {{ sortedRestData.length }} ресторанов</strong></td>
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
+            <td class="rr-num">
+              <strong>{{ fmtKg(totalWeightKg) }}</strong>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+            </td>
             <td class="rr-num"><strong>{{ totalItems }}</strong></td>
             <td class="rr-num"><strong>{{ totalOrders }}</strong></td>
           </tr>
@@ -207,6 +225,7 @@
             <th @click="sortTable('date')">Дата {{ sortIcon('date') }}</th>
             <th @click="sortTable('dayName')">День {{ sortIcon('dayName') }}</th>
             <th class="rr-th-num" @click="sortTable('totalQty')">Коробок {{ sortIcon('totalQty') }}</th>
+            <th class="rr-th-num" @click="sortTable('totalWeightKg')">Вес {{ sortIcon('totalWeightKg') }}</th>
             <th class="rr-th-num" @click="sortTable('itemCount')">Позиций {{ sortIcon('itemCount') }}</th>
             <th class="rr-th-num" @click="sortTable('orderCount')">Заказов {{ sortIcon('orderCount') }}</th>
             <th class="rr-th-num" @click="sortTable('restCount')">Ресторанов {{ sortIcon('restCount') }}</th>
@@ -217,6 +236,10 @@
             <td>{{ fmtDate(row.date) }}</td>
             <td>{{ row.dayName }}</td>
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
+            <td class="rr-num">
+              {{ fmtKg(row.totalWeightKg) }}
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+            </td>
             <td class="rr-num">{{ row.itemCount }}</td>
             <td class="rr-num">{{ row.orderCount }}</td>
             <td class="rr-num">{{ row.restCount }}</td>
@@ -226,6 +249,10 @@
           <tr>
             <td colspan="2"><strong>Итого: {{ sortedDayData.length }} дней</strong></td>
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
+            <td class="rr-num">
+              <strong>{{ fmtKg(totalWeightKg) }}</strong>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+            </td>
             <td class="rr-num"><strong>{{ totalItems }}</strong></td>
             <td class="rr-num"><strong>{{ totalOrders }}</strong></td>
             <td></td>
@@ -241,6 +268,7 @@
           <tr>
             <th>Режим</th>
             <th class="rr-th-num">Коробок</th>
+            <th class="rr-th-num">Вес</th>
             <th class="rr-th-num">Позиций (уник.)</th>
             <th class="rr-th-num">Строк заказов</th>
             <th class="rr-th-num">% от общего</th>
@@ -250,6 +278,10 @@
           <tr v-for="row in categoryData" :key="row.category">
             <td><span class="rr-cat-badge" :class="'cat-' + row.category">{{ row.category }}</span></td>
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
+            <td class="rr-num">
+              {{ fmtKg(row.totalWeightKg) }}
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+            </td>
             <td class="rr-num">{{ row.uniqueProducts }}</td>
             <td class="rr-num">{{ row.lineCount }}</td>
             <td class="rr-num">{{ totalQty ? Math.round(row.totalQty / totalQty * 100) : 0 }}%</td>
@@ -259,6 +291,10 @@
           <tr>
             <td><strong>Итого</strong></td>
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
+            <td class="rr-num">
+              <strong>{{ fmtKg(totalWeightKg) }}</strong>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+            </td>
             <td></td>
             <td class="rr-num"><strong>{{ totalItems }}</strong></td>
             <td class="rr-num">100%</td>
@@ -434,10 +470,12 @@ const productData = computed(() => {
   const map = {};
   for (const item of filteredData.value) {
     const key = item.sku;
-    if (!map[key]) map[key] = { sku: item.sku, name: item.product_name, category: item.category, totalQty: 0, orderCount: 0, rests: new Set() };
+    if (!map[key]) map[key] = { sku: item.sku, name: item.product_name, category: item.category, totalQty: 0, orderCount: 0, rests: new Set(), totalWeightKg: 0, missingWeightCount: 0 };
     map[key].totalQty += parseFloat(item.quantity) || 0;
     map[key].orderCount++;
     if (item.restaurant_number) map[key].rests.add(item.restaurant_number);
+    map[key].totalWeightKg += itemWeightKg(item);
+    if (itemHasWeight(item)) map[key].missingWeightCount++;
   }
   return Object.values(map).map(r => ({ ...r, restCount: r.rests.size, avgQty: r.orderCount ? +(r.totalQty / r.orderCount).toFixed(1) : 0 }));
 });
@@ -447,10 +485,12 @@ const restData = computed(() => {
   const map = {};
   for (const item of filteredData.value) {
     const key = item.restaurant_number;
-    if (!map[key]) map[key] = { number: key, legal_entity_group: item.legal_entity_group || selectedGroupCode.value, city: item.city, totalQty: 0, itemCount: 0, orders: new Set() };
+    if (!map[key]) map[key] = { number: key, legal_entity_group: item.legal_entity_group || selectedGroupCode.value, city: item.city, totalQty: 0, itemCount: 0, orders: new Set(), totalWeightKg: 0, missingWeightCount: 0 };
     map[key].totalQty += parseFloat(item.quantity) || 0;
     map[key].itemCount++;
     if (item.order_id) map[key].orders.add(item.order_id);
+    map[key].totalWeightKg += itemWeightKg(item);
+    if (itemHasWeight(item)) map[key].missingWeightCount++;
   }
   return Object.values(map).map(r => ({ ...r, orderCount: r.orders.size }));
 });
@@ -461,11 +501,13 @@ const dayData = computed(() => {
   for (const item of filteredData.value) {
     const key = item.delivery_date;
     if (!key) continue;
-    if (!map[key]) { const d = new Date(key + 'T00:00:00'); map[key] = { date: key, dayName: DAY_NAMES[d.getDay()], totalQty: 0, itemCount: 0, orders: new Set(), rests: new Set() }; }
+    if (!map[key]) { const d = new Date(key + 'T00:00:00'); map[key] = { date: key, dayName: DAY_NAMES[d.getDay()], totalQty: 0, itemCount: 0, orders: new Set(), rests: new Set(), totalWeightKg: 0, missingWeightCount: 0 }; }
     map[key].totalQty += parseFloat(item.quantity) || 0;
     map[key].itemCount++;
     if (item.order_id) map[key].orders.add(item.order_id);
     if (item.restaurant_number) map[key].rests.add(item.restaurant_number);
+    map[key].totalWeightKg += itemWeightKg(item);
+    if (itemHasWeight(item)) map[key].missingWeightCount++;
   }
   return Object.values(map).map(r => ({ ...r, orderCount: r.orders.size, restCount: r.rests.size }));
 });
@@ -475,10 +517,12 @@ const categoryData = computed(() => {
   const map = {};
   for (const item of filteredData.value) {
     const key = item.category || 'Без категории';
-    if (!map[key]) map[key] = { category: key, totalQty: 0, lineCount: 0, products: new Set() };
+    if (!map[key]) map[key] = { category: key, totalQty: 0, lineCount: 0, products: new Set(), totalWeightKg: 0, missingWeightCount: 0 };
     map[key].totalQty += parseFloat(item.quantity) || 0;
     map[key].lineCount++;
     map[key].products.add(item.sku);
+    map[key].totalWeightKg += itemWeightKg(item);
+    if (itemHasWeight(item)) map[key].missingWeightCount++;
   }
   return Object.values(map).map(r => ({ ...r, uniqueProducts: r.products.size }));
 });
@@ -505,6 +549,8 @@ const crossData = computed(() => {
 const totalQty = computed(() => filteredData.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
 const totalItems = computed(() => filteredData.value.length);
 const totalOrders = computed(() => new Set(filteredData.value.map(i => i.order_id)).size);
+const totalWeightKg = computed(() => filteredData.value.reduce((s, i) => s + itemWeightKg(i), 0));
+const totalMissingWeight = computed(() => filteredData.value.reduce((s, i) => s + (itemHasWeight(i) ? 1 : 0), 0));
 
 // Sorting
 function sortTable(key) {
@@ -527,6 +573,23 @@ const sortedDayData = computed(() => applySorted(dayData.value));
 
 function fmtNum(n) { if (!n) return '0'; const v = parseFloat(n); return v % 1 === 0 ? v.toLocaleString('ru-RU') : v.toFixed(1); }
 function fmtDate(d) { if (!d) return ''; return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
+
+// Вес: weight_brutto хранится в ГРАММАХ на одну коробку.
+// quantity у позиции — в коробках. Итог: ((кор × г) / 1000) = кг.
+function itemWeightKg(item) {
+  const q = parseFloat(item.quantity) || 0;
+  const wb = parseFloat(item.weight_brutto) || 0;
+  if (!q || !wb) return 0;
+  return q * wb / 1000;
+}
+function itemHasWeight(item) {
+  const q = parseFloat(item.quantity) || 0;
+  return q > 0 && !(parseFloat(item.weight_brutto) > 0);
+}
+function fmtKg(kg) {
+  if (!kg) return '0 кг';
+  return Math.round(kg).toLocaleString('ru-RU') + ' кг';
+}
 
 // ═══ Actions ═══
 
@@ -583,19 +646,19 @@ async function exportExcel() {
   const hStyle = { ...EXCEL_HEADER_STYLE, alignment: { horizontal: 'center' } };
 
   // Sheet 1: По товарам
-  const prodRows = [['Артикул', 'Товар', 'Режим', 'Всего (кор.)', 'Заказов', 'Ресторанов', 'Ср. на заказ']];
-  for (const r of sortedProductData.value) prodRows.push([r.sku, r.name, r.category, r.totalQty, r.orderCount, r.restCount, r.avgQty]);
+  const prodRows = [['Артикул', 'Товар', 'Режим', 'Всего (кор.)', 'Вес (кг)', 'Заказов', 'Ресторанов', 'Ср. на заказ']];
+  for (const r of sortedProductData.value) prodRows.push([r.sku, r.name, r.category, r.totalQty, Math.round(r.totalWeightKg), r.orderCount, r.restCount, r.avgQty]);
   const ws1 = XLSX.utils.aoa_to_sheet(prodRows);
-  for (let c = 0; c < 7; c++) { const cell = ws1[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
-  ws1['!cols'] = [{ wch: 12 }, { wch: 35 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+  for (let c = 0; c < 8; c++) { const cell = ws1[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
+  ws1['!cols'] = [{ wch: 12 }, { wch: 35 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, ws1, 'По товарам');
 
   // Sheet 2: По ресторанам
-  const restRows = [['Ресторан', 'Город', 'Коробок', 'Позиций', 'Заказов']];
-  for (const r of sortedRestData.value) restRows.push([formatRestaurantNumber(r.number, r.legal_entity_group), r.city, r.totalQty, r.itemCount, r.orderCount]);
+  const restRows = [['Ресторан', 'Город', 'Коробок', 'Вес (кг)', 'Позиций', 'Заказов']];
+  for (const r of sortedRestData.value) restRows.push([formatRestaurantNumber(r.number, r.legal_entity_group), r.city, r.totalQty, Math.round(r.totalWeightKg), r.itemCount, r.orderCount]);
   const ws2 = XLSX.utils.aoa_to_sheet(restRows);
-  for (let c = 0; c < 5; c++) { const cell = ws2[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
-  ws2['!cols'] = [{ wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 10 }];
+  for (let c = 0; c < 6; c++) { const cell = ws2[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
+  ws2['!cols'] = [{ wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }];
   XLSX.utils.book_append_sheet(wb, ws2, 'По ресторанам');
 
   // Sheet 3: Кросс-таблица
@@ -686,6 +749,7 @@ async function exportExcel() {
 .cat-Мороз { background: #ede9fe; color: #7c3aed; }
 .rr-city { font-size: 12px; color: #8b7355; }
 .rr-comment { font-size: 11px; cursor: help; margin-left: 4px; }
+.rr-warn { font-size: 11px; color: #b45309; cursor: help; margin-left: 4px; }
 
 /* Clickable rows */
 .rr-clickable { cursor: pointer; }
