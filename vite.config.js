@@ -101,12 +101,18 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
-            // Справочники — кэшируем для офлайн-работы. Не содержат личных
-            // данных пользователя, поэтому остаются после logout без риска.
+            // Справочники — при наличии сети всегда берём свежие данные с
+            // сервера (NetworkFirst). Кэш используется только как запасной
+            // вариант, когда связи нет. Так список не «отстаёт» на одну
+            // загрузку после правок и импорта. networkTimeoutSeconds: если
+            // сеть висит дольше 4 сек, отдаём копию из кэша, чтобы не ждать.
+            // Не содержат личных данных пользователя, поэтому остаются после
+            // logout без риска.
             urlPattern: /\/api\/(products|suppliers|restaurants|settings|delivery_schedule|cards)(\?|$)/,
-            handler: 'StaleWhileRevalidate',
+            handler: 'NetworkFirst',
             options: {
               cacheName: 'api-reference-data',
+              networkTimeoutSeconds: 4,
               expiration: { maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 },
             },
           },
