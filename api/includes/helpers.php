@@ -654,16 +654,23 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     $g->execute([$collectionId]);
     $group = $g->fetchColumn() ?: 'BK_VM';
 
-    // Подписанные рестораны нужной группы с включёнными уведомлениями о сборах.
+    // Подписанные рестораны нужной группы с включёнными уведомлениями о сборах,
+    // НО только те, кто ещё ничего не заполнил по этому сбору. Если хоть одна
+    // строка в stock_collection_data есть — считаем, что ресторан в курсе и
+    // повторно не дёргаем (иначе рестораны жалуются на спам напоминаний).
     $st = $pdo->prepare("
         SELECT DISTINCT s.chat_id, GROUP_CONCAT(DISTINCT s.restaurant_number ORDER BY CAST(s.restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests
         FROM ro_telegram_subs s
         JOIN restaurants r ON r.number = s.restaurant_number AND r.legal_entity_group = ?
         WHERE s.notify_stock_sessions = 1
           AND (s.verified_at IS NOT NULL OR (s.must_reverify_by IS NOT NULL AND s.must_reverify_by > NOW()))
+          AND NOT EXISTS (
+            SELECT 1 FROM stock_collection_data scd
+            WHERE scd.collection_id = ? AND scd.restaurant_number = s.restaurant_number
+          )
         GROUP BY s.chat_id
     ");
-    $st->execute([$group]);
+    $st->execute([$group, $collectionId]);
     $subs = $st->fetchAll();
     if (!$subs) return 0;
 

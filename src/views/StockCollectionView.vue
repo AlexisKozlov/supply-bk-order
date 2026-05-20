@@ -36,7 +36,7 @@
     <!-- Active collection detail -->
     <div v-if="activeCollection" class="sc-detail">
       <div class="sc-detail-bar">
-        <button class="sc-btn outline" @click="activeCollection = null; collectionData = null; responseFilter = ''; sortKey = 'restaurant'; sortDir = 'asc';">← Назад</button>
+        <button class="sc-btn outline" @click="activeCollection = null; collectionData = null; responseFilter = ''; responseStatus = 'all'; sortKey = 'restaurant'; sortDir = 'asc';">← Назад</button>
         <div class="sc-detail-info">
           <div class="sc-detail-name">{{ activeCollection.name }}</div>
           <span class="sc-tag" :class="activeCollection.status === 'active' ? 'green' : 'gray'">
@@ -44,8 +44,8 @@
           </span>
         </div>
         <div class="sc-detail-actions">
-          <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying">
-            {{ notifying ? 'Отправка...' : '🔔 Напомнить в Telegram' }}
+          <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying" title="Отправит напоминание в Telegram только тем ресторанам, кто ещё не заполнил остатки">
+            {{ notifying ? 'Отправка...' : '🔔 Напомнить не заполнившим' }}
           </button>
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="openEditProducts">
             Изменить товары
@@ -80,6 +80,7 @@
           </div>
           <div style="margin-left: auto; display: flex; gap: 6px;">
             <button v-if="activeCollection.status === 'active'" class="sc-btn sm outline" @click="openEditProducts">Изменить товары</button>
+            <button class="sc-btn sm outline" @click="openPricesEditor">💰 Цены</button>
             <button class="sc-btn sm outline" @click="exportExcel">Excel</button>
             <button class="sc-btn sm outline" @click="refreshData">Обновить</button>
           </div>
@@ -93,7 +94,24 @@
             class="sc-input sc-filter-input"
             placeholder="Поиск по номеру, городу или адресу..."
           />
-          <span v-if="responseFilter" class="sc-filter-count">
+          <div class="sc-status-chips">
+            <button
+              class="sc-status-chip"
+              :class="{ active: responseStatus === 'all' }"
+              @click="responseStatus = 'all'"
+            >Все <span class="sc-chip-count">{{ mergedRows.length }}</span></button>
+            <button
+              class="sc-status-chip"
+              :class="{ active: responseStatus === 'filled' }"
+              @click="responseStatus = 'filled'"
+            >Заполнили <span class="sc-chip-count">{{ filledCount }}</span></button>
+            <button
+              class="sc-status-chip"
+              :class="{ active: responseStatus === 'missing' }"
+              @click="responseStatus = 'missing'"
+            >Не заполнили <span class="sc-chip-count">{{ missingRestaurants.length }}</span></button>
+          </div>
+          <span v-if="responseFilter || responseStatus !== 'all'" class="sc-filter-count">
             {{ filteredRows.length }} из {{ mergedRows.length }}
           </span>
         </div>
@@ -121,10 +139,13 @@
                     <span v-if="prod.need_expiry" class="prod-toggle-icon">{{ isExpanded(prod) ? '▾' : '▸' }}</span>
                     <span v-else class="sort-arrow">{{ sortKey === 'prod_' + prod.id ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span>
                   </div>
+                  <div v-if="prod.product_sku" class="th-sku">{{ prod.product_sku }}</div>
                   <div class="th-unit">{{ unitLabel(prod.unit) }}</div>
                   <div v-if="prod.need_expiry && !isExpanded(prod)" class="th-flag">срок · нажмите для разбивки</div>
                   <div v-if="prod.note" class="th-note" :title="prod.note">{{ prod.note }}</div>
+                  <div v-if="prod.price != null && parseFloat(prod.price) > 0" class="th-price">{{ formatMoney(prod.price) }} Br/{{ unitLabel(prod.unit) }}</div>
                 </th>
+                <th v-if="pricedStats.priced > 0" class="col-rest-sum" :rowspan="anyExpanded ? 2 : 1">Сумма, Br</th>
                 <th v-if="activeCollection.status === 'active'" class="col-del" :rowspan="anyExpanded ? 2 : 1"></th>
               </tr>
               <tr v-if="anyExpanded">
@@ -192,6 +213,7 @@
                     </div>
                   </td>
                 </template>
+                <td v-if="pricedStats.priced > 0" class="col-rest-sum fw">{{ pricedStats.restCost.get(row.restaurant) ? formatMoney(pricedStats.restCost.get(row.restaurant)) : '—' }}</td>
                 <td v-if="activeCollection.status === 'active'" class="col-del">
                   <button class="sc-row-del" @click="deleteRestaurantRow(row)" title="Удалить ресторан">✕</button>
                 </td>
@@ -215,12 +237,39 @@
                     {{ getProductTotal(prod.id) }}
                   </td>
                 </template>
+                <td v-if="pricedStats.priced > 0" class="col-rest-sum foot-val foot-val-strong">{{ formatMoney(pricedStats.totalCost) }}</td>
+                <td v-if="activeCollection.status === 'active'"></td>
+              </tr>
+              <tr v-if="pricedStats.priced > 0" class="sc-foot-cost">
+                <td colspan="4" class="foot-label">Стоимость, Br</td>
+                <template v-for="prod in collectionData.products" :key="'cost_' + prod.id">
+                  <template v-if="isExpanded(prod)">
+                    <td v-for="date in expiryDatesFor(prod.id)" :key="prod.id + '_cost_' + date" class="col-prod foot-val foot-val-cost"></td>
+                    <td class="col-prod foot-val foot-val-cost">{{ pricedStats.productCost.get(prod.id) ? formatMoney(pricedStats.productCost.get(prod.id)) : '—' }}</td>
+                  </template>
+                  <td v-else class="col-prod foot-val foot-val-cost">
+                    {{ pricedStats.productCost.get(prod.id) ? formatMoney(pricedStats.productCost.get(prod.id)) : '—' }}
+                  </td>
+                </template>
+                <td class="col-rest-sum foot-val foot-val-strong">{{ formatMoney(pricedStats.totalCost) }}</td>
                 <td v-if="activeCollection.status === 'active'"></td>
               </tr>
             </tfoot>
           </table>
         </div>
         <div v-else class="sc-empty">Нет данных</div>
+
+        <!-- Total cost summary -->
+        <div v-if="pricedStats.priced > 0" class="sc-cost-summary">
+          <div class="sc-cost-summary-main">
+            <div class="sc-cost-summary-label">Итого стоимость остатков</div>
+            <div class="sc-cost-summary-value">{{ formatMoney(pricedStats.totalCost) }} Br</div>
+          </div>
+          <div class="sc-cost-summary-meta">
+            <span>С ценой: <b>{{ pricedStats.priced }}</b> {{ pluralizeProducts(pricedStats.priced) }}</span>
+            <span v-if="pricedStats.unpriced > 0" class="muted">·  Без цены: <b>{{ pricedStats.unpriced }}</b> {{ pluralizeProducts(pricedStats.unpriced) }} (в итог не идут)</span>
+          </div>
+        </div>
 
         <!-- Missing restaurants (bottom) -->
         <div v-if="missingRestaurants.length" class="sc-missing">
@@ -284,6 +333,47 @@
             <button class="sc-btn outline" @click="cellEditor.show = false">Отмена</button>
             <button class="sc-btn fill" @click="saveCellEdit" :disabled="cellEditor.loading">
               {{ cellEditor.loading ? '...' : 'Сохранить' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Prices modal -->
+      <div v-if="pricesEditor.show" class="modal">
+        <div class="modal-box" style="max-width: 640px;">
+          <div class="sc-modal-head">
+            <h3>Цены товаров</h3>
+            <button class="sc-x" @click="pricesEditor.show = false">✕</button>
+          </div>
+          <div class="sc-prices-hint">
+            Введите цену за единицу. Пустое поле — цена не учитывается в итогах.
+          </div>
+          <div class="sc-prices-list">
+            <div v-for="p in pricesEditor.items" :key="p.product_id" class="sc-prices-row">
+              <div class="sc-prices-name">
+                <div>{{ p.product_name }}</div>
+                <div class="sc-prices-sub">
+                  <span v-if="p.product_sku">{{ p.product_sku }} · </span>
+                  <span>за {{ unitLabel(p.unit) }}</span>
+                </div>
+              </div>
+              <div class="sc-prices-input-wrap">
+                <input
+                  v-model="p.price"
+                  type="text"
+                  inputmode="decimal"
+                  class="sc-input sc-prices-input"
+                  placeholder="0"
+                />
+                <span class="sc-prices-currency">Br</span>
+              </div>
+            </div>
+            <div v-if="!pricesEditor.items.length" class="sc-empty">В сборе нет товаров.</div>
+          </div>
+          <div class="sc-modal-foot">
+            <button class="sc-btn outline" @click="pricesEditor.show = false">Отмена</button>
+            <button class="sc-btn fill" @click="savePrices" :disabled="pricesEditor.saving">
+              {{ pricesEditor.saving ? '...' : 'Сохранить' }}
             </button>
           </div>
         </div>
@@ -569,6 +659,8 @@ const renameName = ref('');
 
 // Filter & Sort
 const responseFilter = ref('');
+const responseStatus = ref('all'); // 'all' | 'filled' | 'missing'
+const pricesEditor = ref({ show: false, saving: false, items: [] });
 const sortKey = ref('restaurant');
 const sortDir = ref('asc');
 
@@ -827,13 +919,56 @@ async function refreshData() {
   } catch { toastStore.error('Ошибка', 'Не удалось загрузить данные'); }
 }
 
+function openPricesEditor() {
+  if (!collectionData.value?.products) return;
+  pricesEditor.value = {
+    show: true,
+    saving: false,
+    items: collectionData.value.products.map(p => ({
+      product_id: p.id,
+      product_name: p.product_name,
+      product_sku: p.product_sku || '',
+      unit: p.unit,
+      price: p.price !== null && p.price !== undefined ? String(p.price).replace(/\.?0+$/, '').replace('.', ',') : '',
+    })),
+  };
+}
+
+async function savePrices() {
+  if (!activeCollection.value) return;
+  pricesEditor.value.saving = true;
+  try {
+    const prices = pricesEditor.value.items.map(p => ({
+      product_id: p.product_id,
+      price: String(p.price ?? '').trim(),
+    }));
+    const { data, error } = await db.rpc('sc_save_prices', {
+      collection_id: activeCollection.value.id,
+      prices,
+    });
+    if (error) throw new Error(error);
+    toastStore.show(`Цены сохранены (${data?.updated ?? prices.length})`);
+    pricesEditor.value.show = false;
+    // Перечитаем данные, чтобы итоги пересчитались.
+    await refreshData();
+  } catch (e) {
+    toastStore.error('Ошибка', e.message || e);
+  } finally {
+    pricesEditor.value.saving = false;
+  }
+}
+
 async function notifyRestaurants() {
   if (!activeCollection.value) return
   notifying.value = true
   try {
     const { data, error } = await db.rpc('sc_notify_restaurants', { collection_id: activeCollection.value.id })
     if (error) throw new Error(error)
-    toastStore.show(`Уведомления отправлены (${data.sent})`)
+    if ((data?.sent || 0) === 0) {
+      toastStore.show('Напоминать некому — все уже заполнили или ни у кого нет подписки на Telegram')
+    } else {
+      toastStore.show(`Напоминание отправлено ${data.sent} ${data.sent === 1 ? 'ресторану' : 'ресторанам'}`)
+    }
   } catch (e) { toastStore.error('Ошибка', e.message || e) }
   finally { notifying.value = false }
 }
@@ -999,9 +1134,63 @@ function toggleSort(key) {
   }
 }
 
+const filledCount = computed(() => mergedRows.value.filter(r => r.hasData).length);
+
+// Итоги стоимости остатков. Считаем стоимость = сумма(остатков) × цена для каждой
+// пары (ресторан, товар) — берём только товары, у которых задана цена.
+const pricedStats = computed(() => {
+  const products = collectionData.value?.products || [];
+  const priceById = new Map();
+  let priced = 0;
+  let unpriced = 0;
+  for (const p of products) {
+    const price = p.price != null ? parseFloat(p.price) : null;
+    if (price !== null && !Number.isNaN(price) && price > 0) {
+      priceById.set(p.id, price);
+      priced++;
+    } else {
+      unpriced++;
+    }
+  }
+  const productCost = new Map();   // productId → суммарная стоимость по всем ресторанам
+  const restCost = new Map();      // restaurant → суммарная стоимость по всем товарам
+  let totalCost = 0;
+  for (const row of mergedRows.value) {
+    let rTotal = 0;
+    for (const [prodId, cell] of Object.entries(row.cells)) {
+      const price = priceById.get(Number(prodId));
+      if (!price) continue;
+      const cost = (parseFloat(cell.total) || 0) * price;
+      rTotal += cost;
+      productCost.set(Number(prodId), (productCost.get(Number(prodId)) || 0) + cost);
+    }
+    if (rTotal > 0) restCost.set(row.restaurant, rTotal);
+    totalCost += rTotal;
+  }
+  return { priceById, priced, unpriced, productCost, restCost, totalCost };
+});
+
+function formatMoney(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  const v = Number(n);
+  if (Math.abs(v) < 0.005) return '0,00';
+  return v.toLocaleString('ru-BY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function pluralizeProducts(n) {
+  const abs = Math.abs(Number(n) || 0);
+  const m10 = abs % 10;
+  const m100 = abs % 100;
+  if (m10 === 1 && m100 !== 11) return 'товар';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'товара';
+  return 'товаров';
+}
+
 const filteredRows = computed(() => {
   const q = responseFilter.value.trim().toLowerCase();
   let rows = mergedRows.value;
+  if (responseStatus.value === 'filled') rows = rows.filter(r => r.hasData);
+  else if (responseStatus.value === 'missing') rows = rows.filter(r => !r.hasData);
   if (q) {
     rows = rows.filter(row =>
       row.restaurant.toLowerCase().includes(q) ||
@@ -1382,13 +1571,25 @@ async function exportExcel() {
   // prodCol[productId] = { start, end, dates: [...] }
   const prodCol = new Map();
   let curC = prodOffset;
+  // Цена на единицу товара → используется для расчёта стоимости.
+  const priceById = new Map();
+  for (const p of products) {
+    const pr = p.price != null ? parseFloat(p.price) : NaN;
+    if (!Number.isNaN(pr) && pr > 0) priceById.set(p.id, pr);
+  }
+  const hasAnyPrice = priceById.size > 0;
+
   for (const p of products) {
     const ul = unitLabel(p.unit);
+    // Артикул впереди, потом название/ед, и цена в правом верхнем углу.
+    const skuPrefix = p.product_sku ? `[${p.product_sku}] ` : '';
+    const pricePart = priceById.has(p.id) ? `\n${priceById.get(p.id).toFixed(2)} Br/${ul}` : '';
+    const headerText = `${skuPrefix}${p.product_name} (${ul})${pricePart}`;
     if (p.need_expiry) {
       const dates = datesByProd.get(p.id) || [];
       const span = dates.length + 1; // даты + Итого
       // Верхняя строка — название товара, объединить span колонок
-      ws[XLSX.utils.encode_cell({ r, c: curC })] = { v: `${p.product_name} (${ul})`, t: 's', s: sH };
+      ws[XLSX.utils.encode_cell({ r, c: curC })] = { v: headerText, t: 's', s: sH };
       if (span > 1) {
         merges.push({ s: { r, c: curC }, e: { r, c: curC + span - 1 } });
       }
@@ -1403,12 +1604,20 @@ async function exportExcel() {
       curC += span;
     } else {
       // Одна колонка с rowspan=2
-      ws[XLSX.utils.encode_cell({ r, c: curC })] = { v: `${p.product_name} (${ul})`, t: 's', s: sH };
+      ws[XLSX.utils.encode_cell({ r, c: curC })] = { v: headerText, t: 's', s: sH };
       merges.push({ s: { r, c: curC }, e: { r: r + 1, c: curC } });
-      cols.push({ wch: Math.max(16, p.product_name.length + 8) });
+      cols.push({ wch: Math.max(16, headerText.length + 4) });
       prodCol.set(p.id, { start: curC, end: curC, dates: [], hasExpiry: false });
       curC += 1;
     }
+  }
+  // Столбец «Сумма по ресторану, Br» — последним, только если есть хоть одна цена.
+  const sumCol = hasAnyPrice ? curC : null;
+  if (hasAnyPrice) {
+    ws[XLSX.utils.encode_cell({ r, c: sumCol })] = { v: 'Сумма, Br', t: 's', s: sH };
+    merges.push({ s: { r, c: sumCol }, e: { r: r + 1, c: sumCol } });
+    cols.push({ wch: 14 });
+    curC += 1;
   }
   const lastC = curC - 1;
   r += 2;
@@ -1426,6 +1635,10 @@ async function exportExcel() {
     }
   }
 
+  // Стоимость по ресторану (для итогового столбца) и общий итог.
+  let grandTotalCost = 0;
+  const restTotalCost = new Map();
+
   // Строки данных
   restNums.forEach((num, ri) => {
     const stripe = ri % 2 === 1;
@@ -1433,6 +1646,7 @@ async function exportExcel() {
     ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: `Ресторан ${num}`, t: 's', s: sB(stripe) };
     ws[XLSX.utils.encode_cell({ r, c: 1 })] = { v: info.city, t: 's', s: sC(stripe) };
     ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: info.address, t: 's', s: sC(stripe) };
+    let rowCost = 0;
     for (const p of products) {
       const cfg = prodCol.get(p.id);
       if (cfg.hasExpiry) {
@@ -1444,11 +1658,22 @@ async function exportExcel() {
         const tot = cellTotal.get(`${num}__${p.id}`);
         ws[XLSX.utils.encode_cell({ r, c: cfg.start + cfg.dates.length })] =
           tot == null ? { v: '', t: 's', s: sCTotal(stripe) } : { v: parseFloat(tot.toFixed(2)), t: 'n', s: sCTotal(stripe) };
+        if (tot != null && priceById.has(p.id)) rowCost += tot * priceById.get(p.id);
       } else {
         const tot = cellTotal.get(`${num}__${p.id}`);
         ws[XLSX.utils.encode_cell({ r, c: cfg.start })] =
           tot == null ? { v: '', t: 's', s: sC(stripe) } : { v: parseFloat(tot.toFixed(2)), t: 'n', s: sC(stripe) };
+        if (tot != null && priceById.has(p.id)) rowCost += tot * priceById.get(p.id);
       }
+    }
+    if (hasAnyPrice) {
+      ws[XLSX.utils.encode_cell({ r, c: sumCol })] = rowCost > 0
+        ? { v: parseFloat(rowCost.toFixed(2)), t: 'n', s: sCTotal(stripe) }
+        : { v: '', t: 's', s: sCTotal(stripe) };
+    }
+    if (rowCost > 0) {
+      restTotalCost.set(num, rowCost);
+      grandTotalCost += rowCost;
     }
     r++;
   });
@@ -1459,6 +1684,7 @@ async function exportExcel() {
   ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: 'Итого', t: 's', s: sBold };
   ws[XLSX.utils.encode_cell({ r, c: 1 })] = { v: '', t: 's', s: sBold };
   ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: '', t: 's', s: sBold };
+  const productGrandTotal = new Map(); // productId → суммарный объём (для строки «Стоимость»)
   for (const p of products) {
     const cfg = prodCol.get(p.id);
     if (cfg.hasExpiry) {
@@ -1471,12 +1697,46 @@ async function exportExcel() {
       });
       let tot = 0;
       for (const num of restNums) tot += cellTotal.get(`${num}__${p.id}`) || 0;
+      productGrandTotal.set(p.id, tot);
       ws[XLSX.utils.encode_cell({ r, c: cfg.start + cfg.dates.length })] = { v: parseFloat(tot.toFixed(2)), t: 'n', s: sBoldAcc };
     } else {
       let tot = 0;
       for (const num of restNums) tot += cellTotal.get(`${num}__${p.id}`) || 0;
+      productGrandTotal.set(p.id, tot);
       ws[XLSX.utils.encode_cell({ r, c: cfg.start })] = { v: parseFloat(tot.toFixed(2)), t: 'n', s: sBold };
     }
+  }
+  if (hasAnyPrice) {
+    ws[XLSX.utils.encode_cell({ r, c: sumCol })] = grandTotalCost > 0
+      ? { v: parseFloat(grandTotalCost.toFixed(2)), t: 'n', s: sBoldAcc }
+      : { v: '', t: 's', s: sBoldAcc };
+  }
+
+  // Строка «Стоимость, Br» — по каждому товару (объём × цена), и общий итог справа.
+  if (hasAnyPrice) {
+    r++;
+    const sCostHead = { font: { bold: true, sz: 11, color: { rgb: brown }, name: 'Calibri' }, fill: { fgColor: { rgb: 'FBF1E0' } }, border: borders };
+    const sCostCell = { font: { bold: true, sz: 11, color: { rgb: brown }, name: 'Calibri' }, fill: { fgColor: { rgb: 'FBF1E0' } }, alignment: { horizontal: 'right' }, border: borders };
+    ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: 'Стоимость, Br', t: 's', s: sCostHead };
+    ws[XLSX.utils.encode_cell({ r, c: 1 })] = { v: '', t: 's', s: sCostHead };
+    ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: '', t: 's', s: sCostHead };
+    for (const p of products) {
+      const cfg = prodCol.get(p.id);
+      // Подзаголовки «до даты» оставляем пустыми, цену пишем только в «Итого» товара.
+      if (cfg.hasExpiry) {
+        cfg.dates.forEach((dt, i) => {
+          ws[XLSX.utils.encode_cell({ r, c: cfg.start + i })] = { v: '', t: 's', s: sCostHead };
+        });
+      }
+      const targetC = cfg.hasExpiry ? cfg.start + cfg.dates.length : cfg.start;
+      if (priceById.has(p.id)) {
+        const cost = (productGrandTotal.get(p.id) || 0) * priceById.get(p.id);
+        ws[XLSX.utils.encode_cell({ r, c: targetC })] = { v: parseFloat(cost.toFixed(2)), t: 'n', s: sCostCell };
+      } else {
+        ws[XLSX.utils.encode_cell({ r, c: targetC })] = { v: '', t: 's', s: sCostHead };
+      }
+    }
+    ws[XLSX.utils.encode_cell({ r, c: sumCol })] = { v: parseFloat(grandTotalCost.toFixed(2)), t: 'n', s: sCostCell };
   }
 
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: lastC } });
@@ -1639,10 +1899,16 @@ function fmtTime(s) {
 .sc-summary-lbl { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 
 /* Filter */
-.sc-filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.sc-filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .sc-filter-input { max-width: 320px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--brown); background: #fff; }
 .sc-filter-input:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 2px rgba(255,135,50,0.15); }
 .sc-filter-input::placeholder { color: #bbb; }
+.sc-status-chips { display: inline-flex; gap: 6px; align-items: center; }
+.sc-status-chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: #fff; color: var(--brown); font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; transition: .12s ease; }
+.sc-status-chip:hover { border-color: var(--orange); color: var(--orange); }
+.sc-status-chip.active { background: var(--brown); border-color: var(--brown); color: #fff; }
+.sc-status-chip .sc-chip-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; padding: 0 6px; border-radius: 999px; background: rgba(0,0,0,.08); font-size: 11px; font-weight: 800; }
+.sc-status-chip.active .sc-chip-count { background: rgba(255,255,255,.18); }
 .sc-filter-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { background: rgba(80,35,20,0.08); }
@@ -1662,6 +1928,29 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 }
 .sc-tbl thead th.col-prod { white-space: normal; word-break: break-word; max-width: 80px; font-size: 10px; line-height: 1.3; }
 .sc-tbl thead th .th-unit { font-weight: 400; font-size: 9px; opacity: 0.7; margin-top: 1px; }
+.sc-tbl thead th .th-sku { font-weight: 600; font-size: 9.5px; color: #FFCFA8; margin-top: 1px; letter-spacing: 0.02em; }
+.sc-tbl thead th .th-price { font-weight: 700; font-size: 9.5px; color: #FFE0AA; margin-top: 2px; letter-spacing: 0.02em; }
+.sc-tbl .col-rest-sum { text-align: right; padding-right: 10px; font-weight: 700; }
+.sc-tbl tfoot .foot-val-cost { color: var(--brown); background: #FBF1E0; font-weight: 700; }
+.sc-tbl tfoot tr.sc-foot-cost td { border-top: 2px solid #E0CB9F; }
+
+.sc-cost-summary { display: flex; align-items: center; gap: 16px; margin: 14px 0; padding: 14px 18px; background: linear-gradient(135deg, #FFF8EB 0%, #FBF1E0 100%); border: 1px solid #E0CB9F; border-radius: 12px; flex-wrap: wrap; }
+.sc-cost-summary-main { display: flex; flex-direction: column; gap: 2px; }
+.sc-cost-summary-label { font-size: 12px; color: #8b7355; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.sc-cost-summary-value { font-size: 24px; font-weight: 800; color: #502314; }
+.sc-cost-summary-meta { font-size: 12.5px; color: #4b3527; display: flex; gap: 6px; flex-wrap: wrap; }
+.sc-cost-summary-meta .muted { color: #8b7355; }
+
+.sc-prices-hint { padding: 10px 14px; color: #6b4f3a; font-size: 13px; background: #FBF6EE; border-radius: 8px; margin: 10px 0; }
+.sc-prices-list { max-height: 50vh; overflow: auto; padding-right: 4px; }
+.sc-prices-row { display: flex; align-items: center; gap: 12px; padding: 8px 4px; border-bottom: 1px solid #EFE5D5; }
+.sc-prices-row:last-child { border-bottom: none; }
+.sc-prices-name { flex: 1; min-width: 0; }
+.sc-prices-name > div:first-child { font-size: 13.5px; color: #502314; font-weight: 600; word-break: break-word; }
+.sc-prices-sub { font-size: 11.5px; color: #8b7355; margin-top: 2px; }
+.sc-prices-input-wrap { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.sc-prices-input { width: 110px; text-align: right; }
+.sc-prices-currency { color: #8b7355; font-weight: 700; font-size: 12px; }
 .th-flag { font-weight: 700; font-size: 9px; color: #ffd8bf; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.02em; }
 .sc-tbl thead th .th-note { font-weight: 400; font-size: 9px; color: #c88; font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .sc-tbl tbody td {

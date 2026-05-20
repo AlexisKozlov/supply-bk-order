@@ -675,6 +675,7 @@ if ($endpoint === 'rpc') {
         if (count($products) > 5000) respond(['error' => 'Слишком много товаров (макс. 5000)'], 400);
         $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
         $hasNote = dbColumnExists($pdo, 'stock_collection_products', 'note');
+        $hasPrice = dbColumnExists($pdo, 'stock_collection_products', 'price');
         $pdo->beginTransaction();
         try {
             // legal_entity — кто создал (для аудита), legal_entity_group —
@@ -683,6 +684,7 @@ if ($endpoint === 'rpc') {
             $s->execute([$le, getEntityGroup($le), $name, $uname]);
             $collId = $pdo->lastInsertId();
             $productCols = ['collection_id', 'product_name', 'product_sku', 'unit'];
+            if ($hasPrice) $productCols[] = 'price';
             if ($hasNeedExpiry) $productCols[] = 'need_expiry';
             $productCols[] = 'sort_order';
             if ($hasNote) $productCols[] = 'note';
@@ -694,7 +696,13 @@ if ($endpoint === 'rpc') {
                 $punit = in_array($p['unit'] ?? '', ['boxes', 'pieces', 'kg', 'liters']) ? $p['unit'] : 'pieces';
                 $pneedExpiry = !empty($p['need_expiry']) ? 1 : 0;
                 $pnote = mb_substr($p['note'] ?? '', 0, 500) ?: null;
+                $pprice = null;
+                if ($hasPrice && isset($p['price']) && $p['price'] !== '' && $p['price'] !== null) {
+                    $normalized = str_replace([',', ' '], ['.', ''], (string)$p['price']);
+                    if (is_numeric($normalized)) $pprice = round((float)$normalized, 4);
+                }
                 $params = [$collId, $pname, $psku, $punit];
+                if ($hasPrice) $params[] = $pprice;
                 if ($hasNeedExpiry) $params[] = $pneedExpiry;
                 $params[] = $i;
                 if ($hasNote) $params[] = $pnote;
@@ -728,6 +736,41 @@ if ($endpoint === 'rpc') {
         $cnt = $products->fetchColumn();
         $sent = scNotifyRestaurants($pdo, $collId, $c['name'], $cnt);
         respond(['success' => true, 'sent' => $sent]);
+    }
+
+    if ($fn === 'sc_save_prices') {
+        requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $collId = intval($body['collection_id'] ?? 0);
+        if (!$collId) respond(['error' => 'collection_id required'], 400);
+        $prices = is_array($body['prices'] ?? null) ? $body['prices'] : [];
+
+        // Проверка доступа к сбору по группе юрлиц.
+        $collCheck = $pdo->prepare("SELECT legal_entity_group FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
+        if ($authUser && !checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+
+        $upd = $pdo->prepare("UPDATE stock_collection_products SET price = ? WHERE id = ? AND collection_id = ?");
+        $updated = 0;
+        foreach ($prices as $row) {
+            $pid = intval($row['product_id'] ?? 0);
+            if (!$pid) continue;
+            // Пустая строка / null → стираем цену (NULL). Иначе принудительно DECIMAL.
+            $raw = $row['price'] ?? null;
+            if ($raw === '' || $raw === null) {
+                $price = null;
+            } else {
+                // На фронте часто разделитель — запятая. Приводим к точке для float.
+                $normalized = str_replace([',', ' '], ['.', ''], (string)$raw);
+                if (!is_numeric($normalized)) continue;
+                $price = round((float)$normalized, 4);
+                if ($price < 0) continue;
+            }
+            $upd->execute([$price, $pid, $collId]);
+            $updated += $upd->rowCount();
+        }
+        respond(['success' => true, 'updated' => $updated]);
     }
 
     if ($fn === 'sc_close_collection') {
@@ -796,7 +839,9 @@ if ($endpoint === 'rpc') {
         // Товары
         $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
         $hasNote = dbColumnExists($pdo, 'stock_collection_products', 'note');
+        $hasPrice = dbColumnExists($pdo, 'stock_collection_products', 'price');
         $productCols = ['id', 'product_name', 'product_sku', 'unit'];
+        if ($hasPrice) $productCols[] = 'price';
         if ($hasNeedExpiry) $productCols[] = 'need_expiry';
         $productCols[] = 'sort_order';
         if ($hasNote) $productCols[] = 'note';
