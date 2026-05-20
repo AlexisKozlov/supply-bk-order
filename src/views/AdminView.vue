@@ -7,7 +7,10 @@
     <!-- Табы -->
     <div class="adm-tabs">
       <button class="adm-tab" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">
-        <BkIcon name="user" size="sm"/> Пользователи <span class="adm-tab-count" :class="{ active: activeTab === 'users' }">{{ users.length }}</span>
+        <BkIcon name="user" size="sm"/> Сотрудники <span class="adm-tab-count" :class="{ active: activeTab === 'users' }">{{ users.length }}</span>
+      </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'restaurant-accounts' }" @click="activeTab = 'restaurant-accounts'">
+        <BkIcon name="user" size="sm"/> Кабинеты ресторанов
       </button>
       <button class="adm-tab" :class="{ active: activeTab === 'maintenance' }" @click="activeTab = 'maintenance'">
         <BkIcon name="warning" size="sm"/> Тех. работы
@@ -82,6 +85,11 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ═══ Кабинеты ресторанов ═══ -->
+    <div v-if="activeTab === 'restaurant-accounts'" class="adm-section">
+      <AdminRestaurantAccountsTab />
     </div>
 
     <!-- ═══ Тех. работы ═══ -->
@@ -972,6 +980,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 
 const router = useRouter();
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import AdminRestaurantAccountsTab from '@/components/admin/AdminRestaurantAccountsTab.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
@@ -979,7 +988,7 @@ const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/Conf
 const userStore = useUserStore();
 const toast = useToastStore();
 
-const activeTab = useTabRoute('users', ['users', 'sessions', 'audit', 'feedback', 'broadcast', 'stats', 'backup', 'maintenance', 'cron-reminders']);
+const activeTab = useTabRoute('users', ['users', 'restaurant-accounts', 'sessions', 'audit', 'feedback', 'broadcast', 'stats', 'backup', 'maintenance', 'cron-reminders']);
 const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);

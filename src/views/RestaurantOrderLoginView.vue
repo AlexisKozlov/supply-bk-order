@@ -109,6 +109,9 @@
                 {{ showPassword ? '🙈' : '👁' }}
               </button>
             </div>
+            <div class="ro-forgot-row">
+              <router-link :to="{ name: 'ForgotPassword' }" class="ro-forgot-link">Забыли пароль?</router-link>
+            </div>
           </div>
 
           <div v-if="error" class="ro-error">
@@ -137,13 +140,6 @@
       </div>
 
       <!-- Подсказки -->
-      <div class="ro-hints">
-        <router-link class="ro-hint" :to="{ name: 'ForgotPassword' }">
-          <span class="ro-hint-icon">🔐</span>
-          <span><strong>Забыли пароль?</strong></span>
-        </router-link>
-      </div>
-
       <div class="ro-login-footer">
         {{ loginBrand.footer }}
         <span class="ro-help-sep">·</span>
@@ -590,28 +586,14 @@ async function handleLogin() {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Подсказки */
-.ro-hints {
-  margin-top: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
+.ro-forgot-row { display: flex; justify-content: flex-end; margin-top: 6px; }
+.ro-forgot-link {
+  color: #8b7355;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
 }
-.ro-hint {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: rgba(255,255,255,0.85);
-  font-size: 13px;
-  background: rgba(255,255,255,0.1);
-  padding: 10px 14px;
-  border-radius: 10px;
-  backdrop-filter: blur(4px);
-}
-.ro-hint-icon { font-size: 16px; flex-shrink: 0; }
-a.ro-hint { text-decoration: none; color: rgba(255,255,255,0.85); }
-a.ro-hint:hover { background: rgba(255,255,255,0.18); }
-.ro-hint strong { color: white; }
+.ro-forgot-link:hover { color: #E76F51; text-decoration: underline; }
 
 /* Футер */
 .ro-login-footer {

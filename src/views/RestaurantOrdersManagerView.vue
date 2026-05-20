@@ -26,7 +26,7 @@
         <div class="rom-menu-wrap" v-click-outside="() => moreMenuOpen = false">
           <button class="rom-btn rom-btn-icon" @click="moreMenuOpen = !moreMenuOpen" title="Ещё">⋯</button>
           <div v-if="moreMenuOpen" class="rom-menu">
-            <button class="rom-menu-item" @click="moreMenuOpen = false; openUsersModal()">Учётки ресторанов</button>
+            <router-link to="/admin?tab=restaurant-accounts" class="rom-menu-item" @click="moreMenuOpen = false">Учётки ресторанов →</router-link>
             <button class="rom-menu-item" @click="moreMenuOpen = false; copyRoLink()">Скопировать ссылку /restaurant</button>
           </div>
         </div>
@@ -757,12 +757,13 @@
       </div>
     </div>
 
-    <!-- Users modal -->
-    <div v-if="showUsersModal" class="rom-modal-overlay" @click.self="showUsersModal = false">
+    <!-- Users modal удалена — модуль учётных записей переехал в раздел Администрирования
+         (см. /admin?tab=restaurant-accounts → AdminRestaurantAccountsTab.vue). -->
+    <div v-if="false" class="rom-modal-overlay">
       <div class="rom-modal" style="max-width:820px">
         <div class="rom-modal-header">
           <h2>Учётные записи ресторанов</h2>
-          <button class="rom-modal-close" @click="showUsersModal = false">&times;</button>
+          <button class="rom-modal-close">&times;</button>
         </div>
         <div class="rom-modal-body">
           <div class="rom-users-hint" style="margin-bottom:10px">
@@ -3056,8 +3057,10 @@ async function doUnifiedExport() {
   display: block; width: 100%; padding: 10px 14px; border: none;
   background: transparent; text-align: left; font-size: 13px; font-family: inherit;
   color: #502314; cursor: pointer; border-radius: 6px; font-weight: 500;
+  text-decoration: none;
 }
 .rom-menu-item:hover { background: #faf0e6; }
+a.rom-menu-item { box-sizing: border-box; }
 
 /* Командир: дата + дедлайн + действия */
 .rom-command {
