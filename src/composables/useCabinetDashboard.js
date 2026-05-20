@@ -11,7 +11,7 @@
  *   } = useCabinetDashboard({ toast });
  */
 
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { usePushNotifications } from '@/composables/usePushNotifications.js';
 
 const PUSH_ONBOARDING_KEY = 'ro_push_onboarding_seen_v1';
