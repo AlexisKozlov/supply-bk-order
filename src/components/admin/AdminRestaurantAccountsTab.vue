@@ -107,10 +107,10 @@
               <td class="arat-col-actions">
                 <div class="arat-actions">
                   <button class="arat-btn arat-btn-sm" @click="handleSetEmail(u)" :disabled="busy" :title="u.email ? 'Изменить email' : 'Указать email'">
-                    {{ u.email ? 'Email' : 'Email…' }}
+                    Email
                   </button>
                   <button class="arat-btn arat-btn-sm" @click="handleSetPassword(u)" :disabled="busy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
-                    {{ u.has_password ? 'Пароль' : 'Пароль…' }}
+                    Пароль
                   </button>
                   <button
                     v-if="u.has_password"
@@ -118,8 +118,9 @@
                     :class="u.is_active ? 'arat-btn-danger' : 'arat-btn-success'"
                     @click="handleToggleUser(u)"
                     :disabled="busy"
+                    :title="u.is_active ? 'Отключить учётку' : 'Включить учётку'"
                   >
-                    {{ u.is_active ? 'Отключить' : 'Включить' }}
+                    {{ u.is_active ? 'Откл.' : 'Вкл.' }}
                   </button>
                 </div>
               </td>
@@ -479,8 +480,8 @@ async function handleToggleUser(u) {
 
 .arat-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 4px;
   justify-content: flex-end;
 }
 
