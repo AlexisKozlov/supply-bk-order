@@ -4,7 +4,8 @@
     "type": "project",
     "require": {
         "phpoffice/phpspreadsheet": "^2.1",
-        "minishlink/web-push": "^10.0"
+        "minishlink/web-push": "^10.0",
+        "phpmailer/phpmailer": "^7.1"
     },
     "config": {
         "vendor-dir": "vendor"

@@ -571,6 +571,182 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
+    // ====================================================================
+    // Сброс пароля сотрудников (через email).
+    // Отдельный flow от ресторанного: длинная ссылка на email, не код в TG.
+    // Таблицы: staff_password_reset_tokens, staff_password_reset_logs.
+    // ====================================================================
+
+    if ($fn === 'request_staff_password_reset') {
+        $email = trim((string)($body['email'] ?? ''));
+        if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            respond(['error' => 'Введите корректный email'], 400);
+        }
+        $email = mb_strtolower($email);
+
+        // Тихий троттлинг — не палим лимиты, чтобы нельзя было перебирать.
+        //   - не более 5 запросов с одного IP за 10 минут;
+        //   - не более 1 запроса на email за 60 секунд.
+        try {
+            $ipStmt = $pdo->prepare("SELECT COUNT(*) FROM staff_password_reset_logs WHERE ip_address = ? AND created_at > (NOW() - INTERVAL 10 MINUTE)");
+            $ipStmt->execute([$clientIp]);
+            $ipCount = (int)$ipStmt->fetchColumn();
+
+            $emStmt = $pdo->prepare("SELECT COUNT(*) FROM staff_password_reset_logs WHERE email = ? AND created_at > (NOW() - INTERVAL 1 MINUTE)");
+            $emStmt->execute([$email]);
+            $emCount = (int)$emStmt->fetchColumn();
+
+            if ($ipCount >= 5 || $emCount >= 1) {
+                $pdo->prepare("INSERT INTO staff_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'rate_limited')")
+                    ->execute([$email, $clientIp]);
+                respond(['success' => true]);
+            }
+        } catch (Throwable $e) {}
+
+        // Ищем пользователя. Не сообщаем, найден он или нет — отвечаем success в любом случае.
+        $userStmt = $pdo->prepare("SELECT id, name, email FROM users WHERE email = ? LIMIT 1");
+        $userStmt->execute([$email]);
+        $user = $userStmt->fetch();
+
+        if (!$user) {
+            try {
+                $pdo->prepare("INSERT INTO staff_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'not_found')")
+                    ->execute([$email, $clientIp]);
+            } catch (Throwable $e) {}
+            respond(['success' => true]);
+        }
+
+        // Сгенерировать одноразовый токен (256 бит энтропии).
+        $token = bin2hex(random_bytes(32));
+        $userAgent = mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+        try {
+            $pdo->prepare("INSERT INTO staff_password_reset_tokens (user_id, email, token, expires_at, ip_address, user_agent) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE), ?, ?)")
+                ->execute([$user['id'], $email, $token, $clientIp, $userAgent]);
+        } catch (Throwable $e) {
+            error_log('[staff_pwd_reset] insert token failed: ' . $e->getMessage());
+            respond(['success' => true]);
+        }
+
+        // Сборка и отправка письма.
+        require_once __DIR__ . '/mail_send.php';
+        require_once __DIR__ . '/mail_templates.php';
+
+        $siteUrl  = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
+        $resetUrl = $siteUrl . '/staff-reset-password?token=' . $token;
+        $userName = trim((string)$user['name']);
+
+        $intro = $userName !== '' ? "Здравствуйте, {$userName}!" : 'Здравствуйте!';
+        $bodyHtml = '<p style="margin:0 0 12px;">Был получен запрос на сброс пароля для вашей учётной записи в системе Supply Department.</p>'
+                  . '<p style="margin:0;">Нажмите кнопку ниже, чтобы задать новый пароль. Ссылка действительна <strong>30 минут</strong>.</p>';
+
+        $html = renderMailHtml([
+            'title'   => 'Сброс пароля',
+            'preview' => 'Ссылка для сброса пароля действительна 30 минут',
+            'intro'   => $intro,
+            'body'    => $bodyHtml,
+            'cta'     => ['text' => 'Сбросить пароль', 'url' => $resetUrl],
+            'footer'  => 'Если вы не запрашивали сброс пароля — просто проигнорируйте это письмо, ваш текущий пароль останется без изменений.',
+        ]);
+
+        $sendResult = sendEmail($email, 'Сброс пароля — Supply Department', $html, true);
+
+        try {
+            $logRes = $sendResult['success'] ? 'sent' : 'not_found';
+            $pdo->prepare("INSERT INTO staff_password_reset_logs (email, ip_address, result) VALUES (?, ?, ?)")
+                ->execute([$email, $clientIp, $logRes]);
+        } catch (Throwable $e) {}
+
+        if (!$sendResult['success']) {
+            error_log('[staff_pwd_reset] email send failed: ' . ($sendResult['error'] ?? 'unknown'));
+        }
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'verify_staff_reset_token') {
+        $token = trim((string)($body['token'] ?? ''));
+        if (!$token || !preg_match('/^[a-f0-9]{64}$/', $token)) {
+            respond(['valid' => false, 'reason' => 'invalid'], 200);
+        }
+
+        $stmt = $pdo->prepare("SELECT id, email, used_at, (expires_at < NOW()) AS is_expired FROM staff_password_reset_tokens WHERE token = ? LIMIT 1");
+        $stmt->execute([$token]);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            try {
+                $pdo->prepare("INSERT INTO staff_password_reset_logs (ip_address, result) VALUES (?, 'token_invalid')")->execute([$clientIp]);
+            } catch (Throwable $e) {}
+            respond(['valid' => false, 'reason' => 'invalid'], 200);
+        }
+        if ($row['used_at'] !== null) {
+            respond(['valid' => false, 'reason' => 'used'], 200);
+        }
+        if ((int)$row['is_expired'] === 1) {
+            respond(['valid' => false, 'reason' => 'expired'], 200);
+        }
+
+        // Возвращаем замаскированный email (для UX, чтобы пользователь понимал, для какого аккаунта меняет пароль).
+        $emailParts = explode('@', $row['email']);
+        $local = $emailParts[0] ?? '';
+        $domain = $emailParts[1] ?? '';
+        $maskedLocal = mb_strlen($local) <= 2 ? $local : mb_substr($local, 0, 1) . str_repeat('*', max(1, mb_strlen($local) - 2)) . mb_substr($local, -1);
+        $maskedEmail = $maskedLocal . '@' . $domain;
+
+        respond(['valid' => true, 'email' => $maskedEmail]);
+    }
+
+    if ($fn === 'reset_staff_password') {
+        $token = trim((string)($body['token'] ?? ''));
+        $newPassword = (string)($body['new_password'] ?? '');
+
+        if (!$token || !preg_match('/^[a-f0-9]{64}$/', $token)) {
+            respond(['error' => 'Неверный токен'], 400);
+        }
+        if (mb_strlen($newPassword) < 8) {
+            respond(['error' => 'Пароль должен быть не менее 8 символов'], 400);
+        }
+
+        $stmt = $pdo->prepare("SELECT id, user_id, email, used_at, (expires_at < NOW()) AS is_expired FROM staff_password_reset_tokens WHERE token = ? LIMIT 1");
+        $stmt->execute([$token]);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            try { $pdo->prepare("INSERT INTO staff_password_reset_logs (ip_address, result) VALUES (?, 'token_invalid')")->execute([$clientIp]); } catch (Throwable $e) {}
+            respond(['error' => 'Ссылка недействительна'], 400);
+        }
+        if ($row['used_at'] !== null) {
+            try { $pdo->prepare("INSERT INTO staff_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'token_used')")->execute([$row['email'], $clientIp]); } catch (Throwable $e) {}
+            respond(['error' => 'Ссылка уже была использована'], 400);
+        }
+        if ((int)$row['is_expired'] === 1) {
+            try { $pdo->prepare("INSERT INTO staff_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'token_expired')")->execute([$row['email'], $clientIp]); } catch (Throwable $e) {}
+            respond(['error' => 'Срок действия ссылки истёк. Запросите новую.'], 400);
+        }
+
+        $hash = password_hash($newPassword, PASSWORD_BCRYPT);
+
+        try {
+            $pdo->beginTransaction();
+            $pdo->prepare("UPDATE users SET password = ? WHERE id = ?")->execute([$hash, $row['user_id']]);
+            $pdo->prepare("UPDATE staff_password_reset_tokens SET used_at = NOW() WHERE id = ?")->execute([$row['id']]);
+            // Инвалидируем все остальные неиспользованные токены этого пользователя.
+            $pdo->prepare("UPDATE staff_password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL")
+                ->execute([$row['user_id']]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('[staff_pwd_reset] reset failed: ' . $e->getMessage());
+            respond(['error' => 'Не удалось сменить пароль, попробуйте ещё раз'], 500);
+        }
+
+        try {
+            $pdo->prepare("INSERT INTO staff_password_reset_logs (email, ip_address, result) VALUES (?, ?, 'reset_ok')")
+                ->execute([$row['email'], $clientIp]);
+        } catch (Throwable $e) {}
+
+        respond(['success' => true]);
+    }
+
     // --- Приватные RPC (требуют авторизацию) ---
     if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 

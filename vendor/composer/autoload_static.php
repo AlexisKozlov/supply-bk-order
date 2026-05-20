@@ -30,6 +30,7 @@ class ComposerStaticInit980145ae5f8dc3ccd3c24b6716876ae8
             'Psr\\Http\\Client\\' => 16,
             'Psr\\Clock\\' => 10,
             'PhpOffice\\PhpSpreadsheet\\' => 25,
+            'PHPMailer\\PHPMailer\\' => 20,
         ),
         'M' => 
         array (
@@ -77,8 +78,8 @@ class ComposerStaticInit980145ae5f8dc3ccd3c24b6716876ae8
         ),
         'Psr\\Http\\Message\\' => 
         array (
-            0 => __DIR__ . '/..' . '/psr/http-message/src',
-            1 => __DIR__ . '/..' . '/psr/http-factory/src',
+            0 => __DIR__ . '/..' . '/psr/http-factory/src',
+            1 => __DIR__ . '/..' . '/psr/http-message/src',
         ),
         'Psr\\Http\\Client\\' => 
         array (
@@ -91,6 +92,10 @@ class ComposerStaticInit980145ae5f8dc3ccd3c24b6716876ae8
         'PhpOffice\\PhpSpreadsheet\\' => 
         array (
             0 => __DIR__ . '/..' . '/phpoffice/phpspreadsheet/src/PhpSpreadsheet',
+        ),
+        'PHPMailer\\PHPMailer\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/phpmailer/phpmailer/src',
         ),
         'Minishlink\\WebPush\\' => 
         array (
