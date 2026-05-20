@@ -49,6 +49,54 @@ function canDownloadRestaurantInfoFile($pdo, $fileId) {
     return (bool)$q->fetchColumn();
 }
 
+function canDownloadSurveyFile($pdo, $fileRow) {
+    // Закупщик с правом surveys.view (или выше) — может скачивать любые ответы.
+    if (checkAuth($pdo)) {
+        $su = getSessionUser($pdo);
+        if ($su) {
+            global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+            $p = resolvePermissions($su['role'] ?? 'user', $su['permissions'] ?? null, $ROLE_TEMPLATES);
+            if (($ACCESS_LEVELS[$p['surveys'] ?? 'none'] ?? 0) >= $ACCESS_LEVELS['view']) return true;
+        }
+    }
+    // Ресторан — только свой файл, и только пока сам опрос не закрыт администратором
+    // (после закрытия ответ всё равно остаётся, и ему можно показать свои файлы).
+    $rest = roReadActiveSessionRow($pdo);
+    if (!$rest) return false;
+    $group = $rest['legal_entity_group'] ?: (((int)$rest['restaurant_number'] >= 1000) ? 'PS' : 'BK_VM');
+    return (int)$fileRow['restaurant_number'] === (int)$rest['restaurant_number']
+        && (string)$fileRow['legal_entity_group'] === (string)$group;
+}
+
+// ═══ DOWNLOAD SURVEY FILE ═══
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'survey_files' && isset($parts[2])) {
+    // /api/uploads/survey_files/{YYYY}/{MM}/{filename}
+    $year = preg_replace('/[^0-9]/', '', (string)($parts[2] ?? ''));
+    $month = preg_replace('/[^0-9]/', '', (string)($parts[3] ?? ''));
+    $filename = basename((string)($parts[4] ?? ''));
+    if (!$year || !$month || !$filename) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    $rel = "uploads/survey_files/{$year}/{$month}/{$filename}";
+    $abs = __DIR__ . '/../' . $rel;
+    if (!file_exists($abs)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    $s = $pdo->prepare("
+        SELECT file_name, mime_type, restaurant_number, legal_entity_group
+        FROM survey_response_files
+        WHERE file_path = ?
+        LIMIT 1
+    ");
+    $s->execute([$rel]);
+    $file = $s->fetch();
+    if (!$file) respond(['error' => 'Файл не найден'], 404);
+    if (!canDownloadSurveyFile($pdo, $file)) respond(['error' => 'Нет доступа'], 403);
+    $mime = $file['mime_type'] ?: 'application/octet-stream';
+    $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($file['file_name'] ?: $filename) . '"');
+    header('Content-Length: ' . filesize($abs));
+    readfile($abs);
+    exit;
+}
+
 // ═══ DOWNLOAD RESTAURANT INFO FILE ═══
 if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'restaurant_info' && isset($parts[2])) {
     $filename = basename($parts[2]);

@@ -108,6 +108,50 @@
                 class="cab-sv-textarea" rows="5" placeholder="Ваш ответ..."
                 :disabled="surveySubmitting"
                 @keydown.ctrl.enter="wizardCanNext && nextStep()" />
+              <div v-else-if="surveyQuestionType(currentQuestion) === 'files'" class="cab-sv-files">
+                <p class="cab-sv-files-hint">
+                  Можно загрузить до {{ FILES_MAX_PER_QUESTION }} файлов, до 25 МБ каждый.
+                  Картинки, PDF, документы Word/Excel.
+                  <span v-if="!currentQuestion.files_required" class="cab-sv-optional">прикладывать необязательно</span>
+                </p>
+                <input ref="fileInputRef"
+                  type="file"
+                  class="cab-sv-files-input"
+                  multiple
+                  :accept="FILES_ACCEPT"
+                  :disabled="surveySubmitting || filesUploadingCount > 0 || (surveyFiles[currentQuestion.id]?.length || 0) >= FILES_MAX_PER_QUESTION"
+                  @change="onFilesPicked($event, currentQuestion.id)" />
+                <label class="cab-sv-files-btn"
+                  :class="{ disabled: surveySubmitting || (surveyFiles[currentQuestion.id]?.length || 0) >= FILES_MAX_PER_QUESTION }"
+                  @click="triggerFileInput">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                  Выбрать файлы
+                  <span class="cab-sv-files-counter">{{ surveyFiles[currentQuestion.id]?.length || 0 }} / {{ FILES_MAX_PER_QUESTION }}</span>
+                </label>
+                <div v-if="filesError" class="cab-sv-files-error">{{ filesError }}</div>
+                <div v-if="surveyFiles[currentQuestion.id]?.length || filesPending[currentQuestion.id]?.length" class="cab-sv-files-list">
+                  <div v-for="f in (surveyFiles[currentQuestion.id] || [])" :key="'f' + f.id" class="cab-sv-file">
+                    <span class="cab-sv-file-thumb">
+                      <img v-if="isImageMime(f.mime_type)" :src="f.url" :alt="f.file_name" loading="lazy" />
+                      <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </span>
+                    <div class="cab-sv-file-info">
+                      <a :href="f.url" target="_blank" rel="noopener" class="cab-sv-file-name">{{ f.file_name }}</a>
+                      <span class="cab-sv-file-size">{{ formatFileSize(f.file_size) }}</span>
+                    </div>
+                    <button type="button" class="cab-sv-file-del" :disabled="surveySubmitting" @click="removeFile(f.id, currentQuestion.id)" title="Удалить">×</button>
+                  </div>
+                  <div v-for="p in (filesPending[currentQuestion.id] || [])" :key="'p' + p.uid" class="cab-sv-file pending">
+                    <span class="cab-sv-file-thumb">
+                      <span class="cab-spin cab-spin-sm"></span>
+                    </span>
+                    <div class="cab-sv-file-info">
+                      <span class="cab-sv-file-name">{{ p.name }}</span>
+                      <span class="cab-sv-file-size">{{ p.progress }}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div v-else class="cab-sv-bigopts">
                 <button v-for="option in currentQuestion.options || []" :key="option.id"
                   class="cab-sv-bigopt"
@@ -184,6 +228,19 @@
               <div v-else-if="surveyQuestionType(q) === 'text'" class="cab-sv-ro-text-answer">
                 {{ surveyAnswers[q.id] || '—' }}
               </div>
+              <div v-else-if="surveyQuestionType(q) === 'files'" class="cab-sv-files-list cab-sv-files-readonly">
+                <div v-if="!(surveyFiles[q.id]?.length)" class="cab-sv-ro-text-answer">Файлы не приложены</div>
+                <div v-for="f in (surveyFiles[q.id] || [])" :key="f.id" class="cab-sv-file readonly">
+                  <span class="cab-sv-file-thumb">
+                    <img v-if="isImageMime(f.mime_type)" :src="f.url" :alt="f.file_name" loading="lazy" />
+                    <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  </span>
+                  <div class="cab-sv-file-info">
+                    <a :href="f.url" target="_blank" rel="noopener" class="cab-sv-file-name">{{ f.file_name }}</a>
+                    <span class="cab-sv-file-size">{{ formatFileSize(f.file_size) }}</span>
+                  </div>
+                </div>
+              </div>
               <div v-else v-for="opt in q.options || []" :key="opt.id"
                 class="cab-sv-ro-opt"
                 :class="{ selected: Number(surveyAnswers[q.id]) === Number(opt.id) }">
@@ -237,9 +294,17 @@ const surveyError = ref('');
 const surveyDetail = ref(null);
 const surveyComment = ref('');
 const surveyAnswers = reactive({});
+const surveyFiles = reactive({});         // { questionId: [{id, file_name, mime_type, file_size, url}] } — уже загруженные
+const filesPending = reactive({});        // { questionId: [{uid, name, progress}] } — в процессе загрузки
+const filesError = ref('');
+const fileInputRef = ref(null);
 const surveyMode = ref('list'); // 'list' | 'wizard' | 'readonly' | 'success'
 const wizardStep = ref(0);
 const wizardSlideName = ref('cab-sv-slide-forward');
+
+const FILES_MAX_PER_QUESTION = 20;
+const FILES_MAX_BYTES = 25 * 1024 * 1024;
+const FILES_ACCEPT = 'image/jpeg,image/png,image/heic,image/heif,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint,text/plain,text/csv';
 
 const pendingSurveys = computed(() => props.items.filter(s => !s.already_answered));
 const answeredSurveys = computed(() => props.items.filter(s => !!s.already_answered));
@@ -297,14 +362,16 @@ function surveyQuestionPlural(n) {
   return 'вопросов';
 }
 
-function surveyQuestionType(question) {
-  return ['choice', 'scale', 'text'].includes(question?.type) ? question.type : 'choice';
-}
-
 function surveyQuestionAnswered(question) {
   if (!question?.id) return false;
-  const value = surveyAnswers[question.id];
   const type = surveyQuestionType(question);
+  if (type === 'files') {
+    const required = !!question.files_required;
+    if (!required) return true; // опциональный — всегда «отвечено»
+    const count = (surveyFiles[question.id] || []).length;
+    return count > 0;
+  }
+  const value = surveyAnswers[question.id];
   if (type === 'text') return String(value || '').trim() !== '';
   if (type === 'scale') {
     const n = Number(value);
@@ -313,8 +380,15 @@ function surveyQuestionAnswered(question) {
   return Number(value) > 0;
 }
 
+function surveyQuestionType(question) {
+  return ['choice', 'scale', 'text', 'files'].includes(question?.type) ? question.type : 'choice';
+}
+
 function resetSurveyDraft(detail = surveyDetail.value) {
   for (const key of Object.keys(surveyAnswers)) delete surveyAnswers[key];
+  for (const key of Object.keys(surveyFiles)) delete surveyFiles[key];
+  for (const key of Object.keys(filesPending)) delete filesPending[key];
+  filesError.value = '';
   if (!detail) { surveyComment.value = ''; return; }
   const answers = detail.answers || {};
   for (const [questionId, answer] of Object.entries(answers)) {
@@ -326,7 +400,85 @@ function resetSurveyDraft(detail = surveyDetail.value) {
       surveyAnswers[questionId] = Number(answer);
     }
   }
+  // Файлы (черновики или уже отправленные) приходят сгруппированные по question_id.
+  const files = detail.files || {};
+  for (const [qid, list] of Object.entries(files)) {
+    surveyFiles[qid] = Array.isArray(list) ? list.slice() : [];
+  }
   surveyComment.value = detail.comment || '';
+}
+
+function isImageMime(mime) {
+  return typeof mime === 'string' && mime.startsWith('image/');
+}
+
+function formatFileSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + ' Б';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' КБ';
+  return (n / 1024 / 1024).toFixed(1) + ' МБ';
+}
+
+const filesUploadingCount = computed(() => {
+  let n = 0;
+  for (const arr of Object.values(filesPending)) n += (arr?.length || 0);
+  return n;
+});
+
+function triggerFileInput() {
+  if (fileInputRef.value) fileInputRef.value.click();
+}
+
+async function onFilesPicked(event, questionId) {
+  const input = event.target;
+  const picked = Array.from(input.files || []);
+  input.value = ''; // позволяем выбрать те же файлы снова при необходимости
+  if (!picked.length) return;
+  filesError.value = '';
+
+  const already = (surveyFiles[questionId] || []).length;
+  const slots = Math.max(0, FILES_MAX_PER_QUESTION - already - (filesPending[questionId]?.length || 0));
+  if (picked.length > slots) {
+    filesError.value = `Можно добавить ещё ${slots} ${slots === 1 ? 'файл' : 'файлов'}`;
+    picked.splice(slots);
+    if (!picked.length) return;
+  }
+
+  for (const file of picked) {
+    if (file.size > FILES_MAX_BYTES) {
+      filesError.value = `${file.name}: файл больше 25 МБ`;
+      continue;
+    }
+    const uid = `up_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    filesPending[questionId] = filesPending[questionId] || [];
+    const pending = reactive({ uid, name: file.name, progress: 0 });
+    filesPending[questionId].push(pending);
+    try {
+      const meta = await roStore.uploadSurveyFile(
+        surveyDetail.value.id,
+        questionId,
+        file,
+        (pct) => { pending.progress = pct; }
+      );
+      surveyFiles[questionId] = surveyFiles[questionId] || [];
+      surveyFiles[questionId].push(meta);
+    } catch (e) {
+      filesError.value = e.message || `Не удалось загрузить «${file.name}»`;
+    } finally {
+      filesPending[questionId] = (filesPending[questionId] || []).filter(p => p.uid !== uid);
+    }
+  }
+}
+
+async function removeFile(fileId, questionId) {
+  if (!fileId) return;
+  filesError.value = '';
+  try {
+    await roStore.removeSurveyFile(fileId);
+    surveyFiles[questionId] = (surveyFiles[questionId] || []).filter(f => f.id !== fileId);
+  } catch (e) {
+    filesError.value = e.message || 'Не удалось удалить файл';
+  }
 }
 
 async function openSurvey(surveyId) {
@@ -406,6 +558,11 @@ async function submitSurveyAnswer() {
       return;
     }
     const type = surveyQuestionType(question);
+    if (type === 'files') {
+      // Файлы уже лежат в БД через survey-file-upload; на submit бэк сам привяжет
+      // черновики к response_id, в answers их передавать не нужно.
+      continue;
+    }
     if (type === 'text') {
       payload[question.id] = { question_id: Number(question.id), type, text_value: String(surveyAnswers[question.id] || '').trim() };
     } else if (type === 'scale') {
@@ -483,6 +640,31 @@ async function submitSurveyAnswer() {
 .cab-sv-scale-btn.selected { border-color: #D08B3A; background: #FFF1D7; color: #4A2C18; }
 .cab-sv-textarea { width: 100%; min-height: 120px; padding: 14px 16px; border: 1.5px solid #E0DBD5; border-radius: 12px; font: inherit; font-size: 14px; color: #502314; background: white; resize: vertical; transition: .15s ease; }
 .cab-sv-textarea:focus { outline: none; border-color: #D08B3A; box-shadow: 0 0 0 3px rgba(208,139,58,0.14); }
+
+/* Загрузка файлов: кнопка-плашка + список превью. */
+.cab-sv-files { display: flex; flex-direction: column; gap: 12px; }
+.cab-sv-files-hint { margin: 0; font-size: 13px; color: #6b4f3a; line-height: 1.45; }
+.cab-sv-files-hint .cab-sv-optional { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #F0E8DE; color: #8b7355; font-size: 11px; font-weight: 700; }
+.cab-sv-files-input { display: none; }
+.cab-sv-files-btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border: 2px dashed #D7B79A; border-radius: 12px; background: #FFFBF5; color: #B45309; font-size: 14px; font-weight: 700; cursor: pointer; transition: .15s ease; align-self: flex-start; }
+.cab-sv-files-btn:hover:not(.disabled) { border-color: #D08B3A; background: #FFF6E7; }
+.cab-sv-files-btn.disabled { opacity: .5; cursor: not-allowed; }
+.cab-sv-files-counter { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #FFEACE; color: #B45309; font-size: 12px; font-weight: 800; }
+.cab-sv-files-error { padding: 10px 12px; border-radius: 10px; background: #FEF2F2; color: #b91c1c; font-size: 13px; border: 1px solid #FECACA; }
+.cab-sv-files-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.cab-sv-files-readonly { gap: 6px; }
+.cab-sv-file { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: #FBF6EE; border: 1px solid #ECE2D2; border-radius: 12px; }
+.cab-sv-file.pending { opacity: .8; }
+.cab-sv-file.readonly { background: #fff; border-color: #EDE8E3; }
+.cab-sv-file-thumb { width: 44px; height: 44px; border-radius: 8px; background: #fff; display: flex; align-items: center; justify-content: center; color: #8b7355; flex-shrink: 0; overflow: hidden; border: 1px solid #ECE2D2; }
+.cab-sv-file-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.cab-sv-file-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cab-sv-file-name { color: #502314; font-size: 13.5px; font-weight: 700; text-decoration: none; word-break: break-word; }
+.cab-sv-file-name:hover { text-decoration: underline; }
+.cab-sv-file-size { color: #8b7355; font-size: 11.5px; font-weight: 600; }
+.cab-sv-file-del { width: 28px; height: 28px; border-radius: 8px; border: none; background: #FFF; color: #b91c1c; font-size: 18px; line-height: 1; cursor: pointer; flex-shrink: 0; transition: .15s ease; }
+.cab-sv-file-del:hover:not(:disabled) { background: #FEF2F2; }
+.cab-sv-file-del:disabled { opacity: .4; cursor: not-allowed; }
 .cab-sv-wiz-nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #F5F0EB; }
 .cab-sv-nav-btn { display: inline-flex; align-items: center; gap: 6px; padding: 12px 20px; border-radius: 12px; border: none; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: .15s ease; }
 .cab-sv-nav-btn:disabled { opacity: .4; cursor: not-allowed; }

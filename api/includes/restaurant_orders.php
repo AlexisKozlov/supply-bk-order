@@ -131,7 +131,7 @@ function roGetSurveyForRestaurant($pdo, $surveyId, $rest) {
     if (($survey['status'] ?? '') !== 'active') return null;
 
     $questionsStmt = $pdo->prepare("
-        SELECT id, text, type, sort_order
+        SELECT id, text, type, files_required, sort_order
         FROM survey_questions
         WHERE survey_id = ?
         ORDER BY sort_order, id
@@ -180,7 +180,52 @@ function roGetSurveyForRestaurant($pdo, $surveyId, $rest) {
         $survey['answers'] = new stdClass();
     }
 
+    // Файлы по вопросам: либо привязанные к этому response_id (если уже сабмитнули),
+    // либо черновики (response_id IS NULL для этой пары survey+ресторан).
+    $survey['files'] = roLoadSurveyFiles($pdo, (int)$surveyId, (int)$rest['restaurant_number'], $group, $survey['response_id'] ?? null);
     return $survey;
+}
+
+/**
+ * Загружает список файлов опроса, сгруппированный по question_id.
+ * Если передан $responseId — берёт привязанные к нему файлы (просмотр ответа).
+ * Если $responseId NULL — берёт черновики ресторана (ещё не сабмитнутый ответ).
+ */
+function roLoadSurveyFiles(PDO $pdo, $surveyId, $restaurantNumber, $group, $responseId = null) {
+    if ($responseId) {
+        $st = $pdo->prepare("
+            SELECT id, question_id, file_path, file_name, mime_type, file_size, created_at
+            FROM survey_response_files
+            WHERE response_id = ?
+            ORDER BY id
+        ");
+        $st->execute([(int)$responseId]);
+    } else {
+        $st = $pdo->prepare("
+            SELECT id, question_id, file_path, file_name, mime_type, file_size, created_at
+            FROM survey_response_files
+            WHERE response_id IS NULL
+              AND survey_id = ?
+              AND restaurant_number = ?
+              AND legal_entity_group = ?
+            ORDER BY id
+        ");
+        $st->execute([(int)$surveyId, (int)$restaurantNumber, (string)$group]);
+    }
+    $byQuestion = [];
+    foreach ($st->fetchAll() as $row) {
+        $qid = (int)$row['question_id'];
+        $byQuestion[$qid] ??= [];
+        $byQuestion[$qid][] = [
+            'id'         => (int)$row['id'],
+            'file_name'  => $row['file_name'],
+            'mime_type'  => $row['mime_type'],
+            'file_size'  => (int)$row['file_size'],
+            'created_at' => $row['created_at'],
+            'url'        => '/api/' . ltrim((string)$row['file_path'], '/'),
+        ];
+    }
+    return $byQuestion;
 }
 
 function roGetActiveSession($pdo, $group = 'BK_VM') {
@@ -1546,7 +1591,7 @@ function roCabinetSendTelegramPost($pdo, $title, $message, $targetMode, $targetG
     if (!$chatIds) return 0;
 
     $safeTitle = htmlspecialchars(mb_substr($title ?: 'Важная информация', 0, 255), ENT_QUOTES, 'UTF-8');
-    $safeMessage = htmlspecialchars(mb_substr($message ?: '', 0, 3000), ENT_QUOTES, 'UTF-8');
+    $safeMessage = tgFormatPostMessage(mb_substr($message ?: '', 0, 3000));
     $text = "ℹ️ <b>{$safeTitle}</b>\n\n{$safeMessage}";
     if (count($files) > 1) {
         $text .= "\n\nВложения доступны в личном кабинете ресторана.";
@@ -1561,7 +1606,7 @@ function roCabinetSendTelegramPost($pdo, $title, $message, $targetMode, $targetG
         $captionTitle = htmlspecialchars(mb_substr($title ?: 'Важная информация', 0, 150), ENT_QUOTES, 'UTF-8');
         $captionMessageRaw = mb_substr($message ?: '', 0, 800);
         if (mb_strlen($message ?: '') > 800) $captionMessageRaw .= '...';
-        $captionMessage = htmlspecialchars($captionMessageRaw, ENT_QUOTES, 'UTF-8');
+        $captionMessage = tgFormatPostMessage($captionMessageRaw);
         $fileCaption = "ℹ️ <b>{$captionTitle}</b>\n\n{$captionMessage}";
         $sent = 0;
         foreach ($chatIds as $chatId) {
@@ -1577,7 +1622,7 @@ function roCabinetSendTelegramPost($pdo, $title, $message, $targetMode, $targetG
         $captionTitle = htmlspecialchars(mb_substr($title ?: 'Важная информация', 0, 150), ENT_QUOTES, 'UTF-8');
         $captionMessageRaw = mb_substr($message ?: '', 0, 800);
         if (mb_strlen($message ?: '') > 800) $captionMessageRaw .= '...';
-        $captionMessage = htmlspecialchars($captionMessageRaw, ENT_QUOTES, 'UTF-8');
+        $captionMessage = tgFormatPostMessage($captionMessageRaw);
         $fileCaption = "ℹ️ <b>{$captionTitle}</b>\n\n{$captionMessage}";
         $sent = 0;
         $chunks = array_chunk($imageFiles, 10);
@@ -2597,7 +2642,7 @@ if ($roAction === 'submit-survey' && $method === 'POST') {
     $answerMap = array_filter($answerMap, fn($answer, $questionId) => (int)$questionId > 0, ARRAY_FILTER_USE_BOTH);
 
     $qStmt = $pdo->prepare("
-        SELECT sq.id AS question_id, sq.type, so.id AS option_id
+        SELECT sq.id AS question_id, sq.type, sq.files_required, so.id AS option_id
         FROM survey_questions sq
         LEFT JOIN survey_options so ON so.question_id = sq.id
         WHERE sq.survey_id = ?
@@ -2606,19 +2651,46 @@ if ($roAction === 'submit-survey' && $method === 'POST') {
     $qStmt->execute([$surveyId]);
     $questionOptions = [];
     $questionTypes = [];
+    $questionFilesRequired = [];
     foreach ($qStmt->fetchAll() as $row) {
         $questionId = (int)$row['question_id'];
         $questionTypes[$questionId] = $row['type'] ?: 'choice';
+        $questionFilesRequired[$questionId] = (int)$row['files_required'] === 1;
         $questionOptions[$questionId] ??= [];
         if ($row['option_id'] !== null) $questionOptions[$questionId][] = (int)$row['option_id'];
     }
 
-    if (!$questionOptions) roRespond(['error' => 'В опросе нет вопросов'], 400);
-    if (count($answerMap) !== count($questionOptions)) roRespond(['error' => 'Ответьте на все вопросы'], 400);
+    if (!$questionTypes) roRespond(['error' => 'В опросе нет вопросов'], 400);
 
-    foreach ($questionOptions as $questionId => $optionIds) {
+    // Считаем сколько файлов уже лежит в черновике у этого ресторана по каждому вопросу.
+    $filesCountStmt = $pdo->prepare("
+        SELECT question_id, COUNT(*) AS cnt
+        FROM survey_response_files
+        WHERE response_id IS NULL AND survey_id = ? AND restaurant_number = ? AND legal_entity_group = ?
+        GROUP BY question_id
+    ");
+    $filesCountStmt->execute([$surveyId, (int)$rest['restaurant_number'], $group]);
+    $draftFilesCount = [];
+    foreach ($filesCountStmt->fetchAll() as $row) {
+        $draftFilesCount[(int)$row['question_id']] = (int)$row['cnt'];
+    }
+
+    // Для files-вопросов в payload могут не приходить answers; гарантируем валидацию по типу.
+    $nonFileQuestions = array_filter($questionTypes, fn($t) => $t !== 'files');
+    if (count($answerMap) !== count($nonFileQuestions)) {
+        $missing = array_diff(array_keys($nonFileQuestions), array_keys($answerMap));
+        if ($missing) roRespond(['error' => 'Ответьте на все вопросы'], 400);
+    }
+
+    foreach ($questionTypes as $questionId => $type) {
+        if ($type === 'files') {
+            $cnt = (int)($draftFilesCount[$questionId] ?? 0);
+            if ($questionFilesRequired[$questionId] && $cnt === 0) {
+                roRespond(['error' => 'Загрузите хотя бы один файл'], 400);
+            }
+            continue;
+        }
         $answer = $answerMap[$questionId] ?? null;
-        $type = $questionTypes[$questionId] ?? 'choice';
         if ($type === 'scale') {
             $score = (int)($answer['numeric_value'] ?? 0);
             if ($score < 1 || $score > 10) roRespond(['error' => 'Одна из оценок указана неверно'], 400);
@@ -2626,6 +2698,7 @@ if ($roAction === 'submit-survey' && $method === 'POST') {
             if (trim((string)($answer['text_value'] ?? '')) === '') roRespond(['error' => 'Ответьте на все вопросы'], 400);
         } else {
             $selectedOptionId = (int)($answer['option_id'] ?? 0);
+            $optionIds = $questionOptions[$questionId] ?? [];
             if (!$selectedOptionId || !in_array($selectedOptionId, $optionIds, true)) {
                 roRespond(['error' => 'Один из ответов выбран неверно'], 400);
             }
@@ -2667,6 +2740,14 @@ if ($roAction === 'submit-survey' && $method === 'POST') {
             ]);
         }
 
+        // Привязываем все черновые файлы этого ресторана к свежему response_id.
+        // Файлы уже физически на диске, тут только меняем response_id с NULL на конкретный.
+        $pdo->prepare("
+            UPDATE survey_response_files
+            SET response_id = ?
+            WHERE response_id IS NULL AND survey_id = ? AND restaurant_number = ? AND legal_entity_group = ?
+        ")->execute([$responseId, $surveyId, (int)$rest['restaurant_number'], $group]);
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -2676,6 +2757,175 @@ if ($roAction === 'submit-survey' && $method === 'POST') {
         roRespond(['error' => 'Не удалось сохранить ответ'], 500);
     }
 
+    roRespond(['success' => true]);
+}
+
+/**
+ * Допустимые типы файлов для вложений к опросу. Ключ — MIME, значение — расширение.
+ * Картинки + PDF + основные Office-форматы. Любые .exe/.zip/.tar в список не входят.
+ */
+function roSurveyFileAllowedMimes() {
+    return [
+        'image/jpeg'  => 'jpg',
+        'image/png'   => 'png',
+        'image/heic'  => 'heic',
+        'image/heif'  => 'heic',
+        'image/webp'  => 'webp',
+        'image/gif'   => 'gif',
+        'application/pdf' => 'pdf',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'   => 'xlsx',
+        'application/vnd.ms-excel'                                            => 'xls',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/msword'                                                  => 'doc',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation' => 'pptx',
+        'application/vnd.ms-powerpoint'                                       => 'ppt',
+        'text/plain'  => 'txt',
+        'text/csv'    => 'csv',
+    ];
+}
+
+define('RO_SURVEY_FILE_MAX_BYTES', 25 * 1024 * 1024); // 25 МБ
+define('RO_SURVEY_FILE_MAX_PER_QUESTION', 20);
+
+// --- Загрузка файла к вопросу-файлы (черновик до submit) ---
+if ($roAction === 'survey-file-upload' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $surveyId = (int)($_POST['survey_id'] ?? 0);
+    $questionId = (int)($_POST['question_id'] ?? 0);
+    if (!$surveyId || !$questionId) roRespond(['error' => 'Не указаны опрос и вопрос'], 400);
+    if (empty($_FILES['file']) || ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        $err = $_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE;
+        if ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE) {
+            roRespond(['error' => 'Файл слишком большой'], 400);
+        }
+        roRespond(['error' => 'Файл не получен'], 400);
+    }
+
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+
+    // Проверка: опрос активный, этого юрлица, ответ ещё не сабмитнут.
+    $sq = $pdo->prepare("
+        SELECT s.status, sq.type, sq.id AS question_id
+        FROM surveys s
+        JOIN survey_questions sq ON sq.survey_id = s.id
+        WHERE s.id = ?
+          AND sq.id = ?
+          AND s.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+        LIMIT 1
+    ");
+    $sq->execute([$surveyId, $questionId, $group]);
+    $row = $sq->fetch();
+    if (!$row) roRespond(['error' => 'Опрос или вопрос не найден'], 404);
+    if ($row['status'] !== 'active') roRespond(['error' => 'Опрос уже закрыт'], 400);
+    if ($row['type'] !== 'files') roRespond(['error' => 'К этому вопросу нельзя прикреплять файлы'], 400);
+
+    $alreadyAnswered = $pdo->prepare("SELECT id FROM survey_responses WHERE survey_id = ? AND restaurant_number = ? LIMIT 1");
+    $alreadyAnswered->execute([$surveyId, (int)$rest['restaurant_number']]);
+    if ($alreadyAnswered->fetch()) roRespond(['error' => 'Вы уже отправили ответ на этот опрос'], 400);
+
+    // Лимит N файлов на вопрос (среди черновиков этого ресторана).
+    $cntStmt = $pdo->prepare("
+        SELECT COUNT(*) FROM survey_response_files
+        WHERE response_id IS NULL AND survey_id = ? AND question_id = ? AND restaurant_number = ? AND legal_entity_group = ?
+    ");
+    $cntStmt->execute([$surveyId, $questionId, (int)$rest['restaurant_number'], $group]);
+    if ((int)$cntStmt->fetchColumn() >= RO_SURVEY_FILE_MAX_PER_QUESTION) {
+        roRespond(['error' => 'Достигнут лимит ' . RO_SURVEY_FILE_MAX_PER_QUESTION . ' файлов на вопрос'], 400);
+    }
+
+    $tmp = $_FILES['file']['tmp_name'];
+    $origName = (string)($_FILES['file']['name'] ?? 'file');
+    $size = (int)($_FILES['file']['size'] ?? 0);
+    if ($size <= 0) roRespond(['error' => 'Пустой файл'], 400);
+    if ($size > RO_SURVEY_FILE_MAX_BYTES) {
+        roRespond(['error' => 'Файл больше 25 МБ'], 400);
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $tmp) ?: '';
+    finfo_close($finfo);
+    $allowed = roSurveyFileAllowedMimes();
+    if (!isset($allowed[$mime])) {
+        roRespond(['error' => 'Неподдерживаемый тип файла'], 400);
+    }
+    $ext = $allowed[$mime];
+
+    $year = date('Y');
+    $month = date('m');
+    $dir = __DIR__ . "/../uploads/survey_files/{$year}/{$month}/";
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        roRespond(['error' => 'Не удалось создать каталог'], 500);
+    }
+    $filename = sprintf(
+        'survey_%d_q%d_r%d_%s.%s',
+        $surveyId,
+        $questionId,
+        (int)$rest['restaurant_number'],
+        bin2hex(random_bytes(8)),
+        $ext
+    );
+    $dest = $dir . $filename;
+    if (!move_uploaded_file($tmp, $dest)) {
+        roRespond(['error' => 'Не удалось сохранить файл'], 500);
+    }
+    @chmod($dest, 0644);
+    $relPath = "uploads/survey_files/{$year}/{$month}/{$filename}";
+    $safeOrigName = mb_substr(preg_replace('/[\x00-\x1F]/u', '', $origName), 0, 255);
+
+    $ins = $pdo->prepare("
+        INSERT INTO survey_response_files
+          (survey_id, question_id, restaurant_number, legal_entity_group, response_id, file_path, file_name, mime_type, file_size)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
+    ");
+    $ins->execute([
+        $surveyId,
+        $questionId,
+        (int)$rest['restaurant_number'],
+        $group,
+        $relPath,
+        $safeOrigName,
+        $mime,
+        $size,
+    ]);
+    $fileId = (int)$pdo->lastInsertId();
+
+    roRespond([
+        'success' => true,
+        'file' => [
+            'id'         => $fileId,
+            'question_id'=> $questionId,
+            'file_name'  => $safeOrigName,
+            'mime_type'  => $mime,
+            'file_size'  => $size,
+            'url'        => '/api/' . $relPath,
+        ],
+    ]);
+}
+
+// --- Удалить свой черновой файл опроса ---
+if ($roAction === 'survey-file-remove' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $fileId = (int)($body['id'] ?? 0);
+    if (!$fileId) roRespond(['error' => 'Не указан файл'], 400);
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $st = $pdo->prepare("
+        SELECT id, file_path
+        FROM survey_response_files
+        WHERE id = ?
+          AND response_id IS NULL
+          AND restaurant_number = ?
+          AND legal_entity_group = ?
+        LIMIT 1
+    ");
+    $st->execute([$fileId, (int)$rest['restaurant_number'], $group]);
+    $row = $st->fetch();
+    if (!$row) roRespond(['error' => 'Файл не найден или уже отправлен в составе ответа'], 404);
+    $pdo->prepare("DELETE FROM survey_response_files WHERE id = ?")->execute([$fileId]);
+    $abs = __DIR__ . '/../' . ltrim((string)$row['file_path'], '/');
+    if (is_file($abs)) @unlink($abs);
     roRespond(['success' => true]);
 }
 

@@ -259,6 +259,14 @@
                 <div v-else-if="question.type === 'text'" class="sv-type-note">
                   Ресторан напишет ответ текстом.
                 </div>
+                <div v-else-if="question.type === 'files'" class="sv-type-note">
+                  Ресторан приложит до 20 файлов (картинки, PDF, документы Word/Excel), до 25 МБ каждый.
+                  <label class="sv-files-req">
+                    <input type="checkbox" :checked="question.files_required !== false" :disabled="!canEditDraft"
+                      @change="setQuestionFilesRequired(qIndex, $event.target.checked)" />
+                    Обязательно приложить хотя бы один файл
+                  </label>
+                </div>
 
                 <div v-if="question.type === 'choice'" class="sv-options">
                   <div
@@ -367,6 +375,19 @@
                     <div v-for="a in resp.answers" :key="a.question_id" class="sv-response-answer">
                       <span class="sv-response-q">{{ a.question_text }}</span>
                       <span class="sv-response-a">{{ surveyAnswerText(a) }}</span>
+                    </div>
+                    <div v-for="(group, qid) in responseFilesByQuestion(resp)" :key="'f' + qid" class="sv-response-answer">
+                      <span class="sv-response-q">{{ questionTextById(Number(qid)) }}</span>
+                      <span class="sv-response-a sv-response-files">
+                        <a v-for="f in group" :key="f.id" :href="f.url" target="_blank" rel="noopener" class="sv-response-file">
+                          <span class="sv-response-file-thumb">
+                            <img v-if="isImageMime(f.mime_type)" :src="f.url" :alt="f.file_name" loading="lazy" />
+                            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                          </span>
+                          <span class="sv-response-file-name">{{ f.file_name }}</span>
+                          <span class="sv-response-file-size">{{ humanFileSize(f.file_size) }}</span>
+                        </a>
+                      </span>
                     </div>
                     <div v-if="resp.comment" class="sv-response-comment">
                       <span class="sv-muted small">Комментарий:</span>
@@ -579,6 +600,7 @@ function cloneSurveyToForm(survey) {
     questions: (survey.questions || []).map(q => ({
       text: q.text || '',
       type: q.type || 'choice',
+      files_required: q.type === 'files' ? (q.files_required !== false) : true,
       options: (q.options || []).map(o => ({ text: o.text || '' })),
     })),
   }
@@ -618,6 +640,7 @@ const questionTypes = [
   { key: 'choice', label: 'Варианты' },
   { key: 'scale', label: 'Шкала 1-10' },
   { key: 'text', label: 'Текст' },
+  { key: 'files', label: 'Файлы' },
 ]
 
 const counts = computed(() => ({
@@ -1067,10 +1090,42 @@ function removeOption(qi, oi) {
 function setQuestionType(qi, type) {
   const q = form.value.questions[qi]
   if (!q) return
-  q.type = ['choice', 'scale', 'text'].includes(type) ? type : 'choice'
+  q.type = ['choice', 'scale', 'text', 'files'].includes(type) ? type : 'choice'
   if (q.type === 'choice' && (!Array.isArray(q.options) || q.options.length < 2)) {
     q.options = [{ text: '' }, { text: '' }]
   }
+  if (q.type === 'files' && typeof q.files_required !== 'boolean') {
+    q.files_required = true
+  }
+}
+
+function setQuestionFilesRequired(qi, value) {
+  const q = form.value.questions[qi]
+  if (!q) return
+  q.files_required = !!value
+}
+
+function isImageMime(mime) {
+  return typeof mime === 'string' && mime.startsWith('image/')
+}
+function humanFileSize(n) {
+  const b = Number(n) || 0
+  if (b < 1024) return b + ' Б'
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' КБ'
+  return (b / 1024 / 1024).toFixed(1) + ' МБ'
+}
+function responseFilesByQuestion(resp) {
+  const out = {}
+  for (const f of (resp?.files || [])) {
+    const qid = Number(f.question_id)
+    if (!out[qid]) out[qid] = []
+    out[qid].push(f)
+  }
+  return out
+}
+function questionTextById(qid) {
+  const q = (detail.value?.questions || []).find(q => Number(q.id) === qid)
+  return q?.text || ''
 }
 
 // Drag-and-drop вопросов
@@ -1112,6 +1167,7 @@ function buildPayload() {
     questions: form.value.questions.map(q => ({
       text: q.text.trim(),
       type: q.type || 'choice',
+      files_required: q.type === 'files' ? (q.files_required !== false) : true,
       options: q.type === 'choice' ? q.options.map(o => ({ text: o.text.trim() })) : [],
     })),
   }
@@ -1931,6 +1987,17 @@ onUnmounted(() => {
   padding: 9px 11px;
   font-size: 13px;
 }
+.sv-files-req { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--sv-fg); }
+.sv-files-req input { margin: 0; }
+
+/* Файлы в просмотре ответа: компактные «чипсы» с миниатюрой/иконкой и ссылкой. */
+.sv-response-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.sv-response-file { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; background: #FBF6EE; border: 1px solid #ECE2D2; border-radius: 8px; text-decoration: none; color: #502314; font-size: 12.5px; max-width: 280px; }
+.sv-response-file:hover { background: #F5EAD8; }
+.sv-response-file-thumb { width: 24px; height: 24px; border-radius: 4px; background: #fff; border: 1px solid #ECE2D2; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; color: #8b7355; }
+.sv-response-file-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.sv-response-file-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.sv-response-file-size { color: #8b7355; font-size: 11px; flex-shrink: 0; }
 
 .sv-options {
   display: flex;

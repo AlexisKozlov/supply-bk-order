@@ -5885,6 +5885,7 @@ if ($endpoint === 'rpc') {
         // Вопросы + опции одним запросом
         $qRowsStmt = $pdo->prepare("
             SELECT sq.id AS question_id, sq.text AS question_text, sq.type AS question_type, sq.sort_order AS question_sort,
+                   sq.files_required AS question_files_required,
                    so.id AS option_id, so.text AS option_text, so.sort_order AS option_sort
             FROM survey_questions sq
             LEFT JOIN survey_options so ON so.question_id = sq.id
@@ -5900,6 +5901,7 @@ if ($endpoint === 'rpc') {
                     'id' => $qid,
                     'text' => $row['question_text'],
                     'type' => $row['question_type'] ?: 'choice',
+                    'files_required' => (int)$row['question_files_required'] === 1,
                     'sort_order' => (int)$row['question_sort'],
                     'options' => [],
                 ];
@@ -5959,8 +5961,31 @@ if ($endpoint === 'rpc') {
                 $optionCounts[$oid] = ($optionCounts[$oid] ?? 0) + 1;
             }
         }
+        // Файлы по ответам — одним запросом.
+        $filesByResp = [];
+        $filesStmt = $pdo->prepare("
+            SELECT response_id, id, question_id, file_path, file_name, mime_type, file_size, created_at
+            FROM survey_response_files
+            WHERE response_id IN (SELECT id FROM survey_responses WHERE survey_id = ?)
+            ORDER BY id
+        ");
+        $filesStmt->execute([$id]);
+        foreach ($filesStmt->fetchAll() as $row) {
+            $rid = (int)$row['response_id'];
+            $filesByResp[$rid] ??= [];
+            $filesByResp[$rid][] = [
+                'id'          => (int)$row['id'],
+                'question_id' => (int)$row['question_id'],
+                'file_name'   => $row['file_name'],
+                'mime_type'   => $row['mime_type'],
+                'file_size'   => (int)$row['file_size'],
+                'created_at'  => $row['created_at'],
+                'url'         => '/api/' . ltrim((string)$row['file_path'], '/'),
+            ];
+        }
         foreach ($respRows as &$r) {
             $r['answers'] = $ansByResp[(int)$r['id']] ?? [];
+            $r['files'] = $filesByResp[(int)$r['id']] ?? [];
         }
         unset($r);
         $s['responses'] = $respRows;
@@ -6057,7 +6082,7 @@ if ($endpoint === 'rpc') {
         foreach ($questions as $q) {
             $qText = trim($q['text'] ?? '');
             if ($qText === '') continue;
-            $qType = in_array($q['type'] ?? 'choice', ['choice', 'scale', 'text'], true) ? $q['type'] : 'choice';
+            $qType = in_array($q['type'] ?? 'choice', ['choice', 'scale', 'text', 'files'], true) ? $q['type'] : 'choice';
 
             $normalizedOptions = [];
             if ($qType === 'choice') {
@@ -6073,9 +6098,15 @@ if ($endpoint === 'rpc') {
                 }
             }
 
+            $filesRequired = 1; // default ВКЛ
+            if ($qType === 'files' && array_key_exists('files_required', $q)) {
+                $filesRequired = (int)(bool)$q['files_required'];
+            }
+
             $normalizedQuestions[] = [
                 'text' => $qText,
                 'type' => $qType,
+                'files_required' => $filesRequired,
                 'options' => $normalizedOptions,
             ];
         }
@@ -6105,8 +6136,8 @@ if ($endpoint === 'rpc') {
             }
 
             foreach ($normalizedQuestions as $qi => $q) {
-                $pdo->prepare("INSERT INTO survey_questions (survey_id, text, type, sort_order) VALUES (?,?,?,?)")
-                    ->execute([$id, $q['text'], $q['type'], $qi]);
+                $pdo->prepare("INSERT INTO survey_questions (survey_id, text, type, files_required, sort_order) VALUES (?,?,?,?,?)")
+                    ->execute([$id, $q['text'], $q['type'], $q['files_required'] ?? 1, $qi]);
                 $qId = (int)$pdo->lastInsertId();
                 foreach ($q['options'] as $oi => $optText) {
                     $pdo->prepare("INSERT INTO survey_options (question_id, text, sort_order) VALUES (?,?,?)")
@@ -6209,7 +6240,18 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Ответ не относится к этому опросу'], 400);
         }
 
+        // Сначала собираем файлы — после CASCADE DELETE строки в БД исчезнут,
+        // а на диске останутся «осиротевшими».
+        $filesStmt = $pdo->prepare("SELECT file_path FROM survey_response_files WHERE response_id = ?");
+        $filesStmt->execute([$responseId]);
+        $filesToUnlink = $filesStmt->fetchAll(PDO::FETCH_COLUMN);
+
         $pdo->prepare("DELETE FROM survey_responses WHERE id = ?")->execute([$responseId]);
+
+        foreach ($filesToUnlink as $rel) {
+            $abs = __DIR__ . '/../' . ltrim((string)$rel, '/');
+            if (is_file($abs)) @unlink($abs);
+        }
         respond(['success' => true]);
     }
 
@@ -6220,7 +6262,19 @@ if ($endpoint === 'rpc') {
 
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
+
+        // Соберём пути файлов до CASCADE — иначе после DELETE строки исчезнут,
+        // а файлы останутся болтаться на диске.
+        $filesStmt = $pdo->prepare("SELECT file_path FROM survey_response_files WHERE survey_id = ?");
+        $filesStmt->execute([$id]);
+        $filesToUnlink = $filesStmt->fetchAll(PDO::FETCH_COLUMN);
+
         $pdo->prepare("DELETE FROM surveys WHERE id = ?")->execute([$id]);
+
+        foreach ($filesToUnlink as $rel) {
+            $abs = __DIR__ . '/../' . ltrim((string)$rel, '/');
+            if (is_file($abs)) @unlink($abs);
+        }
         respond(['success' => true]);
     }
 

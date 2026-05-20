@@ -687,6 +687,42 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
+  // Загрузка файла к вопросу-файлы. Идёт multipart — поэтому не используем api()
+  // (он ставит Content-Type: application/json). Прогресс возвращаем через onProgress
+  // колбэк, чтобы UI мог показывать процент.
+  async function uploadSurveyFile(surveyId, questionId, file, onProgress = null) {
+    const form = new FormData();
+    form.append('survey_id', String(surveyId));
+    form.append('question_id', String(questionId));
+    form.append('file', file);
+    return await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/survey-file-upload`);
+      const st = localStorage.getItem('bk_session_token');
+      if (st) xhr.setRequestHeader('X-Session-Token', st);
+      if (onProgress && xhr.upload) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) resolve(data.file);
+        else reject(new Error(data.error || `Ошибка загрузки (${xhr.status})`));
+      };
+      xhr.onerror = () => reject(new Error('Сервер недоступен'));
+      xhr.send(form);
+    });
+  }
+
+  async function removeSurveyFile(fileId) {
+    return await api('survey-file-remove', {
+      method: 'POST',
+      body: JSON.stringify({ id: fileId }),
+    });
+  }
+
   async function markBroadcastRead(ids) {
     return await api('broadcast-read', {
       method: 'POST',
@@ -722,7 +758,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
     loadBroadcasts, heartbeat, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,
-    loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
+    loadSurveys, loadSurvey, submitSurvey, uploadSurveyFile, removeSurveyFile, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection, loadWarehouseStock,
     adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
