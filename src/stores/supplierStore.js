@@ -78,7 +78,7 @@ export const useSupplierStore = defineStore('supplier', () => {
       try {
         let query = db
           .from('suppliers')
-          .select('short_name, full_name, whatsapp, telegram, viber, email, dlt, doc')
+          .select('short_name, full_name, whatsapp, telegram, viber, email, cc_emails, dlt, doc')
           .order('short_name');
 
         query = applyEntityGroupFilter(query, legalEntity);
