@@ -108,8 +108,8 @@
         <input v-model="newSender.email" type="email" placeholder="email@example.com" class="aei-input" />
         <select v-model="newSender.type" class="aei-select">
           <option value="restaurant_sales">Реализация ресторанов</option>
+          <option value="analysis">Анализ запасов (остатки + расход)</option>
           <option value="stock_1c" disabled>Остатки 1С (скоро)</option>
-          <option value="analysis" disabled>Анализ (скоро)</option>
         </select>
         <select v-model="newSender.legal_entity" class="aei-select">
           <option value="">Любое юрлицо</option>
@@ -182,8 +182,8 @@ const newSender = ref({ email: '', type: 'restaurant_sales', legal_entity: '', n
 
 const TYPE_LABEL = {
   restaurant_sales: 'Реализация ресторанов',
+  analysis: 'Анализ запасов',
   stock_1c: 'Остатки 1С',
-  analysis: 'Анализ (расход)',
   unknown: 'Неизвестный',
 };
 const STATUS_LABEL = {
