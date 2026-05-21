@@ -113,6 +113,16 @@ app.config.errorHandler = (err, instance, info) => {
   } catch (e) { /* store not ready */ }
 };
 
+// Колёсико мыши на сфокусированных number-инпутах случайно меняет значение —
+// частая причина испорченных заказов. Снимаем фокус, чтобы прокрутка пошла
+// по странице, а значение в инпуте не изменилось.
+window.addEventListener('wheel', (e) => {
+  const t = e.target;
+  if (t && t.tagName === 'INPUT' && t.type === 'number' && document.activeElement === t) {
+    t.blur();
+  }
+}, { passive: true, capture: true });
+
 // Cache-bust параметр `_v` нужен только в момент жёсткого релоада из
 // UpdatePrompt (чтобы браузер не отдал старый index.html). После загрузки он
 // уже бесполезен и засоряет адресную строку — убираем сразу.

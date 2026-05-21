@@ -31,6 +31,7 @@ if (!function_exists('sendEmail')) {
      *   reply_to?: string,            // переопределить Reply-To
      *   from_name?: string,           // переопределить отправителя
      *   cc?: string|array,            // адреса в копию
+     *   attachments?: array,          // [{ filename, content_b64, mime? }, ...]
      * }
      * @return array{success: bool, error?: string}
      */
@@ -93,6 +94,20 @@ if (!function_exists('sendEmail')) {
                     if ($ccAddr !== '' && filter_var($ccAddr, FILTER_VALIDATE_EMAIL)) {
                         $mail->addCC($ccAddr);
                     }
+                }
+            }
+
+            // Вложения — base64-строки в опциях.
+            if (!empty($opts['attachments']) && is_array($opts['attachments'])) {
+                foreach ($opts['attachments'] as $att) {
+                    if (!is_array($att)) continue;
+                    $fname = trim((string)($att['filename'] ?? ''));
+                    $b64   = (string)($att['content_b64'] ?? '');
+                    if ($fname === '' || $b64 === '') continue;
+                    $decoded = base64_decode($b64, true);
+                    if ($decoded === false) continue;
+                    $mime = trim((string)($att['mime'] ?? '')) ?: 'application/octet-stream';
+                    $mail->addStringAttachment($decoded, $fname, PHPMailer::ENCODING_BASE64, $mime);
                 }
             }
 

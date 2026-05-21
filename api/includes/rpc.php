@@ -255,7 +255,7 @@ if ($endpoint === 'rpc') {
         $permsRaw2 = $sessionUser['permissions'] ?? null;
         $permsDecoded2 = ($permsRaw2 && is_string($permsRaw2)) ? json_decode($permsRaw2, true) : null;
         $hiddenMods2 = ($sessionUser['hidden_modules'] && is_string($sessionUser['hidden_modules'])) ? (json_decode($sessionUser['hidden_modules'], true) ?? []) : [];
-        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'permissions' => $permsDecoded2, 'created_at' => $sessionUser['created_at'] ?? null, 'telegram_connected' => !empty($sessionUser['telegram_chat_id']), 'hidden_modules' => $hiddenMods2]]);
+        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'email' => $sessionUser['email'] ?? null, 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'permissions' => $permsDecoded2, 'created_at' => $sessionUser['created_at'] ?? null, 'telegram_connected' => !empty($sessionUser['telegram_chat_id']), 'hidden_modules' => $hiddenMods2]]);
     }
 
     if ($fn === 'save_hidden_modules') {
@@ -793,14 +793,31 @@ if ($endpoint === 'rpc') {
         if (!$recipients) respond(['error' => 'Не указан корректный email получателя'], 400);
         if (count($recipients) > 10) respond(['error' => 'Слишком много адресов (максимум 10)'], 400);
 
-        $supplierLabel = $supplier !== '' ? $supplier : 'поставщику';
+        // В теме и заголовке письма используем полное наименование поставщика,
+        // если оно заполнено в справочнике. Иначе — короткое (то, что пришло).
+        // Заодно тянем cc_emails — постоянные получатели в копию.
+        $supplierDisplay = $supplier;
+        $supplierCcRaw   = '';
+        if ($supplier !== '') {
+            try {
+                $sStmt = $pdo->prepare("SELECT full_name, cc_emails FROM suppliers WHERE legal_entity = ? AND (short_name = ? OR full_name = ?) LIMIT 1");
+                $sStmt->execute([$legalEntity, $supplier, $supplier]);
+                $sRow = $sStmt->fetch();
+                if ($sRow) {
+                    $full = trim((string)($sRow['full_name'] ?? ''));
+                    if ($full !== '') $supplierDisplay = $full;
+                    $supplierCcRaw = (string)($sRow['cc_emails'] ?? '');
+                }
+            } catch (Throwable $e) {}
+        }
+
         $deliveryLabel = $delivery !== '' ? $delivery : '';
         // Тема: «Заказ от <юрлицо> для <supplier> на <дата>».
         // Юрлицо в теме важно — поставщик работает с несколькими нашими компаниями.
         $subjParts = ['Заказ'];
-        if ($legalEntity !== '') $subjParts[] = 'от ' . $legalEntity;
-        if ($supplier !== '')    $subjParts[] = 'для ' . $supplier;
-        if ($deliveryLabel !== '') $subjParts[] = 'на ' . $deliveryLabel;
+        if ($legalEntity !== '')    $subjParts[] = 'от ' . $legalEntity;
+        if ($supplierDisplay !== '') $subjParts[] = 'для ' . $supplierDisplay;
+        if ($deliveryLabel !== '')   $subjParts[] = 'на ' . $deliveryLabel;
         $subject = implode(' ', $subjParts);
         if (mb_strlen($subject) > 200) $subject = mb_substr($subject, 0, 200);
 
@@ -809,31 +826,81 @@ if ($endpoint === 'rpc') {
 
         $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
 
-        // Тело письма поставщику — деловой стиль, без брендинга «портал».
-        // Текст заказа в небольшом блоке, с заголовком сверху.
-        $bodyEscaped = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
-        $titleParts = [];
-        if ($supplier !== '')      $titleParts[] = htmlspecialchars($supplier, ENT_QUOTES, 'UTF-8');
-        if ($deliveryLabel !== '') $titleParts[] = 'дата поставки <strong>' . htmlspecialchars($deliveryLabel, ENT_QUOTES, 'UTF-8') . '</strong>';
-        $title    = $titleParts ? implode(' · ', $titleParts) : 'Заявка на поставку';
-        $fromLine = $legalEntity !== ''
-            ? '<div style="font-size:13px;color:#6b6b6b;margin-bottom:18px;">От <strong style="color:#3a3a3a;">' . htmlspecialchars($legalEntity, ENT_QUOTES, 'UTF-8') . '</strong></div>'
+        // Структурированные позиции для таблицы. Если фронт прислал items[] —
+        // строим аккуратную таблицу, иначе fallback на текстовый body_text.
+        $itemsRaw = isset($body['items']) && is_array($body['items']) ? $body['items'] : [];
+        $esc = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+        $formatInt = function ($n) {
+            $n = (float)$n;
+            return number_format($n, ($n - floor($n) > 0.0001) ? 2 : 0, ',', ' ');
+        };
+
+        $itemsHtml = '';
+        if (!empty($itemsRaw)) {
+            $rowsHtml = '';
+            $i = 0;
+            foreach ($itemsRaw as $it) {
+                if (!is_array($it)) continue;
+                $i++;
+                $sku    = $esc($it['sku']    ?? '');
+                $name   = $esc($it['name']   ?? '');
+                $boxes  = $formatInt($it['boxes']  ?? 0);
+                $pieces = $formatInt($it['pieces'] ?? 0);
+                $unit   = $esc($it['unit']   ?? 'шт');
+                $rowBg  = ($i % 2 === 0) ? '#f6f8fa' : '#ffffff';
+                $rowsHtml .=
+                    '<tr style="background:' . $rowBg . ';">'
+                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#6b7280;text-align:right;font-variant-numeric:tabular-nums;width:32px;">' . $i . '</td>'
+                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-variant-numeric:tabular-nums;white-space:nowrap;">' . $sku . '</td>'
+                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#111827;">' . $name . '</td>'
+                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#111827;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700;">' . $boxes . ' кор.</td>'
+                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#4b5563;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">' . $pieces . ' ' . $unit . '</td>'
+                  . '</tr>';
+            }
+            $itemsHtml =
+                '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:24px 0 20px;font-size:14px;line-height:1.45;width:auto;max-width:100%;border:1px solid #d1d5db;border-radius:4px;">'
+              . '<thead><tr style="background:#e9eef3;">'
+              . '<th style="padding:5px 12px;text-align:right;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">№</th>'
+              . '<th style="padding:5px 12px;text-align:left;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Артикул</th>'
+              . '<th style="padding:5px 12px;text-align:left;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Наименование</th>'
+              . '<th style="padding:5px 12px;text-align:right;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Кол-во</th>'
+              . '<th style="padding:5px 12px;text-align:right;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Штук</th>'
+              . '</tr></thead>'
+              . '<tbody>' . $rowsHtml . '</tbody>'
+              . '</table>';
+        } else {
+            // fallback на старый текстовый блок — если items не прислали.
+            $itemsHtml = '<div style="white-space:pre-wrap;margin-top:14px;font-size:14px;color:#1f2937;">'
+                       . nl2br($esc($bodyText))
+                       . '</div>';
+        }
+
+        // Минимализм без рамок и цветных блоков. Одна шапка-предложение,
+        // таблица, две строки подписи. Дублирование заголовка убрано.
+        $greetingLine = 'Здравствуйте!';
+        $reqParts = ['Просьба отгрузить товар'];
+        if ($legalEntity   !== '') $reqParts[] = 'для <strong>' . $esc($legalEntity) . '</strong>';
+        if ($deliveryLabel !== '') $reqParts[] = 'с поставкой <strong>' . $esc($deliveryLabel) . '</strong>';
+        $requestLine = implode(' ', $reqParts) . '.';
+
+        $hasAttachment = !empty($body['attachment']) && is_array($body['attachment']);
+        $attachLine = $hasAttachment
+            ? '<div style="margin-top:18px;color:#4b5563;">Подробности — во вложении (Excel).</div>'
             : '';
 
-        $html = '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-              . '<body style="margin:0;padding:0;background:#ffffff;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;color:#1f1f1f;line-height:1.55;font-size:15px;">'
-              . '<div style="padding:24px 28px;">'
-              . '<h2 style="margin:0 0 6px;font-size:18px;font-weight:600;color:#222;line-height:1.35;">' . $title . '</h2>'
-              . $fromLine
-              . '<div style="border-left:3px solid #2a78c2;background:#f6f9fc;padding:14px 18px;border-radius:0 6px 6px 0;font-size:14.5px;line-height:1.6;color:#222;">'
-              . $bodyEscaped
-              . '</div>'
-              . '</div>'
-              . '</body></html>';
+        $html =
+            '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+          . '<body style="margin:0;padding:0;background:#ffffff;color:#1f2937;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:14px;line-height:1.55;">'
+          . '<div style="padding:24px 28px;max-width:760px;font-size:14px;">'
+          . '<div style="margin-bottom:6px;">' . $greetingLine . '</div>'
+          . '<div>' . $requestLine . '</div>'
+          . $itemsHtml
+          . $attachLine
+          . '<div style="margin-top:22px;color:#1f2937;">Спасибо!</div>'
+          . '</div>'
+          . '</body></html>';
 
         // Slать с заказного ящика order@, Reply-To — туда же.
-        // CC — отправителю (сотруднику, который нажал кнопку): подтверждение, что
-        // письмо ушло, плюс копия в почте для архивации.
         $orderEmail = $_ENV['SMTP_ORDER_USER'] ?? 'order@supply-department.online';
         // getSessionUser() не возвращает id в массиве — достаём id и email
         // одним запросом по уникальному name (для CC отправителю и аудита).
@@ -849,19 +916,79 @@ if ($endpoint === 'rpc') {
             }
         } catch (Throwable $e) {}
 
-        $opts = ['account' => 'order', 'reply_to' => $orderEmail];
-        if ($senderEmail !== '' && filter_var($senderEmail, FILTER_VALIDATE_EMAIL)) {
-            $opts['cc'] = $senderEmail;
+        // Финальный список CC. Если фронт прислал свой `cc` (после
+        // предпросмотра/правки в модалке) — берём как итог. Иначе собираем
+        // сами: отправитель + cc_emails поставщика.
+        $parseEmails = function ($raw) {
+            if ($raw === null || $raw === '') return [];
+            if (is_array($raw)) {
+                $list = $raw;
+            } else {
+                $list = preg_split('/[,;\s]+/', (string)$raw);
+            }
+            $out = [];
+            foreach ($list as $item) {
+                $e = trim((string)$item);
+                if ($e !== '' && filter_var($e, FILTER_VALIDATE_EMAIL)) $out[] = $e;
+            }
+            return $out;
+        };
+
+        if (array_key_exists('cc', $body)) {
+            $ccList = $parseEmails($body['cc']);
+        } else {
+            $ccList = [];
+            if ($senderEmail !== '' && filter_var($senderEmail, FILTER_VALIDATE_EMAIL)) {
+                $ccList[] = $senderEmail;
+            }
+            foreach ($parseEmails($supplierCcRaw) as $e) $ccList[] = $e;
         }
+        // Дедупликация (case-insensitive) и исключение тех, кто уже в To.
+        $toLower = array_map('strtolower', $recipients);
+        $seen = array_flip($toLower);
+        $ccFinal = [];
+        foreach ($ccList as $e) {
+            $key = strtolower($e);
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $ccFinal[] = $e;
+        }
+        if (count($ccFinal) > 10) $ccFinal = array_slice($ccFinal, 0, 10);
+
+        $opts = ['account' => 'order', 'reply_to' => $orderEmail];
+        if (!empty($ccFinal)) $opts['cc'] = $ccFinal;
+
+        // Вложение от фронта (например, xlsx-заявка). Жёсткие лимиты по
+        // размеру и расширению — чтобы не дать прицепить что попало.
+        if ($hasAttachment) {
+            $att = $body['attachment'];
+            $fname = trim((string)($att['filename'] ?? 'order.xlsx'));
+            $b64   = (string)($att['content_b64'] ?? '');
+            $mime  = trim((string)($att['mime'] ?? '')) ?: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            // Безопасное имя файла.
+            $fname = preg_replace('/[^\p{L}\p{N}\.\-_ ]+/u', '_', $fname);
+            if (mb_strlen($fname) > 120) $fname = mb_substr($fname, 0, 120);
+            // Размер декода — не больше 4 МБ.
+            $decoded = base64_decode($b64, true);
+            if ($decoded !== false && strlen($decoded) > 0 && strlen($decoded) <= 4 * 1024 * 1024) {
+                $opts['attachments'] = [[
+                    'filename'    => $fname,
+                    'content_b64' => $b64,
+                    'mime'        => $mime,
+                ]];
+            }
+        }
+
         $sendResult = sendEmail($recipients, $subject, $html, true, $opts);
 
         $userId = $senderUserId;
         try {
-            $pdo->prepare("INSERT INTO order_email_log (sender_user_id, sender_user_name, recipients, subject, supplier, legal_entity, delivery_date, items_count, success, error_message, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            $pdo->prepare("INSERT INTO order_email_log (sender_user_id, sender_user_name, recipients, cc_recipients, subject, supplier, legal_entity, delivery_date, items_count, success, error_message, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 ->execute([
                     $userId,
                     $authUserName,
                     implode(', ', $recipients),
+                    !empty($ccFinal) ? implode(', ', $ccFinal) : null,
                     $subject,
                     $supplier !== '' ? $supplier : null,
                     $legalEntity !== '' ? $legalEntity : null,
@@ -878,7 +1005,7 @@ if ($endpoint === 'rpc') {
         if (!$sendResult['success']) {
             respond(['error' => 'Не удалось отправить письмо: ' . ($sendResult['error'] ?? 'неизвестная ошибка')], 500);
         }
-        respond(['success' => true, 'sent_to' => $recipients]);
+        respond(['success' => true, 'sent_to' => $recipients, 'cc' => $ccFinal]);
     }
 
     if ($fn === 'get_rbac_config') {

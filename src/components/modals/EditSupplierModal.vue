@@ -32,6 +32,11 @@
             <span v-if="form.email && /[,;]/.test(form.email)" class="modal-field-hint">Несколько адресов через точку с запятой</span>
           </div>
         </div>
+        <div class="modal-field" style="margin-top:8px;">
+          <span class="modal-field-label">В копию (постоянные получатели)</span>
+          <input v-model="form.cc_emails" placeholder="boss@company.by; accountant@company.by" />
+          <span class="modal-field-hint">Эти адреса автоматически попадают в копию при отправке заявки этому поставщику</span>
+        </div>
 
         <div style="margin-top:12px;font-size:13px;font-weight:600;color:#555;margin-bottom:6px;">Параметры доставки</div>
         <div class="modal-row-2">
@@ -109,7 +114,7 @@ const oldShortName = ref('');
 
 const form = ref({
   short_name: '', full_name: '', legal_entity: orderStore.settings.legalEntity || DEFAULT_ENTITY,
-  whatsapp: '', telegram: '', viber: '', email: '',
+  whatsapp: '', telegram: '', viber: '', email: '', cc_emails: '',
   dlt: null, doc: null, country: 'BY', payment_delay_days: null,
 });
 const { saveSnapshot, isDirty } = useFormDirty(form);
@@ -128,6 +133,7 @@ onMounted(() => {
       telegram: props.supplier.telegram || '',
       viber: props.supplier.viber || '',
       email: props.supplier.email || '',
+      cc_emails: props.supplier.cc_emails || '',
       dlt: props.supplier.dlt ?? null,
       doc: props.supplier.doc ?? null,
       country: props.supplier.country || 'BY',
@@ -157,6 +163,7 @@ async function save() {
       telegram: form.value.telegram.trim() || null,
       viber: form.value.viber.trim() || null,
       email: form.value.email.trim() || null,
+      cc_emails: form.value.cc_emails.trim() || null,
       dlt: form.value.dlt != null && form.value.dlt !== '' ? form.value.dlt : null,
       doc: form.value.doc != null && form.value.doc !== '' ? form.value.doc : null,
       country: form.value.country || 'BY',

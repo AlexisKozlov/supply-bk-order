@@ -1023,7 +1023,7 @@ function getSessionUser($pdo) {
     // expires_at сразу выбираем — раньше делали отдельный SELECT перед UPDATE,
     // что давало 3 запроса к user_sessions на каждый авторизованный hit.
     $s = $pdo->prepare("
-        SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions,
+        SELECT u.name, u.email, u.role, u.display_role, u.legal_entities, u.permissions,
                u.created_at, u.telegram_chat_id, u.hidden_modules,
                s.created_at AS session_created_at,
                s.expires_at AS session_expires_at

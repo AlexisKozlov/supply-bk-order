@@ -219,6 +219,16 @@
       @cancel="onConfirmCancel"/>
     <AnalogMergeModal v-if="analogMergeModal.show" :merges="analogMergeModal.merges" @apply="onAnalogApply" @skip="onAnalogSkip"/>
     <AuditLogModal :show="logModal.show" :loading="logModal.loading" :entries="logModal.entries" @close="logModal.show = false" />
+    <SendSupplierEmailModal
+      v-if="emailPreview.show"
+      :to="emailPreview.to"
+      :subject="emailPreview.subject"
+      :initial-cc="emailPreview.initialCc"
+      :self-email="emailPreview.selfEmail"
+      :sending="emailSending"
+      @send="sendSupplierEmailWithCc"
+      @cancel="emailPreview.show = false"
+    />
     <Teleport to="body">
       <div v-if="orderResultModal.show" class="modal">
         <div class="modal-box order-result-modal">
@@ -277,7 +287,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, watch, inject } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, onActivated, watch, inject } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
@@ -302,6 +312,7 @@ const EditCardModal = defineAsyncComponent(() => import('@/components/modals/Edi
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const AnalogMergeModal = defineAsyncComponent(() => import('@/components/modals/AnalogMergeModal.vue'));
 const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
+const SendSupplierEmailModal = defineAsyncComponent(() => import('@/components/modals/SendSupplierEmailModal.vue'));
 
 const route         = useRoute();
 const router        = useRouter();
@@ -323,6 +334,7 @@ const supplierLoading       = ref(false);
 let _supplierLoadGen = 0;
 const showShareDropdown     = ref(false);
 const emailSending          = ref(false);
+const emailPreview          = ref({ show: false, to: '', subject: '', initialCc: [], selfEmail: '', payload: null });
 
 const showManualModal       = ref(false);
 
@@ -481,6 +493,17 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
   filterQuery.value = '';
   priceMap.value = {};
   await supplierStore.loadSuppliers(le);
+});
+
+// OrderView живёт в <KeepAlive>: onMounted срабатывает один раз. Если в
+// другом разделе вызвали supplierStore.invalidate() (например, после
+// правки поставщика), наш кеш окажется пустым — выпадайка поставщиков
+// будет пустой. Подгружаем при каждом возврате на вкладку.
+onActivated(async () => {
+  const le = orderStore.settings.legalEntity;
+  if (le && supplierStore.getSuppliersForEntity(le).length === 0) {
+    await supplierStore.loadSuppliers(le);
+  }
 });
 
 // Динамическое название вкладки
@@ -1290,26 +1313,101 @@ async function share(channel) {
     const to = (contacts?.email || '').trim();
     if (!to) { toast.error('У поставщика не указан email', 'Заполните в карточке поставщика'); return; }
     if (emailSending.value) return;
-    emailSending.value = true;
-    try {
-      const { data, error } = await db.rpc('send_supplier_order_email', {
-        to,
-        body_text: text,
-        supplier,
-        legal_entity: le,
-        delivery_date: deliveryDate,
-        items_count: lines.length,
-      });
-      if (error) throw new Error(error);
-      if (data?.error) throw new Error(data.error);
-      const recipients = Array.isArray(data?.sent_to) ? data.sent_to.join(', ') : to;
-      toast.success('Письмо отправлено', `На ${recipients}`);
-    } catch (e) {
-      toast.error('Не удалось отправить', e?.message || 'Ошибка соединения');
-    } finally {
-      emailSending.value = false;
+
+    // Собираем стартовый список CC: отправитель + постоянные получатели поставщика.
+    const selfEmail = (userStore.currentUser?.email || '').trim();
+    const initialCc = [];
+    if (selfEmail) initialCc.push(selfEmail);
+    const rawSupplierCc = (contacts?.cc_emails || '').toString();
+    const parsedSupplierCc = rawSupplierCc.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+    const toLc = to.toLowerCase().split(/[,;\s]+/).filter(Boolean);
+    const seen = new Set([...initialCc.map(e => e.toLowerCase()), ...toLc]);
+    for (const e of parsedSupplierCc) {
+      const lc = e.toLowerCase();
+      if (seen.has(lc)) continue;
+      seen.add(lc);
+      initialCc.push(e);
     }
+
+    // Предпросмотр темы — повторяет логику бэка («Заказ от <ЮЛ> для <supplier> на <дата>»).
+    const subjParts = ['Заказ'];
+    if (le) subjParts.push('от ' + le);
+    if (supplier) subjParts.push('для ' + supplier);
+    if (deliveryDate) subjParts.push('на ' + deliveryDate);
+
+    // Структурированные позиции для таблицы в письме.
+    const itemsStructured = orderLines.map(l => ({
+      sku: l.sku || '',
+      name: l.name || '',
+      boxes: l.boxes,
+      pieces: l.pieces,
+      unit: l.unit || 'шт',
+    }));
+
+    emailPreview.value = {
+      show: true,
+      to,
+      subject: subjParts.join(' '),
+      initialCc,
+      selfEmail,
+      payload: {
+        to, supplier, le, deliveryDate, text,
+        itemsCount: lines.length,
+        items: itemsStructured,
+      },
+    };
     return;
+  }
+}
+
+// base64 без увеличения стека для больших массивов
+function uint8ToBase64(u8) {
+  let s = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < u8.length; i += chunk) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+  }
+  return btoa(s);
+}
+
+async function sendSupplierEmailWithCc(cc) {
+  const p = emailPreview.value.payload;
+  if (!p || emailSending.value) return;
+  emailSending.value = true;
+  try {
+    // Excel-вложение с табличной заявкой
+    let attachment = null;
+    try {
+      const { buildOrderXlsxBuffer } = await import('@/lib/excelExport.js');
+      const { buffer, filename, mime } = await buildOrderXlsxBuffer(orderStore.items, orderStore.settings, priceMap.value);
+      attachment = { filename, mime, content_b64: uint8ToBase64(buffer) };
+    } catch (e) {
+      // Не блокируем отправку, если не удалось собрать вложение —
+      // в теле письма таблица всё равно есть.
+      console.warn('[email-portal] xlsx build failed:', e);
+    }
+
+    const { data, error } = await db.rpc('send_supplier_order_email', {
+      to: p.to,
+      body_text: p.text,
+      supplier: p.supplier,
+      legal_entity: p.le,
+      delivery_date: p.deliveryDate,
+      items_count: p.itemsCount,
+      items: p.items,
+      cc,
+      ...(attachment ? { attachment } : {}),
+    });
+    if (error) throw new Error(error);
+    if (data?.error) throw new Error(data.error);
+    const recipients = Array.isArray(data?.sent_to) ? data.sent_to.join(', ') : p.to;
+    const ccCount = Array.isArray(data?.cc) ? data.cc.length : 0;
+    toast.success('Письмо отправлено', `На ${recipients}${ccCount ? ` (+${ccCount} в копии)` : ''}`);
+    emailPreview.value.show = false;
+  } catch (e) {
+    toast.error('Не удалось отправить', e?.message || 'Ошибка соединения');
+  } finally {
+    emailSending.value = false;
   }
 }
 

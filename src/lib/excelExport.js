@@ -1,6 +1,6 @@
 import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes } from './utils.js';
 
-export async function exportToExcel(items, settings, priceMap) {
+async function buildOrderWorkbook(items, settings, priceMap) {
   const XLSX = await import('xlsx-js-style');
   const nf = new Intl.NumberFormat('ru-RU');
 
@@ -193,7 +193,27 @@ export async function exportToExcel(items, settings, priceMap) {
 
   const dd = settings.deliveryDate || new Date();
   const fileDate = `${String(dd.getDate()).padStart(2,'0')}-${String(dd.getMonth()+1).padStart(2,'0')}-${dd.getFullYear()}`;
-  XLSX.writeFile(wb, `Заказ_${supplier}_${fileDate}.xlsx`);
+  const filename = `Заказ_${supplier}_${fileDate}.xlsx`;
+  return { XLSX, wb, filename };
+}
+
+export async function exportToExcel(items, settings, priceMap) {
+  const { XLSX, wb, filename } = await buildOrderWorkbook(items, settings, priceMap);
+  XLSX.writeFile(wb, filename);
+}
+
+/**
+ * Бинарный буфер заказа (для отправки во вложении письма).
+ * Возвращает { buffer: Uint8Array, filename, mime }.
+ */
+export async function buildOrderXlsxBuffer(items, settings, priceMap) {
+  const { XLSX, wb, filename } = await buildOrderWorkbook(items, settings, priceMap);
+  const arr = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  return {
+    buffer: arr instanceof Uint8Array ? arr : new Uint8Array(arr),
+    filename,
+    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  };
 }
 
 /**
