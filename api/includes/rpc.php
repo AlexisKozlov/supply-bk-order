@@ -835,11 +835,18 @@ if ($endpoint === 'rpc') {
         // CC — отправителю (сотруднику, который нажал кнопку): подтверждение, что
         // письмо ушло, плюс копия в почте для архивации.
         $orderEmail = $_ENV['SMTP_ORDER_USER'] ?? 'order@supply-department.online';
+        // getSessionUser() не возвращает id в массиве — достаём id и email
+        // одним запросом по уникальному name (для CC отправителю и аудита).
         $senderEmail = '';
+        $senderUserId = null;
         try {
-            $eStmt = $pdo->prepare("SELECT email FROM users WHERE id = ? LIMIT 1");
-            $eStmt->execute([(string)($authUser['id'] ?? '')]);
-            $senderEmail = trim((string)($eStmt->fetchColumn() ?: ''));
+            $eStmt = $pdo->prepare("SELECT id, email FROM users WHERE name = ? LIMIT 1");
+            $eStmt->execute([$authUserName]);
+            $senderRow = $eStmt->fetch();
+            if ($senderRow) {
+                $senderEmail  = trim((string)($senderRow['email'] ?? ''));
+                $senderUserId = $senderRow['id'] ?? null;
+            }
         } catch (Throwable $e) {}
 
         $opts = ['account' => 'order', 'reply_to' => $orderEmail];
@@ -848,7 +855,7 @@ if ($endpoint === 'rpc') {
         }
         $sendResult = sendEmail($recipients, $subject, $html, true, $opts);
 
-        $userId = $authUser['id'] ?? null;
+        $userId = $senderUserId;
         try {
             $pdo->prepare("INSERT INTO order_email_log (sender_user_id, sender_user_name, recipients, subject, supplier, legal_entity, delivery_date, items_count, success, error_message, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 ->execute([
