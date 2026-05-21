@@ -876,7 +876,7 @@ async function fillFromLastOrder() {
   try {
     const result = await loadFromAnalysis('order', orderStore.items, orderStore.settings.legalEntity, orderStore.settings.unit, orderStore.settings.periodDays || 30);
 
-    if (result.matched === 0) {
+    if (result.matched === 0 && !result.analogMerges?.length) {
       toast.info('Нет данных', 'Нет данных анализа для этих товаров');
       return;
     }
@@ -888,7 +888,11 @@ async function fillFromLastOrder() {
       ? result.updatedAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : '—';
     const byStr = result.updatedBy ? ` (${result.updatedBy})` : '';
-    toast.success('Загружено', `${result.matched} из ${result.total}. Данные от ${dateStr}${byStr}`);
+    if (result.matched > 0) {
+      toast.success('Загружено', `${result.matched} из ${result.total}. Данные от ${dateStr}${byStr}`);
+    } else {
+      toast.info('Нашлись аналоги', 'Для товаров заказа данных нет, но в группах аналогов есть. Выбери, что подтянуть.');
+    }
 
     if (result.analogMerges?.length) {
       analogMergeModal.value = { show: true, merges: result.analogMerges, target: 'order' };
