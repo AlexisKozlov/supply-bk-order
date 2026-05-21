@@ -719,6 +719,40 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'task-attachments' && isset
     exit;
 }
 
+// ═══ DOWNLOAD EMAIL IMPORT FILE ═══
+// /api/uploads/email_imports/{filename}?dl=<token>  — токен из email-imports/:id/file-token
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'email_imports' && isset($parts[2])) {
+    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    $su = getSessionUser($pdo);
+    if (!$su) respond(['error' => 'Требуется авторизация'], 401);
+    // Доступ: admin или роли с уровнем не ниже edit для restaurant-sales.
+    if (($su['role'] ?? '') !== 'admin') {
+        global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+        $perms = resolvePermissions($su['role'] ?? 'user', $su['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['restaurant-sales'] ?? 'none'] ?? 0) < ($ACCESS_LEVELS['view'] ?? 0)) {
+            respond(['error' => 'Нет доступа'], 403);
+        }
+    }
+    $filename = basename($parts[2]);
+    $filepath = __DIR__ . '/../uploads/email_imports/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    // Привязка к записи в email_imports — не отдаём «сирот».
+    $rel = 'uploads/email_imports/' . $filename;
+    $st = $pdo->prepare("SELECT file_name FROM email_imports WHERE file_path = ? LIMIT 1");
+    $st->execute([$rel]);
+    $row = $st->fetch();
+    if (!$row) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $filepath);
+    finfo_close($finfo);
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: attachment; filename="' . sanitizeHeaderFilename($row['file_name'] ?: $filename) . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
+
 // ═══ DOWNLOAD BUG SCREENSHOT ═══
 if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'bugs' && isset($parts[2])) {
     if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);

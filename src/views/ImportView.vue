@@ -2,6 +2,22 @@
   <div class="imp">
     <h1 class="page-title">Импорт данных</h1>
 
+    <div v-if="emailImport.show" class="imp-email-banner">
+      <div class="imp-email-info">
+        <div class="imp-email-title">Файл из письма</div>
+        <div class="imp-email-meta">
+          <span>От: <strong>{{ emailImport.fromEmail }}</strong></span>
+          <span v-if="emailImport.subject">· «{{ emailImport.subject }}»</span>
+          <span v-if="emailImport.fileName">· <strong>{{ emailImport.fileName }}</strong></span>
+          <span v-if="emailImport.legalEntity">· юрлицо: {{ emailImport.legalEntity }}</span>
+        </div>
+      </div>
+      <div class="imp-email-actions">
+        <span v-if="emailImport.applying" class="imp-email-status">Загружаю…</span>
+        <button v-else class="imp-btn imp-btn-secondary" @click="cancelEmailImport">Отменить</button>
+      </div>
+    </div>
+
     <div class="imp-grid">
       <div class="imp-card" v-for="item in imports" :key="item.key">
         <div class="imp-card-icon">{{ item.icon }}</div>
@@ -87,6 +103,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { parseFile } from '@/lib/importStock.js'
 import { parseStockMalling, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js'
@@ -100,10 +117,95 @@ import { useUserStore } from '@/stores/userStore.js'
 const orderStore = useOrderStore()
 const toast = useToastStore()
 const userStore = useUserStore()
+const route = useRoute()
+const router = useRouter()
 const uploading = ref(null)
 const lastUpdates = ref({})
 const cttResult = ref(null)
 const STORAGE_RULES_KEY = 'shelfLifeStorageRules.v1'
+
+// Состояние «импорт из письма»: автоподгрузка файла из email_imports.
+const emailImport = ref({ show: false, id: null, fromEmail: '', subject: '', fileName: '', legalEntity: '', type: '', applying: false })
+
+const TYPE_TO_IMPORT_KEY = {
+  restaurant_sales: 'sales',
+  stock_1c: 'analysis',
+  analysis: 'analysis',
+}
+
+async function startEmailImport(id) {
+  emailImport.value = { ...emailImport.value, show: true, id, applying: true }
+  try {
+    // 1) Достаём метаданные из списка (бэк уже умеет фильтровать одним запросом)
+    const listRes = await fetch('/api/email-imports?limit=500', {
+      headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' }
+    })
+    const listData = await listRes.json()
+    if (!listRes.ok) throw new Error(listData?.error || 'Не удалось получить список')
+    const row = (listData.items || []).find(r => Number(r.id) === Number(id))
+    if (!row) throw new Error('Запись не найдена')
+    if (row.status !== 'pending') throw new Error('Это письмо уже обработано')
+
+    emailImport.value.fromEmail   = row.from_email
+    emailImport.value.subject     = row.subject
+    emailImport.value.fileName    = row.file_name
+    emailImport.value.legalEntity = row.legal_entity || ''
+    emailImport.value.type        = row.type
+
+    // 2) Подставляем юрлицо, если оно есть в правиле
+    if (row.legal_entity && !orderStore.settings.legalEntity) {
+      orderStore.settings.legalEntity = row.legal_entity
+    }
+    if (row.legal_entity && row.legal_entity !== orderStore.settings.legalEntity) {
+      const ok = confirm(`В правиле для отправителя ${row.from_email} указано юрлицо «${row.legal_entity}». Переключить?`)
+      if (ok) orderStore.settings.legalEntity = row.legal_entity
+    }
+
+    // 3) Берём download-токен и скачиваем файл
+    const tokenRes = await fetch(`/api/email-imports/${id}/file-token`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '', 'Content-Type': 'application/json' },
+      body: '{}'
+    })
+    const tokenData = await tokenRes.json()
+    if (!tokenRes.ok) throw new Error(tokenData?.error || 'Не удалось получить токен файла')
+
+    const fileRes = await fetch(tokenData.url)
+    if (!fileRes.ok) throw new Error('Не удалось скачать файл (' + fileRes.status + ')')
+    const blob = await fileRes.blob()
+    const file = new File([blob], row.file_name || ('import_' + id + '.xlsx'), { type: blob.type || 'application/octet-stream' })
+
+    const importKey = TYPE_TO_IMPORT_KEY[row.type] || 'sales'
+    if ((importKey === 'sales' || importKey === 'analysis') && !orderStore.settings.legalEntity) {
+      throw new Error('Юр. лицо не выбрано — выберите в боковом меню и попробуйте снова')
+    }
+
+    // 4) Запускаем тот же импорт, что и при ручной загрузке
+    await uploadFile(importKey, file)
+
+    // 5) Помечаем письмо как применённое
+    try {
+      await fetch(`/api/email-imports/${id}/applied`, {
+        method: 'POST',
+        headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '', 'Content-Type': 'application/json' },
+        body: '{}'
+      })
+    } catch (_) { /* лог не критичен */ }
+    toast.success('Письмо применено', 'Импорт завершён, статус письма обновлён')
+
+    // Чистим url
+    router.replace({ name: 'import' })
+    emailImport.value = { show: false, id: null, fromEmail: '', subject: '', fileName: '', legalEntity: '', type: '', applying: false }
+  } catch (e) {
+    toast.error('Импорт из письма', e.message || 'Не удалось загрузить')
+    emailImport.value.applying = false
+  }
+}
+
+function cancelEmailImport() {
+  router.replace({ name: 'import' })
+  emailImport.value = { show: false, id: null, fromEmail: '', subject: '', fileName: '', legalEntity: '', type: '', applying: false }
+}
 
 const imports = computed(() => [
   {
@@ -362,11 +464,28 @@ async function loadLastUpdates() {
   } catch {}
 }
 
-onMounted(loadLastUpdates)
+onMounted(async () => {
+  await loadLastUpdates()
+  const ei = Number(route.query.ei)
+  if (Number.isFinite(ei) && ei > 0) {
+    await startEmailImport(ei)
+  }
+})
 </script>
 
 <style scoped>
 .imp { padding: 24px 32px; }
+
+.imp-email-banner {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 16px; padding: 12px 16px; margin-bottom: 16px; max-width: 700px;
+  background: #fff7e6; border: 1px solid #f5c876; border-radius: 8px;
+}
+.imp-email-title { font-weight: 700; font-size: 13px; color: #1f2937; margin-bottom: 4px; }
+.imp-email-meta { font-size: 12px; color: #4b5563; display: flex; flex-wrap: wrap; gap: 6px; }
+.imp-email-status { font-size: 13px; color: #92560f; font-weight: 600; }
+.imp-btn-secondary { background: #fff; color: #4b5563; border: 1px solid #d1d5db; }
+
 .imp-grid { display: flex; flex-direction: column; gap: 12px; max-width: 700px; }
 .imp-card { display: flex; align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--border-light); border-radius: 12px; padding: 16px 20px; }
 .imp-card-icon { font-size: 28px; flex-shrink: 0; }

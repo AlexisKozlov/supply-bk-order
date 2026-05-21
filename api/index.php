@@ -118,11 +118,17 @@ require_once __DIR__ . '/includes/supplier_orders.php';
 // Корректировки основной поставки из кабинета ресторана (синхронизация с TG-ботом)
 require_once __DIR__ . '/includes/restaurant_corrections.php';
 
+// Контакты поставщиков для кабинетов ресторанов
+require_once __DIR__ . '/includes/restaurant_supplier_contacts.php';
+
 // Загрузка машин
 require_once __DIR__ . '/includes/truck_loading.php';
 
 // Задачи (личные канбан-доски сотрудников)
 require_once __DIR__ . '/includes/tasks.php';
+
+// Импорт данных по email (очередь писем с вложениями)
+require_once __DIR__ . '/includes/email_imports.php';
 
 // Возврат кег
 require_once __DIR__ . '/includes/keg_returns.php';
