@@ -140,6 +140,7 @@ const routes = [
       { path: 'surveys', name: 'restaurant-surveys', component: EmptySlot, meta: { title: 'Опросы' } },
       { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Сбор остатков' } },
       { path: 'warehouse-stock', name: 'restaurant-warehouse-stock', component: EmptySlot, meta: { title: 'Остатки склада' } },
+      { path: 'contacts', name: 'restaurant-contacts', component: EmptySlot, meta: { title: 'Контакты поставщиков' } },
       { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
       { path: 'keg-returns', name: 'restaurant-keg-returns', component: EmptySlot, meta: { title: 'Возврат кег' } },
@@ -176,7 +177,7 @@ const routes = [
     path: '/search-cards',
     name: 'search-cards',
     component: () => import('@/views/CardsSearchView.vue'),
-    meta: { title: 'Поиск карточек' },
+    meta: { title: 'Поиск карточек', requiresAnyAuth: true },
   },
   {
     path: '/telegram-link',
@@ -267,6 +268,13 @@ router.beforeEach(async (to) => {
   }
   if (to.meta.requiresAuth && !userStore.isAuthenticated) {
     return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
+  }
+  // Маршруты, доступные либо закупщику, либо ресторану. Анонимам — на главную закупок.
+  if (to.meta.requiresAnyAuth) {
+    const roStore = useRestaurantOrderStore();
+    if (!userStore.isAuthenticated && !roStore.isAuthenticated) {
+      return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
+    }
   }
   if (to.meta.requiresAdmin && userStore.currentUser?.role !== 'admin') {
     const first = NAV_MODULES.find(m => userStore.hasAccess(m, 'view'));

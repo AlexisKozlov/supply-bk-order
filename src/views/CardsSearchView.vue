@@ -315,6 +315,7 @@
                 <div v-for="log in filteredAuditLogs" :key="log.id" class="audit-log-row">
                   <span class="audit-log-dot" :class="log.found ? 'dot-found' : 'dot-notfound'"></span>
                   <span class="audit-log-query">{{ log.query }}</span>
+                  <span v-if="log.searcher_kind" class="audit-log-searcher" :class="'searcher-' + log.searcher_kind">{{ formatSearcher(log) }}</span>
                   <span v-if="log.match_type" class="audit-log-type">{{ formatMatchType(log.match_type) }}</span>
                   <span class="audit-log-date">{{ formatAuditDate(log.created_at) }}</span>
                 </div>
@@ -379,7 +380,12 @@ const userStore = useUserStore()
 function fetchWithTimeout(url, opts = {}, timeout = 30000) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
-  return fetch(url, { ...opts, signal: controller.signal })
+  // Авто-подстановка заголовка сессии закупщика. Сессия ресторана живёт в
+  // HttpOnly-cookie — браузер сам приложит её к same-origin запросам.
+  const headers = { ...(opts.headers || {}) }
+  const supplyToken = localStorage.getItem('bk_session_token') || ''
+  if (supplyToken && !headers['X-Session-Token']) headers['X-Session-Token'] = supplyToken
+  return fetch(url, { ...opts, headers, signal: controller.signal })
     .then(r => { clearTimeout(timer); return r })
     .catch(e => { clearTimeout(timer); throw e.name === 'AbortError' ? new Error('Сервер не отвечает (таймаут)') : e })
 }
@@ -920,7 +926,7 @@ async function loginAdmin() {
     const res = await fetchWithTimeout(`${API_BASE}/rpc/check_user_password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_email: adminUserName.value, user_password: adminPassword.value })
+      body: JSON.stringify({ user_email: adminUserName.value, user_password: adminPassword.value, accepted_data_rules: true })
     })
     const data = await res.json()
     if (data.success) {
@@ -1189,6 +1195,16 @@ function formatMatchType(type) {
     name: 'по названию'
   }
   return map[type] || type
+}
+
+function formatSearcher(log) {
+  if (log.searcher_kind === 'restaurant') {
+    return log.restaurant_number ? `№${log.restaurant_number}` : 'ресторан'
+  }
+  if (log.searcher_kind === 'supply') {
+    return log.searcher_name || 'закупки'
+  }
+  return ''
 }
 
 function formatAuditDate(str) {
@@ -2268,6 +2284,21 @@ select.field-input {
   color: #9B8B7E;
   font-weight: 500;
   flex-shrink: 0;
+}
+.audit-log-searcher {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.audit-log-searcher.searcher-restaurant {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+.audit-log-searcher.searcher-supply {
+  background: #fff3e0;
+  color: #b35900;
 }
 .audit-log-date {
   font-size: 0.68rem;

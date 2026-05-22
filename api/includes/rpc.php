@@ -106,8 +106,48 @@ if ($endpoint === 'rpc') {
         }
         respond(['maintenance_mode' => $mm === 'true', 'maintenance_message' => $msg ?: null, 'maintenance_end_time' => $endTime ?: null]);
     }
-    // Гостевые эндпоинты (публичная страница поиска карточек)
+    // ─── Поиск карточек: страница доступна только закупщикам и ресторанам ───
+    // Раньше эти RPC были публичными — get_stock_skus отдавал остатки любого
+    // юрлица без авторизации. Теперь требуется либо сессия закупщика (X-Session-Token),
+    // либо сессия ресторана (X-RO-Token). Результат — массив контекста или null.
+    $resolveCardSearchAuth = function() use ($pdo) {
+        $supply = getSessionUser($pdo);
+        if ($supply) {
+            return [
+                'kind' => 'supply',
+                'name' => $supply['name'] ?? '',
+                'restaurant_number' => null,
+                'group' => null,
+                'user' => $supply,
+            ];
+        }
+        // restaurant_orders.php подключается из index.php ПОСЛЕ rpc.php — поэтому
+        // функцию подгружаем лениво. require_once безопасен: блок с if ($endpoint===...)
+        // в файле сам решит, исполнять ему логику или нет.
+        if (!function_exists('roGetRestaurantSession')) {
+            require_once __DIR__ . '/restaurant_orders.php';
+        }
+        $ro = function_exists('roGetRestaurantSession') ? roGetRestaurantSession($pdo) : null;
+        if ($ro) {
+            $group = $ro['legal_entity_group'] ?? 'BK_VM';
+            return [
+                'kind' => 'restaurant',
+                'name' => 'ro:' . ($ro['restaurant_number'] ?? ''),
+                'restaurant_number' => (string)($ro['restaurant_number'] ?? ''),
+                'group' => $group,
+                'user' => $ro,
+            ];
+        }
+        return null;
+    };
+    $requireCardSearchAuth = function() use ($resolveCardSearchAuth) {
+        $ctx = $resolveCardSearchAuth();
+        if (!$ctx) respond(['error' => 'Требуется авторизация'], 401);
+        return $ctx;
+    };
+
     if ($fn === 'guest_heartbeat') {
+        $requireCardSearchAuth();
         $sid = $body['session_id'] ?? '';
         $page = $body['page'] ?? 'search-cards';
         if ($sid && preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $sid)) {
@@ -117,39 +157,78 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'get_guest_count') {
+        $requireCardSearchAuth();
         // Чистим старые записи (старше 5 минут)
         $pdo->exec("DELETE FROM guest_presence WHERE last_seen < NOW() - INTERVAL 5 MINUTE");
         $s = $pdo->query("SELECT COUNT(*) as cnt FROM guest_presence WHERE last_seen > NOW() - INTERVAL 1 MINUTE");
         respond($s->fetch());
     }
     if ($fn === 'log_card_search') {
+        $ctx = $requireCardSearchAuth();
         if (!checkRateLimit($pdo, $clientIp, 30, 1)) respond(['success' => true]); // Тихий rate-limit: макс 30 поисков/мин
         $q = $body['query'] ?? '';
         $found = $body['found'] ?? false;
         $matchType = $body['match_type'] ?? null;
         $matchedId = $body['matched_card_id'] ?? null;
+        // Юрлицо контекста: для ресторана — основное юрлицо его группы;
+        // для закупщика — первое из его доступных (для аналитики, не критично).
+        $logLegalEntity = null;
+        if ($ctx['kind'] === 'restaurant') {
+            $entities = getEntitiesInGroup($ctx['group']);
+            $logLegalEntity = $entities[0] ?? null;
+        } else {
+            $userEnts = $ctx['user']['legal_entities'] ?? '';
+            if (is_string($userEnts)) $userEnts = json_decode($userEnts, true);
+            if (is_array($userEnts) && !empty($userEnts)) $logLegalEntity = $userEnts[0];
+        }
         if ($q && mb_strlen($q) <= 200) {
-            $s = $pdo->prepare("INSERT INTO search_logs (query, found, match_type, matched_card_id, created_at) VALUES (?, ?, ?, ?, NOW())");
-            $s->execute([mb_substr($q, 0, 200), $found ? 1 : 0, $matchType ? mb_substr($matchType, 0, 50) : null, $matchedId]);
+            $s = $pdo->prepare("INSERT INTO search_logs (query, found, match_type, matched_card_id, searcher_kind, searcher_name, restaurant_number, legal_entity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+            $s->execute([
+                mb_substr($q, 0, 200),
+                $found ? 1 : 0,
+                $matchType ? mb_substr($matchType, 0, 50) : null,
+                $matchedId,
+                $ctx['kind'],
+                mb_substr($ctx['name'], 0, 200),
+                $ctx['restaurant_number'],
+                $logLegalEntity ? mb_substr($logLegalEntity, 0, 100) : null,
+            ]);
         }
         respond(['success' => true]);
     }
     if ($fn === 'get_cards') {
+        $requireCardSearchAuth();
         $s = $pdo->query("SELECT id, name, analogs, updated_by, updated_at FROM cards ORDER BY name");
         respond($s->fetchAll());
     }
     if ($fn === 'get_cards_last_update') {
+        $requireCardSearchAuth();
         $s = $pdo->prepare("SELECT `value` FROM settings WHERE `key`='last_update'"); $s->execute();
         $row = $s->fetch();
         respond($row ?: ['value' => null]);
     }
 
     // Артикулы на остатках (для поиска карточек).
-    // Юрлицо принимается параметром; дефолт — «Бургер БК» (исторически основная база).
+    // Только для авторизованных. Ресторан получает остатки своей группы юрлиц.
+    // Закупщик — указанное юрлицо, но с проверкой через checkLegalEntityAccess.
     if ($fn === 'get_stock_skus') {
-        $le = $body['legal_entity'] ?? $_GET['legal_entity'] ?? 'ООО "Бургер БК"';
-        $valid = array_merge(getEntitiesInGroup('BK_VM'), getEntitiesInGroup('PS'));
-        if (!in_array($le, $valid, true)) $le = 'ООО "Бургер БК"';
+        $ctx = $requireCardSearchAuth();
+        $le = $body['legal_entity'] ?? $_GET['legal_entity'] ?? null;
+        if ($ctx['kind'] === 'restaurant') {
+            // Ресторан: разрешаем только юрлица его группы. Если ничего не передали — берём основное.
+            $allowedEntities = getEntitiesInGroup($ctx['group']);
+            if (!$le || !in_array($le, $allowedEntities, true)) {
+                $le = $allowedEntities[0];
+            }
+        } else {
+            // Закупщик: дефолт — «Бургер БК», но обязательно проверяем доступ.
+            if (!$le) $le = 'ООО "Бургер БК"';
+            $valid = array_merge(getEntitiesInGroup('BK_VM'), getEntitiesInGroup('PS'));
+            if (!in_array($le, $valid, true)) $le = 'ООО "Бургер БК"';
+            if (!checkLegalEntityAccess($ctx['user'], $le)) {
+                respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+            }
+        }
         $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.legal_entity = ? AND a.stock > 0");
         $s->execute([$le]);
         $rows = $s->fetchAll();
@@ -796,12 +875,27 @@ if ($endpoint === 'rpc') {
         // В теме и заголовке письма используем полное наименование поставщика,
         // если оно заполнено в справочнике. Иначе — короткое (то, что пришло).
         // Заодно тянем cc_emails — постоянные получатели в копию.
+        //
+        // Ищем в пределах ГРУППЫ юрлиц (BK_VM / PS), а не точного юрлица:
+        // карточки поставщиков обычно заведены только под одно юрлицо в группе
+        // (как правило — основное), и заказ от другого юрлица группы должен
+        // подтягивать тот же full_name. Без этого ВМ-заказы получали короткое
+        // имя в теме, а БК-заказы — полное.
         $supplierDisplay = $supplier;
         $supplierCcRaw   = '';
         if ($supplier !== '') {
+            $senderGroup = getEntityGroup($legalEntity);
             try {
-                $sStmt = $pdo->prepare("SELECT full_name, cc_emails FROM suppliers WHERE legal_entity = ? AND (short_name = ? OR full_name = ?) LIMIT 1");
-                $sStmt->execute([$legalEntity, $supplier, $supplier]);
+                $sStmt = $pdo->prepare("
+                    SELECT full_name, cc_emails
+                    FROM suppliers
+                    WHERE legal_entity_group = ?
+                      AND (short_name = ? OR full_name = ?)
+                      AND is_active = 1
+                    ORDER BY (legal_entity = ?) DESC, id
+                    LIMIT 1
+                ");
+                $sStmt->execute([$senderGroup, $supplier, $supplier, $legalEntity]);
                 $sRow = $sStmt->fetch();
                 if ($sRow) {
                     $full = trim((string)($sRow['full_name'] ?? ''));
@@ -837,6 +931,11 @@ if ($endpoint === 'rpc') {
 
         $itemsHtml = '';
         if (!empty($itemsRaw)) {
+            // Outlook (Word-движок) игнорирует border-collapse/border-radius и многие CSS-свойства,
+            // зато уважает border на каждой ячейке и mso-line-height-rule:exactly.
+            // Поэтому: бордер у каждой td/th, фиксированный line-height в px против раздутых строк.
+            $cellBase = 'padding:6px 10px;border:1px solid #d1d5db;line-height:18px;mso-line-height-rule:exactly;';
+            $headBase = 'padding:6px 10px;border:1px solid #d1d5db;line-height:14px;mso-line-height-rule:exactly;background:#e9eef3;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;';
             $rowsHtml = '';
             $i = 0;
             foreach ($itemsRaw as $it) {
@@ -849,22 +948,22 @@ if ($endpoint === 'rpc') {
                 $unit   = $esc($it['unit']   ?? 'шт');
                 $rowBg  = ($i % 2 === 0) ? '#f6f8fa' : '#ffffff';
                 $rowsHtml .=
-                    '<tr style="background:' . $rowBg . ';">'
-                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#6b7280;text-align:right;font-variant-numeric:tabular-nums;width:32px;">' . $i . '</td>'
-                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-variant-numeric:tabular-nums;white-space:nowrap;">' . $sku . '</td>'
-                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#111827;">' . $name . '</td>'
-                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#111827;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700;">' . $boxes . ' кор.</td>'
-                  . '<td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#4b5563;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">' . $pieces . ' ' . $unit . '</td>'
+                    '<tr>'
+                  . '<td style="' . $cellBase . 'background:' . $rowBg . ';color:#6b7280;text-align:right;width:32px;">' . $i . '</td>'
+                  . '<td style="' . $cellBase . 'background:' . $rowBg . ';color:#374151;white-space:nowrap;">' . $sku . '</td>'
+                  . '<td style="' . $cellBase . 'background:' . $rowBg . ';color:#111827;">' . $name . '</td>'
+                  . '<td style="' . $cellBase . 'background:' . $rowBg . ';color:#111827;text-align:right;white-space:nowrap;font-weight:700;">' . $boxes . ' кор.</td>'
+                  . '<td style="' . $cellBase . 'background:' . $rowBg . ';color:#4b5563;text-align:right;white-space:nowrap;">' . $pieces . ' ' . $unit . '</td>'
                   . '</tr>';
             }
             $itemsHtml =
-                '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:24px 0 20px;font-size:14px;line-height:1.45;width:auto;max-width:100%;border:1px solid #d1d5db;border-radius:4px;">'
-              . '<thead><tr style="background:#e9eef3;">'
-              . '<th style="padding:5px 12px;text-align:right;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">№</th>'
-              . '<th style="padding:5px 12px;text-align:left;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Артикул</th>'
-              . '<th style="padding:5px 12px;text-align:left;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Наименование</th>'
-              . '<th style="padding:5px 12px;text-align:right;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Кол-во</th>'
-              . '<th style="padding:5px 12px;text-align:right;color:#1f2937;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #d1d5db;line-height:1.3;">Штук</th>'
+                '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;mso-table-lspace:0;mso-table-rspace:0;margin:24px 0 20px;font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">'
+              . '<thead><tr>'
+              . '<th style="' . $headBase . 'text-align:right;">№</th>'
+              . '<th style="' . $headBase . 'text-align:left;">Артикул</th>'
+              . '<th style="' . $headBase . 'text-align:left;">Наименование</th>'
+              . '<th style="' . $headBase . 'text-align:right;">Кол-во</th>'
+              . '<th style="' . $headBase . 'text-align:right;">Штук</th>'
               . '</tr></thead>'
               . '<tbody>' . $rowsHtml . '</tbody>'
               . '</table>';

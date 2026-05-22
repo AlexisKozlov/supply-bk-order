@@ -1,7 +1,7 @@
 <template>
-  <div v-if="show" class="rem-overlay" @click.self="close">
+  <div v-if="show" class="rem-overlay" :class="{ 'rem-overlay--mandatory': mandatory }" @click.self="onOverlayClick">
     <div class="rem-card">
-      <button class="rem-close" @click="close" :disabled="loading" aria-label="Закрыть">×</button>
+      <button v-if="!mandatory" class="rem-close" @click="close" :disabled="loading" aria-label="Закрыть">×</button>
 
       <div class="rem-header">
         <div class="rem-icon">
@@ -11,21 +11,26 @@
           </svg>
         </div>
         <div>
-          <h2>Укажите email</h2>
-          <p>Нужен для восстановления пароля кабинета.<br>Заполнить можно позже.</p>
+          <h2>{{ mandatory ? 'Привяжите рабочий email' : 'Укажите email' }}</h2>
+          <p v-if="mandatory">
+            Чтобы пользоваться кабинетом, привяжите рабочую почту —
+            <b>@burger-king.by</b> или <b>@dodopizza.by</b>.
+            На неё будут приходить уведомления и ссылка для сброса пароля.
+          </p>
+          <p v-else>Нужен для восстановления пароля кабинета.<br>Заполнить можно позже.</p>
         </div>
       </div>
 
       <!-- Состояние: ввод email -->
       <div v-if="!sent">
         <div class="rem-field">
-          <label>Ваш email</label>
+          <label>{{ mandatory ? 'Рабочий email' : 'Ваш email' }}</label>
           <input
             v-model="email"
             type="email"
             inputmode="email"
             autocomplete="email"
-            placeholder="your-name@example.com"
+            :placeholder="mandatory ? 'name@burger-king.by' : 'your-name@example.com'"
             :disabled="loading"
             @keydown.enter="submit"
           />
@@ -34,8 +39,8 @@
         <div v-if="error" class="rem-error">{{ error }}</div>
 
         <div class="rem-actions">
-          <button class="rem-btn-ghost" @click="close" :disabled="loading">Позже</button>
-          <button class="rem-btn-primary" :disabled="loading || !email.trim()" @click="submit">
+          <button v-if="!mandatory" class="rem-btn-ghost" @click="close" :disabled="loading">Позже</button>
+          <button class="rem-btn-primary" :disabled="loading || !canSubmit" @click="submit">
             <span v-if="loading" class="rem-spinner"></span>
             <template v-else>Сохранить</template>
           </button>
@@ -53,7 +58,7 @@
         </div>
         <div class="rem-actions">
           <button class="rem-btn-ghost" @click="reset" :disabled="loading">Изменить email</button>
-          <button class="rem-btn-primary" @click="close">Готово</button>
+          <button class="rem-btn-primary" @click="finish">Готово</button>
         </div>
       </div>
     </div>
@@ -65,6 +70,9 @@ import { ref, watch } from 'vue';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
+  // mandatory — без крестика, без «Позже», нельзя закрыть кликом снаружи.
+  // Используется в кабинете, когда email отсутствует или не корпоративный.
+  mandatory: { type: Boolean, default: false },
 });
 const emit = defineEmits(['update:modelValue', 'saved']);
 
@@ -78,10 +86,40 @@ const sent = ref(false);
 const sentTo = ref('');
 
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { computed } from 'vue';
 const roStore = useRestaurantOrderStore();
+
+const CORP_DOMAINS = ['@burger-king.by', '@dodopizza.by'];
+
+function isCorporateEmail(value) {
+  if (!value) return false;
+  const v = value.trim().toLowerCase();
+  return CORP_DOMAINS.some(d => v.endsWith(d));
+}
+
+const canSubmit = computed(() => {
+  const v = email.value.trim();
+  if (!v) return false;
+  // В обязательном режиме требуем корпоративный домен сразу — иначе кнопка disabled.
+  if (props.mandatory) return isCorporateEmail(v);
+  return true;
+});
 
 function close() {
   if (loading.value) return;
+  if (props.mandatory) return; // нельзя закрыть, пока не сохранили
+  show.value = false;
+  emit('update:modelValue', false);
+}
+
+function onOverlayClick() {
+  // В обязательном режиме клик мимо ничего не делает.
+  if (props.mandatory) return;
+  close();
+}
+
+function finish() {
+  // После успешного «Готово» — закрываем, даже в mandatory: email сохранён, цель достигнута.
   show.value = false;
   emit('update:modelValue', false);
 }
@@ -96,9 +134,12 @@ async function submit() {
   error.value = '';
   const value = email.value.trim();
   if (!value) { error.value = 'Введите email'; return; }
-  // Базовая проверка формата (точная проверка — на бэке)
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value)) {
     error.value = 'Похоже, email указан с ошибкой';
+    return;
+  }
+  if (!isCorporateEmail(value)) {
+    error.value = 'Принимаем только рабочую почту: @burger-king.by или @dodopizza.by';
     return;
   }
 
@@ -127,6 +168,11 @@ async function submit() {
   z-index: 9999;
   padding: 16px;
   animation: rem-fade-in 0.2s ease;
+}
+.rem-overlay--mandatory {
+  /* Жёстче перекрываем фон — чтобы было видно, что без email кабинет недоступен. */
+  background: rgba(80, 35, 20, 0.78);
+  backdrop-filter: blur(6px);
 }
 
 @keyframes rem-fade-in {

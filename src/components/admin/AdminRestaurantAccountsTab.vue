@@ -250,11 +250,15 @@ async function handleBulkCreate() {
 async function handleSetEmail(u) {
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
   const current = u.email || '';
-  const value = prompt(`Email для ресторана ${label}:\n\nПосле сохранения на этот адрес уйдёт письмо для подтверждения. Чтобы очистить email — оставьте поле пустым.`, current);
+  const value = prompt(`Email для ресторана ${label}:\n\nТолько рабочий: @burger-king.by или @dodopizza.by.\nПосле сохранения на этот адрес уйдёт письмо для подтверждения. Чтобы очистить email — оставьте поле пустым.`, current);
   if (value === null) return;
   const trimmed = value.trim();
   if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
     toast.error('Похоже, email указан с ошибкой', '');
+    return;
+  }
+  if (trimmed && !/@(burger-king\.by|dodopizza\.by)$/i.test(trimmed)) {
+    toast.error('Можно указать только рабочий email', 'Принимаем @burger-king.by или @dodopizza.by');
     return;
   }
   busy.value = true;

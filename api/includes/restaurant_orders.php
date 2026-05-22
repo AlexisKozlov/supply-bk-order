@@ -34,6 +34,17 @@ if ($endpoint !== 'ro') return;
 
 // ═══ Хелперы ═══
 
+/**
+ * Корпоративный email ресторана — обязательное требование.
+ * Принимаем только @burger-king.by (БК/ВМ) и @dodopizza.by (ПС).
+ * Без ограничения по группе: ресторан мог быть передан между группами.
+ */
+function roIsCorporateEmail($email) {
+    if (!$email) return false;
+    $email = mb_strtolower(trim((string)$email));
+    return (bool)preg_match('/@(burger-king\.by|dodopizza\.by)$/', $email);
+}
+
 function roRespond($data, $code = 200) {
     http_response_code($code);
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
@@ -3209,6 +3220,10 @@ if ($roAction === 'set-email' && $method === 'POST') {
     if (mb_strlen($email) > 255) {
         roRespond(['error' => 'Слишком длинный email'], 400);
     }
+    // Только рабочая почта — иначе уведомления и сброс пароля не уходят в нужный домен.
+    if (!roIsCorporateEmail($email)) {
+        roRespond(['error' => 'Можно указать только рабочий email: @burger-king.by или @dodopizza.by'], 400);
+    }
 
     $userId = (int)$rest['id'];
     $currentEmail = $rest['email'] ?? null;
@@ -5521,6 +5536,10 @@ if (strpos($roAction, 'admin') === 0) {
                 roRespond(['error' => 'Введите корректный email'], 400);
             }
             if (mb_strlen($email) > 255) roRespond(['error' => 'Слишком длинный email'], 400);
+            // Пустой email = очистить (это норма). Иначе требуем рабочий домен.
+            if ($email !== '' && !roIsCorporateEmail($email)) {
+                roRespond(['error' => 'Можно указать только рабочий email: @burger-king.by или @dodopizza.by'], 400);
+            }
             roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
 
             $email = $email === '' ? null : mb_strtolower($email);

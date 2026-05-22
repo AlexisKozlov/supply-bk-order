@@ -40,7 +40,9 @@ const router = useRouter();
 const route = useRoute();
 
 // Публичные страницы, которые работают даже при тех. работах
-const publicRoutes = ['search-cards', 'deficit-form'];
+// (search-cards теперь требует авторизацию закупщика или ресторана —
+// при техработах админ всё равно проходит, остальных гард на маршруте отправит на /).
+const publicRoutes = ['deficit-form'];
 
 const showMaintenance = computed(() =>
   userStore.maintenanceMode && !userStore.isAdmin && !publicRoutes.includes(route.name)

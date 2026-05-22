@@ -128,7 +128,7 @@
       <!-- Десктоп-топбар -->
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты поставщиков' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров">
@@ -142,7 +142,7 @@
           <span class="mob-topbar-num">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</span>
           <span class="mob-topbar-label">Ресторан</span>
         </div>
-        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
+        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
         <button
           v-if="activeTab !== 'scanner'"
           class="mob-topbar-scan"
@@ -289,6 +289,14 @@
                 <div class="dash-tile-text">
                   <div class="dash-tile-title">Напоминания</div>
                   <div class="dash-tile-sub">О подаче заявок поставщикам</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
+              </button>
+              <button class="dash-tile dash-tile--contacts" @click="switchTab('contacts')">
+                <span class="dash-tile-icon" v-html="tileIconSvg.contacts"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Контакты поставщиков</div>
+                  <div class="dash-tile-sub">Телефоны, Telegram, WhatsApp</div>
                 </div>
                 <span class="dash-tile-arrow">›</span>
               </button>
@@ -1003,6 +1011,11 @@
       @reload="loadWarehouseStock"
     />
 
+    <!-- ══════ TAB: Контакты поставщиков ══════ -->
+    <section v-if="activeTab === 'contacts' && !globalError" class="cab-section">
+      <RestaurantSupplierContactsTab />
+    </section>
+
     <!-- ══════ TAB: Сканер товаров (BETA) ══════ -->
     <section v-if="activeTab === 'scanner' && !globalError" class="cab-section">
       <ScannerView />
@@ -1202,34 +1215,37 @@
     </section>
 
     <div v-if="currentImportantPost" class="modal-overlay" @click.self="dismissCurrentImportantPost">
-      <div class="cab-modal cab-modal-important">
-        <div class="cab-modal-head">
-          <h2>{{ currentImportantPost.title || 'Важная информация' }}</h2>
-          <button class="cab-modal-close" @click="dismissCurrentImportantPost">&times;</button>
-        </div>
-        <div class="cab-modal-body">
-          <div class="cab-info-text cab-info-text-broadcast ro-post-body" v-html="renderPostMessage(currentImportantPost.message)"></div>
-          <div v-if="currentImportantPost.files?.length" class="info-attachments info-files-modal">
+      <div class="cab-modal cab-modal-important imp-modal">
+        <div class="imp-accent"></div>
+        <button class="imp-close" @click="dismissCurrentImportantPost" aria-label="Закрыть">&times;</button>
+        <div class="imp-body">
+          <div class="imp-meta">
+            <span class="imp-meta-icon" aria-hidden="true">⚠</span>
+            <span>{{ currentImportantPost.created_by || 'Отдел закупок' }}</span>
+            <span class="imp-meta-dot">·</span>
+            <span>{{ fmtDateTime(currentImportantPost.published_at || currentImportantPost.created_at) }}</span>
+          </div>
+          <h2 class="imp-title">{{ currentImportantPost.title || 'Важная информация' }}</h2>
+          <div class="imp-text ro-post-body" v-html="renderPostMessage(currentImportantPost.message)"></div>
+          <div v-if="currentImportantPost.files?.length" class="imp-files">
             <button
               v-for="file in currentImportantPost.files"
               :key="file.id"
-              class="info-attachment"
-              :class="{ image: isImportantImage(file) }"
+              class="imp-file"
+              :class="{ 'imp-file-image': isImportantImage(file) }"
+              type="button"
               @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
             >
-              <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
-              <span v-else class="info-file-icon" v-html="cabIconSvg.file"></span>
-              <span>{{ file.file_name }}</span>
-              <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
+              <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" class="imp-file-img" />
+              <span v-else class="imp-file-icon" v-html="cabIconSvg.file"></span>
+              <span class="imp-file-name">{{ file.file_name }}</span>
+              <span class="imp-file-meta">{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</span>
             </button>
           </div>
-          <div class="cab-info-meta">
-            {{ currentImportantPost.created_by || 'Отдел закупок' }} · {{ fmtDateTime(currentImportantPost.published_at || currentImportantPost.created_at) }}
-          </div>
-          <div class="cab-info-actions">
-            <button class="btn btn-outline" @click="switchTab('info'); dismissCurrentImportantPost()">Открыть раздел</button>
-            <button class="btn btn-primary" @click="dismissCurrentImportantPost">Понятно</button>
-          </div>
+        </div>
+        <div class="imp-footer">
+          <button class="imp-btn imp-btn-ghost" @click="switchTab('info'); dismissCurrentImportantPost()">Открыть раздел</button>
+          <button class="imp-btn imp-btn-primary" @click="dismissCurrentImportantPost">Понятно</button>
         </div>
       </div>
     </div>
@@ -1365,8 +1381,9 @@
          сам кабинет управляет содержимым через состояние табов -->
     <router-view v-slot="{ Component }"><component :is="Component" v-if="false" /></router-view>
 
-    <!-- Модалка «укажите email» (для восстановления пароля) -->
-    <RestaurantEmailModal v-model="showEmailModal" />
+    <!-- Модалка «укажите email» (для восстановления пароля).
+         Обязательная, если email пустой или не корпоративный. -->
+    <RestaurantEmailModal v-model="showEmailModal" :mandatory="emailModalMandatory" />
   </div>
 </template>
 
@@ -1402,6 +1419,7 @@ const RestaurantInfoTab = defineAsyncComponent(() => import('@/components/restau
 const RestaurantEmailModal = defineAsyncComponent(() => import('@/components/restaurant/RestaurantEmailModal.vue'));
 const RestaurantWarehouseStockTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantWarehouseStockTab.vue'));
 const RestaurantSupplyAssistantTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplyAssistantTab.vue'));
+const RestaurantSupplierContactsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplierContactsTab.vue'));
 
 const router = useRouter();
 const route = useRoute();
@@ -1412,16 +1430,21 @@ const toast = useToastStore();
 const globalLoading = ref(true);
 const globalError = ref('');
 
-// Модалка «укажите email» — открывается один раз за сессию кабинета, если у
-// ресторана не сохранён email. После закрытия крестиком в этой же сессии не
-// показываем (но при новом логине покажется снова, пока email не указан).
+// Модалка «укажите email». Если email пустой или НЕ корпоративный
+// (@burger-king.by / @dodopizza.by), модалка открывается в принудительном
+// режиме — без крестика и без «Позже». Кабинет в этом режиме недоступен,
+// пока ресторан не привяжет рабочую почту. Если email уже корпоративный —
+// модалка не открывается совсем.
 const showEmailModal = ref(false);
-let emailModalShownThisSession = false;
+const CORP_EMAIL_DOMAINS = ['@burger-king.by', '@dodopizza.by'];
+const accountEmailIsCorporate = computed(() => {
+  const e = (roStore.accountInfo?.email || '').toLowerCase().trim();
+  return !!e && CORP_EMAIL_DOMAINS.some(d => e.endsWith(d));
+});
+const emailModalMandatory = computed(() => !accountEmailIsCorporate.value);
 function maybePromptForEmail() {
-  if (emailModalShownThisSession) return;
-  const account = roStore.accountInfo;
-  if (account && !account.email) {
-    emailModalShownThisSession = true;
+  // Если email не корпоративный (пустой или личный) — показываем обязательную модалку.
+  if (!accountEmailIsCorporate.value) {
     showEmailModal.value = true;
   }
 }
@@ -1759,6 +1782,7 @@ const mainTabs = computed(() => {
     });
   }
   tabs.push({ id: 'warehouse-stock', label: 'Остатки склада' });
+  tabs.push({ id: 'contacts', label: 'Контакты' });
   tabs.push({ id: 'scanner', label: 'Сканер' });
   if (kegReturnsEnabled.value) tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
   return tabs;
@@ -2608,6 +2632,8 @@ function applyRouteToState() {
   } else if (name === 'restaurant-warehouse-stock') {
     activeTab.value = 'warehouse-stock';
     if (!warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
+  } else if (name === 'restaurant-contacts') {
+    activeTab.value = 'contacts';
   } else if (name === 'restaurant-scanner') {
     activeTab.value = 'scanner';
   } else if (name === 'restaurant-profile') {
@@ -2639,6 +2665,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-stock' };
   } else if (activeTab.value === 'warehouse-stock') {
     target = { name: 'restaurant-warehouse-stock' };
+  } else if (activeTab.value === 'contacts') {
+    target = { name: 'restaurant-contacts' };
   } else if (activeTab.value === 'scanner') {
     target = { name: 'restaurant-scanner' };
   } else if (activeTab.value === 'profile') {
@@ -4414,9 +4442,110 @@ tr.del-err { background: #fef2f2; }
 .cab-modal-close:hover { color: #502314; }
 .cab-modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; }
 .cab-modal-info { max-width: 380px; }
-.cab-modal-important { max-width: min(860px, 96vw); max-height: 88vh; }
+.cab-modal-important { max-width: min(640px, 96vw); max-height: 88vh; }
 .cab-modal-important .cab-modal-body { padding: 20px 24px; }
 .cab-modal-important .info-files-modal { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+
+/* ── Всплывающее окно «Важная информация» ── */
+.imp-modal { position: relative; padding: 0; }
+.imp-accent {
+  height: 6px;
+  background: linear-gradient(90deg, #E76F51 0%, #F4A261 60%, #FFD54F 100%);
+  flex-shrink: 0;
+}
+.imp-close {
+  position: absolute; top: 14px; right: 14px;
+  width: 32px; height: 32px;
+  border: none; background: rgba(255,255,255,0.85);
+  border-radius: 50%;
+  color: #8b7355; font-size: 22px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .15s, background .15s;
+}
+.imp-close:hover { background: #fff; color: #502314; }
+.imp-body { padding: 22px 26px 16px; overflow-y: auto; flex: 1; min-height: 0; }
+.imp-meta {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; color: #8b7355;
+  background: #FFF8EE;
+  border: 1px solid #FBE2C4;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  margin-bottom: 12px;
+  max-width: 100%;
+}
+.imp-meta-icon { color: #E76F51; font-size: 13px; line-height: 1; }
+.imp-meta-dot { opacity: 0.55; }
+.imp-title {
+  margin: 0 0 14px;
+  font-size: 20px; line-height: 1.25; font-weight: 800; color: #502314;
+  padding-right: 40px; /* место под кнопку закрытия */
+}
+.imp-text { font-size: 15px; line-height: 1.55; color: #2C1A12; }
+.imp-text p:first-child { margin-top: 0; }
+.imp-text p:last-child { margin-bottom: 0; }
+
+.imp-files {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.imp-file {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 10px 12px;
+  background: #FAF6EF;
+  border: 1px solid #EDE3D2;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: #502314;
+  transition: border-color .15s, background .15s;
+  min-width: 0;
+}
+.imp-file:hover { border-color: #E76F51; background: #FFF8EE; }
+.imp-file-image { padding: 0; overflow: hidden; }
+.imp-file-image .imp-file-img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; }
+.imp-file-image .imp-file-name,
+.imp-file-image .imp-file-meta { padding: 0 10px; }
+.imp-file-image .imp-file-name { margin-top: 8px; }
+.imp-file-image .imp-file-meta { margin-bottom: 8px; }
+.imp-file-icon { width: 18px; height: 18px; display: inline-block; color: #B0A090; }
+.imp-file-icon svg { width: 100%; height: 100%; }
+.imp-file-name {
+  font-size: 13px; font-weight: 600; color: #502314;
+  width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.imp-file-meta { font-size: 11px; color: #8b7355; }
+
+.imp-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 14px 22px 18px;
+  border-top: 1px solid #F2EDE8;
+  background: #FDFBF8;
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
+}
+.imp-btn {
+  padding: 10px 18px; border-radius: 10px;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  border: 1px solid transparent;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.imp-btn-ghost { background: #fff; border-color: #E8DCC9; color: #502314; }
+.imp-btn-ghost:hover { background: #F7F1E6; border-color: #C9A989; }
+.imp-btn-primary { background: #E76F51; color: #fff; }
+.imp-btn-primary:hover { background: #d35a3b; }
+
+@media (max-width: 560px) {
+  .imp-body { padding: 18px 18px 12px; }
+  .imp-title { font-size: 18px; padding-right: 36px; }
+  .imp-text { font-size: 14.5px; }
+  .imp-footer { padding: 12px 16px 16px; flex-direction: column-reverse; gap: 8px; }
+  .imp-btn { width: 100%; padding: 12px 18px; }
+  .imp-files { grid-template-columns: repeat(2, 1fr); }
+}
 .cab-info-text { color: #502314; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
 .cab-info-text.cab-info-error { color: #b91c1c; }
 .cab-info-text-broadcast { white-space: pre-line; }
