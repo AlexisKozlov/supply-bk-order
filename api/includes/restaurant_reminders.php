@@ -57,6 +57,18 @@ if ($subpoint === 'list' && $method === 'GET') {
     // Загружаем расписания только ЛОКАЛЬНЫХ поставщиков (so_enabled=0).
     // У so-поставщиков (Камако/Планета/...) свои автоматические напоминания
     // через основной модуль "Заявки поставщикам".
+    //
+    // Если у поставщика активен временный график (so_supplier_temp_schedule_periods
+    // с date_to >= сегодня), берём дни из so_supplier_temp_schedule_items вместо
+    // основного расписания. После окончания периода всё само вернётся к основному.
+    $tempPeriods = [];
+    foreach ($pdo->query("SELECT supplier_id, date_from, date_to FROM so_supplier_temp_schedule_periods WHERE date_to >= CURDATE()") as $p) {
+        $tempPeriods[$p['supplier_id']] = [
+            'date_from' => $p['date_from'],
+            'date_to'   => $p['date_to'],
+        ];
+    }
+
     $sched = $pdo->prepare("
         SELECT ss.supplier_id, ss.order_day, ss.delivery_day, ss.is_active,
                s.short_name AS supplier_name, s.so_enabled,
@@ -74,7 +86,49 @@ if ($subpoint === 'list' && $method === 'GET') {
         ORDER BY s.short_name, ss.order_day
     ");
     $sched->execute([$rrRestPk]);
-    $rows = $sched->fetchAll();
+    $rawRows = $sched->fetchAll();
+
+    // Для поставщиков с активным периодом — берём строки из временного графика.
+    // Остальные — как обычно.
+    $tempRowsBySupplier = [];
+    if ($tempPeriods) {
+        $supIds = array_keys($tempPeriods);
+        $ph = implode(',', array_fill(0, count($supIds), '?'));
+        $tempStmt = $pdo->prepare("
+            SELECT sp.supplier_id, ssi.order_day, ssi.delivery_day, ssi.is_active,
+                   s.short_name AS supplier_name, s.so_enabled,
+                   sd.deadline_time AS deadline_override
+            FROM so_supplier_temp_schedule_items ssi
+            JOIN so_supplier_temp_schedule_periods sp ON sp.id = ssi.period_id
+            JOIN suppliers s ON s.id = sp.supplier_id
+            LEFT JOIN supplier_schedule_deadlines sd
+                   ON sd.supplier_id = sp.supplier_id
+                  AND sd.restaurant_id = ssi.restaurant_id
+                  AND sd.order_day = ssi.order_day
+            WHERE ssi.restaurant_id = ? AND ssi.is_active = 1
+              AND sp.supplier_id IN ($ph)
+              AND s.is_active = 1 AND s.so_enabled = 0
+            ORDER BY s.short_name, ssi.order_day
+        ");
+        $tempStmt->execute(array_merge([$rrRestPk], $supIds));
+        foreach ($tempStmt->fetchAll() as $r) {
+            $tempRowsBySupplier[$r['supplier_id']][] = $r;
+        }
+    }
+
+    $rows = [];
+    foreach ($rawRows as $r) {
+        $sid = $r['supplier_id'];
+        if (isset($tempPeriods[$sid])) {
+            // Этого поставщика покрывает временный график — основные строки
+            // не используем (они добавлены ниже из temp).
+            continue;
+        }
+        $rows[] = $r;
+    }
+    foreach ($tempRowsBySupplier as $sid => $items) {
+        foreach ($items as $r) $rows[] = $r;
+    }
 
     // Группируем по поставщику
     $bySupplier = [];
@@ -89,6 +143,10 @@ if ($subpoint === 'list' && $method === 'GET') {
                 'days'            => [],
                 'subscription'    => null,
                 'selected_tg_ids' => [],
+                'temp_period'     => isset($tempPeriods[$sid]) ? [
+                    'date_from' => $tempPeriods[$sid]['date_from'],
+                    'date_to'   => $tempPeriods[$sid]['date_to'],
+                ] : null,
             ];
             $supplierIds[] = $sid;
         }
@@ -461,6 +519,18 @@ if ($subpoint === 'today' && $method === 'GET') {
     };
 
     // ─── Локальные поставщики ─────────────────────────────────────────────
+    // Активные временные периоды графиков — если у поставщика есть период,
+    // покрывающий дату поставки строки, берём её из so_supplier_temp_*,
+    // а строку из основного расписания пропускаем. Так напоминания у
+    // ресторана совпадают с тем, что показывает менеджер закупки.
+    $tempPeriods = [];
+    foreach ($pdo->query("SELECT supplier_id, date_from, date_to FROM so_supplier_temp_schedule_periods WHERE date_to >= CURDATE()") as $p) {
+        $tempPeriods[$p['supplier_id']] = [
+            'date_from' => $p['date_from'],
+            'date_to'   => $p['date_to'],
+        ];
+    }
+
     $rows = $pdo->prepare("
         SELECT ss.supplier_id, ss.order_day, ss.delivery_day,
                s.short_name AS supplier_name, s.so_enabled,
@@ -478,7 +548,122 @@ if ($subpoint === 'today' && $method === 'GET') {
         ORDER BY s.short_name
     ");
     $rows->execute([$rrRestPk]);
-    $list = $rows->fetchAll();
+    $mainList = $rows->fetchAll();
+
+    // Строки из временных графиков (только для поставщиков с активным периодом)
+    $tempList = [];
+    if ($tempPeriods) {
+        $supIds = array_keys($tempPeriods);
+        $ph = implode(',', array_fill(0, count($supIds), '?'));
+        $tempStmt = $pdo->prepare("
+            SELECT sp.supplier_id, ssi.order_day, ssi.delivery_day,
+                   s.short_name AS supplier_name, s.so_enabled,
+                   sd.deadline_time AS deadline_override,
+                   sd.reminder_times AS reminder_times_override,
+                   sub.id AS subscription_id, sub.is_enabled, sub.portal_enabled
+            FROM so_supplier_temp_schedule_items ssi
+            JOIN so_supplier_temp_schedule_periods sp ON sp.id = ssi.period_id
+            JOIN suppliers s ON s.id = sp.supplier_id
+            LEFT JOIN supplier_schedule_deadlines sd
+                   ON sd.supplier_id = sp.supplier_id AND sd.restaurant_id = ssi.restaurant_id AND sd.order_day = ssi.order_day
+            LEFT JOIN restaurant_reminder_subscriptions sub
+                   ON sub.restaurant_id = ssi.restaurant_id AND sub.supplier_id = sp.supplier_id
+            WHERE ssi.restaurant_id = ? AND ssi.is_active = 1
+              AND sp.supplier_id IN ($ph)
+              AND s.is_active = 1 AND s.so_enabled = 0
+            ORDER BY s.short_name
+        ");
+        $tempStmt->execute(array_merge([$rrRestPk], $supIds));
+        $tempList = $tempStmt->fetchAll();
+    }
+
+    // Оценка ближайшей даты поставки строки расписания
+    $rrEstDelivery = function ($orderDay, $deliveryDay) use ($now, $todayDow) {
+        $diffOrder = ($orderDay - $todayDow + 7) % 7;
+        $dt = clone $now;
+        $dt->modify("+{$diffOrder} days");
+        $diffDeliv = ($deliveryDay - $orderDay + 7) % 7;
+        if ($diffDeliv === 0) $diffDeliv = 7;
+        $dt->modify("+{$diffDeliv} days");
+        return $dt->format('Y-m-d');
+    };
+
+    $list = [];
+    foreach ($mainList as $r) {
+        $sid = $r['supplier_id'];
+        if (isset($tempPeriods[$sid])) {
+            $dd = $rrEstDelivery((int)$r['order_day'], (int)$r['delivery_day']);
+            $p = $tempPeriods[$sid];
+            if ($dd >= $p['date_from'] && $dd <= $p['date_to']) continue;
+        }
+        $list[] = $r;
+    }
+    foreach ($tempList as $r) {
+        $sid = $r['supplier_id'];
+        $p = $tempPeriods[$sid] ?? null;
+        if (!$p) continue;
+        $dd = $rrEstDelivery((int)$r['order_day'], (int)$r['delivery_day']);
+        if ($dd >= $p['date_from'] && $dd <= $p['date_to']) {
+            $list[] = $r;
+        }
+    }
+
+    // Учёт активных временных графиков: если у поставщика есть период,
+    // в который попадает дата поставки — заменяем строки основного расписания
+    // на строки из so_supplier_temp_schedule_items.
+    $tempPeriods = [];
+    foreach ($pdo->query("SELECT supplier_id, date_from, date_to FROM so_supplier_temp_schedule_periods WHERE date_to >= CURDATE()") as $p) {
+        $tempPeriods[$p['supplier_id']] = ['date_from' => $p['date_from'], 'date_to' => $p['date_to']];
+    }
+    if ($tempPeriods) {
+        $supIdsT = array_keys($tempPeriods);
+        $phT = implode(',', array_fill(0, count($supIdsT), '?'));
+        $tempStmt = $pdo->prepare("
+            SELECT sp.supplier_id, ssi.order_day, ssi.delivery_day,
+                   s.short_name AS supplier_name, s.so_enabled,
+                   sd.deadline_time AS deadline_override,
+                   sd.reminder_times AS reminder_times_override,
+                   sub.id AS subscription_id, sub.is_enabled, sub.portal_enabled
+            FROM so_supplier_temp_schedule_items ssi
+            JOIN so_supplier_temp_schedule_periods sp ON sp.id = ssi.period_id
+            JOIN suppliers s ON s.id = sp.supplier_id
+            LEFT JOIN supplier_schedule_deadlines sd
+                   ON sd.supplier_id = sp.supplier_id AND sd.restaurant_id = ssi.restaurant_id AND sd.order_day = ssi.order_day
+            LEFT JOIN restaurant_reminder_subscriptions sub
+                   ON sub.restaurant_id = ssi.restaurant_id AND sub.supplier_id = sp.supplier_id
+            WHERE ssi.restaurant_id = ? AND ssi.is_active = 1
+              AND sp.supplier_id IN ($phT)
+              AND s.is_active = 1 AND s.so_enabled = 0
+            ORDER BY s.short_name
+        ");
+        $tempStmt->execute(array_merge([$rrRestPk], $supIdsT));
+        $estimateDeliveryDate = function($orderDay, $deliveryDay) use ($now, $todayDow) {
+            $diffOrder = ($orderDay - $todayDow + 7) % 7;
+            $dt = clone $now;
+            $dt->modify("+{$diffOrder} days");
+            $diffDeliv = ($deliveryDay - $orderDay + 7) % 7;
+            if ($diffDeliv === 0) $diffDeliv = 7;
+            $dt->modify("+{$diffDeliv} days");
+            return $dt->format('Y-m-d');
+        };
+        // Из основного списка убираем строки, попадающие в активный темп-период
+        $list = array_values(array_filter($list, function($r) use ($tempPeriods, $estimateDeliveryDate) {
+            $supId = $r['supplier_id'];
+            if (!isset($tempPeriods[$supId])) return true;
+            $dd = $estimateDeliveryDate((int)$r['order_day'], (int)$r['delivery_day']);
+            $p = $tempPeriods[$supId];
+            return !($dd >= $p['date_from'] && $dd <= $p['date_to']);
+        }));
+        // Из темпа добавляем строки, попадающие в свой период
+        foreach ($tempStmt->fetchAll() as $r) {
+            $p = $tempPeriods[$r['supplier_id']] ?? null;
+            if (!$p) continue;
+            $dd = $estimateDeliveryDate((int)$r['order_day'], (int)$r['delivery_day']);
+            if ($dd >= $p['date_from'] && $dd <= $p['date_to']) {
+                $list[] = $r;
+            }
+        }
+    }
 
     // Дефолты поставщиков
     $supplierIds = array_values(array_unique(array_column($list, 'supplier_id')));
@@ -625,11 +810,40 @@ if ($subpoint === 'acknowledge' && $method === 'POST') {
     if ($isMain) {
         $check = $pdo->prepare("SELECT 1 FROM delivery_schedule WHERE restaurant_id = ? AND order_day = ? AND order_deadline IS NOT NULL LIMIT 1");
         $check->execute([$rrRestPk, $orderDay]);
+        $hasSchedule = (bool)$check->fetchColumn();
     } else {
+        // Основное расписание поставщика
         $check = $pdo->prepare("SELECT 1 FROM supplier_schedules WHERE restaurant_id = ? AND supplier_id = ? AND order_day = ? LIMIT 1");
         $check->execute([$rrRestPk, $supplierId, $orderDay]);
+        $hasSchedule = (bool)$check->fetchColumn();
+        // Если в основном нет — смотрим временный график (so_supplier_temp_schedule_*).
+        // Период задан по датам ПОСТАВКИ, поэтому считаем дату поставки от
+        // даты заявки и сравниваем её с границами периода — так же, как /today.
+        if (!$hasSchedule) {
+            $tempCheck = $pdo->prepare("
+                SELECT ssi.delivery_day, sp.date_from, sp.date_to
+                FROM so_supplier_temp_schedule_items ssi
+                JOIN so_supplier_temp_schedule_periods sp ON sp.id = ssi.period_id
+                WHERE ssi.restaurant_id = ?
+                  AND sp.supplier_id = ?
+                  AND ssi.order_day = ?
+                  AND ssi.is_active = 1
+                  AND sp.date_to >= CURDATE()
+            ");
+            $tempCheck->execute([$rrRestPk, $supplierId, $orderDay]);
+            foreach ($tempCheck->fetchAll() as $tr) {
+                $deliveryDay = (int)$tr['delivery_day'];
+                $diff = ($deliveryDay - $orderDay + 7) % 7;
+                if ($diff === 0) $diff = 7;
+                $deliveryDate = (new DateTime($targetDate))->modify("+{$diff} days")->format('Y-m-d');
+                if ($deliveryDate >= $tr['date_from'] && $deliveryDate <= $tr['date_to']) {
+                    $hasSchedule = true;
+                    break;
+                }
+            }
+        }
     }
-    if (!$check->fetchColumn()) rrRespond(['error' => 'Нет расписания на этот день'], 404);
+    if (!$hasSchedule) rrRespond(['error' => 'Нет расписания на этот день'], 404);
 
     $by = 'ro:' . $rrUser['restaurant_number'];
     $minskNow = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('Y-m-d H:i:s');

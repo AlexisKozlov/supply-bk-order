@@ -16,6 +16,7 @@
             <span v-if="it.is_main_delivery" class="rtr-tag-main">склад</span>
             <span v-if="it.is_advance" class="rtr-tag-advance">{{ advanceLabel(it) }}</span>
           </div>
+          <div v-if="deliveryLabel(it)" class="rtr-delivery-info">{{ deliveryLabel(it) }}</div>
           <div class="rtr-deadline">
             <template v-if="it.is_acknowledged">
               <span class="rtr-status-done">✓ Заявка подана</span>
@@ -64,6 +65,7 @@ function itemKey(it) { return it.supplier_id + '-' + it.order_day + '-' + (it.or
 function fmtTime(t) { return t ? String(t).slice(0, 5) : ''; }
 
 const DAY_NAMES_RU = ['', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
+const MONTHS_RU_GEN = ['', 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 function whenLabel(it) {
   const db = Number(it.days_before) || 0;
   if (db === 1) return 'Завтра';
@@ -75,6 +77,20 @@ function advanceLabel(it) {
   if (db === 1) return 'на завтра';
   if (db === 2) return 'на послезавтра';
   return 'на ' + (DAY_NAMES_RU[it.order_day] || '').toLowerCase();
+}
+
+function deliveryLabel(it) {
+  if (!it.order_date || !it.order_day || !it.delivery_day) return '';
+  const [y, m, d] = String(it.order_date).split('-').map(Number);
+  if (!y || !m || !d) return '';
+  let diff = (Number(it.delivery_day) - Number(it.order_day) + 7) % 7;
+  if (diff === 0) diff = 7;
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + diff);
+  const dow = dt.getDay() === 0 ? 7 : dt.getDay();
+  const dayName = DAY_NAMES_RU[dow] || '';
+  const monthName = MONTHS_RU_GEN[dt.getMonth() + 1] || '';
+  return `Поставка: ${dayName}, ${dt.getDate()} ${monthName}`;
 }
 
 function itemClass(it) {
@@ -193,6 +209,7 @@ defineExpose({ load });
 .rtr-btn-done.is-advance:hover { background: #0d47a1; }
 .rtr-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .rtr-supplier { font-size: 14px; font-weight: 700; color: #2b2b2b; }
+.rtr-delivery-info { font-size: 11px; color: #888; margin-top: 1px; }
 .rtr-deadline { font-size: 12px; color: #555; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .rtr-deadline-label { color: #777; }
 .rtr-deadline-time { font-size: 16px; font-weight: 700; color: #b35900; line-height: 1; }

@@ -4,7 +4,6 @@
  */
 
 import { CUSTOMER_MAP } from '@/lib/legalEntities.js';
-import { toLocalDateStr } from '@/lib/utils.js';
 
 // Маппинг складов на понятные названия
 const WAREHOUSE_MAP = [
@@ -55,7 +54,17 @@ function getSheetRows(XLSX, ws) {
 
 function parseDate(val) {
   if (!val) return null;
-  if (val instanceof Date) return isNaN(val.getTime()) ? null : toLocalDateStr(val);
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    // xlsx-js-style 0.18.5 при cellDates:true возвращает Date со смещением на
+    // локальную TZ браузера (с историческим LMT для 1900 г.), из-за чего в
+    // Москве/Минске getDate() даёт «вчера». Снимаем смещение и округляем к
+    // ближайшей полуночи UTC — так получаем ту дату, что отображалась в Excel.
+    const ms = val.getTime() - val.getTimezoneOffset() * 60000;
+    const rounded = Math.round(ms / 86400000) * 86400000;
+    const d = new Date(rounded);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  }
   const s = String(val).trim();
   const m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
