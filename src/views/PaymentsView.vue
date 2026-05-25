@@ -23,7 +23,7 @@
           <tr>
             <th>Поставщик</th>
             <th>Юрлицо</th>
-            <th>Дата ТТН</th>
+            <th>Дата прихода</th>
             <th>Отсрочка</th>
             <th>Дата оплаты</th>
             <th>Дедлайн заявки</th>
@@ -82,6 +82,7 @@ import { useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
+import { getEntityGroupCode } from '@/lib/legalEntities.js'
 
 const orderStore = useOrderStore()
 
@@ -98,7 +99,11 @@ const editPayDate = ref('')
 async function load() {
   loading.value = true
   try {
-    let q = db.from('supplier_payments').select('*').eq('legal_entity', orderStore.settings.legalEntity).order('payment_date')
+    // Оплаты смотрим по всей группе юрлиц (БК+ВМ или ПС отдельно) — финансовый
+    // отдел работает по группе, а не по конкретному юрлицу. Фильтр по
+    // legal_entity_group (триггер БД автоматически проставляет колонку при INSERT).
+    const groupCode = getEntityGroupCode(orderStore.settings.legalEntity)
+    let q = db.from('supplier_payments').select('*').eq('legal_entity_group', groupCode).order('payment_date')
     if (statusFilter.value) q = q.eq('status', statusFilter.value)
     const { data } = await q
     payments.value = data || []
@@ -252,7 +257,7 @@ watch(() => orderStore.settings.legalEntity, () => load())
   /* Подписи перед значениями */
   .pay-table td:nth-child(1) { font-size: 15px; font-weight: 600; }
   .pay-table td:nth-child(2)::before { content: 'Юрлицо: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
-  .pay-table td:nth-child(3)::before { content: 'ТТН: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+  .pay-table td:nth-child(3)::before { content: 'Приход: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
   .pay-table td:nth-child(5)::before { content: 'Оплата: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
   .pay-table td:nth-child(7)::before { content: 'Сумма: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
 
