@@ -843,7 +843,7 @@ if ($endpoint === 'rpc') {
     // Список RPC, доступных также по ресторанной сессии (cookie ro_session).
     // Каждый из этих эндпоинтов внутри ещё раз проверяет, кто звонит, через
     // $bugReportCaller() — лишнего доступа не выдаём.
-    $RO_ALLOWED_RPC = ['create_bug_report', 'get_bug_reports', 'get_bug_report', 'get_bug_reports_count', 'reply_bug_report'];
+    $RO_ALLOWED_RPC = ['create_bug_report', 'get_bug_reports', 'get_bug_report', 'get_bug_reports_count', 'reply_bug_report', 'create_download_token'];
     if (!checkAuth($pdo)) {
         $roAllowed = false;
         if (in_array($fn, $RO_ALLOWED_RPC, true)) {
@@ -1136,16 +1136,32 @@ if ($endpoint === 'rpc') {
     // (относительно api/uploads/) для аудита; реальная авторизация на
     // конкретный файл всё равно делается uploads.php.
     if ($fn === 'create_download_token') {
-        if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
         $filePath = trim((string)($body['file_path'] ?? ''));
         if ($filePath === '' || mb_strlen($filePath) > 512) respond(['error' => 'invalid file_path'], 400);
         if (strpos($filePath, '..') !== false || strpos($filePath, "\0") !== false) respond(['error' => 'invalid file_path'], 400);
+
+        // Если staff-сессия есть — берём её.
+        $issueAs = $authUserName ?: '';
+        if (!$authUser) {
+            // Ресторан тоже может получать токены, но только для путей uploads/bugs/*
+            // (чтобы не дать ему доступ к чужим файлам через дыру в авторизации).
+            if (strpos($filePath, 'uploads/bugs/') !== 0) {
+                respond(['error' => 'Требуется авторизация'], 401);
+            }
+            if (!function_exists('roGetRestaurantSession')) {
+                require_once __DIR__ . '/restaurant_orders.php';
+            }
+            $roSess = function_exists('roGetRestaurantSession') ? roGetRestaurantSession($pdo) : null;
+            if (!$roSess) respond(['error' => 'Требуется авторизация'], 401);
+            $issueAs = 'ro:' . ($roSess['restaurant_number'] ?? '');
+        }
+
         // Ленивая чистка устаревших токенов: вместо отдельного cron-а удаляем
         // протухшие записи при каждом запросе. Дешёвая операция (индекс по expires_at).
         try { $pdo->prepare("DELETE FROM download_tokens WHERE expires_at < NOW() - INTERVAL 1 DAY")->execute(); } catch (Throwable $e) {}
         $token = bin2hex(random_bytes(16));
         $pdo->prepare("INSERT INTO download_tokens (token, user_name, file_path, expires_at) VALUES (?, ?, ?, NOW() + INTERVAL 15 MINUTE)")
-            ->execute([$token, $authUserName, $filePath]);
+            ->execute([$token, $issueAs, $filePath]);
         respond(['token' => $token, 'expires_in' => 15 * 60]);
     }
 

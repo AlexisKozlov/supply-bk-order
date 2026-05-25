@@ -1,6 +1,6 @@
 <template>
-  <!-- Плавающая кнопка -->
-  <div class="bug-fab-wrap" :class="{ open: showForm }">
+  <!-- Плавающая кнопка. При hideFab=true прячем — кнопка вызывается извне через defineExpose. -->
+  <div class="bug-fab-wrap" :class="{ open: showForm }" v-if="!hideFab">
     <button class="bug-fab" :class="{ active: showForm, 'has-replies': hasNewReplies }" @click="toggleForm" :title="showForm ? 'Закрыть' : 'Нашли ошибку?'">
       <span class="bug-fab-icon" :class="{ spin: showForm }">
         <svg v-if="!showForm" viewBox="0 0 24 24" fill="none" width="18" height="18">
@@ -228,11 +228,22 @@ async function refreshReportImageUrls() {
   reportImageUrls.value = map;
 }
 
+defineProps({
+  hideFab: { type: Boolean, default: false },
+});
+
 const showForm = ref(false);
 const tab = ref('new');
 const sending = ref(false);
 const showSuccess = ref(false);
 const hasNewReplies = ref(false);
+
+// Открытие модалки извне — для пункта в меню профиля.
+defineExpose({
+  open() { showForm.value = true; },
+  close() { showForm.value = false; },
+  hasNewReplies,
+});
 
 const form = ref({ title: '', description: '' });
 const screenshots = ref([]);
@@ -270,6 +281,9 @@ onMounted(() => {
 // Polling: обновлять чат каждые 20 сек (раньше было 5 сек — лишний трафик
 // для мобильных, особенно когда модал просто оставлен открытым).
 let chatPollTimer = null;
+// Фоновая проверка новых ответов когда модал ЗАКРЫТ — раз в 60 сек.
+// Нужно чтобы значок «есть ответ» подтягивался без перезагрузки страницы.
+let bgReplyTimer = null;
 
 function startChatPoll() {
   stopChatPoll();
@@ -300,13 +314,33 @@ function stopChatPoll() {
   if (chatPollTimer) { clearInterval(chatPollTimer); chatPollTimer = null; }
 }
 
+function startBgReplyPoll() {
+  stopBgReplyPoll();
+  bgReplyTimer = setInterval(() => { checkNewReplies(); }, 60000);
+}
+function stopBgReplyPoll() {
+  if (bgReplyTimer) { clearInterval(bgReplyTimer); bgReplyTimer = null; }
+}
+
 watch(showForm, (open) => {
-  if (open) startChatPoll();
-  else stopChatPoll();
+  if (open) {
+    startChatPoll();
+    stopBgReplyPoll();
+    hasNewReplies.value = false; // открыл — точно прочитал
+  } else {
+    stopChatPoll();
+    startBgReplyPoll();
+  }
+});
+
+onMounted(() => {
+  // Фоновый polling работает с момента mount, пока модал не открыт.
+  startBgReplyPoll();
 });
 
 onUnmounted(() => {
   stopChatPoll();
+  stopBgReplyPoll();
   if (stopRouteWatch) stopRouteWatch();
   document.removeEventListener('click', onDocClick, true);
   document.removeEventListener('paste', onPaste);
@@ -335,6 +369,29 @@ function toggleForm() {
 }
 
 // --- Скриншоты ---
+// Сжимает фото на клиенте перед отправкой: max 1600px по большой стороне, JPEG 85%.
+// На мобильном это ускоряет загрузку в 5-10 раз и снимает таймауты.
+async function compressImage(file) {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file;
+  if (file.size < 300 * 1024) return file; // меньше 300КБ — не трогаем
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxSide = 1600;
+    let { width, height } = bitmap;
+    if (width <= maxSide && height <= maxSide && file.size < 1024 * 1024) return file;
+    const scale = Math.min(1, maxSide / Math.max(width, height));
+    const w = Math.round(width * scale);
+    const h = Math.round(height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
+    bitmap.close?.();
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch { return file; }
+}
+
 async function uploadFile(file) {
   if (screenshots.value.length >= 5) return;
   if (!file.type.startsWith('image/')) return;
@@ -342,8 +399,9 @@ async function uploadFile(file) {
   const item = { preview, path: null, uploading: true };
   screenshots.value.push(item);
   try {
+    const compressed = await compressImage(file);
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', compressed);
     const token = localStorage.getItem('bk_session_token') || '';
     const res = await fetch(apiBase + '/upload/bug-screenshot', {
       method: 'POST',
@@ -462,8 +520,9 @@ async function uploadReplyImage(file) {
   const item = { preview, path: null, uploading: true };
   replyImages.value.push(item);
   try {
+    const compressed = await compressImage(file);
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', compressed);
     const res = await fetch(apiBase + '/upload/bug-screenshot', {
       method: 'POST',
       body: fd,
