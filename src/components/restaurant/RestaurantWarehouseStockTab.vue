@@ -305,89 +305,83 @@ async function exportToExcel() {
 
 @media (max-width: 600px) {
   .whs-section { padding-left: 0; padding-right: 0; }
-  .whs-panel { padding: 14px 12px; border-radius: 14px; }
+  .whs-panel { padding: 12px 10px; border-radius: 14px; }
 
   /* Шапка: заголовок и кнопка Excel в столбик */
-  .whs-head { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 12px; }
-  .whs-head h2 { font-size: 18px; }
-  .whs-head .btn { align-self: flex-end; padding: 8px 14px; font-size: 13px; }
+  .whs-head { flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 10px; }
+  .whs-head h2 { font-size: 17px; }
+  .whs-head .btn { align-self: flex-end; padding: 7px 14px; font-size: 13px; }
 
   /* Заголовок столбцов на мобильном не нужен — всё подписано в карточке */
   .whs-list-head { display: none; }
 
-  /* Карточка остатка: вертикальный стек вместо grid */
+  /* Карточка остатка: 3 строки — артикул+название, метаданные, число+срок */
   .whs-row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    padding: 12px;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 8px;
+    padding: 10px 12px;
   }
-  .whs-row-main { order: 1; }
-  .whs-name { flex-direction: column; gap: 2px; align-items: flex-start; }
+  .whs-row-main { grid-column: 1 / -1; }
+  .whs-name { flex-direction: column; gap: 1px; align-items: flex-start; }
   .whs-sku { font-size: 11px; }
   .whs-title { font-size: 14px; line-height: 1.3; }
-  .whs-meta { font-size: 11px; gap: 6px; }
 
-  /* Остаток и срок — одной строкой под названием */
-  .whs-qty {
-    order: 2;
-    flex-direction: row;
-    justify-content: flex-start;
-    align-items: baseline;
+  /* Метаданные — одна компактная строка с обрезкой */
+  .whs-meta {
+    font-size: 11px;
     gap: 6px;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-wrap: nowrap;
+  }
+  .whs-meta > span { flex-shrink: 0; }
+
+  /* Остаток слева, срок+партии справа — на одной строке */
+  .whs-row > .whs-qty {
+    grid-column: 1;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 4px;
     padding-top: 6px;
     border-top: 1px solid #F6EFE7;
   }
-  .whs-qty::before {
-    content: 'Остаток:';
-    color: #8b7355;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-  .whs-qty strong { font-size: 18px; }
+  .whs-row > .whs-qty strong { font-size: 16px; }
 
-  .whs-exp {
-    order: 3;
+  .whs-row > .whs-exp {
+    grid-column: 2;
     flex-direction: row;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-    padding-top: 4px;
+    justify-content: flex-end;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #F6EFE7;
+    font-size: 13px;
   }
-  .whs-exp > span:first-child::before {
-    content: 'Срок: ';
-    color: #8b7355;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 0.3px;
-    margin-right: 4px;
-  }
-  .whs-batches-btn { font-size: 13px; }
+  .whs-batches-btn { font-size: 12px; padding: 0 4px; }
+  .whs-row > .whs-batches { grid-column: 1 / -1; }
 
   /* Партии — стек с подписями вместо таблицы */
-  .whs-batches { order: 4; padding-top: 8px; }
   .whs-batch-head { display: none; }
   .whs-batch {
     grid-template-columns: 1fr;
-    gap: 4px;
-    padding: 10px;
+    gap: 3px;
+    padding: 8px 10px;
     background: #FAFAF8;
     border: 1px solid #F0E8DD;
     border-radius: 8px;
     margin-bottom: 6px;
   }
   .whs-batch:last-child { margin-bottom: 0; }
-  .whs-batch-name { font-size: 13px; margin-bottom: 4px; }
+  .whs-batch-name { font-size: 13px; margin-bottom: 2px; }
   .whs-batch > span:not(.whs-batch-name)::before,
   .whs-batch > b::before {
     color: #8b7355;
     font-size: 11px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    margin-right: 6px;
+    margin-right: 5px;
   }
   .whs-batch > span:not(.whs-batch-name),
   .whs-batch > b {
