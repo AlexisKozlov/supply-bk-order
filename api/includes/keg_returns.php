@@ -585,8 +585,8 @@ if ($method === 'GET' && $krId === null && $krAction === null && $krSubSlug === 
         if (!in_array($filterGroup, ['BK_VM', 'PS'])) $filterGroup = 'BK_VM';
         krRequireGroupAccess($krPortalUser, $filterGroup);
         $rows = $pdo->prepare("
-            SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
-                   kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at,
+            SELECT kr.id, kr.restaurant_id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
+                   kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at, kr.updated_at,
                    r.number AS restaurant_number, r.city AS restaurant_city,
                    r.address AS restaurant_address, r.pickup_address,
                    (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs,
