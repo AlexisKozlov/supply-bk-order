@@ -200,7 +200,14 @@ watch(() => orderStore.settings.legalEntity, () => load())
 .pay-empty { text-align: center; padding: 40px; color: var(--text-muted); }
 .pay-table-wrap { overflow-x: auto; }
 .pay-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.pay-table th { text-align: left; padding: 8px 8px; border-bottom: 2px solid var(--border); font-weight: 600; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.pay-table th {
+  text-align: left; padding: 10px 10px;
+  background: #FAF5EF;
+  border-bottom: 2px solid #C8A27C;
+  font-weight: 700; color: #502314;
+  font-size: 11px; letter-spacing: 0.4px; text-transform: uppercase;
+  white-space: nowrap;
+}
 .pay-table td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--border-light); vertical-align: middle; white-space: nowrap; }
 .pay-center { text-align: center; }
 .pay-le { font-size: 12px; color: var(--text-muted); }
