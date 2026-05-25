@@ -17,7 +17,7 @@
  *   - Inline-стили (большинство почтовых клиентов не понимают <style>)
  *   - Table-based layout для совместимости с Outlook
  *   - Адаптивный (responsive) под мобильные через медиа-запросы
- *   - Логотип берётся как абсолютный URL с SITE_URL
+ *   - Шапка без картинок (Outlook не качает их по умолчанию) — только типографика
  *   - Цветовая палитра бренда: #E76F51 / #F4A261 / #FFD54F / #502314
  */
 
@@ -33,9 +33,6 @@ if (!function_exists('renderMailHtml')) {
      * }
      */
     function renderMailHtml(array $opts): string {
-        $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
-        $logoUrl = $siteUrl . '/pwa-192x192.png';
-
         $title   = htmlspecialchars($opts['title'] ?? '', ENT_QUOTES, 'UTF-8');
         $preview = htmlspecialchars($opts['preview'] ?? '', ENT_QUOTES, 'UTF-8');
         $intro   = $opts['intro'] ?? '';
@@ -85,6 +82,8 @@ HTML;
     .mail-card { width: 100% !important; border-radius: 0 !important; }
     .mail-inner { padding: 24px 20px !important; }
     .mail-title { font-size: 22px !important; }
+    .mail-brand-title { font-size: 22px !important; }
+    .mail-header { padding: 28px 24px !important; }
   }
 </style>
 </head>
@@ -98,18 +97,9 @@ HTML;
       <table role="presentation" class="mail-card" width="600" cellspacing="0" cellpadding="0" border="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(80,35,20,0.08);">
 
         <tr>
-          <td style="background:linear-gradient(135deg,#E76F51 0%,#F4A261 100%);padding:28px 32px;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-              <tr>
-                <td valign="middle" width="56">
-                  <img src="{$logoUrl}" width="48" height="48" alt="Supply Department" style="display:block;border-radius:12px;border:0;">
-                </td>
-                <td valign="middle" style="padding-left:14px;">
-                  <div style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.2px;">Supply Department</div>
-                  <div style="font-size:13px;color:rgba(255,255,255,0.85);margin-top:2px;">Портал закупок</div>
-                </td>
-              </tr>
-            </table>
+          <td class="mail-header" bgcolor="#E76F51" style="background-color:#E76F51;background-image:linear-gradient(135deg,#E76F51 0%,#F4A261 100%);padding:32px 36px;">
+            <div class="mail-brand-title" style="font-size:26px;font-weight:800;color:#ffffff;letter-spacing:-0.4px;line-height:1.15;margin:0;">Supply Department</div>
+            <div style="font-size:13px;color:#fff5f0;margin-top:6px;letter-spacing:0.2px;">Портал закупок</div>
           </td>
         </tr>
 

@@ -20,6 +20,35 @@ require_once __DIR__ . '/../../vendor/autoload.php';
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
 
+if (!function_exists('htmlEmailToPlainText')) {
+    function htmlEmailToPlainText(string $html): string {
+        $text = preg_replace('#<head[^>]*>.*?</head>#is', '', $html);
+        $text = preg_replace('#<style[^>]*>.*?</style>#is', '', $text);
+        // Скрытый preheader-блок (display:none) — не нужен в plain-варианте.
+        $text = preg_replace('#<div[^>]*style="[^"]*display\s*:\s*none[^"]*"[^>]*>.*?</div>#is', '', $text);
+        // Ссылку (включая кнопку-CTA) превращаем в «Текст: URL».
+        $text = preg_replace_callback(
+            '#<a\s[^>]*href="([^"]+)"[^>]*>(.*?)</a>#is',
+            function ($m) {
+                $linkText = trim(strip_tags($m[2]));
+                $url = trim($m[1]);
+                if ($linkText === '' || strcasecmp($linkText, $url) === 0) return $url;
+                return $linkText . ': ' . $url;
+            },
+            $text
+        );
+        // Блочные теги → перевод строки.
+        $text = preg_replace('#</(p|div|h[1-6]|li|tr|table)\s*>#i', "\n", $text);
+        $text = preg_replace('#<br\s*/?>#i', "\n", $text);
+        $text = strip_tags($text);
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace('#[ \t]+#', ' ', $text);
+        $text = preg_replace('#[ \t]*\n[ \t]*#', "\n", $text);
+        $text = preg_replace('#\n{3,}#', "\n\n", $text);
+        return trim($text);
+    }
+}
+
 if (!function_exists('sendEmail')) {
     /**
      * @param string|array $to       email или массив email-ов
@@ -75,6 +104,14 @@ if (!function_exists('sendEmail')) {
                 $mail->addReplyTo($replyTo);
             }
 
+            // List-Unsubscribe для системных писем — повышает рейтинг у антиспама.
+            // Для заказного аккаунта (заявки поставщикам) не добавляем — это деловая
+            // переписка, а не рассылка.
+            if ($account !== 'order') {
+                $mail->addCustomHeader('List-Unsubscribe', '<mailto:' . $user . '?subject=unsubscribe>');
+                $mail->addCustomHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+            }
+
             $recipients = is_array($to) ? $to : [$to];
             foreach ($recipients as $addr) {
                 $addr = trim((string)$addr);
@@ -115,7 +152,7 @@ if (!function_exists('sendEmail')) {
             if ($isHtml) {
                 $mail->isHTML(true);
                 $mail->Body    = $body;
-                $mail->AltBody = trim(strip_tags(preg_replace('#<br\s*/?>#i', "\n", $body)));
+                $mail->AltBody = htmlEmailToPlainText($body);
             } else {
                 $mail->Body = $body;
             }
