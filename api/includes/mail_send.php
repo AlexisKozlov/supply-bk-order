@@ -104,12 +104,18 @@ if (!function_exists('sendEmail')) {
                 $mail->addReplyTo($replyTo);
             }
 
-            // List-Unsubscribe для системных писем — повышает рейтинг у антиспама.
+            // PHPMailer по умолчанию ставит X-Mailer: PHPMailer X.Y.Z — некоторые
+            // антиспам-фильтры это любят. Пробел отключает автодобавление.
+            $mail->XMailer = ' ';
+
+            // List-Unsubscribe + Auto-Submitted — для системных писем.
             // Для заказного аккаунта (заявки поставщикам) не добавляем — это деловая
-            // переписка, а не рассылка.
+            // переписка от живого человека, заголовки «автоматическое письмо» там вредны.
             if ($account !== 'order') {
                 $mail->addCustomHeader('List-Unsubscribe', '<mailto:' . $user . '?subject=unsubscribe>');
                 $mail->addCustomHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+                // RFC 3834: явно помечаем как авто-сгенерированное системное письмо.
+                $mail->addCustomHeader('Auto-Submitted', 'auto-generated');
             }
 
             $recipients = is_array($to) ? $to : [$to];
