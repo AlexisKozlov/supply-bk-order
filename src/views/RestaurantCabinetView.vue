@@ -1799,7 +1799,7 @@ const urgentItems = computed(() => {
   return items;
 });
 
-const bugReportHasReplies = computed(() => !!bugReportRef.value?.hasNewReplies?.value);
+const bugReportHasReplies = computed(() => !!bugReportRef.value?.hasNewReplies);
 
 // ═══ Tabs ═══
 // Полный список табов — используется на десктопе (вторичная навигация под топбаром)
