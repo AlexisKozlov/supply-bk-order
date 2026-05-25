@@ -45,10 +45,10 @@ if (!function_exists('renderMailHtml')) {
             $url  = htmlspecialchars($cta['url'], ENT_QUOTES, 'UTF-8');
             $text = htmlspecialchars($cta['text'], ENT_QUOTES, 'UTF-8');
             $ctaHtml = <<<HTML
-            <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:32px auto 0;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:36px auto 8px;">
               <tr>
-                <td align="center" bgcolor="#E76F51" style="border-radius:10px;">
-                  <a href="{$url}" target="_blank" style="display:inline-block;padding:14px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:10px;">
+                <td class="mail-cta-td" align="center" bgcolor="#E76F51" style="background-color:#E76F51;background-image:linear-gradient(135deg,#E76F51 0%,#F4A261 100%);border-radius:14px;box-shadow:0 6px 18px rgba(231,111,81,0.28);">
+                  <a class="mail-cta-link" href="{$url}" target="_blank" style="display:block;padding:18px 44px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:17px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:14px;letter-spacing:0.2px;line-height:1.2;mso-padding-alt:18px 44px;">
                     {$text}
                   </a>
                 </td>
@@ -84,6 +84,7 @@ HTML;
     .mail-title { font-size: 22px !important; }
     .mail-brand-title { font-size: 22px !important; }
     .mail-header { padding: 28px 24px !important; }
+    .mail-cta-link { padding: 16px 28px !important; font-size: 16px !important; }
   }
 </style>
 </head>
