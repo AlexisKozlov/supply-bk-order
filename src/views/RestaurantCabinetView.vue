@@ -106,7 +106,10 @@
       </a>
       <div class="sb-rest" :class="{ active: activeTab === 'profile' }">
         <button class="sb-rest-main" @click="switchTab('profile')" title="Открыть профиль">
-          <div class="sb-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
+          <div class="sb-avatar">
+            {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}
+            <span v-if="bugReportHasReplies" class="sb-avatar-dot" title="На ваше обращение ответили"></span>
+          </div>
           <div class="sb-rest-info">
             <div class="sb-rest-name">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
             <div class="sb-rest-addr">{{ restaurantAddress }}</div>
@@ -1209,10 +1212,33 @@
         </a>
       </div>
 
+      <div class="pf-card">
+        <div class="pf-card-head">
+          <span class="pf-card-icon pf-icon-bug">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="13" rx="6" ry="7"/>
+              <path d="M9 4l1.5 2.5M15 4l-1.5 2.5"/>
+              <path d="M3 10l3 1M21 10l-3 1M3 16l3-0.5M21 16l-3-0.5"/>
+              <path d="M9 11h6M9 14h6M9 17h6" stroke-width="1.2"/>
+            </svg>
+          </span>
+          <div class="pf-card-title">
+            <h3>Нашли ошибку?</h3>
+            <p>Опишите проблему — закупка получит уведомление и ответит здесь же</p>
+          </div>
+        </div>
+        <button class="pf-btn primary block" @click="openBugReport">
+          <span v-if="bugReportRef?.hasNewReplies" class="pf-bug-dot" title="Есть новое сообщение"></span>
+          {{ bugReportRef?.hasNewReplies ? 'Открыть обращения · есть ответ' : 'Сообщить об ошибке' }}
+        </button>
+      </div>
+
       <div class="pf-logout-row">
         <button class="pf-btn danger lg pf-logout" @click="handleLogout">Выйти из аккаунта</button>
       </div>
     </section>
+
+    <BugReportButton ref="bugReportRef" :hide-fab="true" />
 
     <div v-if="currentImportantPost" class="modal-overlay" @click.self="dismissCurrentImportantPost">
       <div class="cab-modal cab-modal-important imp-modal">
@@ -1373,6 +1399,7 @@
       <button class="mob-tab" :class="{ active: activeTab === 'profile' }" @click="switchTab('profile')">
         <span class="mob-tab-icon" v-html="cabIconSvg.profile"></span>
         <span class="mob-tab-label">Профиль</span>
+        <span v-if="bugReportHasReplies" class="mob-tab-dot" title="На ваше обращение ответили"></span>
       </button>
     </div>
 
@@ -1417,6 +1444,7 @@ const RestaurantOrderHistoryTab = defineAsyncComponent(() => import('@/component
 const RestaurantSurveysTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSurveysTab.vue'));
 const RestaurantInfoTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantInfoTab.vue'));
 const RestaurantEmailModal = defineAsyncComponent(() => import('@/components/restaurant/RestaurantEmailModal.vue'));
+const BugReportButton = defineAsyncComponent(() => import('@/components/BugReportButton.vue'));
 const RestaurantWarehouseStockTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantWarehouseStockTab.vue'));
 const RestaurantSupplyAssistantTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplyAssistantTab.vue'));
 const RestaurantSupplierContactsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplierContactsTab.vue'));
@@ -1756,9 +1784,22 @@ const urgentItems = computed(() => {
       action: () => switchTab('stock'),
     });
   }
+  // Ответ на обращение
+  if (bugReportHasReplies.value) {
+    items.push({
+      key: 'bug_reply', type: 'orange',
+      icon: cabIconSvg.help || cabIconSvg.info || '',
+      title: 'На ваше обращение ответили',
+      subtitle: 'Откройте чтобы прочитать',
+      deadline: '0000-00-00',  // в самый верх
+      action: () => openBugReport(),
+    });
+  }
   items.sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)));
   return items;
 });
+
+const bugReportHasReplies = computed(() => !!bugReportRef.value?.hasNewReplies?.value);
 
 // ═══ Tabs ═══
 // Полный список табов — используется на десктопе (вторичная навигация под топбаром)
@@ -2716,6 +2757,11 @@ function supAutoSelectDate(sup) {
 
 function handleLogout() { roStore.logout(); router.replace({ name: 'restaurant-order-login' }); }
 
+const bugReportRef = ref(null);
+function openBugReport() {
+  bugReportRef.value?.open();
+}
+
 // Format helpers
 // fmtDate, fmtDateShort, fmtDateTime, statusLabel imported from roUtils.js
 
@@ -3562,7 +3608,24 @@ onUnmounted(() => {
   color: inherit;
 }
 .sb-rest-info { flex: 1; min-width: 0; }
-.sb-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #E76F51, #F4A261); color: white; font-size: 13px; font-weight: 900; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sb-avatar { position: relative; width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #E76F51, #F4A261); color: white; font-size: 13px; font-weight: 900; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sb-avatar-dot {
+  position: absolute; top: -2px; right: -2px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #ef4444; border: 2px solid #1f1207;
+  box-shadow: 0 0 0 2px rgba(239,68,68,0.3);
+  animation: sb-dot-pulse 2s ease-in-out infinite;
+}
+@keyframes sb-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(239,68,68,0.3); }
+  50% { box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+}
+.mob-tab { position: relative; }
+.mob-tab-dot {
+  position: absolute; top: 4px; right: 26%;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #ef4444; border: 2px solid #fff;
+}
 .sb-rest-name { font-size: 12px; font-weight: 700; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-rest-addr { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 3px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .sb-rest-logout {
@@ -4924,6 +4987,8 @@ tr.del-err { background: #fef2f2; }
 }
 .pf-icon-devices { background: #E8F5E9; color: #2E7D32; }
 .pf-icon-contact { background: #FFF1E0; color: #C16B4D; }
+.pf-icon-bug { background: #FFF3E0; color: #b35900; }
+.pf-bug-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 6px; vertical-align: middle; }
 .pf-card-title { min-width: 0; flex: 1; }
 .pf-card-title h3 { margin: 0; font-size: 15px; font-weight: 700; color: #2C1A12; }
 .pf-card-title p { margin: 2px 0 0; font-size: 12px; color: #8B7355; }
