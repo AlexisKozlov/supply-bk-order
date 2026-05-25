@@ -407,7 +407,7 @@
       <button class="btn" @click="exportExcel" :disabled="!itemsWithPlan.length"><BkIcon name="excel" size="sm"/> Excel</button>
       <div style="position:relative;display:inline-block;">
         <button class="btn" :disabled="!itemsWithPlan.length" @click.stop="showSendDropdown = !showSendDropdown"><BkIcon name="send" size="sm"/> Отправить</button>
-        <div v-if="showSendDropdown" class="share-dropdown" style="bottom:100%;top:auto;">
+        <div v-if="showSendDropdown" class="share-dropdown" style="bottom:100%;top:auto;right:0;left:auto;">
           <button @click.stop="sendPlan('email-portal')" :disabled="planEmailSending"><span class="share-dot" style="background:#E76F51"></span>{{ planEmailSending ? 'Отправка…' : 'Email с портала' }}</button>
           <button @click.stop="sendPlan('email-mailto')"><span class="share-dot" style="background:#8B7355"></span>Email в почтовом клиенте</button>
         </div>
