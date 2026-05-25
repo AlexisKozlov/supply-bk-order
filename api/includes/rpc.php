@@ -1122,6 +1122,206 @@ if ($endpoint === 'rpc') {
         respond(['success' => true, 'sent_to' => $recipients, 'cc' => $ccFinal]);
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // Отправка прогнозного плана поставщику по email с портала
+    // (account=order, Reply-To=order@). По аналогии с send_supplier_order_email.
+    // Тема: «План для <supplier> от <ЮЛ> на <P1>—<Pn>».
+    // Тело — короткий текст со списком периодов; детали в Excel-вложении.
+    // ════════════════════════════════════════════════════════════════════
+    if ($fn === 'send_supplier_plan_email') {
+        if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
+
+        $rawTo        = trim((string)($body['to'] ?? ''));
+        $bodyText     = (string)($body['body_text'] ?? '');
+        $supplier     = trim((string)($body['supplier'] ?? ''));
+        $legalEntity  = trim((string)($body['legal_entity'] ?? ''));
+        $periodLabels = isset($body['period_labels']) && is_array($body['period_labels'])
+            ? array_values(array_filter(array_map(static function ($p) { return trim((string)$p); }, $body['period_labels'])))
+            : [];
+        $itemsCount   = (int)($body['items_count'] ?? 0);
+
+        if ($rawTo === '') respond(['error' => 'Не указан email получателя'], 400);
+
+        $recipients = array_values(array_filter(array_map('trim', preg_split('/[,;\s]+/', $rawTo)), function ($e) {
+            return $e !== '' && filter_var($e, FILTER_VALIDATE_EMAIL);
+        }));
+        if (!$recipients) respond(['error' => 'Не указан корректный email получателя'], 400);
+        if (count($recipients) > 10) respond(['error' => 'Слишком много адресов (максимум 10)'], 400);
+
+        // Полное имя поставщика и его cc_emails (по группе юрлиц).
+        $supplierDisplay = $supplier;
+        $supplierCcRaw   = '';
+        if ($supplier !== '') {
+            $senderGroup = getEntityGroup($legalEntity);
+            try {
+                $sStmt = $pdo->prepare("
+                    SELECT full_name, cc_emails
+                    FROM suppliers
+                    WHERE legal_entity_group = ?
+                      AND (short_name = ? OR full_name = ?)
+                      AND is_active = 1
+                    ORDER BY (legal_entity = ?) DESC, id
+                    LIMIT 1
+                ");
+                $sStmt->execute([$senderGroup, $supplier, $supplier, $legalEntity]);
+                $sRow = $sStmt->fetch();
+                if ($sRow) {
+                    $full = trim((string)($sRow['full_name'] ?? ''));
+                    if ($full !== '') $supplierDisplay = $full;
+                    $supplierCcRaw = (string)($sRow['cc_emails'] ?? '');
+                }
+            } catch (Throwable $e) {}
+        }
+
+        // Метка периодов: «P1—Pn» если ≥2, иначе одна строка.
+        $periodLabelText = '';
+        if (count($periodLabels) >= 2) {
+            $periodLabelText = $periodLabels[0] . '—' . $periodLabels[count($periodLabels) - 1];
+        } elseif (count($periodLabels) === 1) {
+            $periodLabelText = $periodLabels[0];
+        }
+
+        $subjParts = ['План'];
+        if ($supplierDisplay !== '') $subjParts[] = 'для ' . $supplierDisplay;
+        if ($legalEntity !== '')     $subjParts[] = 'от ' . $legalEntity;
+        if ($periodLabelText !== '') $subjParts[] = 'на ' . $periodLabelText;
+        $subject = implode(' ', $subjParts);
+        if (mb_strlen($subject) > 200) $subject = mb_substr($subject, 0, 200);
+
+        require_once __DIR__ . '/mail_send.php';
+
+        // HTML письма — минимализм, аналогично заявке. Без брендинга.
+        $esc = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+        $greetingLine = 'Здравствуйте!';
+
+        $intro = 'Направляем прогнозный план поставок';
+        if ($supplierDisplay !== '') $intro .= ' для <strong>' . $esc($supplierDisplay) . '</strong>';
+        if ($legalEntity !== '')     $intro .= ' от <strong>' . $esc($legalEntity) . '</strong>';
+        $intro .= '.';
+
+        $periodsHtml = '';
+        if (!empty($periodLabels)) {
+            $periodsHtml = '<div style="margin-top:10px;">Периоды: <strong>'
+                . $esc(implode(', ', $periodLabels)) . '</strong>.</div>';
+        }
+
+        $hasAttachment = !empty($body['attachment']) && is_array($body['attachment']);
+        $attachLine = $hasAttachment
+            ? '<div style="margin-top:18px;color:#4b5563;">Детали — во вложении (Excel).</div>'
+            : '';
+
+        // Если фронт прислал текст — добавляем как «комментарий от отправителя».
+        $extraText = '';
+        if ($bodyText !== '') {
+            $extraText = '<div style="white-space:pre-wrap;margin-top:18px;font-size:14px;color:#1f2937;">'
+                       . nl2br($esc($bodyText)) . '</div>';
+        }
+
+        $html =
+            '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+          . '<body style="margin:0;padding:0;background:#ffffff;color:#1f2937;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:14px;line-height:1.55;">'
+          . '<div style="padding:24px 28px;max-width:760px;font-size:14px;">'
+          . '<div style="margin-bottom:6px;">' . $greetingLine . '</div>'
+          . '<div>' . $intro . '</div>'
+          . $periodsHtml
+          . $extraText
+          . $attachLine
+          . '<div style="margin-top:22px;color:#1f2937;">Спасибо!</div>'
+          . '</div>'
+          . '</body></html>';
+
+        $orderEmail = $_ENV['SMTP_ORDER_USER'] ?? 'order@supply-department.online';
+        $senderEmail = '';
+        $senderUserId = null;
+        try {
+            $eStmt = $pdo->prepare("SELECT id, email FROM users WHERE name = ? LIMIT 1");
+            $eStmt->execute([$authUserName]);
+            $senderRow = $eStmt->fetch();
+            if ($senderRow) {
+                $senderEmail  = trim((string)($senderRow['email'] ?? ''));
+                $senderUserId = $senderRow['id'] ?? null;
+            }
+        } catch (Throwable $e) {}
+
+        $parseEmails = function ($raw) {
+            if ($raw === null || $raw === '') return [];
+            $list = is_array($raw) ? $raw : preg_split('/[,;\s]+/', (string)$raw);
+            $out = [];
+            foreach ($list as $item) {
+                $e = trim((string)$item);
+                if ($e !== '' && filter_var($e, FILTER_VALIDATE_EMAIL)) $out[] = $e;
+            }
+            return $out;
+        };
+
+        if (array_key_exists('cc', $body)) {
+            $ccList = $parseEmails($body['cc']);
+        } else {
+            $ccList = [];
+            if ($senderEmail !== '' && filter_var($senderEmail, FILTER_VALIDATE_EMAIL)) {
+                $ccList[] = $senderEmail;
+            }
+            foreach ($parseEmails($supplierCcRaw) as $e) $ccList[] = $e;
+        }
+        $toLower = array_map('strtolower', $recipients);
+        $seen = array_flip($toLower);
+        $ccFinal = [];
+        foreach ($ccList as $e) {
+            $key = strtolower($e);
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $ccFinal[] = $e;
+        }
+        if (count($ccFinal) > 10) $ccFinal = array_slice($ccFinal, 0, 10);
+
+        $opts = ['account' => 'order', 'reply_to' => $orderEmail];
+        if (!empty($ccFinal)) $opts['cc'] = $ccFinal;
+
+        if ($hasAttachment) {
+            $att = $body['attachment'];
+            $fname = trim((string)($att['filename'] ?? 'plan.xlsx'));
+            $b64   = (string)($att['content_b64'] ?? '');
+            $mime  = trim((string)($att['mime'] ?? '')) ?: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            $fname = preg_replace('/[^\p{L}\p{N}\.\-_ ]+/u', '_', $fname);
+            if (mb_strlen($fname) > 120) $fname = mb_substr($fname, 0, 120);
+            $decoded = base64_decode($b64, true);
+            if ($decoded !== false && strlen($decoded) > 0 && strlen($decoded) <= 4 * 1024 * 1024) {
+                $opts['attachments'] = [[
+                    'filename'    => $fname,
+                    'content_b64' => $b64,
+                    'mime'        => $mime,
+                ]];
+            }
+        }
+
+        $sendResult = sendEmail($recipients, $subject, $html, true, $opts);
+
+        try {
+            $pdo->prepare("INSERT INTO plan_email_log (sender_user_id, sender_user_name, recipients, cc_recipients, subject, supplier, legal_entity, period_labels, items_count, success, error_message, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                ->execute([
+                    $senderUserId,
+                    $authUserName,
+                    implode(', ', $recipients),
+                    !empty($ccFinal) ? implode(', ', $ccFinal) : null,
+                    $subject,
+                    $supplier !== '' ? $supplier : null,
+                    $legalEntity !== '' ? $legalEntity : null,
+                    !empty($periodLabels) ? mb_substr(implode(', ', $periodLabels), 0, 500) : null,
+                    $itemsCount ?: null,
+                    $sendResult['success'] ? 1 : 0,
+                    $sendResult['success'] ? null : mb_substr((string)($sendResult['error'] ?? ''), 0, 500),
+                    $clientIp ?? null,
+                ]);
+        } catch (Throwable $e) {
+            error_log('[send_supplier_plan_email] log insert failed: ' . $e->getMessage());
+        }
+
+        if (!$sendResult['success']) {
+            respond(['error' => 'Не удалось отправить письмо: ' . ($sendResult['error'] ?? 'неизвестная ошибка')], 500);
+        }
+        respond(['success' => true, 'sent_to' => $recipients, 'cc' => $ccFinal]);
+    }
+
     if ($fn === 'get_rbac_config') {
         respond([
             'modules' => array_keys($ROLE_TEMPLATES['admin']),

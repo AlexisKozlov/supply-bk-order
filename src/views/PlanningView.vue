@@ -405,6 +405,13 @@
       <button v-if="!isViewer" class="btn primary" @click="savePlan" :disabled="!itemsWithPlan.length || viewOnly"><BkIcon name="save" size="sm"/> {{ editingPlanId ? 'Обновить план' : 'Сохранить план' }}</button>
       <button class="btn" @click="copyPlanToClipboard" :disabled="!itemsWithPlan.length"><BkIcon name="history" size="sm"/> Копировать</button>
       <button class="btn" @click="exportExcel" :disabled="!itemsWithPlan.length"><BkIcon name="excel" size="sm"/> Excel</button>
+      <div style="position:relative;display:inline-block;">
+        <button class="btn" :disabled="!itemsWithPlan.length" @click.stop="showSendDropdown = !showSendDropdown"><BkIcon name="send" size="sm"/> Отправить</button>
+        <div v-if="showSendDropdown" class="share-dropdown" style="bottom:100%;top:auto;">
+          <button @click.stop="sendPlan('email-portal')" :disabled="planEmailSending"><span class="share-dot" style="background:#E76F51"></span>{{ planEmailSending ? 'Отправка…' : 'Email с портала' }}</button>
+          <button @click.stop="sendPlan('email-mailto')"><span class="share-dot" style="background:#8B7355"></span>Email в почтовом клиенте</button>
+        </div>
+      </div>
     </div>
     <div v-if="planDraftStatusText && items.length && !viewOnly && !editingPlanId" class="draft-status">{{ planDraftStatusText }}</div>
 
@@ -414,6 +421,16 @@
       @confirm="onConfirmOk"
       @cancel="onConfirmCancel"/>
     <AnalogMergeModal v-if="analogMergeModal.show" :merges="analogMergeModal.merges" @apply="onAnalogApply" @skip="onAnalogSkip"/>
+    <SendSupplierEmailModal
+      v-if="planEmailPreview.show"
+      :to="planEmailPreview.to"
+      :subject="planEmailPreview.subject"
+      :initial-cc="planEmailPreview.initialCc"
+      :self-email="planEmailPreview.selfEmail"
+      :sending="planEmailSending"
+      @send="sendPlanEmailWithCc"
+      @cancel="planEmailPreview.show = false"
+    />
 
     <!-- Модалка сохранения плана -->
     <Teleport to="body">
@@ -510,6 +527,7 @@ import ViewerBanner from '@/components/ViewerBanner.vue';
 const EditCardModal = defineAsyncComponent(() => import('@/components/modals/EditCardModal.vue'));
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const AnalogMergeModal = defineAsyncComponent(() => import('@/components/modals/AnalogMergeModal.vue'));
+const SendSupplierEmailModal = defineAsyncComponent(() => import('@/components/modals/SendSupplierEmailModal.vue'));
 
 const route = useRoute();
 const router = useRouter();
@@ -538,6 +556,21 @@ const items = ref([]);
 const trendMap = ref({});
 const salesMap = ref({}); // sku -> { total, daily, group }
 const showSales = ref(false);
+
+// ─── Отправка плана поставщику ────────────────────────────────────────────────
+const showSendDropdown = ref(false);
+const planEmailSending = ref(false);
+const planEmailPreview = ref({ show: false, to: '', subject: '', initialCc: [], selfEmail: '', payload: null });
+
+// Закрываем dropdown по клику вне
+function _onDocClickClosePlanDropdown(e) {
+  if (!showSendDropdown.value) return;
+  const t = e.target;
+  if (t && t.closest && t.closest('.share-dropdown')) return;
+  showSendDropdown.value = false;
+}
+onMounted(() => document.addEventListener('click', _onDocClickClosePlanDropdown));
+onBeforeUnmount(() => document.removeEventListener('click', _onDocClickClosePlanDropdown));
 
 // При включении тоггла «📊 Реализация» — подгрузить тренды, если они ещё пусты.
 // Раньше loadTrends дёргался только при выборе поставщика / открытии плана,
@@ -1686,8 +1719,11 @@ function addProduct(e) {
   _savePlanDraft();
 }
 
-async function exportExcel() {
-  if (!itemsWithPlan.value.length) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
+// Собирает книгу xlsx без побочных эффектов. Возвращает { XLSX, wb, filename }
+// или null если нет данных. Используется и для скачивания (exportExcel), и для
+// прикрепления к email (sendPlanByEmail).
+async function buildPlanWorkbook() {
+  if (!itemsWithPlan.value.length) return null;
   const XLSX = await import('xlsx-js-style');
   const headers = periodHeaders.value;
   const le = orderStore.settings.legalEntity;
@@ -1879,8 +1915,162 @@ async function exportExcel() {
   XLSX.utils.book_append_sheet(wb, ws, 'План');
 
   const fileDate = startDateStr.value.replace(/-/g, '');
-  XLSX.writeFile(wb, `План_${supplier.value}_${fileDate}.xlsx`);
+  const filename = `План_${supplier.value}_${fileDate}.xlsx`;
+  return { XLSX, wb, filename };
+}
+
+async function exportExcel() {
+  if (!itemsWithPlan.value.length) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
+  const built = await buildPlanWorkbook();
+  if (!built) return;
+  built.XLSX.writeFile(built.wb, built.filename);
   toast.success('Экспорт', 'Файл Excel сохранён');
+}
+
+// Утилита: ArrayBuffer → base64 (для отправки xlsx как вложения в письме).
+function planUint8ToBase64(u8) {
+  const chunk = 0x8000;
+  let s = '';
+  for (let i = 0; i < u8.length; i += chunk) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+  }
+  return btoa(s);
+}
+
+// Метки периодов в человекочитаемом виде (для темы письма и аудита).
+function planPeriodLabels() {
+  return (periodHeaders.value || []).map(h => h.label);
+}
+
+// Короткое текстовое описание плана для тела письма / mailto.
+function planTextBody() {
+  const labels = planPeriodLabels();
+  const periodPart = labels.length
+    ? (labels.length >= 2 ? `${labels[0]}—${labels[labels.length - 1]}` : labels[0])
+    : '';
+  const lines = [];
+  lines.push('Добрый день!');
+  lines.push('');
+  const intro = `Направляем прогнозный план поставок для ${supplier.value}` +
+    (orderStore.settings.legalEntity ? ` от ${orderStore.settings.legalEntity}` : '') +
+    (periodPart ? ` на ${periodPart}` : '') + '.';
+  lines.push(intro);
+  if (labels.length) lines.push(`Периоды: ${labels.join(', ')}.`);
+  lines.push('');
+  lines.push('Детали — во вложении (Excel).');
+  lines.push('');
+  lines.push('Спасибо!');
+  return lines.join('\n');
+}
+
+async function sendPlan(channel) {
+  showSendDropdown.value = false;
+  if (!itemsWithPlan.value.length) { toast.error('Нет позиций', 'Нет позиций с заказом для отправки'); return; }
+  if (!supplier.value) { toast.error('Не выбран поставщик', ''); return; }
+
+  const contacts = await supplierStore.getSupplierContacts(supplier.value, orderStore.settings.legalEntity);
+  const toRaw = (contacts?.email || '').trim();
+  if (!toRaw) { toast.error('У поставщика не указан email', 'Заполните в карточке поставщика'); return; }
+
+  const labels = planPeriodLabels();
+  const periodPart = labels.length
+    ? (labels.length >= 2 ? `${labels[0]}—${labels[labels.length - 1]}` : labels[0])
+    : '';
+
+  if (channel === 'email-mailto') {
+    const to = toRaw.split(/[,;]/).map(e => e.trim()).filter(Boolean).join(';');
+    const subj = [`План`,
+      supplier.value ? `для ${supplier.value}` : '',
+      orderStore.settings.legalEntity ? `от ${orderStore.settings.legalEntity}` : '',
+      periodPart ? `на ${periodPart}` : '',
+    ].filter(Boolean).join(' ');
+    window.location.href = `mailto:${to}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(planTextBody())}`;
+    return;
+  }
+
+  if (channel === 'email-portal') {
+    if (planEmailSending.value) return;
+
+    // Стартовый CC: отправитель + cc_emails поставщика (как в /order).
+    const selfEmail = (userStore.currentUser?.email || '').trim();
+    const initialCc = [];
+    if (selfEmail) initialCc.push(selfEmail);
+    const rawSupplierCc = (contacts?.cc_emails || '').toString();
+    const parsedSupplierCc = rawSupplierCc.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+    const toLc = toRaw.toLowerCase().split(/[,;\s]+/).filter(Boolean);
+    const seen = new Set([...initialCc.map(e => e.toLowerCase()), ...toLc]);
+    for (const e of parsedSupplierCc) {
+      const lc = e.toLowerCase();
+      if (seen.has(lc)) continue;
+      seen.add(lc);
+      initialCc.push(e);
+    }
+
+    const subjParts = ['План'];
+    if (supplier.value)                    subjParts.push('для ' + supplier.value);
+    if (orderStore.settings.legalEntity)   subjParts.push('от ' + orderStore.settings.legalEntity);
+    if (periodPart)                        subjParts.push('на ' + periodPart);
+
+    planEmailPreview.value = {
+      show: true,
+      to: toRaw,
+      subject: subjParts.join(' '),
+      initialCc,
+      selfEmail,
+      payload: {
+        to: toRaw,
+        supplier: supplier.value,
+        le: orderStore.settings.legalEntity,
+        periodLabels: labels,
+        itemsCount: itemsWithPlan.value.length,
+        text: planTextBody(),
+      },
+    };
+  }
+}
+
+async function sendPlanEmailWithCc(cc) {
+  const p = planEmailPreview.value.payload;
+  if (!p || planEmailSending.value) return;
+  planEmailSending.value = true;
+  try {
+    let attachment = null;
+    try {
+      const built = await buildPlanWorkbook();
+      if (built) {
+        const buffer = built.XLSX.write(built.wb, { type: 'array', bookType: 'xlsx' });
+        const u8 = new Uint8Array(buffer);
+        attachment = {
+          filename: built.filename,
+          mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          content_b64: planUint8ToBase64(u8),
+        };
+      }
+    } catch (e) {
+      console.warn('[plan-email] xlsx build failed:', e);
+    }
+
+    const { data, error } = await db.rpc('send_supplier_plan_email', {
+      to: p.to,
+      body_text: '',
+      supplier: p.supplier,
+      legal_entity: p.le,
+      period_labels: p.periodLabels,
+      items_count: p.itemsCount,
+      cc,
+      ...(attachment ? { attachment } : {}),
+    });
+    if (error) throw new Error(error);
+    if (data?.error) throw new Error(data.error);
+    const recipients = Array.isArray(data?.sent_to) ? data.sent_to.join(', ') : p.to;
+    const ccCount = Array.isArray(data?.cc) ? data.cc.length : 0;
+    toast.success('Письмо отправлено', `На ${recipients}${ccCount ? ` (+${ccCount} в копии)` : ''}`);
+    planEmailPreview.value.show = false;
+  } catch (e) {
+    toast.error('Не удалось отправить', e?.message || 'Ошибка соединения');
+  } finally {
+    planEmailSending.value = false;
+  }
 }
 
 function _savePlanDraft() {
