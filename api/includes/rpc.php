@@ -840,7 +840,22 @@ if ($endpoint === 'rpc') {
     }
 
     // --- Приватные RPC (требуют авторизацию) ---
-    if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
+    // Список RPC, доступных также по ресторанной сессии (cookie ro_session).
+    // Каждый из этих эндпоинтов внутри ещё раз проверяет, кто звонит, через
+    // $bugReportCaller() — лишнего доступа не выдаём.
+    $RO_ALLOWED_RPC = ['create_bug_report', 'get_bug_reports', 'get_bug_report', 'get_bug_reports_count', 'reply_bug_report'];
+    if (!checkAuth($pdo)) {
+        $roAllowed = false;
+        if (in_array($fn, $RO_ALLOWED_RPC, true)) {
+            if (!function_exists('roGetRestaurantSession')) {
+                require_once __DIR__ . '/restaurant_orders.php';
+            }
+            if (function_exists('roGetRestaurantSession') && roGetRestaurantSession($pdo)) {
+                $roAllowed = true;
+            }
+        }
+        if (!$roAllowed) respond(['error' => 'Unauthorized'], 401);
+    }
 
     // Получаем имя авторизованного пользователя из сессии (для защиты от подмены user_name)
     $authUser = getSessionUser($pdo);
@@ -4212,15 +4227,46 @@ if ($endpoint === 'rpc') {
     }
 
     // ═══ Баг-репорты: создать ═══
+    // Универсальный caller для баг-репорта: закупка ИЛИ ресторан.
+    // Возвращает ['name' => ..., 'role' => 'admin'|'user', 'legal_entity' => ?].
+    // Для ресторана name = 'ro:<номер>', role = 'user' — отдельной адмки нет,
+    // в /admin?tab=feedback закупка видит все обращения как админ.
+    $bugReportCaller = function() use ($pdo) {
+        $supply = getSessionUser($pdo);
+        if ($supply) {
+            return [
+                'name' => $supply['name'] ?? 'unknown',
+                'role' => $supply['role'] ?? 'user',
+                'legal_entity' => '',
+            ];
+        }
+        if (!function_exists('roGetRestaurantSession')) {
+            require_once __DIR__ . '/restaurant_orders.php';
+        }
+        $ro = function_exists('roGetRestaurantSession') ? roGetRestaurantSession($pdo) : null;
+        if ($ro) {
+            $group = $ro['legal_entity_group'] ?? 'BK_VM';
+            $le = $group === 'PS' ? 'ООО "Пицца Стар"' : 'ООО "Бургер БК"';
+            return [
+                'name' => 'ro:' . ($ro['restaurant_number'] ?? ''),
+                'role' => 'user',
+                'legal_entity' => $le,
+            ];
+        }
+        return null;
+    };
+
     if ($fn === 'create_bug_report') {
-        $caller = getSessionUser($pdo);
+        $caller = $bugReportCaller();
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $title = trim($body['title'] ?? '');
         $description = trim($body['description'] ?? '');
         $screenshots = $body['screenshots'] ?? [];
         $actionLog = trim($body['action_log'] ?? '');
         $pageUrl = trim($body['page_url'] ?? '');
-        $le = $body['legal_entity'] ?? '';
+        // Юрлицо: у ресторана подставляем из сессии (фронту его передавать нечем),
+        // у закупки уважаем то, что прислал фронт.
+        $le = $caller['legal_entity'] !== '' ? $caller['legal_entity'] : ($body['legal_entity'] ?? '');
         $browserInfo = trim($body['browser_info'] ?? '');
         if (!$title) respond(['error' => 'Укажите тему сообщения'], 400);
         $stmt = $pdo->prepare("INSERT INTO bug_reports (title, description, screenshots, action_log, page_url, created_by, legal_entity, browser_info) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
@@ -4231,7 +4277,7 @@ if ($endpoint === 'rpc') {
 
     // ═══ Баг-репорты: список (для админа — все, для юзера — свои) ═══
     if ($fn === 'get_bug_reports') {
-        $caller = getSessionUser($pdo);
+        $caller = $bugReportCaller();
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $isAdmin = ($caller['role'] ?? '') === 'admin';
         if ($isAdmin) {
@@ -4250,7 +4296,7 @@ if ($endpoint === 'rpc') {
 
     // ═══ Баг-репорты: получить один с ответами ═══
     if ($fn === 'get_bug_report') {
-        $caller = getSessionUser($pdo);
+        $caller = $bugReportCaller();
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'Не указан ID'], 400);
@@ -4267,7 +4313,7 @@ if ($endpoint === 'rpc') {
 
     // ═══ Баг-репорты: ответить ═══
     if ($fn === 'reply_bug_report') {
-        $caller = getSessionUser($pdo);
+        $caller = $bugReportCaller();
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $reportId = intval($body['report_id'] ?? 0);
         $message = trim($body['message'] ?? '');
@@ -4319,7 +4365,7 @@ if ($endpoint === 'rpc') {
 
     // ═══ Баг-репорты: количество новых (для бейджа админа) ═══
     if ($fn === 'get_bug_reports_count') {
-        $caller = getSessionUser($pdo);
+        $caller = $bugReportCaller();
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $isAdmin = ($caller['role'] ?? '') === 'admin';
         if ($isAdmin) {
