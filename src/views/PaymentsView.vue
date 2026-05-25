@@ -4,12 +4,16 @@
       <h1 class="page-title">Оплаты поставщиков</h1>
       <div class="pay-filters">
         <select v-model="statusFilter" class="pay-input" @change="load">
-          <option value="">Все</option>
+          <option value="">Все статусы</option>
           <option value="upcoming">Предстоящие</option>
           <option value="request_due">Нужна заявка</option>
           <option value="requested">Заявка подана</option>
           <option value="paid">Оплачено</option>
           <option value="cancelled">Отменено</option>
+        </select>
+        <select v-model="supplierFilter" class="pay-input" @change="load">
+          <option value="">Все поставщики</option>
+          <option v-for="s in supplierFilterOptions" :key="s" :value="s">{{ s }}</option>
         </select>
         <button class="btn primary pay-add-btn" @click="openAddModal">+ Добавить вручную</button>
       </div>
@@ -138,6 +142,9 @@ const router = useRouter()
 const loading = ref(false)
 const payments = ref([])
 const statusFilter = ref('')
+const supplierFilter = ref('')
+// Список уникальных поставщиков из текущей выдачи — для select-фильтра.
+const supplierFilterOptions = ref([])
 const editId = ref(null)
 const editAmount = ref('')
 const editNote = ref('')
@@ -152,8 +159,17 @@ async function load() {
     const groupCode = getEntityGroupCode(orderStore.settings.legalEntity)
     let q = db.from('supplier_payments').select('*').eq('legal_entity_group', groupCode).order('payment_date')
     if (statusFilter.value) q = q.eq('status', statusFilter.value)
+    if (supplierFilter.value) q = q.eq('supplier', supplierFilter.value)
     const { data } = await q
     payments.value = data || []
+    // Обновляем список поставщиков для фильтра. Список считается ТОЛЬКО когда
+    // фильтр поставщика пуст, чтобы выбранный поставщик не «исчез» из dropdown,
+    // когда после фильтра в выдаче остаётся одна группа.
+    if (!supplierFilter.value) {
+      const uniq = new Set()
+      for (const p of payments.value) if (p.supplier) uniq.add(p.supplier)
+      supplierFilterOptions.value = [...uniq].sort((a, b) => a.localeCompare(b, 'ru'))
+    }
   } catch { payments.value = [] }
   finally { loading.value = false }
 }
@@ -295,7 +311,7 @@ function onSupplierInput() {
         .select('short_name,payment_delay_days,country')
         .eq('legal_entity_group', group)
         .eq('is_active', 1)
-        .ilike('short_name', `%${q}%`)
+        .ilike('short_name', `*${q}*`)
         .limit(15)
       addModal.value.supplierMatches = data || []
     } catch {
