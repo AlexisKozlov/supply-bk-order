@@ -90,8 +90,8 @@ function roClearSessionCookie() {
 // (отчёты/RPC сброса пароля ещё на них смотрят), но логика сессий теперь здесь.
 
 define('RO_SESSION_MAX_DEVICES', 5);             // активных устройств на ресторан
-define('RO_SESSION_IDLE_HOURS', 12);             // потолок неактивности (last_seen → expire)
-define('RO_SESSION_TTL_DEFAULT_HOURS', 24);      // без галки «запомнить»
+define('RO_SESSION_IDLE_HOURS', 168);            // потолок неактивности (last_seen → expire); 7 дней
+define('RO_SESSION_TTL_DEFAULT_HOURS', 168);     // без галки «запомнить»; 7 дней
 define('RO_SESSION_TTL_REMEMBER_DAYS', 30);      // с галкой «запомнить»
 
 /**
