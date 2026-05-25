@@ -5868,16 +5868,21 @@ if (strpos($roAction, 'admin') === 0) {
     }
 
     // --- Поиск товаров (для модалки штрихкодов в админке) — без обязательного legal_entity ---
+    // Не-admin видит только товары своих групп юрлиц (roApplyAllowedGroupsSql).
     if ($adminAction === 'products-search' && $method === 'GET') {
         $q = trim((string)($_GET['q'] ?? ''));
         if (mb_strlen($q) < 2) roRespond(['products' => []]);
         $like = '%' . $q . '%';
-        $s = $pdo->prepare("SELECT sku, name, legal_entity, qty_per_box, supplier, gtin
-                            FROM products
-                            WHERE is_active = 1 AND (sku LIKE ? OR name LIKE ? OR external_code LIKE ?)
-                            ORDER BY name
-                            LIMIT 30");
-        $s->execute([$like, $like, $like]);
+        $where = ["is_active = 1", "(sku LIKE ? OR name LIKE ? OR external_code LIKE ?)"];
+        $params = [$like, $like, $like];
+        roApplyAllowedGroupsSql($sessionUser, $where, $params, 'legal_entity_group');
+        $sql = "SELECT sku, name, legal_entity, qty_per_box, supplier, gtin
+                FROM products
+                WHERE " . implode(' AND ', $where) . "
+                ORDER BY name
+                LIMIT 30";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
         roRespond(['products' => $s->fetchAll()]);
     }
 
@@ -6704,18 +6709,25 @@ if (strpos($roAction, 'admin') === 0) {
             if ($isPrimary) {
                 $pdo->prepare("UPDATE product_barcodes SET is_primary = 0 WHERE sku = ?")->execute([$sku]);
             }
+            // INSERT: если такая пара (sku, barcode) уже есть — обновляем только
+            // тип (его пользователь сейчас явно указал) и created_by. Флаг is_primary
+            // через POST НЕ перетираем — для смены основного есть PATCH с is_primary.
             $ins = $pdo->prepare("
                 INSERT INTO product_barcodes (sku, barcode, barcode_type, is_primary, source, created_by)
                 VALUES (?, ?, ?, ?, 'admin', ?)
                 ON DUPLICATE KEY UPDATE
                     barcode_type = VALUES(barcode_type),
-                    is_primary = VALUES(is_primary),
                     created_by = VALUES(created_by)
             ");
             $ins->execute([$sku, $barcode, $type, $isPrimary, $createdBy]);
 
-            // Синхронизация с products.gtin: если этот штрихкод стал основным — пишем в products.gtin
+            // Если ставили как основной — синхронизируем products.gtin.
+            // (Для случая когда запись уже существовала и is_primary не перетирался,
+            // принудительно поставим is_primary=1 этой строке отдельным UPDATE — выше
+            // уже сняли флаг с других.)
             if ($isPrimary) {
+                $pdo->prepare("UPDATE product_barcodes SET is_primary = 1 WHERE sku = ? AND barcode = ?")
+                    ->execute([$sku, $barcode]);
                 $pdo->prepare("UPDATE products SET gtin = ? WHERE sku = ?")->execute([$barcode, $sku]);
             }
             $pdo->commit();
