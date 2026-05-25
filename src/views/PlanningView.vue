@@ -538,6 +538,15 @@ const items = ref([]);
 const trendMap = ref({});
 const salesMap = ref({}); // sku -> { total, daily, group }
 const showSales = ref(false);
+
+// При включении тоггла «📊 Реализация» — подгрузить тренды, если они ещё пусты.
+// Раньше loadTrends дёргался только при выборе поставщика / открытии плана,
+// и пользователь, нажавший кнопку сразу — видел пустую колонку.
+watch(showSales, (on) => {
+  if (on && items.value.length && Object.keys(salesMap.value).length === 0) {
+    loadTrends();
+  }
+});
 const suppLoading = ref(false);
 const settingsExpanded = ref(false);
 const load1cLoading = ref(false);
