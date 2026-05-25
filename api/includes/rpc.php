@@ -5592,6 +5592,94 @@ if ($endpoint === 'rpc') {
         respond(['success' => true, 'payment_id' => $pdo->lastInsertId(), 'payment_date' => $payDate->format('Y-m-d')]);
     }
 
+    // Ручное создание оплаты — для случаев когда заказ не проходил через портал.
+    // Принимает supplier, legal_entity, delivery_date, amount (опц.).
+    // Расчёт payment_date / request_deadline — по той же логике что и
+    // create_payment_if_needed (отсрочка из карточки поставщика, ближайший ВТ/ЧТ).
+    if ($fn === 'create_manual_payment') {
+        requireModuleAccess($authUser, 'plan-fact', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $supplier     = trim((string)($body['supplier'] ?? ''));
+        $legalEntity  = trim((string)($body['legal_entity'] ?? ''));
+        $deliveryDate = trim((string)($body['delivery_date'] ?? ''));
+        $amount       = $body['amount'] ?? null;
+        $note         = trim((string)($body['note'] ?? ''));
+
+        if ($supplier === '')     respond(['error' => 'Не указан поставщик'], 400);
+        if ($legalEntity === '')  respond(['error' => 'Не указано юрлицо'], 400);
+        if ($deliveryDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) {
+            respond(['error' => 'Не указана корректная дата прихода'], 400);
+        }
+        if (!checkLegalEntityAccess($authUser, $legalEntity)) {
+            respond(['error' => 'Нет доступа к юрлицу'], 403);
+        }
+
+        // Берём поставщика и его отсрочку. Ищем по группе юрлиц, чтобы можно
+        // было создать оплату от любого юрлица группы (карточка поставщика
+        // обычно заведена под одно из них).
+        $group = getEntityGroup($legalEntity);
+        $sStmt = $pdo->prepare("
+            SELECT country, payment_delay_days
+            FROM suppliers
+            WHERE legal_entity_group = ?
+              AND (short_name = ? OR full_name = ?)
+              AND is_active = 1
+            ORDER BY (legal_entity = ?) DESC, id
+            LIMIT 1
+        ");
+        $sStmt->execute([$group, $supplier, $supplier, $legalEntity]);
+        $s = $sStmt->fetch();
+        if (!$s) respond(['error' => 'Поставщик не найден в карточках'], 404);
+        if (!$s['payment_delay_days']) {
+            respond(['error' => 'У поставщика не указана отсрочка платежа — заполните в карточке'], 400);
+        }
+
+        $delayDays = intval($s['payment_delay_days']);
+        $dDate = new DateTime($deliveryDate);
+        $dueDate = clone $dDate;
+        $dueDate->modify("+{$delayDays} days");
+
+        // Ближайший ВТ(2) или ЧТ(4) до или на dueDate.
+        $payDate = clone $dueDate;
+        while (true) {
+            $dow = (int)$payDate->format('N');
+            if ($dow === 2 || $dow === 4) break;
+            $payDate->modify('-1 day');
+        }
+
+        $deadline = clone $payDate;
+        $deadline->modify('-1 day');
+        $deadline->setTime(15, 0, 0);
+
+        $amountVal = ($amount !== null && $amount !== '' && is_numeric($amount)) ? (float)$amount : null;
+
+        $ins = $pdo->prepare("
+            INSERT INTO supplier_payments
+              (order_id, supplier, legal_entity, delivery_date, payment_delay_days,
+               payment_due_date, payment_date, request_deadline, amount, note, created_by)
+            VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $ins->execute([
+            $supplier,
+            $legalEntity,
+            $deliveryDate,
+            $delayDays,
+            $dueDate->format('Y-m-d'),
+            $payDate->format('Y-m-d'),
+            $deadline->format('Y-m-d H:i:s'),
+            $amountVal,
+            $note !== '' ? $note : null,
+            $authUserName,
+        ]);
+
+        respond([
+            'success' => true,
+            'payment_id' => $pdo->lastInsertId(),
+            'payment_date' => $payDate->format('Y-m-d'),
+            'request_deadline' => $deadline->format('Y-m-d H:i:s'),
+        ]);
+    }
+
     if ($fn === 'update_payment') {
         requireModuleAccess($authUser, 'plan-fact', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);

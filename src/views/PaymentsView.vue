@@ -11,6 +11,7 @@
           <option value="paid">Оплачено</option>
           <option value="cancelled">Отменено</option>
         </select>
+        <button class="btn primary pay-add-btn" @click="openAddModal">+ Добавить вручную</button>
       </div>
     </div>
 
@@ -73,16 +74,62 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Модалка ручного создания оплаты -->
+    <div v-if="addModal.show" class="pay-modal-backdrop" @click.self="closeAddModal">
+      <div class="pay-modal">
+        <h2 class="pay-modal-title">Добавить оплату вручную</h2>
+        <p class="pay-modal-hint">Если заказ не проходил через портал. Срок оплаты и дедлайн заявки рассчитаются автоматически по отсрочке из карточки поставщика.</p>
+        <div class="pay-modal-row">
+          <label>Юрлицо <span class="req">*</span></label>
+          <select v-model="addModal.legalEntity" class="pay-input">
+            <option v-for="le in legalEntityOptions" :key="le" :value="le">{{ le }}</option>
+          </select>
+        </div>
+        <div class="pay-modal-row">
+          <label>Поставщик <span class="req">*</span></label>
+          <input v-model="addModal.supplierQuery" class="pay-input" placeholder="Поиск по названию" @input="onSupplierInput" />
+          <div v-if="addModal.supplierMatches.length && !addModal.supplier" class="pay-supplier-suggest">
+            <button v-for="s in addModal.supplierMatches" :key="s.short_name" @click="pickSupplier(s)">
+              {{ s.short_name }}<span v-if="s.payment_delay_days"> · отсрочка {{ s.payment_delay_days }} дн.</span>
+            </button>
+          </div>
+          <div v-if="addModal.supplier" class="pay-supplier-picked">
+            ✓ {{ addModal.supplier }}
+            <button class="pay-supplier-clear" @click="clearSupplier" title="Сбросить">✕</button>
+          </div>
+        </div>
+        <div class="pay-modal-row">
+          <label>Дата прихода <span class="req">*</span></label>
+          <input type="date" v-model="addModal.deliveryDate" class="pay-input" />
+        </div>
+        <div class="pay-modal-row">
+          <label>Сумма (необязательно)</label>
+          <input type="number" v-model="addModal.amount" class="pay-input" placeholder="0" min="0" step="0.01" />
+        </div>
+        <div class="pay-modal-row">
+          <label>Комментарий (необязательно)</label>
+          <input v-model="addModal.note" class="pay-input" placeholder="Например: счёт 123 от 24.05" maxlength="255" />
+        </div>
+        <div v-if="addModal.error" class="pay-modal-error">{{ addModal.error }}</div>
+        <div class="pay-modal-actions">
+          <button class="btn" @click="closeAddModal" :disabled="addModal.saving">Отмена</button>
+          <button class="btn primary" @click="submitAddModal" :disabled="addModal.saving || !canSubmitAdd">
+            {{ addModal.saving ? 'Сохраняю…' : 'Создать' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
-import { getEntityGroupCode } from '@/lib/legalEntities.js'
+import { getEntityGroup, getEntityGroupCode } from '@/lib/legalEntities.js'
 
 const orderStore = useOrderStore()
 
@@ -190,6 +237,101 @@ function fmtAmount(v) { return Number(v).toLocaleString('ru-RU', { minimumFracti
 
 onMounted(load)
 watch(() => orderStore.settings.legalEntity, () => load())
+
+// ─── Ручное создание оплаты ───────────────────────────────────────────────
+const addModal = ref({
+  show: false,
+  legalEntity: '',
+  supplier: '',
+  supplierQuery: '',
+  supplierMatches: [],
+  deliveryDate: '',
+  amount: '',
+  note: '',
+  saving: false,
+  error: '',
+})
+
+const legalEntityOptions = computed(() => getEntityGroup(orderStore.settings.legalEntity))
+const canSubmitAdd = computed(() =>
+  addModal.value.legalEntity && addModal.value.supplier && addModal.value.deliveryDate
+)
+
+function openAddModal() {
+  const today = new Date().toISOString().slice(0, 10)
+  addModal.value = {
+    show: true,
+    legalEntity: orderStore.settings.legalEntity,
+    supplier: '',
+    supplierQuery: '',
+    supplierMatches: [],
+    deliveryDate: today,
+    amount: '',
+    note: '',
+    saving: false,
+    error: '',
+  }
+}
+function closeAddModal() {
+  if (addModal.value.saving) return
+  addModal.value.show = false
+}
+function clearSupplier() {
+  addModal.value.supplier = ''
+  addModal.value.supplierQuery = ''
+  addModal.value.supplierMatches = []
+}
+
+let _supplierSearchTimer = null
+function onSupplierInput() {
+  addModal.value.supplier = ''
+  if (_supplierSearchTimer) clearTimeout(_supplierSearchTimer)
+  const q = addModal.value.supplierQuery.trim()
+  if (q.length < 2) { addModal.value.supplierMatches = []; return }
+  _supplierSearchTimer = setTimeout(async () => {
+    try {
+      const group = getEntityGroupCode(addModal.value.legalEntity)
+      const { data } = await db.from('suppliers')
+        .select('short_name,payment_delay_days,country')
+        .eq('legal_entity_group', group)
+        .eq('is_active', 1)
+        .ilike('short_name', `%${q}%`)
+        .limit(15)
+      addModal.value.supplierMatches = data || []
+    } catch {
+      addModal.value.supplierMatches = []
+    }
+  }, 250)
+}
+function pickSupplier(s) {
+  addModal.value.supplier = s.short_name
+  addModal.value.supplierQuery = s.short_name
+  addModal.value.supplierMatches = []
+}
+
+async function submitAddModal() {
+  if (!canSubmitAdd.value || addModal.value.saving) return
+  addModal.value.saving = true
+  addModal.value.error = ''
+  try {
+    const { data, error } = await db.rpc('create_manual_payment', {
+      supplier: addModal.value.supplier,
+      legal_entity: addModal.value.legalEntity,
+      delivery_date: addModal.value.deliveryDate,
+      amount: addModal.value.amount || null,
+      note: addModal.value.note || null,
+    })
+    if (error) throw new Error(error)
+    if (data?.error) throw new Error(data.error)
+    toast.show('Оплата создана', `Срок: ${data.payment_date || ''}`)
+    addModal.value.show = false
+    await load()
+  } catch (e) {
+    addModal.value.error = e?.message || 'Не удалось создать'
+  } finally {
+    addModal.value.saving = false
+  }
+}
 </script>
 
 <style scoped>
@@ -283,4 +425,47 @@ watch(() => orderStore.settings.legalEntity, () => load())
   .pay-note-input,
   .pay-date-input { width: 100%; box-sizing: border-box; }
 }
+
+/* Кнопка «+ Добавить вручную» в фильтрах */
+.pay-add-btn { padding: 6px 14px; font-size: 13px; }
+
+/* Модалка ручного создания оплаты */
+.pay-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;
+}
+.pay-modal {
+  background: #fff; border-radius: 12px; padding: 24px;
+  width: 460px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+}
+.pay-modal-title { margin: 0 0 6px; font-size: 18px; font-weight: 700; color: #502314; }
+.pay-modal-hint { margin: 0 0 18px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+.pay-modal-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; position: relative; }
+.pay-modal-row label { font-size: 12px; color: #502314; font-weight: 600; }
+.pay-modal-row .req { color: #c0392b; }
+.pay-supplier-suggest {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+  background: #fff; border: 1px solid var(--border); border-radius: 6px;
+  max-height: 220px; overflow-y: auto; margin-top: 2px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.pay-supplier-suggest button {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 12px; border: 0; background: transparent;
+  font: inherit; cursor: pointer; font-size: 13px;
+}
+.pay-supplier-suggest button:hover { background: #FAF5EF; }
+.pay-supplier-picked {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; background: #FAF5EF; border-radius: 6px;
+  color: #2e7d32; font-size: 13px; font-weight: 600;
+  margin-top: 2px;
+}
+.pay-supplier-clear {
+  margin-left: auto; background: transparent; border: 0; cursor: pointer;
+  color: var(--text-muted); font-size: 14px;
+}
+.pay-modal-error { color: #c0392b; font-size: 13px; margin-bottom: 12px; }
+.pay-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 </style>
