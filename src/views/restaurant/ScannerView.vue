@@ -101,9 +101,13 @@
           <div class="scn-card-name">{{ result.product.name }}</div>
           <div class="scn-card-meta">
             <span class="scn-meta-row"><span class="lbl">Артикул:</span> <b>{{ result.product.sku }}</b></span>
-            <span class="scn-meta-row">
-              <span class="lbl">Штрихкод:</span> {{ result.product.gtin }}
+            <span v-if="scannedDiffersFromPrimary" class="scn-meta-row">
+              <span class="lbl">Сканирован:</span> {{ result.product.scanned_barcode }}
               <span v-if="scannedTypeLabel" class="scn-type-badge" :class="scannedTypeClass">{{ scannedTypeLabel }}</span>
+            </span>
+            <span class="scn-meta-row">
+              <span class="lbl">{{ scannedDiffersFromPrimary ? 'Основной штрихкод:' : 'Штрихкод:' }}</span> {{ result.product.gtin }}
+              <span v-if="!scannedDiffersFromPrimary && scannedTypeLabel" class="scn-type-badge" :class="scannedTypeClass">{{ scannedTypeLabel }}</span>
             </span>
             <span v-if="result.product.unit_of_measure" class="scn-meta-row"><span class="lbl">Ед. изм.:</span> {{ result.product.unit_of_measure }}</span>
             <span v-if="result.product.qty_per_box" class="scn-meta-row"><span class="lbl">В упаковке:</span> {{ result.product.qty_per_box }} {{ result.product.unit_of_measure || 'шт' }}</span>
@@ -222,6 +226,11 @@ const scannedTypeLabel = computed(() => {
 const scannedTypeClass = computed(() => {
   const t = result.value?.product?.scanned_barcode_type;
   return t ? `scn-type-${t}` : '';
+});
+const scannedDiffersFromPrimary = computed(() => {
+  const p = result.value?.product;
+  if (!p?.scanned_barcode || !p?.gtin) return false;
+  return String(p.scanned_barcode).trim() !== String(p.gtin).trim();
 });
 
 function onPhotoSelected(e) {

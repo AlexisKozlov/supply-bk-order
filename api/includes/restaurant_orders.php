@@ -3656,6 +3656,7 @@ if ($roAction === 'scan-product' && $method === 'GET') {
             'supplier' => $main['supplier'],
             'legal_entity' => $main['legal_entity'],
             'stock_warehouse' => $stockMain,
+            'scanned_barcode' => $gtin,
             'scanned_barcode_type' => $main['scanned_barcode_type'] ?? null,
         ],
         'analogs' => $analogs,
@@ -4411,11 +4412,20 @@ if (strpos($roAction, 'admin') === 0) {
     $userRoleForSensitive = $sessionUser['role'] ?? '';
     $isSensitiveUsers = ($adminAction === 'users' && $method !== 'GET');
     $isSensitiveCabinetPosts = ($adminAction === 'cabinet-posts' && in_array($method, ['POST', 'PATCH', 'DELETE'], true));
+    // Управление штрихкодами товаров (POST/PATCH/DELETE) — admin/manager.
+    // GET — пусть будет доступно всем с restaurant-orders ≥ view, чтобы закупщик
+    // мог посмотреть таблицу. products-search — тоже только admin/manager,
+    // т.к. она нужна именно для модалки привязки и без неё.
+    $isSensitiveBarcodes = ($adminAction === 'barcodes' && in_array($method, ['POST', 'PATCH', 'DELETE'], true))
+        || ($adminAction === 'products-search');
     if ($isSensitiveUsers && $userRoleForSensitive !== 'admin') {
         roRespond(['error' => 'Управление учётками ресторанов доступно только администраторам'], 403);
     }
     if ($isSensitiveCabinetPosts && !in_array($userRoleForSensitive, ['admin', 'manager'], true)) {
         roRespond(['error' => 'Публикация сообщений в кабинеты ресторанов доступна только администраторам и менеджерам'], 403);
+    }
+    if ($isSensitiveBarcodes && !in_array($userRoleForSensitive, ['admin', 'manager'], true)) {
+        roRespond(['error' => 'Управление штрихкодами товаров доступно только администраторам и менеджерам'], 403);
     }
 
     // --- Настройки модуля для выбранной группы юрлиц ---
