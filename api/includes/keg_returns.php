@@ -413,7 +413,10 @@ $krPortalUser  = getSessionUser($pdo);
 if (!$krRestSession && !$krPortalUser) {
     krRespond(['error' => 'Нет авторизации'], 401);
 }
-$isRestaurant = (bool)$krRestSession;
+// Staff-сессия приоритетнее ресторанной. Если у админа в браузере осталась
+// cookie ro_session от теста кабинета — он всё равно работает как сотрудник.
+// Иначе админ получал урезанный список заявок без полей restaurant_*.
+$isRestaurant = (bool)$krRestSession && !$krPortalUser;
 
 // ═══ Роутинг keg-catalog ═══
 
