@@ -525,6 +525,10 @@ if ($method === 'POST') {
         }
         $lid = $rec['id'] ?? $pdo->lastInsertId();
         $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE id=?"); $s2->execute([$lid]); $r = $s2->fetch(); if ($r) $ins[] = $r;
+        // Синхронизация products.gtin → product_barcodes
+        if ($table === 'products' && !empty($r['sku']) && !empty($r['gtin'])) {
+            syncProductGtinToBarcodes($pdo, $r['sku'], $r['gtin'], $sessionUser['name'] ?? 'admin');
+        }
     }
     if ($table === 'users') { foreach ($ins as &$r) { unset($r['password']); } }
     respond(count($ins) === 1 ? $ins[0] : $ins, 201);
@@ -624,6 +628,14 @@ if ($method === 'PATCH' || $method === 'PUT') {
     $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE " . implode(' AND ', $where)); $s2->execute($params);
     $result = $s2->fetchAll();
     if ($table === 'users') { foreach ($result as &$r) { unset($r['password']); } }
+    // Синхронизация products.gtin → product_barcodes
+    if ($table === 'products' && array_key_exists('gtin', $body)) {
+        foreach ($result as $r) {
+            if (!empty($r['sku'])) {
+                syncProductGtinToBarcodes($pdo, $r['sku'], $r['gtin'] ?? null, $sessionUser['name'] ?? 'admin');
+            }
+        }
+    }
     respond($result);
 }
 

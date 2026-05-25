@@ -3589,13 +3589,16 @@ if ($roAction === 'scan-product' && $method === 'GET') {
     $le = $rest['legal_entity'];
     $group = getEntityGroup($le);
 
-    // Ищем товар по GTIN среди всех юрлиц группы (товары — справочник, общий для группы)
-    $where = ["p.gtin = ?", "p.is_active = 1"];
+    // Ищем товар по штрихкоду через product_barcodes (один товар → много штрихкодов).
+    // Товары — справочник, общий для группы юрлиц.
+    $where = ["b.barcode = ?", "p.is_active = 1"];
     $params = [$gtin];
     applyEntityTextFilter($group, $where, $params, 'p.legal_entity');
     $sql = "SELECT p.sku, p.name, p.gtin, p.unit_of_measure, p.qty_per_box, p.multiplicity, p.category,
-                   p.analog_group, p.legal_entity, p.supplier
+                   p.analog_group, p.legal_entity, p.supplier,
+                   b.barcode_type AS scanned_barcode_type
             FROM products p
+            INNER JOIN product_barcodes b ON b.sku = p.sku
             WHERE " . implode(' AND ', $where) . "
             ORDER BY (p.legal_entity = ?) DESC, p.name
             LIMIT 5";
@@ -3653,6 +3656,7 @@ if ($roAction === 'scan-product' && $method === 'GET') {
             'supplier' => $main['supplier'],
             'legal_entity' => $main['legal_entity'],
             'stock_warehouse' => $stockMain,
+            'scanned_barcode_type' => $main['scanned_barcode_type'] ?? null,
         ],
         'analogs' => $analogs,
         'multiple_matches' => array_map(function($r) {
@@ -3831,6 +3835,94 @@ if ($roAction === 'report-missing-gtin' && $method === 'POST') {
         'db_saved' => $dbOk,
         'telegram_sent' => $tgSent,
         'telegram_total' => $tgTotal,
+    ]);
+}
+
+// --- Сканер: поиск товара для ручной привязки штрихкода ---
+// Ресторан ищет товар по SKU или названию (по своей группе юрлиц), чтобы
+// привязать к нему отсканированный штрихкод. Возвращает до 20 совпадений.
+if ($roAction === 'products-search' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $search = trim((string)($_GET['q'] ?? ''));
+    if (mb_strlen($search) < 2) roRespond(['products' => []]);
+
+    $group = $rest['legal_entity_group'] ?: 'BK_VM';
+    $where = ["p.is_active = 1", "(p.sku LIKE ? OR p.name LIKE ? OR p.external_code LIKE ?)"];
+    $like = '%' . $search . '%';
+    $params = [$like, $like, $like];
+    applyEntityTextFilter($group, $where, $params, 'p.legal_entity');
+
+    $sql = "SELECT p.sku, p.name, p.legal_entity, p.unit_of_measure, p.qty_per_box, p.supplier, p.gtin
+            FROM products p
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY (p.legal_entity = ?) DESC, p.name
+            LIMIT 20";
+    $params[] = $rest['legal_entity'];
+    $s = $pdo->prepare($sql);
+    $s->execute($params);
+    roRespond(['products' => $s->fetchAll()]);
+}
+
+// --- Сканер: ресторан привязывает отсканированный штрихкод к существующему товару ---
+// Принимает: barcode, sku, barcode_type ('box'|'piece'|'pack'|'other'|'unknown').
+// SKU проверяется на принадлежность группе юрлиц ресторана.
+// Сразу помечает все записи в ro_scan_unknown с этим штрихкодом как resolved.
+if ($roAction === 'bind-barcode' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $barcode = trim((string)($body['barcode'] ?? ''));
+    $sku = trim((string)($body['sku'] ?? ''));
+    $type = trim((string)($body['barcode_type'] ?? 'unknown'));
+
+    if ($barcode === '' || strlen($barcode) > 64) roRespond(['error' => 'Некорректный штрихкод'], 400);
+    if ($sku === '') roRespond(['error' => 'Не указан товар'], 400);
+    if (!in_array($type, ['box', 'piece', 'pack', 'other', 'unknown'], true)) {
+        $type = 'unknown';
+    }
+
+    $group = $rest['legal_entity_group'] ?: 'BK_VM';
+    // Проверяем, что SKU реально существует и доступен по группе юрлиц.
+    $where = ["p.sku = ?", "p.is_active = 1"];
+    $params = [$sku];
+    applyEntityTextFilter($group, $where, $params, 'p.legal_entity');
+    $s = $pdo->prepare("SELECT p.sku, p.legal_entity FROM products p WHERE " . implode(' AND ', $where) . " LIMIT 1");
+    $s->execute($params);
+    $product = $s->fetch();
+    if (!$product) roRespond(['error' => 'Товар не найден или недоступен'], 404);
+
+    $createdBy = 'restaurant_' . (int)$rest['restaurant_number'];
+    try {
+        $ins = $pdo->prepare("
+            INSERT IGNORE INTO product_barcodes (sku, barcode, barcode_type, source, created_by)
+            VALUES (?, ?, ?, 'restaurant', ?)
+        ");
+        $ins->execute([$product['sku'], $barcode, $type, $createdBy]);
+        $newId = (int)$pdo->lastInsertId();
+        $alreadyExisted = ($newId === 0); // INSERT IGNORE → 0 если дубль
+
+        // Если этот штрихкод раньше попадал в ненайденные — пометить как разобранный.
+        if (!$alreadyExisted) {
+            $upd = $pdo->prepare("
+                UPDATE ro_scan_unknown
+                SET status = 'resolved',
+                    notes = TRIM(CONCAT(IFNULL(notes, ''), CASE WHEN notes IS NOT NULL AND notes <> '' THEN '\n' ELSE '' END, ?))
+                WHERE gtin = ? AND status = 'new'
+            ");
+            $note = 'Привязано рестораном №' . (int)$rest['restaurant_number'] . ' → SKU ' . $product['sku'] . ' (тип: ' . $type . ')';
+            $upd->execute([$note, $barcode]);
+        }
+    } catch (Throwable $e) {
+        error_log('[ro/bind-barcode] DB error: ' . $e->getMessage());
+        roRespond(['error' => 'Не удалось сохранить штрихкод'], 500);
+    }
+
+    roRespond([
+        'success' => true,
+        'already_existed' => $alreadyExisted ?? false,
+        'sku' => $product['sku'],
     ]);
 }
 
@@ -5853,6 +5945,20 @@ if (strpos($roAction, 'admin') === 0) {
         ]);
     }
 
+    // --- Поиск товаров (для модалки штрихкодов в админке) — без обязательного legal_entity ---
+    if ($adminAction === 'products-search' && $method === 'GET') {
+        $q = trim((string)($_GET['q'] ?? ''));
+        if (mb_strlen($q) < 2) roRespond(['products' => []]);
+        $like = '%' . $q . '%';
+        $s = $pdo->prepare("SELECT sku, name, legal_entity, qty_per_box, supplier, gtin
+                            FROM products
+                            WHERE is_active = 1 AND (sku LIKE ? OR name LIKE ? OR external_code LIKE ?)
+                            ORDER BY name
+                            LIMIT 30");
+        $s->execute([$like, $like, $like]);
+        roRespond(['products' => $s->fetchAll()]);
+    }
+
     // --- Поиск товаров (для шаблонов) ---
     if ($adminAction === 'products' && $method === 'GET') {
         $search = $_GET['search'] ?? '';
@@ -6599,6 +6705,200 @@ if (strpos($roAction, 'admin') === 0) {
 
         $cur = $pdo->query("SELECT user_name FROM ro_scan_unknown_subscribers ORDER BY user_name");
         roRespond(['success' => true, 'subscribers' => $cur->fetchAll(PDO::FETCH_COLUMN)]);
+    }
+
+    // ═══ Управление штрихкодами товаров (раздел «Штрихкоды» в админке) ═══
+
+    // --- Список штрихкодов с фильтрами ---
+    // GET /api/ro/admin/barcodes?q=...&type=box|piece|...&source=...&limit=...&offset=...
+    if ($adminAction === 'barcodes' && $method === 'GET' && !$adminParam) {
+        $q = trim((string)($_GET['q'] ?? ''));
+        $type = trim((string)($_GET['type'] ?? ''));
+        $source = trim((string)($_GET['source'] ?? ''));
+        $limit = min((int)($_GET['limit'] ?? 100), 500);
+        $offset = max((int)($_GET['offset'] ?? 0), 0);
+
+        $where = ["1=1"];
+        $params = [];
+        if ($q !== '') {
+            $where[] = "(b.barcode LIKE ? OR b.sku LIKE ? OR p.name LIKE ?)";
+            $like = '%' . $q . '%';
+            $params[] = $like; $params[] = $like; $params[] = $like;
+        }
+        if (in_array($type, ['box', 'piece', 'pack', 'other', 'unknown'], true)) {
+            $where[] = "b.barcode_type = ?";
+            $params[] = $type;
+        }
+        if (in_array($source, ['admin', 'restaurant', 'import', 'migration'], true)) {
+            $where[] = "b.source = ?";
+            $params[] = $source;
+        }
+
+        $sql = "SELECT b.id, b.sku, b.barcode, b.barcode_type, b.qty_per_unit, b.is_primary,
+                       b.source, b.created_by, b.created_at,
+                       p.name AS product_name, p.legal_entity, p.unit_of_measure
+                FROM product_barcodes b
+                LEFT JOIN products p ON p.sku = b.sku
+                WHERE " . implode(' AND ', $where) . "
+                ORDER BY b.created_at DESC
+                LIMIT $limit OFFSET $offset";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        $rows = $s->fetchAll();
+
+        $countSql = "SELECT COUNT(*) FROM product_barcodes b LEFT JOIN products p ON p.sku = b.sku WHERE " . implode(' AND ', $where);
+        $cnt = $pdo->prepare($countSql);
+        $cnt->execute($params);
+        $total = (int)$cnt->fetchColumn();
+
+        roRespond(['barcodes' => $rows, 'total' => $total]);
+    }
+
+    // --- Добавить штрихкод ---
+    // POST /api/ro/admin/barcodes
+    // body: { sku, barcode, barcode_type, is_primary }
+    if ($adminAction === 'barcodes' && $method === 'POST' && !$adminParam) {
+        $sku = trim((string)($body['sku'] ?? ''));
+        $barcode = trim((string)($body['barcode'] ?? ''));
+        $type = trim((string)($body['barcode_type'] ?? 'unknown'));
+        $isPrimary = !empty($body['is_primary']) ? 1 : 0;
+
+        if ($sku === '') roRespond(['error' => 'Не указан SKU'], 400);
+        if ($barcode === '' || strlen($barcode) > 64) roRespond(['error' => 'Некорректный штрихкод'], 400);
+        if (!in_array($type, ['box', 'piece', 'pack', 'other', 'unknown'], true)) {
+            $type = 'unknown';
+        }
+
+        // Проверяем, что SKU существует.
+        $exists = $pdo->prepare("SELECT sku FROM products WHERE sku = ? LIMIT 1");
+        $exists->execute([$sku]);
+        if (!$exists->fetchColumn()) roRespond(['error' => 'Товар не найден'], 404);
+
+        $createdBy = $sessionUser['name'] ?? 'admin';
+
+        $pdo->beginTransaction();
+        try {
+            // Если ставим как основной — снимаем флаг с остальных штрихкодов этого SKU.
+            if ($isPrimary) {
+                $pdo->prepare("UPDATE product_barcodes SET is_primary = 0 WHERE sku = ?")->execute([$sku]);
+            }
+            $ins = $pdo->prepare("
+                INSERT INTO product_barcodes (sku, barcode, barcode_type, is_primary, source, created_by)
+                VALUES (?, ?, ?, ?, 'admin', ?)
+                ON DUPLICATE KEY UPDATE
+                    barcode_type = VALUES(barcode_type),
+                    is_primary = VALUES(is_primary),
+                    created_by = VALUES(created_by)
+            ");
+            $ins->execute([$sku, $barcode, $type, $isPrimary, $createdBy]);
+
+            // Синхронизация с products.gtin: если этот штрихкод стал основным — пишем в products.gtin
+            if ($isPrimary) {
+                $pdo->prepare("UPDATE products SET gtin = ? WHERE sku = ?")->execute([$barcode, $sku]);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            error_log('[admin/barcodes POST] ' . $e->getMessage());
+            roRespond(['error' => 'Не удалось сохранить штрихкод'], 500);
+        }
+
+        roRespond(['success' => true]);
+    }
+
+    // --- Изменить тип / основной флаг ---
+    // PATCH /api/ro/admin/barcodes/{id}
+    // body: { barcode_type?, is_primary? }
+    if ($adminAction === 'barcodes' && $method === 'PATCH' && $adminParam) {
+        $id = (int)$adminParam;
+        if ($id <= 0) roRespond(['error' => 'Некорректный id'], 400);
+
+        $cur = $pdo->prepare("SELECT id, sku, barcode FROM product_barcodes WHERE id = ?");
+        $cur->execute([$id]);
+        $row = $cur->fetch();
+        if (!$row) roRespond(['error' => 'Запись не найдена'], 404);
+
+        $updates = [];
+        $params = [];
+        if (isset($body['barcode_type'])) {
+            $type = trim((string)$body['barcode_type']);
+            if (!in_array($type, ['box', 'piece', 'pack', 'other', 'unknown'], true)) {
+                roRespond(['error' => 'Неизвестный тип'], 400);
+            }
+            $updates[] = "barcode_type = ?";
+            $params[] = $type;
+        }
+        $changingPrimary = isset($body['is_primary']);
+        $newPrimary = $changingPrimary ? (!empty($body['is_primary']) ? 1 : 0) : null;
+
+        $pdo->beginTransaction();
+        try {
+            if ($changingPrimary && $newPrimary === 1) {
+                // Снимаем флаг с остальных штрихкодов этого SKU.
+                $pdo->prepare("UPDATE product_barcodes SET is_primary = 0 WHERE sku = ? AND id <> ?")
+                    ->execute([$row['sku'], $id]);
+                $updates[] = "is_primary = 1";
+                // Синхронизация в products.gtin
+                $pdo->prepare("UPDATE products SET gtin = ? WHERE sku = ?")
+                    ->execute([$row['barcode'], $row['sku']]);
+            } elseif ($changingPrimary && $newPrimary === 0) {
+                $updates[] = "is_primary = 0";
+                // Не трогаем products.gtin — снять «основной» статус не значит обнулить gtin.
+                // Если админ хочет именно очистить gtin, пусть удалит запись или назначит другой основным.
+            }
+            if (!empty($updates)) {
+                $params[] = $id;
+                $pdo->prepare("UPDATE product_barcodes SET " . implode(', ', $updates) . " WHERE id = ?")
+                    ->execute($params);
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            error_log('[admin/barcodes PATCH] ' . $e->getMessage());
+            roRespond(['error' => 'Не удалось обновить'], 500);
+        }
+        roRespond(['success' => true]);
+    }
+
+    // --- Удалить штрихкод ---
+    // DELETE /api/ro/admin/barcodes/{id}
+    if ($adminAction === 'barcodes' && $method === 'DELETE' && $adminParam) {
+        $id = (int)$adminParam;
+        if ($id <= 0) roRespond(['error' => 'Некорректный id'], 400);
+
+        $cur = $pdo->prepare("SELECT id, sku, barcode, is_primary FROM product_barcodes WHERE id = ?");
+        $cur->execute([$id]);
+        $row = $cur->fetch();
+        if (!$row) roRespond(['error' => 'Запись не найдена'], 404);
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("DELETE FROM product_barcodes WHERE id = ?")->execute([$id]);
+
+            // Если удалили основной — назначаем следующим основным первый оставшийся
+            // (если есть). Это поддерживает синхронизацию с products.gtin.
+            if ((int)$row['is_primary'] === 1) {
+                $next = $pdo->prepare("SELECT id, barcode FROM product_barcodes WHERE sku = ? ORDER BY created_at LIMIT 1");
+                $next->execute([$row['sku']]);
+                $nextRow = $next->fetch();
+                if ($nextRow) {
+                    $pdo->prepare("UPDATE product_barcodes SET is_primary = 1 WHERE id = ?")
+                        ->execute([$nextRow['id']]);
+                    $pdo->prepare("UPDATE products SET gtin = ? WHERE sku = ?")
+                        ->execute([$nextRow['barcode'], $row['sku']]);
+                } else {
+                    // Штрихкодов больше нет — очищаем gtin в products.
+                    $pdo->prepare("UPDATE products SET gtin = NULL WHERE sku = ?")
+                        ->execute([$row['sku']]);
+                }
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            error_log('[admin/barcodes DELETE] ' . $e->getMessage());
+            roRespond(['error' => 'Не удалось удалить'], 500);
+        }
+        roRespond(['success' => true]);
     }
 
     roRespond(['error' => 'Not found'], 404);

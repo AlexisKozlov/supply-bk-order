@@ -24,7 +24,76 @@
         <div class="scn-notfound-title">Товар не найден</div>
         <div class="scn-notfound-code">Штрихкод: <b>{{ result.gtin }}</b></div>
 
-        <div v-if="!reported" class="scn-report-form">
+        <!-- Выбор действия: привязать к существующему или сообщить админу -->
+        <div v-if="!reported && notFoundMode === null" class="scn-notfound-choice">
+          <p class="scn-report-hint">Что сделать с этим штрихкодом?</p>
+          <button class="scn-btn primary scn-choice-btn" @click="notFoundMode = 'bind'">
+            🔗 Привязать к товару из базы
+            <span class="scn-choice-sub">Если знаете, что это уже существующий товар</span>
+          </button>
+          <button class="scn-btn ghost scn-choice-btn" @click="notFoundMode = 'report'">
+            📩 Сообщить администратору
+            <span class="scn-choice-sub">Если такого товара ещё нет в базе</span>
+          </button>
+          <button class="scn-btn link" @click="resetScanner">Сканировать снова</button>
+        </div>
+
+        <!-- Привязка к существующему товару -->
+        <div v-if="!reported && notFoundMode === 'bind'" class="scn-bind-form">
+          <p class="scn-report-hint">
+            Найдите товар, к которому относится этот штрихкод. Поиск по артикулу или названию.
+          </p>
+          <label class="scn-field">
+            <span class="scn-field-label">Тип штрихкода</span>
+            <select v-model="bindType" class="scn-input">
+              <option value="piece">Штука (сливс, бутылка, индивидуальная упаковка)</option>
+              <option value="box">Коробка</option>
+              <option value="pack">Промежуточная упаковка (например, по 6 шт.)</option>
+              <option value="other">Другое</option>
+              <option value="unknown">Не знаю</option>
+            </select>
+          </label>
+          <label class="scn-field">
+            <span class="scn-field-label">Поиск товара <span class="scn-req">*</span></span>
+            <input
+              type="text"
+              v-model="bindSearch"
+              class="scn-input"
+              placeholder="Артикул или название"
+              @input="onBindSearchInput"
+            />
+          </label>
+          <div v-if="bindSearching" class="scn-bind-loading">Ищу…</div>
+          <div v-else-if="bindResults.length" class="scn-bind-results">
+            <button
+              v-for="p in bindResults"
+              :key="p.sku + '|' + p.legal_entity"
+              class="scn-bind-item"
+              :class="{ active: bindSelectedSku === p.sku }"
+              @click="bindSelectedSku = p.sku; bindSelectedName = p.name"
+            >
+              <span class="scn-bind-item-name">{{ p.name }}</span>
+              <span class="scn-bind-item-meta">{{ p.sku }} · {{ p.legal_entity }}<span v-if="p.gtin"> · текущий: {{ p.gtin }}</span></span>
+            </button>
+          </div>
+          <div v-else-if="bindSearch.length >= 2 && !bindSearching" class="scn-bind-empty">Ничего не найдено</div>
+
+          <div class="scn-notfound-actions">
+            <button
+              class="scn-btn primary"
+              @click="doBind"
+              :disabled="binding || !bindSelectedSku"
+            >
+              {{ binding ? 'Привязываем…' : (bindSelectedSku ? `Привязать к: ${bindSelectedName}` : 'Выберите товар') }}
+            </button>
+            <div v-if="bindError" class="scn-report-error">
+              Не удалось: {{ bindError }}
+            </div>
+            <button class="scn-btn ghost" @click="notFoundMode = null; bindReset()">Назад</button>
+          </div>
+        </div>
+
+        <div v-if="!reported && notFoundMode === 'report'" class="scn-report-form">
           <p class="scn-report-hint">
             Заполните, пожалуйста, что это за товар — это поможет администратору завести его в базу.
           </p>
@@ -84,7 +153,7 @@
               Не удалось отправить: {{ reportError }}
               <button class="scn-link" @click="reportMissing" :disabled="reporting">Повторить</button>
             </div>
-            <button class="scn-btn ghost" @click="resetScanner">Сканировать снова</button>
+            <button class="scn-btn ghost" @click="notFoundMode = null">Назад</button>
           </div>
         </div>
 
@@ -101,7 +170,10 @@
           <div class="scn-card-name">{{ result.product.name }}</div>
           <div class="scn-card-meta">
             <span class="scn-meta-row"><span class="lbl">Артикул:</span> <b>{{ result.product.sku }}</b></span>
-            <span class="scn-meta-row"><span class="lbl">Штрихкод:</span> {{ result.product.gtin }}</span>
+            <span class="scn-meta-row">
+              <span class="lbl">Штрихкод:</span> {{ result.product.gtin }}
+              <span v-if="scannedTypeLabel" class="scn-type-badge" :class="scannedTypeClass">{{ scannedTypeLabel }}</span>
+            </span>
             <span v-if="result.product.unit_of_measure" class="scn-meta-row"><span class="lbl">Ед. изм.:</span> {{ result.product.unit_of_measure }}</span>
             <span v-if="result.product.qty_per_box" class="scn-meta-row"><span class="lbl">В упаковке:</span> {{ result.product.qty_per_box }} {{ result.product.unit_of_measure || 'шт' }}</span>
             <span v-if="result.product.multiplicity" class="scn-meta-row"><span class="lbl">Кратность заказа:</span> {{ result.product.multiplicity }}</span>
@@ -188,7 +260,7 @@
 </template>
 
 <script setup>
-import { ref, defineAsyncComponent, nextTick } from 'vue';
+import { ref, computed, defineAsyncComponent, nextTick } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 
 const BarcodeScanner = defineAsyncComponent(() => import('@/components/restaurant/BarcodeScanner.vue'));
@@ -204,12 +276,88 @@ const reportError = ref('');
 const reportInfo = ref('');
 const batchesOpen = ref(false);
 
+// Режим блока «не найдено»: null (выбор), 'bind' (привязка), 'report' (сообщить админу)
+const notFoundMode = ref(null);
+
 // Форма сообщения о ненайденном товаре
 const reportName = ref('');
 const reportComment = ref('');
 const reportPhoto = ref(null);
 const reportPhotoPreview = ref('');
 const reportPhotoError = ref('');
+
+// Форма привязки штрихкода к существующему товару
+const bindType = ref('piece');
+const bindSearch = ref('');
+const bindResults = ref([]);
+const bindSearching = ref(false);
+const bindSelectedSku = ref('');
+const bindSelectedName = ref('');
+const binding = ref(false);
+const bindError = ref('');
+let bindSearchTimer = null;
+
+function bindReset() {
+  bindType.value = 'piece';
+  bindSearch.value = '';
+  bindResults.value = [];
+  bindSearching.value = false;
+  bindSelectedSku.value = '';
+  bindSelectedName.value = '';
+  binding.value = false;
+  bindError.value = '';
+  if (bindSearchTimer) { clearTimeout(bindSearchTimer); bindSearchTimer = null; }
+}
+
+function onBindSearchInput() {
+  bindSelectedSku.value = '';
+  bindSelectedName.value = '';
+  if (bindSearchTimer) clearTimeout(bindSearchTimer);
+  const q = bindSearch.value.trim();
+  if (q.length < 2) {
+    bindResults.value = [];
+    bindSearching.value = false;
+    return;
+  }
+  bindSearching.value = true;
+  bindSearchTimer = setTimeout(async () => {
+    try {
+      bindResults.value = await roStore.searchProductsForBind(q);
+    } catch (e) {
+      bindResults.value = [];
+    } finally {
+      bindSearching.value = false;
+    }
+  }, 250);
+}
+
+async function doBind() {
+  if (!result.value || !bindSelectedSku.value || binding.value) return;
+  binding.value = true;
+  bindError.value = '';
+  try {
+    await roStore.bindBarcode(result.value.gtin, bindSelectedSku.value, bindType.value);
+    // Привязали — повторно ищем товар, теперь должен найтись
+    const data = await roStore.scanProduct(result.value.gtin);
+    result.value = data;
+    notFoundMode.value = null;
+    bindReset();
+  } catch (e) {
+    bindError.value = e?.message || 'неизвестная ошибка';
+  } finally {
+    binding.value = false;
+  }
+}
+
+const scannedTypeLabel = computed(() => {
+  const t = result.value?.product?.scanned_barcode_type;
+  if (!t || t === 'unknown') return '';
+  return ({ box: 'коробка', piece: 'штука', pack: 'упаковка', other: 'другое' })[t] || '';
+});
+const scannedTypeClass = computed(() => {
+  const t = result.value?.product?.scanned_barcode_type;
+  return t ? `scn-type-${t}` : '';
+});
 
 function onPhotoSelected(e) {
   reportPhotoError.value = '';
@@ -261,6 +409,8 @@ function resetScanner() {
   batchesOpen.value = false;
   reportName.value = '';
   reportComment.value = '';
+  notFoundMode.value = null;
+  bindReset();
   removePhoto();
   nextTick(() => {
     scannerRef.value?.resetLastCode?.();
@@ -566,6 +716,60 @@ function nearestExpiryShort(value) {
 .scn-btn.primary:hover:not(:disabled) { background: #d85d3f; }
 .scn-btn.ghost { background: transparent; color: #502314; border: 1px solid #d5c8b8; }
 .scn-btn.ghost:hover { background: #f5efe7; }
+.scn-btn.link {
+  background: transparent; color: #8a7a6a; border: none; padding: 6px 0;
+  font-size: 13px; text-decoration: underline;
+}
+.scn-btn.link:hover { color: #502314; }
+
+/* Выбор действия в блоке «не найдено» */
+.scn-notfound-choice {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 8px;
+}
+.scn-choice-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  text-align: left; padding: 14px 16px; line-height: 1.3;
+}
+.scn-choice-sub {
+  font-size: 12px; font-weight: 400; opacity: 0.85;
+}
+
+/* Форма привязки */
+.scn-bind-form {
+  display: flex; flex-direction: column; gap: 10px; margin-top: 8px;
+}
+.scn-bind-loading {
+  text-align: center; padding: 8px; color: #6b5a4a; font-size: 13px;
+}
+.scn-bind-empty {
+  text-align: center; padding: 12px; color: #8a7a6a; font-size: 13px;
+  background: #faf6f1; border-radius: 8px;
+}
+.scn-bind-results {
+  display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto;
+  border: 1px solid #e5dcd2; border-radius: 8px; padding: 4px; background: #faf6f1;
+}
+.scn-bind-item {
+  display: flex; flex-direction: column; gap: 2px;
+  text-align: left; padding: 10px 12px; background: #fff;
+  border: 1px solid transparent; border-radius: 6px;
+  cursor: pointer; font: inherit; color: inherit;
+}
+.scn-bind-item:hover { background: #fff7f0; }
+.scn-bind-item.active { border-color: #E76F51; background: #fff3ec; }
+.scn-bind-item-name { font-size: 14px; font-weight: 600; color: #2b1a0e; }
+.scn-bind-item-meta { font-size: 12px; color: #8a7a6a; }
+
+/* Ярлык типа отсканированного штрихкода */
+.scn-type-badge {
+  display: inline-block; margin-left: 6px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+  text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+}
+.scn-type-box { background: #fff3e0; color: #c66f1f; }
+.scn-type-piece { background: #e8f4f8; color: #1b6e8f; }
+.scn-type-pack { background: #f0e8f8; color: #6f4a9f; }
+.scn-type-other { background: #f0f0f0; color: #555; }
 
 @media (max-width: 600px) {
   .scn { padding: 14px 12px 90px; }

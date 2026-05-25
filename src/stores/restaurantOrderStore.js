@@ -245,6 +245,18 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
+  async function searchProductsForBind(q) {
+    const data = await api(`products-search?q=${encodeURIComponent(q)}`);
+    return data.products || [];
+  }
+
+  async function bindBarcode(barcode, sku, barcodeType) {
+    return await api('bind-barcode', {
+      method: 'POST',
+      body: JSON.stringify({ barcode, sku, barcode_type: barcodeType }),
+    });
+  }
+
   async function reportMissingGtin(gtin, opts = {}) {
     const { name = '', comment = '', photo = null } = opts || {};
     // Если есть фото — multipart/form-data, иначе JSON (обратная совместимость)
@@ -788,7 +800,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     serverTimeOffset, nowFromServer,
     accountInfo, setAccountEmail,
     login, loginByTelegram, validate, logout, logoutLocal, loadSessions, revokeSession, revokeOtherSessions,
-    loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
+    loadMyInfo, loadProducts, scanProduct, reportMissingGtin, searchProductsForBind, bindBarcode, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
     loadBroadcasts, heartbeat, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,

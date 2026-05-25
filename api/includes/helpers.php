@@ -89,6 +89,40 @@ function roClearSessionCookie() {
 // Колонки ro_users.session_token / session_active_until остаются для совместимости
 // (отчёты/RPC сброса пароля ещё на них смотрят), но логика сессий теперь здесь.
 
+/**
+ * Синхронизирует products.gtin → product_barcodes.
+ * Вызывается из crud.php при изменении карточки товара.
+ *
+ * Логика:
+ *   - Если новый gtin пустой → снимаем флаг is_primary с записей этого sku.
+ *     Записи не удаляем — если их добавили вручную, пусть остаются.
+ *   - Если gtin есть → создаём (или находим) запись с этим barcode у этого sku,
+ *     помечаем её is_primary=1, со всех остальных записей этого sku флаг снимаем.
+ *     Тип нового штрихкода — 'unknown' (закупщик может уточнить в админке).
+ */
+function syncProductGtinToBarcodes(PDO $pdo, $sku, $newGtin, $actor = 'admin') {
+    $sku = (string)$sku;
+    $newGtin = $newGtin === null ? '' : trim((string)$newGtin);
+    if ($sku === '') return;
+    try {
+        if ($newGtin === '') {
+            $pdo->prepare("UPDATE product_barcodes SET is_primary = 0 WHERE sku = ?")->execute([$sku]);
+            return;
+        }
+        // Снимаем флаг со всех остальных записей этого sku.
+        $pdo->prepare("UPDATE product_barcodes SET is_primary = 0 WHERE sku = ? AND barcode <> ?")
+            ->execute([$sku, $newGtin]);
+        // Создаём (или находим) запись с этим штрихкодом, делаем её основной.
+        $pdo->prepare("
+            INSERT INTO product_barcodes (sku, barcode, barcode_type, is_primary, source, created_by)
+            VALUES (?, ?, 'unknown', 1, 'admin', ?)
+            ON DUPLICATE KEY UPDATE is_primary = 1
+        ")->execute([$sku, $newGtin, $actor]);
+    } catch (Throwable $e) {
+        error_log('[syncProductGtinToBarcodes] sku=' . $sku . ' gtin=' . $newGtin . ': ' . $e->getMessage());
+    }
+}
+
 define('RO_SESSION_MAX_DEVICES', 5);             // активных устройств на ресторан
 define('RO_SESSION_IDLE_HOURS', 168);            // потолок неактивности (last_seen → expire); 7 дней
 define('RO_SESSION_TTL_DEFAULT_HOURS', 168);     // без галки «запомнить»; 7 дней

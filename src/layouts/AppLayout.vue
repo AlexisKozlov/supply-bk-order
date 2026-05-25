@@ -150,6 +150,10 @@
             {{ userStore.currentUser.telegram_connected ? 'Telegram-бот' : 'Подключить бота' }}
             <span v-if="userStore.currentUser.telegram_connected" class="tg-connected">✓</span>
           </a>
+          <button class="user-dropdown-btn bug-btn" @click="openBugReport">
+            <span class="bug-icon">🐞</span> Нашли ошибку?
+            <span v-if="bugReportRef?.hasNewReplies" class="bug-dot" title="Есть новое сообщение"></span>
+          </button>
           <button class="user-dropdown-btn logout" @click="showLogoutConfirm = true; showUserMenu = false;">
             <BkIcon name="redo" size="sm"/> Выйти
           </button>
@@ -367,8 +371,8 @@
     <!-- Broadcast Popup -->
     <BroadcastPopup />
 
-    <!-- Кнопка «Нашли ошибку?» -->
-    <BugReportButton />
+    <!-- Кнопка «Нашли ошибку?» — скрытая, открывается из выпадающего меню профиля. -->
+    <BugReportButton ref="bugReportRef" :hide-fab="true" />
 
     <!-- Индикатор отсутствия соединения -->
     <OfflineIndicator />
@@ -484,7 +488,7 @@ const toolsGroups = [
     { module: 'restaurant-orders', route: 'restaurant-cabinet-manager', icon: 'building', label: 'Кабинеты ресторанов' },
     { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'restaurantOrders', label: 'Заказы ресторанов' },
     { module: 'supply-assistant', route: 'supply-assistant', icon: 'restaurantOrders', label: 'Сбор заказа осн. поставки' },
-    { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Неизвестные штрихкоды', badgeKey: 'scan-unknown' },
+    { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Штрихкоды', badgeKey: 'scan-unknown' },
     { module: 'restaurant-orders', route: 'keg-returns', icon: 'kegReturn', label: 'Возврат кег' },
     { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
     { module: 'surveys', route: 'surveys', icon: 'survey', label: 'Опросы' },
@@ -644,6 +648,11 @@ const showToolsMenu = ref(false);
 const isToolsRouteActive = computed(() => toolsItems.some(t => route.name === t.route));
 
 const showUserMenu = ref(false);
+const bugReportRef = ref(null);
+function openBugReport() {
+  showUserMenu.value = false;
+  bugReportRef.value?.open();
+}
 const showChangePassword = ref(false);
 const showLogoutConfirm = ref(false);
 

@@ -1,15 +1,29 @@
 <template>
   <div class="ub">
     <div class="ub-header">
-      <h1>Неизвестные штрихкоды</h1>
+      <h1>Штрихкоды</h1>
       <div class="ub-header-actions">
         <router-link :to="{ name: 'restaurant-orders' }" class="ub-btn ub-btn-outline">Заказы ресторанов</router-link>
       </div>
     </div>
 
+    <!-- Вкладки -->
+    <div class="ub-tabs">
+      <button :class="['ub-tab', { active: tab === 'unknown' }]" @click="tab = 'unknown'">
+        Ненайденные
+        <span v-if="unknownNewCount > 0" class="ub-tab-badge">{{ unknownNewCount }}</span>
+      </button>
+      <button :class="['ub-tab', { active: tab === 'all' }]" @click="onTabAll">
+        Все штрихкоды
+      </button>
+    </div>
+
+    <!-- ════════════ Вкладка «Ненайденные» ════════════ -->
+    <div v-if="tab === 'unknown'">
     <p class="ub-hint">
       Сюда попадают штрихкоды, которые рестораны сканируют в приложении,
-      но товар по ним не находится в базе. Разберите их: заведите товар или пометьте как игнор.
+      но товар по ним не находится в базе. Разберите их: привяжите к существующему товару,
+      заведите новый или пометьте как игнор.
     </p>
 
     <!-- Блок подписчиков -->
@@ -124,6 +138,7 @@
                 />
               </td>
               <td class="ub-actions">
+                <button v-if="row.status === 'new'" class="ub-act-btn ub-act-bind" title="Привязать к товару" @click="openBindModal(row.gtin)">🔗</button>
                 <button v-if="row.status !== 'resolved'" class="ub-act-btn ub-act-resolve" title="Разобрано" @click="setStatus(row, 'resolved')">✓</button>
                 <button v-if="row.status !== 'ignored'" class="ub-act-btn ub-act-ignore" title="Игнор" @click="setStatus(row, 'ignored')">✕</button>
                 <button v-if="row.status !== 'new'" class="ub-act-btn ub-act-back" title="Вернуть в новые" @click="setStatus(row, 'new')">↺</button>
@@ -133,21 +148,188 @@
         </tbody>
       </table>
     </div>
+    </div><!-- /tab=unknown -->
+
+    <!-- ════════════ Вкладка «Все штрихкоды» ════════════ -->
+    <div v-if="tab === 'all'">
+      <p class="ub-hint">
+        Все штрихкоды, привязанные к товарам. Можно добавлять и удалять любое количество штрихкодов
+        на один товар (коробки, штуки, промежуточные упаковки). «Основной» штрихкод синхронизируется
+        с полем GTIN в карточке товара.
+      </p>
+
+      <div class="ub-filters">
+        <div class="ub-field">
+          <label>Тип</label>
+          <select v-model="allFilterType" class="ub-input" @change="loadAll">
+            <option value="">Все</option>
+            <option value="box">Коробка</option>
+            <option value="piece">Штука</option>
+            <option value="pack">Промежуточная упаковка</option>
+            <option value="other">Другое</option>
+            <option value="unknown">Не указан</option>
+          </select>
+        </div>
+        <div class="ub-field">
+          <label>Источник</label>
+          <select v-model="allFilterSource" class="ub-input" @change="loadAll">
+            <option value="">Любой</option>
+            <option value="admin">Админ</option>
+            <option value="restaurant">Ресторан</option>
+            <option value="import">Импорт</option>
+            <option value="migration">Миграция</option>
+          </select>
+        </div>
+        <div class="ub-field ub-field-grow">
+          <label>Поиск</label>
+          <input type="text" v-model="allFilterSearch" class="ub-input" placeholder="Штрихкод, SKU или название товара" @keydown.enter="loadAll" />
+        </div>
+        <button class="ub-btn ub-btn-primary" :disabled="allLoading" @click="loadAll">
+          <span v-if="allLoading" class="ub-spin"></span> Показать
+        </button>
+        <button class="ub-btn ub-btn-primary" @click="openBindModal(null)">+ Добавить штрихкод</button>
+      </div>
+
+      <div class="ub-table-wrap">
+        <table class="ub-table">
+          <thead>
+            <tr>
+              <th>Штрихкод</th>
+              <th>Тип</th>
+              <th>SKU</th>
+              <th>Название товара</th>
+              <th>Юрлицо</th>
+              <th>Основной</th>
+              <th>Источник</th>
+              <th>Добавлен</th>
+              <th class="ub-th-actions">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!allLoading && !allItems.length">
+              <td colspan="9" class="ub-empty">Нет записей</td>
+            </tr>
+            <tr v-for="row in allItems" :key="row.id">
+              <td><code class="ub-gtin">{{ row.barcode }}</code></td>
+              <td>
+                <select :value="row.barcode_type" class="ub-input ub-input-type" @change="updateBarcodeType(row, $event.target.value)">
+                  <option value="box">Коробка</option>
+                  <option value="piece">Штука</option>
+                  <option value="pack">Упаковка</option>
+                  <option value="other">Другое</option>
+                  <option value="unknown">Не указан</option>
+                </select>
+              </td>
+              <td><code class="ub-sku">{{ row.sku }}</code></td>
+              <td class="ub-name-cell">{{ row.product_name || '—' }}</td>
+              <td>{{ row.legal_entity || '—' }}</td>
+              <td class="ub-num">
+                <button class="ub-star" :class="{ active: row.is_primary }" :title="row.is_primary ? 'Основной' : 'Сделать основным'" @click="toggleBarcodePrimary(row)">
+                  {{ row.is_primary ? '★' : '☆' }}
+                </button>
+              </td>
+              <td>{{ sourceLabel(row.source) }}</td>
+              <td class="ub-date">
+                {{ fmtDate(row.created_at) }}
+                <div v-if="row.created_by" class="ub-rep-comment">{{ row.created_by }}</div>
+              </td>
+              <td class="ub-actions">
+                <button class="ub-act-btn ub-act-ignore" title="Удалить" @click="deleteBarcodeRow(row)">✕</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div><!-- /tab=all -->
 
     <!-- Модалка с увеличенным фото -->
     <div v-if="photoModal" class="ub-modal" @click="photoModal = null">
       <img :src="photoUrl(photoModal)" alt="фото товара" class="ub-modal-img" @click.stop />
       <button class="ub-modal-close" @click="photoModal = null">✕</button>
     </div>
+
+    <!-- Модалка добавления / привязки штрихкода -->
+    <div v-if="bindModal" class="ub-modal" @click="closeBindModal">
+      <div class="ub-bind-modal" @click.stop>
+        <h3 class="ub-bind-modal-title">
+          {{ bindModal.barcode ? 'Привязать штрихкод к товару' : 'Добавить штрихкод' }}
+        </h3>
+        <p v-if="bindModal.barcode" class="ub-bind-modal-sub">Штрихкод: <code>{{ bindModal.barcode }}</code></p>
+
+        <div class="ub-bind-row">
+          <label class="ub-bind-label">Штрихкод</label>
+          <input
+            type="text"
+            v-model="bindModal.barcode"
+            class="ub-input"
+            placeholder="Например: 4601234567890"
+            maxlength="64"
+            :disabled="!!bindModal.barcodeLocked"
+          />
+        </div>
+
+        <div class="ub-bind-row">
+          <label class="ub-bind-label">Тип</label>
+          <select v-model="bindModal.type" class="ub-input">
+            <option value="piece">Штука</option>
+            <option value="box">Коробка</option>
+            <option value="pack">Промежуточная упаковка</option>
+            <option value="other">Другое</option>
+            <option value="unknown">Не указан</option>
+          </select>
+        </div>
+
+        <div class="ub-bind-row">
+          <label class="ub-bind-label">Товар (поиск по SKU / названию)</label>
+          <input
+            type="text"
+            v-model="bindModal.search"
+            class="ub-input"
+            placeholder="Введите минимум 2 символа"
+            @input="onBindModalSearchInput"
+          />
+        </div>
+
+        <div v-if="bindModal.searching" class="ub-bind-loading">Ищу…</div>
+        <div v-else-if="bindModal.results.length" class="ub-bind-results">
+          <button
+            v-for="p in bindModal.results"
+            :key="p.sku + '|' + p.legal_entity"
+            :class="['ub-bind-item', { active: bindModal.selectedSku === p.sku && bindModal.selectedLE === p.legal_entity }]"
+            @click="bindModal.selectedSku = p.sku; bindModal.selectedName = p.name; bindModal.selectedLE = p.legal_entity"
+          >
+            <span class="ub-bind-item-name">{{ p.name }}</span>
+            <span class="ub-bind-item-meta">{{ p.sku }} · {{ p.legal_entity }}<span v-if="p.gtin"> · текущий GTIN: {{ p.gtin }}</span></span>
+          </button>
+        </div>
+        <div v-else-if="bindModal.search && bindModal.search.length >= 2 && !bindModal.searching" class="ub-bind-empty">Ничего не найдено</div>
+
+        <label class="ub-bind-checkbox">
+          <input type="checkbox" v-model="bindModal.isPrimary" />
+          Сделать основным (синхронизировать с GTIN в карточке товара)
+        </label>
+
+        <div v-if="bindModal.error" class="ub-bind-error">{{ bindModal.error }}</div>
+
+        <div class="ub-bind-actions">
+          <button class="ub-btn ub-btn-outline" @click="closeBindModal" :disabled="bindModal.saving">Отмена</button>
+          <button class="ub-btn ub-btn-primary" :disabled="!bindModal.selectedSku || !bindModal.barcode || bindModal.saving" @click="submitBindModal">
+            {{ bindModal.saving ? 'Сохраняю…' : 'Сохранить' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const toast = useToastStore();
+
+const tab = ref('unknown'); // 'unknown' | 'all'
 
 const items = ref([]);
 const loading = ref(false);
@@ -162,6 +344,194 @@ const subsSaving = ref(false);
 
 const photoModal = ref(null); // id строки, чьё фото открыто
 const photoUrls = ref({}); // { [id]: ObjectURL }
+
+// ─── Вкладка «Все штрихкоды» ───
+const allItems = ref([]);
+const allLoading = ref(false);
+const allFilterType = ref('');
+const allFilterSource = ref('');
+const allFilterSearch = ref('');
+
+// ─── Модалка добавления/привязки штрихкода ───
+const bindModal = ref(null);
+let bindModalSearchTimer = null;
+
+const unknownNewCount = computed(() => {
+  if (filterStatus.value !== 'new') return 0;
+  return items.value.filter(i => i.status === 'new').length;
+});
+
+function onTabAll() {
+  tab.value = 'all';
+  if (allItems.value.length === 0) loadAll();
+}
+
+async function loadAll() {
+  allLoading.value = true;
+  try {
+    const params = new URLSearchParams();
+    if (allFilterType.value) params.set('type', allFilterType.value);
+    if (allFilterSource.value) params.set('source', allFilterSource.value);
+    if (allFilterSearch.value.trim()) params.set('q', allFilterSearch.value.trim());
+    params.set('limit', '300');
+    const res = await fetch(`/api/ro/admin/barcodes?${params}`, { headers: apiHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка загрузки');
+    allItems.value = data.barcodes || [];
+  } catch (e) {
+    console.error(e);
+    toast.error('Не удалось загрузить штрихкоды', e.message || '');
+  } finally {
+    allLoading.value = false;
+  }
+}
+
+function openBindModal(barcode) {
+  bindModal.value = {
+    barcode: barcode || '',
+    barcodeLocked: !!barcode,
+    type: 'piece',
+    search: '',
+    results: [],
+    searching: false,
+    selectedSku: '',
+    selectedName: '',
+    selectedLE: '',
+    isPrimary: false,
+    saving: false,
+    error: '',
+  };
+}
+
+function closeBindModal() {
+  if (bindModal.value?.saving) return;
+  bindModal.value = null;
+  if (bindModalSearchTimer) { clearTimeout(bindModalSearchTimer); bindModalSearchTimer = null; }
+}
+
+function onBindModalSearchInput() {
+  if (!bindModal.value) return;
+  bindModal.value.selectedSku = '';
+  bindModal.value.selectedName = '';
+  bindModal.value.selectedLE = '';
+  if (bindModalSearchTimer) clearTimeout(bindModalSearchTimer);
+  const q = bindModal.value.search.trim();
+  if (q.length < 2) {
+    bindModal.value.results = [];
+    bindModal.value.searching = false;
+    return;
+  }
+  bindModal.value.searching = true;
+  bindModalSearchTimer = setTimeout(async () => {
+    try {
+      // Поиск идёт по products через тот же эндпоинт, что использует admin для шаблонов,
+      // но он требует legal_entity. У нас тут админ — берём через продукты-таблицу.
+      const params = new URLSearchParams({ q });
+      const res = await fetch(`/api/ro/admin/products-search?${params}`, { headers: apiHeaders() });
+      // Если такого эндпоинта нет — fallback на products
+      if (res.status === 404) {
+        bindModal.value.results = [];
+        return;
+      }
+      const data = await res.json();
+      bindModal.value.results = data.products || [];
+    } catch (e) {
+      bindModal.value.results = [];
+    } finally {
+      if (bindModal.value) bindModal.value.searching = false;
+    }
+  }, 250);
+}
+
+async function submitBindModal() {
+  if (!bindModal.value || !bindModal.value.selectedSku || !bindModal.value.barcode) return;
+  bindModal.value.saving = true;
+  bindModal.value.error = '';
+  try {
+    const res = await fetch('/api/ro/admin/barcodes', {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({
+        sku: bindModal.value.selectedSku,
+        barcode: bindModal.value.barcode.trim(),
+        barcode_type: bindModal.value.type,
+        is_primary: !!bindModal.value.isPrimary,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+
+    // Если этот штрихкод был в «Ненайденных» — отметим как resolved.
+    if (bindModal.value.barcodeLocked && tab.value === 'unknown') {
+      const row = items.value.find(i => i.gtin === bindModal.value.barcode.trim() && i.status === 'new');
+      if (row) await setStatus(row, 'resolved');
+    }
+
+    toast.success('Штрихкод сохранён');
+    closeBindModal();
+    if (tab.value === 'all') loadAll();
+  } catch (e) {
+    bindModal.value.error = e.message || 'неизвестная ошибка';
+  } finally {
+    if (bindModal.value) bindModal.value.saving = false;
+  }
+}
+
+async function updateBarcodeType(row, newType) {
+  try {
+    const res = await fetch(`/api/ro/admin/barcodes/${row.id}`, {
+      method: 'PATCH',
+      headers: apiHeaders(),
+      body: JSON.stringify({ barcode_type: newType }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    row.barcode_type = newType;
+  } catch (e) {
+    toast.error('Не удалось изменить тип', e.message || '');
+  }
+}
+
+async function toggleBarcodePrimary(row) {
+  const newPrimary = row.is_primary ? 0 : 1;
+  try {
+    const res = await fetch(`/api/ro/admin/barcodes/${row.id}`, {
+      method: 'PATCH',
+      headers: apiHeaders(),
+      body: JSON.stringify({ is_primary: newPrimary }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    // На клиенте: если сделали основным — снять флаг у других этого же SKU.
+    if (newPrimary === 1) {
+      allItems.value.forEach(r => { if (r.sku === row.sku) r.is_primary = (r.id === row.id ? 1 : 0); });
+    } else {
+      row.is_primary = 0;
+    }
+  } catch (e) {
+    toast.error('Не удалось изменить', e.message || '');
+  }
+}
+
+async function deleteBarcodeRow(row) {
+  if (!confirm(`Удалить штрихкод ${row.barcode} (товар ${row.sku})?`)) return;
+  try {
+    const res = await fetch(`/api/ro/admin/barcodes/${row.id}`, {
+      method: 'DELETE',
+      headers: apiHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    allItems.value = allItems.value.filter(r => r.id !== row.id);
+    toast.success('Штрихкод удалён');
+  } catch (e) {
+    toast.error('Не удалось удалить', e.message || '');
+  }
+}
+
+function sourceLabel(s) {
+  return ({ admin: 'Админ', restaurant: 'Ресторан', import: 'Импорт', migration: 'Миграция' })[s] || s;
+}
 
 async function loadPhoto(id) {
   if (photoUrls.value[id]) return;
@@ -337,6 +707,73 @@ onBeforeUnmount(() => {
 .ub-field label { font-size: 12px; color: #6b7280; }
 .ub-input { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; min-width: 160px; }
 .ub-input-notes { min-width: 140px; width: 100%; font-size: 12px; }
+.ub-input-type { min-width: 110px; font-size: 12px; padding: 4px 6px; }
+
+/* Вкладки */
+.ub-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; }
+.ub-tab {
+  position: relative; background: transparent; border: none; padding: 10px 16px;
+  font-size: 14px; font-weight: 500; color: #6b7280; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.ub-tab:hover { color: #111827; }
+.ub-tab.active { color: #E76F51; border-bottom-color: #E76F51; }
+.ub-tab-badge {
+  background: #E76F51; color: #fff; font-size: 11px; font-weight: 700;
+  padding: 1px 7px; border-radius: 10px; min-width: 20px; text-align: center;
+}
+
+/* Звезда «основной» */
+.ub-star {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 18px; color: #d1d5db; padding: 2px 4px;
+}
+.ub-star:hover { color: #fbbf24; }
+.ub-star.active { color: #f59e0b; }
+.ub-sku { font-family: ui-monospace, monospace; font-size: 12px; color: #4b5563; }
+
+/* Модалка привязки */
+.ub-bind-modal {
+  background: #fff; border-radius: 12px; padding: 24px;
+  width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+}
+.ub-bind-modal-title { margin: 0 0 6px; font-size: 18px; font-weight: 700; color: #2b1a0e; }
+.ub-bind-modal-sub { margin: 0 0 16px; color: #6b7280; font-size: 13px; }
+.ub-bind-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.ub-bind-label { font-size: 12px; color: #4b5563; font-weight: 600; }
+.ub-bind-results {
+  display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto;
+  border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px; background: #fafafa;
+  margin-bottom: 12px;
+}
+.ub-bind-item {
+  display: flex; flex-direction: column; gap: 2px;
+  text-align: left; padding: 8px 10px; background: #fff;
+  border: 1px solid transparent; border-radius: 4px;
+  cursor: pointer; font: inherit; color: inherit;
+}
+.ub-bind-item:hover { background: #f9fafb; }
+.ub-bind-item.active { border-color: #E76F51; background: #fff3ec; }
+.ub-bind-item-name { font-size: 13px; font-weight: 600; color: #111827; }
+.ub-bind-item-meta { font-size: 11px; color: #6b7280; }
+.ub-bind-empty, .ub-bind-loading {
+  text-align: center; padding: 12px; color: #6b7280; font-size: 13px;
+  background: #fafafa; border-radius: 6px; margin-bottom: 12px;
+}
+.ub-bind-checkbox {
+  display: flex; align-items: center; gap: 8px; font-size: 13px;
+  color: #4b5563; margin: 8px 0 12px; cursor: pointer;
+}
+.ub-bind-error { color: #c0392b; font-size: 13px; margin-bottom: 12px; }
+.ub-bind-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Иконка «привязать» в действиях */
+.ub-act-bind {
+  background: #fff3ec; color: #c66f1f;
+}
+.ub-act-bind:hover { background: #ffe5d3; }
 
 .ub-btn { padding: 7px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
 .ub-btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
