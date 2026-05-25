@@ -5698,6 +5698,55 @@ if ($endpoint === 'rpc') {
                 $params[] = $body[$f];
             }
         }
+
+        // Если изменилась дата прихода и фронт явно не задал payment_date —
+        // пересчитываем payment_due_date / payment_date / request_deadline по
+        // той же логике, что и create_payment_if_needed (отсрочка из карточки
+        // поставщика, ближайший ВТ/ЧТ до dueDate, дедлайн = пред. день 15:00).
+        if (array_key_exists('delivery_date', $body) && !array_key_exists('payment_date', $body)) {
+            $newDelivery = trim((string)$body['delivery_date']);
+            if ($newDelivery !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $newDelivery)) {
+                $spStmt = $pdo->prepare("SELECT supplier, legal_entity, payment_delay_days FROM supplier_payments WHERE id = ?");
+                $spStmt->execute([$id]);
+                $sp = $spStmt->fetch();
+                if ($sp) {
+                    $delayDays = (int)$sp['payment_delay_days'];
+                    // Если в платеже отсрочки нет (старая запись) — берём из карточки.
+                    if (!$delayDays) {
+                        $grp = getEntityGroup($sp['legal_entity']);
+                        $supSt = $pdo->prepare("
+                            SELECT payment_delay_days FROM suppliers
+                            WHERE legal_entity_group = ?
+                              AND (short_name = ? OR full_name = ?)
+                              AND is_active = 1
+                            ORDER BY (legal_entity = ?) DESC, id
+                            LIMIT 1
+                        ");
+                        $supSt->execute([$grp, $sp['supplier'], $sp['supplier'], $sp['legal_entity']]);
+                        $delayDays = (int)($supSt->fetchColumn() ?: 0);
+                    }
+                    if ($delayDays > 0) {
+                        $dDate = new DateTime($newDelivery);
+                        $dueDate = clone $dDate; $dueDate->modify("+{$delayDays} days");
+                        $payDate = clone $dueDate;
+                        while (true) {
+                            $dow = (int)$payDate->format('N');
+                            if ($dow === 2 || $dow === 4) break;
+                            $payDate->modify('-1 day');
+                        }
+                        $deadline = clone $payDate;
+                        $deadline->modify('-1 day');
+                        $deadline->setTime(15, 0, 0);
+                        $sets[] = "`payment_due_date` = ?";    $params[] = $dueDate->format('Y-m-d');
+                        $sets[] = "`payment_date` = ?";        $params[] = $payDate->format('Y-m-d');
+                        $sets[] = "`request_deadline` = ?";    $params[] = $deadline->format('Y-m-d H:i:s');
+                        if (!array_key_exists('payment_delay_days', $body)) {
+                            $sets[] = "`payment_delay_days` = ?"; $params[] = $delayDays;
+                        }
+                    }
+                }
+            }
+        }
         $caller = getSessionUser($pdo);
         if (($body['status'] ?? '') === 'paid') {
             $sets[] = "paid_by = ?"; $params[] = $caller['name'] ?? 'unknown';

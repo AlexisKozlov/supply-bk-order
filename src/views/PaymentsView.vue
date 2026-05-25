@@ -44,7 +44,10 @@
               <a class="pay-link" @click="goToOrder(p)" title="Перейти к заказу">{{ p.supplier }}</a>
             </td>
             <td class="pay-le">{{ shortLE(p.legal_entity) }}</td>
-            <td>{{ fmtDate(p.delivery_date) }}</td>
+            <td>
+              <input v-if="editId === p.id" type="date" v-model="editDeliveryDate" class="pay-date-input" />
+              <span v-else>{{ fmtDate(p.delivery_date) }}</span>
+            </td>
             <td class="pay-center">{{ p.payment_delay_days }} дн.</td>
             <td>
               <input v-if="editId === p.id" type="date" v-model="editPayDate" class="pay-date-input" />
@@ -149,6 +152,7 @@ const editId = ref(null)
 const editAmount = ref('')
 const editNote = ref('')
 const editPayDate = ref('')
+const editDeliveryDate = ref('')
 
 async function load() {
   loading.value = true
@@ -179,14 +183,22 @@ function startEdit(p) {
   editAmount.value = p.amount || ''
   editNote.value = p.note || ''
   editPayDate.value = p.payment_date || ''
+  editDeliveryDate.value = p.delivery_date || ''
 }
 
 async function saveEdit(p) {
   try {
     const updates = { id: p.id, amount: editAmount.value || null, note: editNote.value || null }
-    if (editPayDate.value && editPayDate.value !== p.payment_date) {
+    // Если изменилась дата прихода — отправляем её. Бэк сам пересчитает
+    // payment_date / request_deadline по отсрочке поставщика.
+    if (editDeliveryDate.value && editDeliveryDate.value !== p.delivery_date) {
+      updates.delivery_date = editDeliveryDate.value
+    }
+    // Ручное изменение даты оплаты применяется ТОЛЬКО когда пользователь не
+    // менял дату прихода — иначе пересчёт от прихода важнее. Если хочется
+    // прибить оплату вручную после смены прихода — сделать вторым редактированием.
+    if (editPayDate.value && editPayDate.value !== p.payment_date && !updates.delivery_date) {
       updates.payment_date = editPayDate.value
-      // Пересчитываем дедлайн: предыдущий день 15:00
       const payDt = new Date(editPayDate.value + 'T00:00:00')
       payDt.setDate(payDt.getDate() - 1)
       const y = payDt.getFullYear(), m = String(payDt.getMonth()+1).padStart(2,'0'), d = String(payDt.getDate()).padStart(2,'0')
