@@ -4545,6 +4545,26 @@ if ($endpoint === 'rpc') {
         if ($isAdmin && $report['status'] === 'new') {
             $pdo->prepare("UPDATE bug_reports SET status='in_progress' WHERE id=?")->execute([$reportId]);
         }
+        // Push ресторану — если ответил админ И обращение от ресторана (created_by вида 'ro:NUM').
+        if ($isAdmin && function_exists('pushSendToRestaurant') === false) {
+            require_once __DIR__ . '/push_send.php';
+        }
+        if ($isAdmin && preg_match('/^ro:(\d+)$/', (string)$report['created_by'], $rm)) {
+            try {
+                $roNum = (int)$rm[1];
+                // Группу юрлиц ищем по номеру: если 1000+ — PS, иначе BK_VM (как в formatRestaurantNumber).
+                $roGroup = $roNum >= 1000 ? 'PS' : 'BK_VM';
+                $preview = mb_substr($message, 0, 80);
+                pushSendToRestaurant($pdo, $roNum, $roGroup, [
+                    'title' => '💬 Ответ от закупки',
+                    'body'  => $preview . (mb_strlen($message) > 80 ? '…' : ''),
+                    'url'   => '/restaurant?bug=' . (int)$reportId,
+                    'tag'   => 'bug-reply-' . (int)$reportId,
+                ]);
+            } catch (Throwable $e) {
+                error_log('[reply_bug_report] push failed: ' . $e->getMessage());
+            }
+        }
         respond(['success' => true]);
     }
 

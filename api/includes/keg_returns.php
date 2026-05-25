@@ -213,6 +213,25 @@ function krNotifyRouted(PDO $pdo, array $row): void {
     } catch (Throwable $e) {
         error_log('krNotifyRouted text failed for #' . (int)$row['id'] . ': ' . $e->getMessage());
     }
+    // Web Push ресторану (рядом с Telegram).
+    try {
+        if (!function_exists('pushSendToRestaurant')) {
+            require_once __DIR__ . '/push_send.php';
+        }
+        $rNum = $pdo->prepare("SELECT number, legal_entity_group FROM restaurants WHERE id = ?");
+        $rNum->execute([(int)$row['restaurant_id']]);
+        $rr = $rNum->fetch();
+        if ($rr && (int)$rr['number'] > 0) {
+            pushSendToRestaurant($pdo, (int)$rr['number'], (string)($rr['legal_entity_group'] ?: 'BK_VM'), [
+                'title' => '✅ ТТН готова к печати',
+                'body'  => 'Заявка ' . $bsoStr . ' от ' . $bsoDate . ' маршрутизирована',
+                'url'   => '/restaurant/keg-returns?id=' . (int)$row['id'],
+                'tag'   => 'keg-routed-' . (int)$row['id'],
+            ]);
+        }
+    } catch (Throwable $e) {
+        error_log('krNotifyRouted push failed for #' . (int)$row['id'] . ': ' . $e->getMessage());
+    }
     // PDF best-effort
     try {
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';

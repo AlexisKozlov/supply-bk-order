@@ -724,7 +724,39 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     $keyboard = json_encode(['inline_keyboard' => $btns]);
 
     $chatIds = array_column($subs, 'chat_id');
-    return sendTelegramBulk($botToken, $chatIds, $text, 'HTML', $keyboard);
+    $tgSent = sendTelegramBulk($botToken, $chatIds, $text, 'HTML', $keyboard);
+
+    // Web Push — для ресторанов группы, которые ещё не заполнили, и у которых
+    // есть push-подписка. Логика «кому слать» та же что у Telegram, только
+    // без условия notify_stock_sessions (это TG-настройка).
+    try {
+        if (!function_exists('pushSendToRestaurant')) {
+            require_once __DIR__ . '/push_send.php';
+        }
+        $pst = $pdo->prepare("
+            SELECT DISTINCT r.number, r.legal_entity_group
+            FROM restaurants r
+            JOIN push_subscriptions ps ON ps.restaurant_number = r.number AND ps.legal_entity_group = r.legal_entity_group
+            WHERE r.legal_entity_group = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM stock_collection_data scd
+                WHERE scd.collection_id = ? AND scd.restaurant_number = r.number
+              )
+        ");
+        $pst->execute([$group, $collectionId]);
+        foreach ($pst->fetchAll() as $r) {
+            pushSendToRestaurant($pdo, (int)$r['number'], (string)$r['legal_entity_group'], [
+                'title' => '📋 Новый сбор остатков',
+                'body'  => $collectionName . ' · товаров: ' . (int)$productsCount,
+                'url'   => '/restaurant?tab=stock',
+                'tag'   => 'stock-collection-' . (int)$collectionId,
+            ]);
+        }
+    } catch (Throwable $e) {
+        error_log('[scNotifyRestaurants] push failed: ' . $e->getMessage());
+    }
+
+    return $tgSent;
 }
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
