@@ -5758,7 +5758,26 @@ if ($endpoint === 'rpc') {
         if (empty($sets)) respond(['error' => 'nothing to update'], 400);
         $params[] = $id;
         $pdo->prepare("UPDATE supplier_payments SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
-        respond(['success' => true]);
+
+        // Каскад orders.delivery_date — только если фронт явно попросил
+        // cascade_delivery_to_order=true. Это решение остаётся за пользователем
+        // (см. модалку подтверждения в PaymentsView).
+        $cascadedOrderId = null;
+        if (!empty($body['cascade_delivery_to_order']) && array_key_exists('delivery_date', $body)) {
+            $newDelivery = trim((string)$body['delivery_date']);
+            if ($newDelivery !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $newDelivery)) {
+                $oidStmt = $pdo->prepare("SELECT order_id FROM supplier_payments WHERE id = ?");
+                $oidStmt->execute([$id]);
+                $oid = $oidStmt->fetchColumn();
+                if ($oid) {
+                    $pdo->prepare("UPDATE orders SET delivery_date = ?, updated_at = NOW() WHERE id = ?")
+                        ->execute([$newDelivery, $oid]);
+                    $cascadedOrderId = $oid;
+                }
+            }
+        }
+
+        respond(['success' => true, 'cascaded_order_id' => $cascadedOrderId]);
     }
 
     if ($fn === 'dashboard_kpi') {

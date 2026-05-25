@@ -191,8 +191,14 @@ async function saveEdit(p) {
     const updates = { id: p.id, amount: editAmount.value || null, note: editNote.value || null }
     // Если изменилась дата прихода — отправляем её. Бэк сам пересчитает
     // payment_date / request_deadline по отсрочке поставщика.
-    if (editDeliveryDate.value && editDeliveryDate.value !== p.delivery_date) {
+    const deliveryChanged = editDeliveryDate.value && editDeliveryDate.value !== p.delivery_date
+    if (deliveryChanged) {
       updates.delivery_date = editDeliveryDate.value
+      // Если платёж связан с заказом — спрашиваем, обновить ли дату и в заказе.
+      if (p.order_id) {
+        const yes = window.confirm(`Дата прихода связана с заказом в истории поставок.\n\nОбновить дату прихода и там тоже?`)
+        if (yes) updates.cascade_delivery_to_order = true
+      }
     }
     // Ручное изменение даты оплаты применяется ТОЛЬКО когда пользователь не
     // менял дату прихода — иначе пересчёт от прихода важнее. Если хочется
@@ -204,9 +210,10 @@ async function saveEdit(p) {
       const y = payDt.getFullYear(), m = String(payDt.getMonth()+1).padStart(2,'0'), d = String(payDt.getDate()).padStart(2,'0')
       updates.request_deadline = `${y}-${m}-${d} 15:00:00`
     }
-    await db.rpc('update_payment', updates)
+    const { data } = await db.rpc('update_payment', updates)
     editId.value = null
-    toast.show('Сохранено')
+    const cascadeMsg = data?.cascaded_order_id ? ` (заказ ${String(data.cascaded_order_id).slice(0, 8)}… обновлён)` : ''
+    toast.show('Сохранено' + cascadeMsg)
     await load()
   } catch (e) { toast.error('Ошибка', e.message || e) }
 }
