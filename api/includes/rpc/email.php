@@ -68,8 +68,8 @@
         $subject = implode(' ', $subjParts);
         if (mb_strlen($subject) > 200) $subject = mb_substr($subject, 0, 200);
 
-        require_once __DIR__ . '/mail_send.php';
-        require_once __DIR__ . '/mail_templates.php';
+        require_once __DIR__ . '/../mail_send.php';
+        require_once __DIR__ . '/../mail_templates.php';
 
         $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
 
@@ -135,6 +135,53 @@
         if ($deliveryLabel !== '') $reqParts[] = 'с поставкой <strong>' . $esc($deliveryLabel) . '</strong>';
         $requestLine = implode(' ', $reqParts) . '.';
 
+        // Адрес(а) разгрузки. Берём категории товаров из БД по списку SKU из items
+        // в пределах группы юрлиц отправителя — это надёжнее, чем доверять фронту.
+        // Сухой → склад №6, Холод/Мороз → склад №1. Если в заказе оба типа —
+        // показываем оба адреса с пометкой категории.
+        $ADDR_DRY  = 'Минский район, Луговослободский с/с, М4 18 км, Склад №6 ТЛК "Прилесье"';
+        $ADDR_COLD = 'Минский р-н, Луговослободский с/с, М4 18-й км, 2А/1, ТЛК "Прилесье", склад №1';
+        $hasDry = false; $hasCold = false;
+        if (!empty($itemsRaw)) {
+            $skuList = [];
+            foreach ($itemsRaw as $it) {
+                if (!is_array($it)) continue;
+                $s = trim((string)($it['sku'] ?? ''));
+                if ($s !== '') $skuList[$s] = true;
+            }
+            if (!empty($skuList)) {
+                try {
+                    $grp = getEntityGroup($legalEntity);
+                    $entitiesInGroup = getEntitiesInGroup($grp);
+                    $skus = array_keys($skuList);
+                    $phSku = implode(',', array_fill(0, count($skus), '?'));
+                    $phEnt = implode(',', array_fill(0, count($entitiesInGroup), '?'));
+                    $st = $pdo->prepare("SELECT DISTINCT category FROM products WHERE sku IN ($phSku) AND legal_entity IN ($phEnt)");
+                    $st->execute(array_merge($skus, $entitiesInGroup));
+                    foreach ($st->fetchAll() as $row) {
+                        $cat = (string)($row['category'] ?? '');
+                        if ($cat === 'Сухой') $hasDry = true;
+                        if ($cat === 'Холод' || $cat === 'Мороз') $hasCold = true;
+                    }
+                } catch (Throwable $e) {
+                    error_log('[send_supplier_order_email] category lookup failed: ' . $e->getMessage());
+                }
+            }
+        }
+        $addressLines = [];
+        if ($hasDry && $hasCold) {
+            $addressLines[] = 'Адрес разгрузки (сухое): ' . $ADDR_DRY . '.';
+            $addressLines[] = 'Адрес разгрузки (холод/мороз): ' . $ADDR_COLD . '.';
+        } elseif ($hasDry) {
+            $addressLines[] = 'Адрес разгрузки: ' . $ADDR_DRY . '.';
+        } elseif ($hasCold) {
+            $addressLines[] = 'Адрес разгрузки: ' . $ADDR_COLD . '.';
+        }
+        $addressHtml = '';
+        foreach ($addressLines as $line) {
+            $addressHtml .= '<div style="margin-top:6px;">' . $esc($line) . '</div>';
+        }
+
         $hasAttachment = !empty($body['attachment']) && is_array($body['attachment']);
         $attachLine = $hasAttachment
             ? '<div style="margin-top:18px;color:#4b5563;">Подробности — во вложении (Excel).</div>'
@@ -146,6 +193,7 @@
           . '<div style="padding:24px 28px;max-width:760px;font-size:14px;">'
           . '<div style="margin-bottom:6px;">' . $greetingLine . '</div>'
           . '<div>' . $requestLine . '</div>'
+          . $addressHtml
           . $itemsHtml
           . $attachLine
           . '<div style="margin-top:22px;color:#1f2937;">Спасибо!</div>'
@@ -320,7 +368,7 @@
         $subject = implode(' ', $subjParts);
         if (mb_strlen($subject) > 200) $subject = mb_substr($subject, 0, 200);
 
-        require_once __DIR__ . '/mail_send.php';
+        require_once __DIR__ . '/../mail_send.php';
 
         // HTML письма — минимализм, аналогично заявке. Без брендинга.
         $esc = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
@@ -468,7 +516,7 @@
                 respond(['error' => 'Требуется авторизация'], 401);
             }
             if (!function_exists('roGetRestaurantSession')) {
-                require_once __DIR__ . '/restaurant_orders.php';
+                require_once __DIR__ . '/../restaurant_orders.php';
             }
             $roSess = function_exists('roGetRestaurantSession') ? roGetRestaurantSession($pdo) : null;
             if (!$roSess) respond(['error' => 'Требуется авторизация'], 401);

@@ -34,7 +34,7 @@
 
         // Освежаем TG-сообщения у закупок — там перерисуются текст и кнопки.
         try {
-            require_once __DIR__ . '/bot_rest.php';
+            require_once __DIR__ . '/../bot_rest.php';
             corrUpdateAllReviewMessages($pdo, $ids);
         } catch (\Throwable $e) {
             error_log('[correction_take_batch] tg refresh failed: ' . $e->getMessage());
@@ -85,7 +85,7 @@
         // Освежаем сообщения у закупок (это работает даже если батч ещё не закрыт целиком),
         // и пытаемся отправить итог ресторану (функция сама вернётся, если ещё есть pending/in_progress).
         try {
-            require_once __DIR__ . '/bot_rest.php';
+            require_once __DIR__ . '/../bot_rest.php';
             if ($batchIds) {
                 corrUpdateAllReviewMessages($pdo, $batchIds);
                 corrSendResultToRestaurant($pdo, $batchIds, $callerName);
@@ -134,7 +134,7 @@
         // Перерисовываем TG-сообщения у закупок и отправляем итог ресторану
         // через единую функцию (push + TG всем верифицированным сотрудникам).
         try {
-            require_once __DIR__ . '/bot_rest.php';
+            require_once __DIR__ . '/../bot_rest.php';
             // Группируем по batch_uuid (для кабинетных), и по (restaurant, date, chat_id) — для TG-старых.
             $first = $pdo->prepare("SELECT batch_uuid, restaurant_number, delivery_date, restaurant_chat_id FROM order_corrections WHERE id = ?");
             $first->execute([intval($ids[0])]);

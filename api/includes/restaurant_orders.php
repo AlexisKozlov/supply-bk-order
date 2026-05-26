@@ -6066,18 +6066,125 @@ if (strpos($roAction, 'admin') === 0) {
         $rows = [];
         $unmatchedMap = []; // ключ: extCode|sku → ['external_code','sku','name','qty','warehouse','legal_entity']
 
+        // Универсальный определитель юрлица по содержимому ячейки «владелец/заказчик».
+        $detectLegalEntity = function ($ownerStrRaw) {
+            $owner = mb_strtolower(trim((string)$ownerStrRaw));
+            if ($owner === '') return '';
+            if (mb_strpos($owner, 'воглия') !== false) return 'ООО "Воглия Матта"';
+            if (mb_strpos($owner, 'бургер') !== false) return 'ООО "Бургер БК"';
+            if (mb_strpos($owner, 'пицца стар') !== false || mb_strpos($owner, 'додо') !== false) {
+                return 'ООО "Пицца Стар"';
+            }
+            return '';
+        };
+
+        // Маппинг названия склада из нового формата → значения warehouse в БД.
+        $detectWarehouseFromName = function ($whRaw) {
+            $wh = mb_strtolower(trim((string)$whRaw));
+            if ($wh === '') return '';
+            // «Прилесье 6» — сухой склад
+            if (mb_strpos($wh, 'прилесь') !== false && mb_strpos($wh, '6') !== false) return 'Сухой';
+            // «Прилесье 1 охлажденные/замороженные», «Шабаны холодный» — холод/мороз
+            if (mb_strpos($wh, 'прилесь') !== false) return 'Холод+Мороз';
+            if (mb_strpos($wh, 'шабан') !== false) return 'Холод+Мороз';
+            return '';
+        };
+
         foreach ($xlsx->sheetNames() as $sheetIdx => $sheetName) {
-            // Определяем тип склада (пропускаем листы с примерами заказов)
             if (mb_stripos($sheetName, 'Пример') !== false) continue;
+
+            $sheetRows = $xlsx->rows($sheetIdx);
+            if (empty($sheetRows)) continue;
+
+            // --- Детекция формата по заголовку ---
+            // Новый формат: один лист, отдельные колонки «Внешний код товара»,
+            // «Наименование товара», «Остатки, кол», «Короткое наименования заказчика»,
+            // «Название склада хранения».
+            // Старый формат: имя листа «П6»/«П1», колонка «Товар» + «Владелец» + «Кол-во».
+            $newColExt = -1; $newColName = -1; $newColQty = -1;
+            $newColOwner = -1; $newColWarehouse = -1;
+            $newHeaderRow = -1;
+            for ($r = 0; $r < min(15, count($sheetRows)); $r++) {
+                foreach ($sheetRows[$r] as $c => $val) {
+                    $v = mb_strtolower(trim((string)$val));
+                    if ($v === '') continue;
+                    if (mb_strpos($v, 'внешний код') !== false) $newColExt = $c;
+                    if (mb_strpos($v, 'наименование товара') !== false) $newColName = $c;
+                    if (mb_strpos($v, 'остатки') !== false || $v === 'остатки, кол') $newColQty = $c;
+                    if (mb_strpos($v, 'заказчик') !== false) $newColOwner = $c;
+                    if (mb_strpos($v, 'склад') !== false && mb_strpos($v, 'хранен') !== false) $newColWarehouse = $c;
+                }
+                if ($newColExt >= 0 && $newColName >= 0 && $newColQty >= 0
+                    && $newColOwner >= 0 && $newColWarehouse >= 0) {
+                    $newHeaderRow = $r;
+                    break;
+                }
+            }
+
+            if ($newHeaderRow >= 0) {
+                // ─── НОВЫЙ ФОРМАТ ───
+                for ($r = $newHeaderRow + 1; $r < count($sheetRows); $r++) {
+                    $qty = (float)($sheetRows[$r][$newColQty] ?? 0);
+                    if ($qty <= 0) continue;
+
+                    $legalEntity = $detectLegalEntity($sheetRows[$r][$newColOwner] ?? '');
+                    if ($legalEntity === '') continue;
+                    if (!$isFullAdmin && !in_array($legalEntity, $allowedEntities, true)) continue;
+
+                    $warehouse = $detectWarehouseFromName($sheetRows[$r][$newColWarehouse] ?? '');
+                    if ($warehouse === '') continue;
+
+                    $extCode = roNormalizeStockProductCode((string)($sheetRows[$r][$newColExt] ?? ''));
+                    $nameStr = trim((string)($sheetRows[$r][$newColName] ?? ''));
+                    if ($extCode === '' && $nameStr === '') continue;
+
+                    // SKU — первое слово в названии товара (например «61084 Огурцы…»).
+                    $sku = '';
+                    $excelName = $nameStr;
+                    if (preg_match('/^\s*(\S+)\s+(.+)$/u', $nameStr, $m)) {
+                        $sku = roNormalizeStockProductCode($m[1]);
+                        $excelName = trim($m[2]);
+                    } else {
+                        $sku = roNormalizeStockProductCode($nameStr);
+                    }
+
+                    // Сначала по внешнему коду (он в файле отдельной колонкой), потом по SKU.
+                    $foundProduct = $productsByExtCode[$extCode] ?? $productsBySku[$sku] ?? null;
+                    if ($foundProduct) {
+                        $fSku = $foundProduct['sku'];
+                        $key = $fSku . '|' . $legalEntity;
+                        if (isset($rows[$key])) {
+                            $rows[$key][2] += $qty;
+                        } else {
+                            $rows[$key] = [$fSku, $foundProduct['name'], $qty, $warehouse, $legalEntity, $balanceDate];
+                        }
+                        $matched++;
+                    } else {
+                        $skipped++;
+                        $umKey = $extCode . '|' . $sku . '|' . $legalEntity;
+                        if (isset($unmatchedMap[$umKey])) {
+                            $unmatchedMap[$umKey]['qty'] += $qty;
+                        } else {
+                            $unmatchedMap[$umKey] = [
+                                'external_code' => $extCode,
+                                'sku' => $sku,
+                                'name' => $excelName,
+                                'qty' => $qty,
+                                'warehouse' => $warehouse,
+                                'legal_entity' => $legalEntity,
+                            ];
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // ─── СТАРЫЙ ФОРМАТ ───
             $warehouse = '';
             if (mb_stripos($sheetName, 'П6') !== false) $warehouse = 'Сухой';
             elseif (mb_stripos($sheetName, 'П1') !== false) $warehouse = 'Холод+Мороз';
             else continue;
 
-            $sheetRows = $xlsx->rows($sheetIdx);
-            if (empty($sheetRows)) continue;
-
-            // Ищем заголовок
             $headerRow = -1;
             $colProduct = -1;
             $colOwner = -1;
@@ -6086,10 +6193,8 @@ if (strpos($roAction, 'admin') === 0) {
                 foreach ($sheetRows[$r] as $c => $val) {
                     $v = mb_strtolower(trim((string)$val));
                     if ($v === '') continue;
-                    // «Товар» (точное совпадение — не путать с «Владелец товара»)
                     if ($v === 'товар' || $v === 'номенклатура' || $v === 'наименование') $colProduct = $c;
                     if (mb_strpos($v, 'владелец') !== false) $colOwner = $c;
-                    // Колонка количества: «Итог», «Итого», «Кол-во», «Количество», «Кол-во штук», «Остаток»
                     if (preg_match('/^итог|^кол[-\s]?во|^количеств|^остаток|штук/u', $v)) $colQty = $c;
                 }
                 if ($colProduct >= 0 && $colQty >= 0) { $headerRow = $r; break; }
@@ -6101,24 +6206,10 @@ if (strpos($roAction, 'admin') === 0) {
                 $qty = (float)($sheetRows[$r][$colQty] ?? 0);
                 if (!$productStr || $qty <= 0) continue;
 
-                // Определяем юрлицо по владельцу
-                $ownerStr = mb_strtolower(trim((string)($sheetRows[$r][$colOwner] ?? '')));
-                $legalEntity = '';
-                if (mb_strpos($ownerStr, 'воглия') !== false) {
-                    $legalEntity = 'ООО "Воглия Матта"';
-                } elseif (mb_strpos($ownerStr, 'бургер') !== false) {
-                    $legalEntity = 'ООО "Бургер БК"';
-                } elseif (mb_strpos($ownerStr, 'пицца стар') !== false || mb_strpos($ownerStr, 'додо') !== false) {
-                    $legalEntity = 'ООО "Пицца Стар"';
-                } else {
-                    continue; // пропускаем ДоДо, Сбарро и т.д.
-                }
-                if (!$isFullAdmin && !in_array($legalEntity, $allowedEntities, true)) {
-                    continue;
-                }
+                $legalEntity = $detectLegalEntity($sheetRows[$r][$colOwner] ?? '');
+                if ($legalEntity === '') continue;
+                if (!$isFullAdmin && !in_array($legalEntity, $allowedEntities, true)) continue;
 
-                // Парсим обычный формат: "внешний_код - SKU Название".
-                // Если формат другой, берём первый код из строки и пробуем найти его как артикул или внешний код.
                 $extCode = '';
                 $sku = '';
                 $excelName = $productStr;
@@ -6135,7 +6226,6 @@ if (strpos($roAction, 'admin') === 0) {
                     $extCode = $sku;
                 }
 
-                // Сопоставляем: сначала по SKU, потом по внешнему коду
                 $foundProduct = $productsBySku[$sku] ?? $productsByExtCode[$extCode] ?? null;
                 if ($foundProduct) {
                     $fSku = $foundProduct['sku'];
