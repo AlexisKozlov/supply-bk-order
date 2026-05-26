@@ -54,6 +54,7 @@
           ><span class="btn-icon">↶</span><span class="btn-text"> Отменить</span></button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Добавить товар" @click="showAddProduct = true"><span class="btn-icon">＋</span><span class="btn-text"> Товар</span></button>
           <button class="dist-btn ghost" title="Скачать Excel" @click="exportExcel"><span class="btn-icon">⬇</span><span class="btn-text"> Excel</span></button>
+          <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Импорт из Excel" @click="showImport = true"><span class="btn-icon">📥</span><span class="btn-text"> Импорт</span></button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost danger" title="Закрыть сессию" @click="askCloseSession"><span class="btn-icon">✕</span><span class="btn-text"> Закрыть</span></button>
           <button v-if="activeSession.status === 'closed'" class="dist-btn ghost" title="Открыть сессию" @click="reopenSession"><span class="btn-icon">↻</span><span class="btn-text"> Открыть</span></button>
           <button class="dist-btn ghost danger" title="Удалить сессию" @click="askDeleteSession"><span class="btn-icon">🗑</span><span class="btn-text"> Удалить</span></button>
@@ -158,10 +159,10 @@
                 @touchmove="cancelLongPress"
                 @touchcancel="cancelLongPress"
               >
-                <span v-if="getCellStatus(rest.number, p.id) === 1" class="cell-ok">✓</span>
-                <span v-else-if="getCellStatus(rest.number, p.id) === 2" class="cell-no">✗</span>
-                <span v-if="hasCustomQty(rest.number, p.id)" class="cell-qty">
-                  {{ getEntryQty(rest.number, p.id) }}
+                <span class="cell-row">
+                  <span v-if="hasCustomQty(rest.number, p.id)" class="cell-qty">{{ getEntryQty(rest.number, p.id) }}</span>
+                  <span v-if="getCellStatus(rest.number, p.id) === 1" class="cell-ok">✓</span>
+                  <span v-else-if="getCellStatus(rest.number, p.id) === 2" class="cell-no">✗</span>
                 </span>
               </td>
               <td class="td-note" @dblclick.stop="startEditNote(rest.number)">
@@ -299,6 +300,55 @@
       </div>
     </Teleport>
 
+    <!-- ═══ Модалка: импорт из Excel ═══ -->
+    <Teleport to="body">
+      <div v-if="showImport" class="dist-overlay" @mousedown.self="closeImport">
+        <div class="dist-modal" style="width:640px">
+          <div class="modal-title">Импорт из Excel</div>
+          <p class="modal-text" style="margin-bottom:12px">
+            Скачайте шаблон, заполните количество для каждого ресторана, загрузите обратно.
+            <br><br>
+            <b>Что писать в клетках:</b>
+            пустое — пропустить, число (например <code>2</code>) — отгружено в этом количестве,
+            <code>✓</code> или <code>да</code> — отгружено по умолчанию ({{ '' }}),
+            <code>✗</code> или <code>нет</code> — не нужно ресторану.
+          </p>
+          <div style="display:flex;gap:8px;margin-bottom:14px">
+            <button class="dist-btn ghost" @click="downloadTemplate">📥 Скачать шаблон</button>
+            <label class="dist-btn primary" style="cursor:pointer">
+              📤 Выбрать файл
+              <input type="file" accept=".xlsx,.xls" style="display:none" @change="onFileSelected"/>
+            </label>
+          </div>
+          <div v-if="importPreview.length" class="import-preview">
+            <div class="import-preview-stats">
+              <span>Всего строк: <b>{{ importPreview.length }}</b></span>
+              <span>К записи: <b class="ok">{{ importStats.valid }}</b></span>
+              <span v-if="importStats.errors">Ошибок: <b class="err">{{ importStats.errors }}</b></span>
+            </div>
+            <div class="import-preview-list">
+              <div v-for="(row, i) in importPreview.slice(0, 50)" :key="i" class="import-row" :class="{ err: row.error }">
+                <span class="import-rn">{{ row.restaurant_number }}</span>
+                <span v-if="row.error" class="import-err-msg">{{ row.error }}</span>
+                <span v-else class="import-changes">
+                  <span v-for="ch in row.changes" :key="ch.spId" class="import-chg">
+                    {{ ch.label }}: <b>{{ ch.action }}</b>
+                  </span>
+                </span>
+              </div>
+              <div v-if="importPreview.length > 50" class="import-more">… и ещё {{ importPreview.length - 50 }} строк</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="dist-btn ghost" @click="closeImport">Отмена</button>
+            <button class="dist-btn primary" :disabled="!importStats.valid || importing" @click="doImport">
+              {{ importing ? 'Импорт...' : `Импортировать ${importStats.valid} строк` }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- ═══ Модалка: подтверждение ═══ -->
     <Teleport to="body">
       <div v-if="confirmMsg" class="dist-overlay" @mousedown.self="confirmMsg = ''">
@@ -333,9 +383,14 @@ const editQtyValue = ref('');
 const editingNote = ref(null);
 const editNoteValue = ref('');
 
+// Import Excel
+const showImport = ref(false);
+const importPreview = ref([]); // [{restaurant_number, changes:[{spId,label,action}], error?}]
+const importing = ref(false);
+
 // Composable знает, что пользователь сейчас редактирует, чтобы не дёргать
 // auto-refresh поверх его правок.
-const isEditing = computed(() => !!editingQty.value || !!editingNote.value);
+const isEditing = computed(() => !!editingQty.value || !!editingNote.value || showImport.value);
 const legalEntityRef = computed(() => orderStore.settings.legalEntity);
 
 const session = useDistributionSession({
@@ -360,6 +415,11 @@ const {
 
 const dayShort = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ' };
 
+function fmtDate(d) {
+  if (!d) return '';
+  return new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 // Create session
 const showCreate = ref(false);
 const newName = ref('');
@@ -380,15 +440,9 @@ const addUnit = ref('кор');
 const addManualName = ref('');
 const addManualSku = ref('');
 
-// Edit qty
-const editingQty = ref(null);
-const editQtyValue = ref('');
-
 // Confirm
 const confirmMsg = ref('');
 const confirmAction = ref(null);
-
-// editingNote / editingQty объявлены выше — это UI-only state модалок и инпутов
 
 // ═══ Mouse actions ═══
 // markShipped/markCrossed приходят из composable — отвечают только за
@@ -646,7 +700,6 @@ async function reopenSession() {
 }
 
 // ═══ Excel export ═══
-import { exportDistExcel } from '@/lib/distExcel.js';
 function exportExcel() {
   return exportDistExcel({
     sessionName: activeSession.value.name,
@@ -659,6 +712,132 @@ function exportExcel() {
     getShippedCount: getProductShippedCount,
   });
 }
+
+// ═══ Импорт Excel ═══
+// Стат подсчитываем тут же, чтобы не плодить computed на временные данные.
+const importStats = computed(() => {
+  let valid = 0, errors = 0;
+  for (const row of importPreview.value) {
+    if (row.error) errors++;
+    else if (row.changes?.length) valid++;
+  }
+  return { valid, errors };
+});
+
+// Генерим Excel-шаблон: первая колонка — номера ресторанов сессии,
+// дальше пустые колонки по числу товаров с подписями.
+async function downloadTemplate() {
+  const XLSX = (await import('xlsx-js-style')).default;
+  const products = sessionProducts.value;
+  const rests = allRestaurants.value;
+  const header = ['Ресторан', 'Адрес', ...products.map(p => `${p.product_name || 'Товар'} (${p.unit})`)];
+  const rows = rests.map(r => [r.number, r.address || r.city || '', ...products.map(() => '')]);
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  ws['!cols'] = [{ wch: 10 }, { wch: 30 }, ...products.map(() => ({ wch: 14 }))];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Импорт');
+  XLSX.writeFile(wb, `Шаблон_${(activeSession.value?.name || 'distribution').replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}.xlsx`);
+}
+
+// Распознаём значение клетки.
+//  - '' → пропустить (ничего не меняем)
+//  - '✓ / +' и т.п. → ставим ✓ (отгружено), qty не трогаем
+//  - '✗ / x / нет' и т.п. → ставим ✗ (не нужно), qty не трогаем
+//  - число (или текст с числом, типа «2 кор») → СОХРАНЯЕМ qty БЕЗ галки
+//    (statusOnly: false, shipped: null — closing-key для бэка «не трогай статус»)
+//    Так закупщик может массово загрузить «количество для каждого ресторана»,
+//    а галки потом поставить руками (или не поставить совсем).
+function parseImportCell(raw) {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  if (s === '') return null;
+  const low = s.toLowerCase();
+  if (['✓', '+', 'да', 'y', 'yes', 'true', '1'].includes(low)) return { shipped: 1, qty: null };
+  if (['✗', 'x', 'х', '×', '-', 'нет', 'n', 'no', 'false', '0'].includes(low)) return { shipped: 2, qty: null };
+  // Число → только qty. shipped=null означает «не менять статус».
+  if (/\d/.test(s)) return { shipped: null, qty: s };
+  return { error: `Не понял значение «${s}»` };
+}
+
+async function onFileSelected(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  importPreview.value = [];
+  const XLSX = (await import('xlsx-js-style')).default;
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: 'array' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  if (!rows.length) { toastStore.show('Файл пуст', 'error'); return; }
+
+  // Строка 0 — заголовки. Колонки B...N сопоставляем с sessionProducts по индексу
+  // (порядок столбцов = порядок товаров в шапке шаблона).
+  const products = sessionProducts.value;
+  const restMap = new Map(allRestaurants.value.map(r => [String(r.number), r]));
+  const preview = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const rn = String(row[0] ?? '').trim();
+    if (!rn) continue; // пустая строка
+    if (!restMap.has(rn)) { preview.push({ restaurant_number: rn, error: 'Ресторан не найден' }); continue; }
+    const changes = [];
+    for (let pi = 0; pi < products.length; pi++) {
+      // Шаблон: A=Ресторан, B=Адрес, C+ — товары → начинаем с индекса 2
+      const cell = row[pi + 2];
+      const parsed = parseImportCell(cell);
+      if (!parsed) continue;
+      if (parsed.error) {
+        preview.push({ restaurant_number: rn, error: `${products[pi].product_name}: ${parsed.error}` });
+        continue;
+      }
+      const p = products[pi];
+      let label = p.product_name || 'Товар';
+      let action;
+      if (parsed.shipped === 1) action = '✓';
+      else if (parsed.shipped === 2) action = '✗';
+      else action = parsed.qty != null ? String(parsed.qty) : '—';
+      changes.push({ spId: p.id, shipped: parsed.shipped, qty: parsed.qty, label, action });
+    }
+    if (changes.length) preview.push({ restaurant_number: rn, changes });
+  }
+  importPreview.value = preview;
+  if (!preview.length) toastStore.show('Не нашлось ни одной клетки для импорта', 'warning');
+  // Сбрасываем input чтобы можно было выбрать тот же файл повторно
+  event.target.value = '';
+}
+
+async function doImport() {
+  if (!activeSession.value || !importStats.value.valid) return;
+  importing.value = true;
+  try {
+    const entries = [];
+    for (const row of importPreview.value) {
+      if (row.error || !row.changes) continue;
+      for (const ch of row.changes) {
+        entries.push({
+          session_product_id: ch.spId,
+          restaurant_number: row.restaurant_number,
+          shipped: ch.shipped,
+          qty: ch.qty,
+        });
+      }
+    }
+    const { error } = await db.rpc('dist_bulk_set_qty', {
+      session_id: activeSession.value.id,
+      entries,
+    });
+    if (error) { toastStore.show('Ошибка импорта: ' + error, 'error'); return; }
+    toastStore.show(`Импортировано ${entries.length} клеток`, 'success');
+    closeImport();
+    await loadSessionData(activeSession.value.id);
+  } finally { importing.value = false; }
+}
+
+function closeImport() {
+  showImport.value = false;
+  importPreview.value = [];
+}
+
 </script>
 
 <style scoped>
@@ -672,7 +851,8 @@ function exportExcel() {
 .dist-btn.primary:hover { background: var(--bk-red-dark); }
 .dist-btn.primary.danger { background: #C62828; }
 .dist-btn.primary.danger:hover { background: #B71C1C; }
-.dist-btn.ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+.dist-btn.ghost { background: transparent; color: var(--bk-brown); border: 1px solid var(--border); }
+.dist-btn.ghost .btn-icon { color: var(--bk-brown); }
 .dist-btn.ghost:hover { border-color: var(--bk-brown); color: var(--bk-brown); background: var(--bk-cream); }
 .dist-btn.ghost.danger { color: #C62828; }
 .dist-btn.ghost.danger:hover { border-color: #C62828; background: #FFF5F5; }
@@ -769,9 +949,10 @@ function exportExcel() {
 .td-crossed { background: #FFEBEE !important; }
 .td-crossed:hover { background: #FFCDD2 !important; }
 .td-custom { outline: 2px solid var(--bk-orange); outline-offset: -2px; }
+.cell-row { display: inline-flex; align-items: center; justify-content: center; gap: 4px; line-height: 1; }
 .cell-ok { color: var(--green); font-weight: 700; font-size: 14px; }
 .cell-no { color: #C62828; font-weight: 700; font-size: 14px; }
-.cell-qty { display: block; font-size: 9px; color: #E65100; font-weight: 600; margin-top: -2px; }
+.cell-qty { font-size: 12px; color: #E65100; font-weight: 700; }
 
 /* Notes */
 .td-note { text-align: left; padding-left: 8px !important; font-size: 11px; color: var(--text-secondary); cursor: pointer; min-width: 120px; }
@@ -807,6 +988,22 @@ function exportExcel() {
 .prod-del { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 18px; padding: 0; line-height: 1; }
 .prod-del:hover { color: #C62828; }
 .prod-selected { margin-top: 12px; padding: 10px; background: #fdfbf8; border-radius: var(--radius-sm); }
+
+/* Импорт Excel */
+.import-preview { margin-top: 10px; }
+.import-preview-stats { display: flex; gap: 16px; font-size: 13px; padding: 8px 12px; background: #fdfbf8; border-radius: 6px; margin-bottom: 8px; }
+.import-preview-stats b.ok { color: var(--green); }
+.import-preview-stats b.err { color: #C62828; }
+.import-preview-list { max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.import-row { display: flex; align-items: baseline; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--border-light); font-size: 12px; }
+.import-row.err { background: #FFEBEE; }
+.import-rn { font-weight: 700; color: var(--bk-brown); min-width: 36px; }
+.import-changes { display: flex; flex-wrap: wrap; gap: 10px; flex: 1; color: var(--text-secondary); }
+.import-chg { white-space: nowrap; }
+.import-chg b { color: var(--text); }
+.import-err-msg { color: #C62828; font-weight: 600; }
+.import-more { padding: 10px; text-align: center; color: var(--text-muted); font-size: 12px; font-style: italic; }
+code { background: #fdfbf8; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; font-family: monospace; color: var(--bk-brown); }
 
 /* ═══ Mobile (<= 600px) ═══
    Цель: пальцем удобно ставить ✓/✗ в матрице и не тратить

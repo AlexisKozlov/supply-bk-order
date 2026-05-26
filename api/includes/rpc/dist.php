@@ -250,6 +250,79 @@
         respond(['success' => true]);
     }
 
+    // Массовая установка статусов/qty при импорте из Excel. Один многострочный
+    // INSERT — на 5000 строк это в десятки раз быстрее N отдельных запросов.
+    // entries: [{session_product_id, restaurant_number, shipped?, qty?}, ...]
+    // Если не передан shipped — оставляем как есть (через COALESCE).
+    if ($fn === 'dist_bulk_set_qty') {
+        requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $sessionId = intval($body['session_id'] ?? 0);
+        $entries = $body['entries'] ?? [];
+        if (!$sessionId || empty($entries)) respond(['error' => 'Нет данных'], 400);
+        if (count($entries) > 5000) respond(['error' => 'Слишком много записей (макс. 5000)'], 400);
+        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$sessionId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+
+        // Проверяем, что все session_product_id принадлежат этой сессии (защита от подмены чужих).
+        $spIds = array_unique(array_map(fn($e) => (int)$e['session_product_id'], $entries));
+        if (in_array(0, $spIds, true)) respond(['error' => 'Невалидный session_product_id'], 400);
+        $ph = implode(',', array_fill(0, count($spIds), '?'));
+        $ck = $pdo->prepare("SELECT COUNT(*) FROM dist_session_products WHERE session_id=? AND id IN ($ph)");
+        $ck->execute(array_merge([$sessionId], array_values($spIds)));
+        if ((int)$ck->fetchColumn() !== count($spIds)) respond(['error' => 'Некоторые позиции не принадлежат этой сессии'], 400);
+
+        // Разделяем на 2 группы — те что меняют статус, и те что только qty.
+        // Это нужно потому что в одном multi-row INSERT нельзя выборочно
+        // обновлять колонки по строкам: UPDATE-часть применяется ко всем.
+        $withStatus = []; // INSERT ... shipped и qty
+        $qtyOnly = [];    // INSERT ... shipped=0 для NEW, в UPDATE shipped НЕ ТРОГАЕМ
+        foreach ($entries as $e) {
+            $spId = (int)($e['session_product_id'] ?? 0);
+            $rn = (string)($e['restaurant_number'] ?? '');
+            $qty = $e['qty'] ?? null;
+            $hasShipped = array_key_exists('shipped', $e) && $e['shipped'] !== null;
+            if (!$spId || $rn === '') continue;
+            if ($hasShipped) {
+                $withStatus[] = [$spId, $rn, (int)$e['shipped'], $qty];
+            } else {
+                $qtyOnly[] = [$spId, $rn, $qty];
+            }
+        }
+        if (empty($withStatus) && empty($qtyOnly)) respond(['error' => 'Нет валидных записей'], 400);
+
+        $totalUpdated = 0;
+        if (!empty($withStatus)) {
+            $ph = []; $params = [];
+            foreach ($withStatus as [$spId, $rn, $shipped, $qty]) {
+                $ph[] = '(?, ?, ?, ?, ?, ?, 1)';
+                array_push($params, $spId, $rn, $shipped, $qty, $authUserName, $authUserName);
+            }
+            $sql = "INSERT INTO dist_entries (session_product_id, restaurant_number, shipped, qty, created_by, updated_by, version) VALUES "
+                . implode(',', $ph)
+                . " ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), qty = VALUES(qty), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1";
+            $pdo->prepare($sql)->execute($params);
+            $totalUpdated += count($withStatus);
+        }
+        if (!empty($qtyOnly)) {
+            // Только qty: для новых строк shipped=0 (нейтрально). При обновлении
+            // существующих не трогаем shipped — пользователь сам поставит ✓ когда
+            // отгрузит. Это просит UX: «хочу залить количество отдельно от статуса».
+            $ph = []; $params = [];
+            foreach ($qtyOnly as [$spId, $rn, $qty]) {
+                $ph[] = '(?, ?, 0, ?, ?, ?, 1)';
+                array_push($params, $spId, $rn, $qty, $authUserName, $authUserName);
+            }
+            $sql = "INSERT INTO dist_entries (session_product_id, restaurant_number, shipped, qty, created_by, updated_by, version) VALUES "
+                . implode(',', $ph)
+                . " ON DUPLICATE KEY UPDATE qty = VALUES(qty), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1";
+            $pdo->prepare($sql)->execute($params);
+            $totalUpdated += count($qtyOnly);
+        }
+        respond(['success' => true, 'updated' => $totalUpdated]);
+    }
+
     if ($fn === 'dist_save_note') {
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $sessionId = intval($body['session_id'] ?? 0);
