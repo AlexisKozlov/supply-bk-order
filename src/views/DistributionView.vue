@@ -316,26 +316,47 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useDistributionSession } from '@/composables/useDistributionSession.js';
+import { exportDistExcel } from '@/lib/distExcel.js';
 
 const orderStore = useOrderStore();
 const toastStore = useToastStore();
 
-// ═══ State ═══
-const loading = ref(false);
-const sessions = ref([]);
-const activeSession = ref(null);
-const sessionData = ref(null);
+// UI-only state модалок и инпутов
+const editingQty = ref(null);
+const editQtyValue = ref('');
+const editingNote = ref(null);
+const editNoteValue = ref('');
 
-// Filters
-const regionFilter = ref('');
-const cityFilter = ref('');
-const hideProcessed = ref(false);
-const dayFilter = ref(0);
+// Composable знает, что пользователь сейчас редактирует, чтобы не дёргать
+// auto-refresh поверх его правок.
+const isEditing = computed(() => !!editingQty.value || !!editingNote.value);
+const legalEntityRef = computed(() => orderStore.settings.legalEntity);
+
+const session = useDistributionSession({
+  toastStore,
+  legalEntityRef,
+  isEditingRef: isEditing,
+});
+
+// Реэкспортируем то, что нужно шаблону — имена совпадают со старыми, чтобы
+// разметка осталась без изменений.
+const {
+  loading, sessions, activeSession, sessionData,
+  regionFilter, cityFilter, hideProcessed, dayFilter,
+  entriesMap, notesMap, undoStack,
+  sessionProducts, allRestaurants, regions, cities, availableDays,
+  filteredRestaurants, totalShipped, totalNotNeeded, totalProcessed, totalCells, progressPct,
+  isVM, getDayCount, entryKey, getEntry, getEntryQty, hasCustomQty,
+  getCellStatus, cellClass, getProductShippedCount, getProductCrossedCount,
+  loadSessions, openSession, loadSessionData, closeDetail,
+  markShipped, markCrossed, undo,
+} = session;
 
 const dayShort = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ' };
 
@@ -367,281 +388,15 @@ const editQtyValue = ref('');
 const confirmMsg = ref('');
 const confirmAction = ref(null);
 
-// Entries map: key = "spId_restNum" => entry object
-const entriesMap = reactive({});
-
-// Notes
-const notesMap = reactive({});
-const editingNote = ref(null);
-const editNoteValue = ref('');
-
-// Undo: храним последние 20 действий. Каждая запись содержит достаточно,
-// чтобы повторить обратную операцию без лишних запросов к серверу.
-const UNDO_LIMIT = 20;
-const undoStack = ref([]);
-function pushUndo(action) {
-  undoStack.value.push(action);
-  if (undoStack.value.length > UNDO_LIMIT) undoStack.value.shift();
-}
-
-// ═══ Computed ═══
-const sessionProducts = computed(() => sessionData.value?.products || []);
-const allRestaurants = computed(() => sessionData.value?.restaurants || []);
-
-const regions = computed(() => {
-  const set = new Set();
-  for (const r of allRestaurants.value) {
-    const region = getRegion(r);
-    if (region) set.add(region);
-  }
-  return [...set].sort();
-});
-
-const cities = computed(() => {
-  const set = new Set();
-  let rests = allRestaurants.value;
-  if (regionFilter.value) rests = rests.filter(r => getRegion(r) === regionFilter.value);
-  for (const r of rests) {
-    if (r.city) set.add(r.city);
-  }
-  return [...set].sort();
-});
-
-const availableDays = computed(() => {
-  const days = new Set();
-  for (const r of allRestaurants.value) {
-    if (r.delivery_days) {
-      for (const d of r.delivery_days) days.add(d);
-    }
-  }
-  return [...days].sort((a, b) => a - b);
-});
-
-function getDayCount(day) {
-  return allRestaurants.value.filter(r => r.delivery_days?.includes(day)).length;
-}
-
-const filteredRestaurants = computed(() => {
-  let rests = allRestaurants.value;
-  if (dayFilter.value) {
-    rests = rests.filter(r => r.delivery_days?.includes(dayFilter.value));
-  }
-  if (regionFilter.value) {
-    rests = rests.filter(r => getRegion(r) === regionFilter.value);
-  }
-  if (cityFilter.value) rests = rests.filter(r => r.city === cityFilter.value);
-  if (hideProcessed.value) {
-    // Прячем ресторан, только если по ВСЕМ товарам уже принято решение
-    // (✓ или ✗). Иначе ресторан останется висеть и сбивать оператора.
-    rests = rests.filter(r => {
-      return sessionProducts.value.some(p => getCellStatus(r.number, p.id) === 0);
-    });
-  }
-  return rests;
-});
-
-const totalShipped = computed(() => {
-  let count = 0;
-  for (const key in entriesMap) {
-    if (entriesMap[key]?.shipped === 1) count++;
-  }
-  return count;
-});
-
-const totalNotNeeded = computed(() => {
-  let count = 0;
-  for (const key in entriesMap) {
-    if (entriesMap[key]?.shipped === 2) count++;
-  }
-  return count;
-});
-
-const totalProcessed = computed(() => totalShipped.value + totalNotNeeded.value);
-
-const totalCells = computed(() => {
-  return allRestaurants.value.length * sessionProducts.value.length;
-});
-
-// «Обработано» включает и отгрузки, и явные отказы — это полное закрытие
-// клетки. Раньше показывали только отгрузки и оператор не понимал, что
-// ещё нужно решить, а что уже закрыто.
-const progressPct = computed(() => {
-  if (!totalCells.value) return 0;
-  return Math.round(totalProcessed.value / totalCells.value * 100);
-});
-
-// ═══ Helpers ═══
-function getRegion(r) {
-  return r.region || 'Другое';
-}
-
-function isVM(r) {
-  return String(r.number) === '3';
-}
-
-function entryKey(restNum, spId) {
-  return `${spId}_${restNum}`;
-}
-
-function getEntry(restNum, spId) {
-  return entriesMap[entryKey(restNum, spId)] || null;
-}
-
-function getEntryQty(restNum, spId) {
-  const e = getEntry(restNum, spId);
-  return e?.qty ?? null;
-}
-
-function hasCustomQty(restNum, spId) {
-  const e = getEntry(restNum, spId);
-  return e && e.qty !== null && e.qty !== undefined;
-}
-
-function getCellStatus(restNum, spId) {
-  const e = getEntry(restNum, spId);
-  if (!e) return 0;
-  return e.shipped;
-}
-
-function cellClass(restNum, spId) {
-  const s = getCellStatus(restNum, spId);
-  return {
-    'td-shipped': s === 1,
-    'td-crossed': s === 2,
-    'td-custom': hasCustomQty(restNum, spId),
-  };
-}
-
-function getProductShippedCount(spId) {
-  let count = 0;
-  for (const r of filteredRestaurants.value) {
-    if (getCellStatus(r.number, spId) === 1) count++;
-  }
-  return count;
-}
-
-function getProductCrossedCount(spId) {
-  let count = 0;
-  for (const r of filteredRestaurants.value) {
-    if (getCellStatus(r.number, spId) === 2) count++;
-  }
-  return count;
-}
-
-function fmtDate(d) {
-  if (!d) return '';
-  return new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-// ═══ Load ═══
-onMounted(() => {
-  loadSessions();
-  window.addEventListener('keydown', onKeydown);
-});
-
-// При смене юрлица: закрываем открытую сессию (если она не той группы) и перезагружаем список
-watch(() => orderStore.settings.legalEntity, async () => {
-  if (activeSession.value) {
-    stopAutoRefresh();
-    activeSession.value = null;
-    sessionData.value = null;
-    for (const key in entriesMap) delete entriesMap[key];
-    for (const key in notesMap) delete notesMap[key];
-  }
-  await loadSessions();
-});
-
-async function loadSessions() {
-  loading.value = true;
-  try {
-    const { data } = await db.rpc('dist_get_sessions', { legal_entity: orderStore.settings.legalEntity });
-    sessions.value = data || [];
-  } catch (e) { console.warn('[dist]', e); }
-  finally { loading.value = false; }
-}
-
-let refreshInterval = null;
-
-async function openSession(s) {
-  activeSession.value = s;
-  await loadSessionData(s.id);
-  startAutoRefresh();
-}
-
-function startAutoRefresh() {
-  stopAutoRefresh();
-  refreshInterval = setInterval(() => {
-    // Не дёргаем сервер на скрытой вкладке.
-    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-    if (activeSession.value && !editingQty.value && !editingNote.value) {
-      loadSessionData(activeSession.value.id);
-    }
-  }, 10000);
-}
-
-function stopAutoRefresh() {
-  if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
-}
-
-async function loadSessionData(id) {
-  try {
-    const { data } = await db.rpc('dist_get_session_data', { session_id: id });
-    sessionData.value = data;
-    for (const key in entriesMap) delete entriesMap[key];
-    for (const e of (data?.entries || [])) {
-      const k = entryKey(e.restaurant_number, e.session_product_id);
-      entriesMap[k] = {
-        id: e.id,
-        shipped: parseInt(e.shipped) || 0,
-        qty: e.qty ?? null,
-        version: parseInt(e.version) || 1,
-        updated_by: e.updated_by || null,
-      };
-    }
-    for (const key in notesMap) delete notesMap[key];
-    if (data?.notes) {
-      for (const [rn, note] of Object.entries(data.notes)) {
-        notesMap[rn] = note;
-      }
-    }
-  } catch (e) { console.warn('[dist] load session data', e); }
-}
-
-function closeDetail() {
-  stopAutoRefresh();
-  activeSession.value = null;
-  sessionData.value = null;
-  for (const key in entriesMap) delete entriesMap[key];
-  for (const key in notesMap) delete notesMap[key];
-  loadSessions();
-}
-
-onUnmounted(() => {
-  stopAutoRefresh();
-  window.removeEventListener('keydown', onKeydown);
-});
+// editingNote / editingQty объявлены выше — это UI-only state модалок и инпутов
 
 // ═══ Mouse actions ═══
-// ЛКМ ставит «отгружено», повторный ЛКМ по уже отгруженной — сброс в пусто.
-// ПКМ ставит «не нужно», повторный — сброс. Это упрощает работу: оператор
-// держит две кнопки мыши и не циклит через все три состояния.
-// На touch-устройствах ПКМ заменяется long-press (см. onTouchStart).
+// markShipped/markCrossed приходят из composable — отвечают только за
+// бизнес-логику клетки. Здесь оставлены тонкие UI-обёртки:
+//   - cellTitle — подсказка при наведении
+//   - long-press handlers для touch-устройств (на телефоне ПКМ не существует)
 const cellTitle = 'ЛКМ — отгружено, ПКМ — не нужно, двойной клик — кол-во. На телефоне: тап — ✓, долгое нажатие — ✗, двойной тап — кол-во';
 
-function markShipped(restNum, product) {
-  const cur = getCellStatus(restNum, product.id);
-  const next = cur === 1 ? 0 : 1; // toggle с любого состояния
-  setStatus(restNum, product, next);
-}
-
-function markCrossed(restNum, product) {
-  const cur = getCellStatus(restNum, product.id);
-  const next = cur === 2 ? 0 : 2;
-  setStatus(restNum, product, next);
-}
-
-// Long-press на touch — эквивалент ПКМ. Удерживаем 500 мс — ставим ✗,
-// и подавляем последующий click чтобы не сработал markShipped по отпусканию.
 const LONG_PRESS_MS = 500;
 let longPressTimer = null;
 let longPressFired = false;
@@ -651,13 +406,12 @@ function onTouchStart(restNum, product) {
   longPressTimer = setTimeout(() => {
     longPressFired = true;
     markCrossed(restNum, product);
-    if (navigator.vibrate) navigator.vibrate(15); // тактильная обратная связь
+    if (navigator.vibrate) navigator.vibrate(15);
   }, LONG_PRESS_MS);
 }
 function onTouchEnd(event) {
   cancelLongPress();
   if (longPressFired) {
-    // long-press уже отработал — не даём системе сгенерировать click
     event.preventDefault();
     longPressFired = false;
   }
@@ -665,42 +419,12 @@ function onTouchEnd(event) {
 function cancelLongPress() {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
 }
-// Обёртка click: если long-press только что сработал — игнорируем
-// синтетический click, который Safari всё же может прислать.
 function onCellClick(restNum, product, event) {
   if (longPressFired) { event.preventDefault(); longPressFired = false; return; }
   markShipped(restNum, product);
 }
 
-async function setStatus(restNum, product, next) {
-  if (activeSession.value?.status === 'closed') return;
-  const k = entryKey(restNum, product.id);
-  if (!entriesMap[k]) entriesMap[k] = { shipped: 0, qty: null, version: 0 };
-  const prev = entriesMap[k].shipped;
-  const prevVersion = entriesMap[k].version || 0;
-  if (prev === next) return; // ничего не изменилось — RPC не дёргаем
-  entriesMap[k].shipped = next;
-  const { data, error } = await db.rpc('dist_toggle_shipped', {
-    session_product_id: product.id,
-    restaurant_number: String(restNum),
-    shipped: next,
-    version: prevVersion,
-  });
-  if (error === 'conflict') {
-    toastStore.show('Кто-то изменил эту клетку, обновляю', 'warning');
-    await loadSessionData(activeSession.value.id);
-    return;
-  }
-  if (error) {
-    entriesMap[k].shipped = prev;
-    toastStore.show('Ошибка сохранения', 'error');
-    return;
-  }
-  if (data?.version) entriesMap[k].version = data.version;
-  pushUndo({ type: 'shipped', restNum: String(restNum), spId: product.id, prev, next });
-}
-
-// ═══ Edit qty ═══
+// ═══ Edit qty (UI-state, сохранение → composable.saveQty) ═══
 function startEditQty(restNum, product, event) {
   if (activeSession.value?.status === 'closed') return;
   event.preventDefault();
@@ -717,91 +441,16 @@ function startEditQty(restNum, product, event) {
 async function saveQty() {
   if (!editingQty.value) return;
   const { restNum, spId } = editingQty.value;
-  const k = entryKey(restNum, spId);
-  if (!entriesMap[k]) entriesMap[k] = { shipped: 0, qty: null, version: 0 };
   const val = editQtyValue.value.toString().trim() || null;
-  const prevQty = entriesMap[k].qty;
-  const prevVersion = entriesMap[k].version || 0;
-  entriesMap[k].qty = val;
   editingQty.value = null;
-  const { data, error } = await db.rpc('dist_update_qty', {
-    session_product_id: spId,
-    restaurant_number: restNum,
-    qty: val,
-    version: prevVersion,
-  });
-  if (error === 'conflict') {
-    toastStore.show('Кто-то изменил эту клетку, обновляю', 'warning');
-    await loadSessionData(activeSession.value.id);
-    return;
-  }
-  if (error) {
-    entriesMap[k].qty = prevQty;
-    toastStore.show('Ошибка', 'error');
-    return;
-  }
-  if (data?.version) entriesMap[k].version = data.version;
-  pushUndo({ type: 'qty', restNum, spId, prev: prevQty, next: val });
+  await session.saveQty(restNum, spId, val);
 }
 
 async function resetQty() {
   if (!editingQty.value) return;
   const { restNum, spId } = editingQty.value;
-  const k = entryKey(restNum, spId);
-  const prevQty = entriesMap[k]?.qty ?? null;
-  const prevVersion = entriesMap[k]?.version || 0;
-  if (entriesMap[k]) entriesMap[k].qty = null;
   editingQty.value = null;
-  const { data, error } = await db.rpc('dist_update_qty', {
-    session_product_id: spId,
-    restaurant_number: restNum,
-    qty: null,
-    version: prevVersion,
-  });
-  if (error === 'conflict') {
-    toastStore.show('Кто-то изменил эту клетку, обновляю', 'warning');
-    await loadSessionData(activeSession.value.id);
-    return;
-  }
-  if (error) {
-    if (entriesMap[k]) entriesMap[k].qty = prevQty;
-    toastStore.show('Ошибка', 'error');
-    return;
-  }
-  if (data?.version) entriesMap[k].version = data.version;
-  pushUndo({ type: 'qty', restNum, spId, prev: prevQty, next: null });
-}
-
-// ═══ Undo последней мутации ═══
-// Возвращаем клетку к предыдущему значению, отправив тот же RPC с актуальной
-// версией (берём её из entriesMap, потому что версия уже могла измениться).
-async function undo() {
-  if (!activeSession.value || activeSession.value.status === 'closed') return;
-  const action = undoStack.value.pop();
-  if (!action) return;
-  const k = entryKey(action.restNum, action.spId);
-  const ver = entriesMap[k]?.version || 0;
-  if (action.type === 'shipped') {
-    if (entriesMap[k]) entriesMap[k].shipped = action.prev;
-    const { error } = await db.rpc('dist_toggle_shipped', {
-      session_product_id: action.spId,
-      restaurant_number: action.restNum,
-      shipped: action.prev,
-      version: ver,
-    });
-    if (error) toastStore.show('Не удалось отменить', 'error');
-    else await loadSessionData(activeSession.value.id);
-  } else if (action.type === 'qty') {
-    if (entriesMap[k]) entriesMap[k].qty = action.prev;
-    const { error } = await db.rpc('dist_update_qty', {
-      session_product_id: action.spId,
-      restaurant_number: action.restNum,
-      qty: action.prev,
-      version: ver,
-    });
-    if (error) toastStore.show('Не удалось отменить', 'error');
-    else await loadSessionData(activeSession.value.id);
-  }
+  await session.saveQty(restNum, spId, null);
 }
 
 function onKeydown(e) {
@@ -813,6 +462,8 @@ function onKeydown(e) {
     undo();
   }
 }
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 
 // ═══ Notes ═══
 function startEditNote(restNum) {
@@ -825,17 +476,11 @@ function startEditNote(restNum) {
 }
 
 async function saveNote() {
-  if (!editingNote.value || !activeSession.value) return;
+  if (!editingNote.value) return;
   const rn = editingNote.value.restNum;
-  notesMap[rn] = editNoteValue.value;
+  const val = editNoteValue.value;
   editingNote.value = null;
-  try {
-    await db.rpc('dist_save_note', {
-      session_id: activeSession.value.id,
-      restaurant_number: rn,
-      note: editNoteValue.value,
-    });
-  } catch { toastStore.show('Ошибка', 'error'); }
+  await session.saveNote(rn, val);
 }
 
 // ═══ Product search ═══
@@ -1001,79 +646,18 @@ async function reopenSession() {
 }
 
 // ═══ Excel export ═══
-async function exportExcel() {
-  const XLSX = (await import('xlsx-js-style')).default;
-  const products = sessionProducts.value;
-  const rests = filteredRestaurants.value;
-
-  const header1 = ['Ресторан', ...products.map(p => p.product_name || 'Товар')];
-  const header2 = ['', ...products.map(p => `${p.default_qty} ${p.unit}`)];
-
-  const dataRows = rests.map(r => {
-    const row = [`${r.number} ${r.address || r.city}${isVM(r) ? ' (ВМ)' : ''}`];
-    for (const p of products) {
-      const s = getCellStatus(r.number, p.id);
-      if (s === 1) {
-        row.push(hasCustomQty(r.number, p.id) ? getEntryQty(r.number, p.id) : '✓');
-      } else if (s === 2) {
-        row.push('✗');
-      } else {
-        row.push('');
-      }
-    }
-    return row;
+import { exportDistExcel } from '@/lib/distExcel.js';
+function exportExcel() {
+  return exportDistExcel({
+    sessionName: activeSession.value.name,
+    products: sessionProducts.value,
+    restaurants: filteredRestaurants.value,
+    getStatus: getCellStatus,
+    getQty: getEntryQty,
+    hasCustomQty,
+    isVM,
+    getShippedCount: getProductShippedCount,
   });
-
-  const totals = ['ИТОГО'];
-  for (const p of products) {
-    totals.push(getProductShippedCount(p.id));
-  }
-
-  const ws = XLSX.utils.aoa_to_sheet([header1, header2, ...dataRows, totals]);
-
-  const border = {
-    top: { style: 'thin', color: { rgb: 'CCCCCC' } },
-    bottom: { style: 'thin', color: { rgb: 'CCCCCC' } },
-    left: { style: 'thin', color: { rgb: 'CCCCCC' } },
-    right: { style: 'thin', color: { rgb: 'CCCCCC' } },
-  };
-  const headerStyle = {
-    font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'FFFFFF' } },
-    fill: { fgColor: { rgb: '502314' } },
-    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-    border,
-  };
-  const subHeaderStyle = {
-    font: { sz: 10, name: 'Calibri', color: { rgb: '6B5344' } },
-    fill: { fgColor: { rgb: 'F5EBDC' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
-    border,
-  };
-  const cellStyle = { font: { sz: 11, name: 'Calibri' }, alignment: { horizontal: 'center', vertical: 'center' }, border };
-  const shippedStyle = { ...cellStyle, font: { ...cellStyle.font, color: { rgb: '2E7D32' }, bold: true }, fill: { fgColor: { rgb: 'E8F5E9' } } };
-  const totalStyle = { font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: '502314' } }, fill: { fgColor: { rgb: 'F5EBDC' } }, alignment: { horizontal: 'center', vertical: 'center' }, border };
-
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = range.s.r; R <= range.e.r; R++) {
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const addr = XLSX.utils.encode_cell({ r: R, c: C });
-      const cell = ws[addr];
-      if (!cell) continue;
-      if (R === 0) cell.s = headerStyle;
-      else if (R === 1) cell.s = subHeaderStyle;
-      else if (R === range.e.r) cell.s = totalStyle;
-      else if (C === 0) cell.s = { ...cellStyle, alignment: { horizontal: 'left' } };
-      else if (cell.v === '✗') cell.s = { ...cellStyle, font: { ...cellStyle.font, color: { rgb: 'C62828' }, bold: true }, fill: { fgColor: { rgb: 'FFEBEE' } } };
-      else if (cell.v === '✓' || (typeof cell.v === 'number' && cell.v > 0)) cell.s = shippedStyle;
-      else cell.s = cellStyle;
-    }
-  }
-
-  ws['!cols'] = [{ wch: 28 }, ...products.map(() => ({ wch: 16 }))];
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Распределение');
-  XLSX.writeFile(wb, `Распределение_${activeSession.value.name.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}.xlsx`);
 }
 </script>
 
