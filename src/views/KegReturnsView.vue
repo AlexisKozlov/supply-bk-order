@@ -5,7 +5,8 @@
       <div class="kr-page-actions">
         <router-link :to="{ name: 'keg-returns-schedule' }" class="btn">График</router-link>
         <button class="btn" @click="exportExcel" :disabled="!filteredRows.length">📥 Экспорт в Excel</button>
-        <button class="btn primary" @click="openImport">Импорт маршрутизации</button>
+        <button class="btn" @click="openImport">Импорт маршрутизации</button>
+        <button class="btn primary" @click="createOpen = true">+ Создать заявку</button>
       </div>
     </div>
 
@@ -18,7 +19,7 @@
       </select>
       <select v-model="filters.restaurant_id">
         <option value="">Все рестораны</option>
-        <option v-for="r in restaurants" :key="r.id" :value="r.id">№{{ r.number }} — {{ r.address }}</option>
+        <option v-for="r in filterRestaurantOptions" :key="r.id" :value="r.id">№{{ r.number }} — {{ r.address }}</option>
       </select>
       <input v-model="filters.from" type="date" />
       <input v-model="filters.to" type="date" />
@@ -72,6 +73,13 @@
 
     <KegReturnEditModal v-if="editId" :id="editId" @close="editId = null; loadList()" />
 
+    <KegReturnCreateModal
+      v-if="createOpen"
+      :restaurants="restaurants"
+      @close="createOpen = false"
+      @created="createOpen = false; loadList()"
+    />
+
     <!-- Модалка импорта маршрутизации -->
     <Teleport v-if="importOpen" to="body">
       <div class="modal" @click.self="closeImport">
@@ -99,7 +107,22 @@
 
             <!-- Превью -->
             <div v-if="importPreview.length" class="kr-import-preview">
-              <div class="kr-import-preview-title">Результат парсинга ({{ importPreview.length }} строк)</div>
+              <div class="kr-import-preview-title">
+                Результат парсинга ({{ importPreview.length }} строк).
+                Учитываются только строки склада «Прилесье 6» (сухой) — оттуда забирают кеги.
+                Если строка не сопоставилась автоматически — выберите заявку в селекте.
+              </div>
+              <div class="kr-import-search">
+                <input
+                  v-model="importSearch"
+                  type="search"
+                  placeholder="Поиск по адресу, заказчику или водителю…"
+                  class="kr-import-search-input"
+                />
+                <span v-if="importSearch" class="kr-import-search-count">
+                  Найдено {{ filteredImportPreview.length }} из {{ importPreview.length }}
+                </span>
+              </div>
               <table class="kr-import-table">
                 <thead>
                   <tr>
@@ -107,36 +130,85 @@
                     <th>Водитель</th>
                     <th>Машина</th>
                     <th>Заявка</th>
-                    <th>Предупреждение</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(p, i) in importPreview" :key="i" :class="{'kr-import-warn': p.warning, 'kr-import-ok': !p.warning && p.match}">
-                    <td>{{ p.row.address }}</td>
+                  <tr v-if="!filteredImportPreview.length">
+                    <td colspan="4" class="kr-import-empty">Ничего не найдено по запросу «{{ importSearch }}».</td>
+                  </tr>
+                  <tr
+                    v-for="{ p, i } in filteredImportPreview"
+                    :key="i"
+                    :class="{
+                      'kr-import-warn': effectiveReqId(i, p) === null,
+                      'kr-import-ok': effectiveReqId(i, p) !== null,
+                      'kr-import-override': Object.prototype.hasOwnProperty.call(importOverrides, i),
+                    }"
+                  >
+                    <td>
+                      <div>{{ p.row.address }}</div>
+                      <div v-if="p.warning && !Object.prototype.hasOwnProperty.call(importOverrides, i)" class="kr-import-hint">
+                        ⚠ {{ p.warning }}
+                      </div>
+                    </td>
                     <td>{{ p.row.driver || '—' }}</td>
                     <td>{{ p.row.vehicle || '—' }}</td>
                     <td>
-                      <template v-if="p.match">
-                        #{{ p.match.request_id }} — №{{ p.match.restaurant_number }}
-                      </template>
-                      <template v-else>—</template>
+                      <select
+                        class="kr-import-select"
+                        :value="effectiveReqId(i, p) === null ? 'null' : String(effectiveReqId(i, p))"
+                        @change="setOverride(i, $event.target.value)"
+                      >
+                        <option value="null">— не назначать —</option>
+                        <option v-for="a in importAvailable" :key="a.request_id" :value="a.request_id">
+                          {{ formatAvailable(a) }}
+                        </option>
+                      </select>
+                      <div v-if="p.match && effectiveReqId(i, p) !== p.match.request_id" class="kr-import-hint">
+                        Авто-матч: №{{ p.match.restaurant_number }}
+                      </div>
                     </td>
-                    <td>{{ p.warning || '' }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
+          <!-- Прогресс импорта в подвале — всегда видно над кнопками, не зависит
+               от того, докуда пользователь прокрутил таблицу превью. Точный
+               процент только во время загрузки файла (XHR upload.onprogress);
+               пока бэк парсит — индетерминированная «бегущая полоска». -->
+          <div v-if="importLoading && importPhase" class="kr-import-progress kr-import-progress-footer">
+            <div class="kr-import-progress-bar">
+              <div
+                v-if="importPhase === 'upload'"
+                class="kr-import-progress-fill"
+                :style="{ width: importUploadPct + '%' }"
+              ></div>
+              <div v-else class="kr-import-progress-indeterminate"></div>
+            </div>
+            <div class="kr-import-progress-label">
+              <template v-if="importPhase === 'upload'">
+                Загружаем файл: {{ importUploadPct }}%
+              </template>
+              <template v-else>
+                Обрабатываем на сервере…
+              </template>
+            </div>
+          </div>
+
           <div class="modal-actions" style="justify-content:flex-end;gap:8px">
             <button class="btn" @click="closeImport" :disabled="importLoading">Отмена</button>
             <button
-              v-if="importPreview.length && importPreview.some(p => p.match && p.warning !== 'не найден')"
+              v-if="importPreview.length"
               class="btn primary"
               @click="commitImport"
-              :disabled="importLoading"
+              :disabled="importLoading || !importPreview.some((p, i) => effectiveReqId(i, p) !== null)"
+              :title="importPreview.some((p, i) => effectiveReqId(i, p) !== null) ? 'Применить выбранные сопоставления' : 'Выберите хотя бы одну заявку'"
             >
-              {{ importLoading ? 'Применение...' : 'Применить маршрутизацию' }}
+              <template v-if="!importLoading">Применить маршрутизацию</template>
+              <template v-else-if="importPhase === 'upload'">Загружаем {{ importUploadPct }}%</template>
+              <template v-else>Обрабатываем…</template>
             </button>
           </div>
         </div>
@@ -157,12 +229,14 @@ function authHeaders(extra = {}) {
 }
 
 const KegReturnEditModal = defineAsyncComponent(() => import('@/components/modals/KegReturnEditModal.vue'));
+const KegReturnCreateModal = defineAsyncComponent(() => import('@/components/modals/KegReturnCreateModal.vue'));
 
 const rows = ref([]);
 const restaurants = ref([]);
 const loading = ref(false);
 const error = ref('');
 const editId = ref(null);
+const createOpen = ref(false);
 
 const filters = ref({ status: '', restaurant_id: '', from: '', to: '' });
 
@@ -171,9 +245,88 @@ const importOpen = ref(false);
 const importDate = ref('');
 const importFileInput = ref(null);
 const importPreview = ref([]);
+const importAvailable = ref([]);     // список SUBMITTED заявок на выбранную дату — для селекта ручного матча
+const importOverrides = ref({});     // { rowIdx: request_id|null } — выбор пользователя
+const importSearch = ref('');         // строка поиска по адресам импортируемых строк
 const importError = ref('');
 const importLoading = ref(false);
 const importFile = ref(null);
+const importPhase = ref('');         // 'upload' (грузим файл) или 'processing' (бэк парсит). '' — простой.
+const importUploadPct = ref(0);      // 0–100, реальный процент загрузки байтов
+
+// Завернули fetch для multipart на XHR, чтобы получить честный прогресс загрузки.
+// fetch таких хуков не даёт. После того как файл ушёл — переключаемся в
+// индетерминированный режим («бегущая полоска»), потому что бэк не отдаёт
+// промежуточный прогресс парсинга — это один HTTP-запрос.
+function xhrUpload(url, formData, { onUploadPct, onUploadDone }) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.withCredentials = true;
+    const token = localStorage.getItem('bk_session_token') || '';
+    if (token) xhr.setRequestHeader('X-Session-Token', token);
+    xhr.upload.onprogress = e => {
+      if (!e.lengthComputable) return;
+      onUploadPct?.(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.upload.onload = () => onUploadDone?.();
+    xhr.onerror = () => reject(new Error('Сетевая ошибка'));
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+      } else {
+        reject(new Error(data?.error || `Ошибка ${xhr.status}`));
+      }
+    };
+    xhr.send(formData);
+  });
+}
+
+// Превью с учётом строки поиска. Сохраняем оригинальный индекс — ключи в
+// importOverrides и аналогии «авто-матч» завязаны на индексе исходного preview.
+const filteredImportPreview = computed(() => {
+  const q = importSearch.value.trim().toLowerCase();
+  const arr = importPreview.value.map((p, i) => ({ p, i }));
+  if (!q) return arr;
+  return arr.filter(({ p }) => {
+    const addr = (p.row?.address || '').toLowerCase();
+    const cust = (p.row?.customer || '').toLowerCase();
+    const drv  = (p.row?.driver  || '').toLowerCase();
+    return addr.includes(q) || cust.includes(q) || drv.includes(q);
+  });
+});
+
+// Эффективный request_id для строки превью: оверрайд побеждает авто-матч.
+// Возвращает null если «не назначать».
+function effectiveReqId(idx, p) {
+  if (Object.prototype.hasOwnProperty.call(importOverrides.value, idx)) {
+    return importOverrides.value[idx];
+  }
+  return p.match?.request_id ?? null;
+}
+
+function setOverride(idx, val) {
+  // val: 'null' (явно не назначать), '' (вернуть к авто-матчу) или request_id
+  const next = { ...importOverrides.value };
+  if (val === '' || val === undefined) {
+    delete next[idx];
+  } else if (val === 'null') {
+    next[idx] = null;
+  } else {
+    next[idx] = Number(val);
+  }
+  importOverrides.value = next;
+}
+
+// Хелпер для подписи в селекте
+function formatAvailable(a) {
+  const city = a.restaurant_city || '';
+  const addr = a.restaurant_address || '';
+  const where = [city, addr].filter(Boolean).join(', ');
+  return `№${a.restaurant_number} — ${where}`;
+}
 
 async function loadList() {
   loading.value = true;
@@ -192,10 +345,18 @@ async function loadList() {
 
 async function loadRestaurants() {
   try {
-    const { data } = await db.from('restaurants').select('id,number,address,city').order('number');
-    restaurants.value = data || [];
+    const { data } = await db.from('restaurants')
+      .select('id,number,address,city,legal_entity_group,pickup_weekdays,default_vehicle,default_driver,active,keg_returns_enabled')
+      .order('number');
+    restaurants.value = (data || []).filter(r => r.active !== false && r.active !== 0);
   } catch {}
 }
+
+// Рестораны для селекта-фильтра: прячем тех, у кого возврат кег отключён
+// (keg_returns_enabled = 0). NULL/единица — это включено по умолчанию схемы.
+const filterRestaurantOptions = computed(() =>
+  restaurants.value.filter(r => Number(r.keg_returns_enabled ?? 1) !== 0)
+);
 
 const filteredRows = computed(() => {
   return rows.value.filter(r => {
@@ -223,7 +384,15 @@ async function deleteRow(row) {
 
 async function exportExcel() {
   try {
-    const res = await fetch('/api/keg-returns/export', { credentials: 'include', headers: authHeaders() });
+    // Передаём ровно те же фильтры, что выставлены на странице — чтобы Excel
+    // совпадал с тем, что пользователь видит в таблице.
+    const qp = new URLSearchParams();
+    if (filters.value.status) qp.set('status', filters.value.status);
+    if (filters.value.restaurant_id) qp.set('restaurant_id', filters.value.restaurant_id);
+    if (filters.value.from) qp.set('from', filters.value.from);
+    if (filters.value.to) qp.set('to', filters.value.to);
+    const url0 = '/api/keg-returns/export' + (qp.toString() ? ('?' + qp.toString()) : '');
+    const res = await fetch(url0, { credentials: 'include', headers: authHeaders() });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || 'Ошибка экспорта');
@@ -242,6 +411,9 @@ async function exportExcel() {
 
 function openImport() {
   importPreview.value = [];
+  importAvailable.value = [];
+  importOverrides.value = {};
+  importSearch.value = '';
   importError.value = '';
   importFile.value = null;
   importOpen.value = true;
@@ -250,6 +422,9 @@ function openImport() {
 function closeImport() {
   importOpen.value = false;
   importPreview.value = [];
+  importAvailable.value = [];
+  importOverrides.value = {};
+  importSearch.value = '';
   importError.value = '';
   importFile.value = null;
 }
@@ -291,24 +466,29 @@ async function runImportPreview() {
   if (!importFile.value || !importDate.value) return;
   importError.value = '';
   importLoading.value = true;
+  importPhase.value = 'upload';
+  importUploadPct.value = 0;
   try {
     const fd = new FormData();
     fd.append('file', importFile.value);
     fd.append('return_date', importDate.value);
-    const res = await fetch('/api/keg-returns/import-routing', {
-      method: 'POST',
-      credentials: 'include',
-      headers: authHeaders(),
-      body: fd,
+    const data = await xhrUpload('/api/keg-returns/import-routing', fd, {
+      onUploadPct: p => { importUploadPct.value = p; },
+      onUploadDone: () => { importPhase.value = 'processing'; },
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Ошибка импорта');
     importPreview.value = data.preview || [];
+    importAvailable.value = data.available_requests || [];
+    importOverrides.value = {};  // новый файл — сбрасываем ручные правки
+    importSearch.value = '';      // и поиск тоже
   } catch (e) {
     importError.value = e.message;
     importPreview.value = [];
+    importAvailable.value = [];
+    importOverrides.value = {};
   } finally {
     importLoading.value = false;
+    importPhase.value = '';
+    importUploadPct.value = 0;
   }
 }
 
@@ -316,25 +496,27 @@ async function commitImport() {
   if (!importFile.value || !importDate.value) return;
   importError.value = '';
   importLoading.value = true;
+  importPhase.value = 'upload';
+  importUploadPct.value = 0;
   try {
     const fd = new FormData();
     fd.append('file', importFile.value);
     fd.append('return_date', importDate.value);
     fd.append('commit', 'true');
-    const res = await fetch('/api/keg-returns/import-routing', {
-      method: 'POST',
-      credentials: 'include',
-      headers: authHeaders(),
-      body: fd,
+    // Сериализуем оверрайды: ключ — индекс строки превью, значение — request_id или null.
+    fd.append('overrides', JSON.stringify(importOverrides.value));
+    await xhrUpload('/api/keg-returns/import-routing', fd, {
+      onUploadPct: p => { importUploadPct.value = p; },
+      onUploadDone: () => { importPhase.value = 'processing'; },
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Ошибка при применении');
     closeImport();
     await loadList();
   } catch (e) {
     importError.value = e.message;
   } finally {
     importLoading.value = false;
+    importPhase.value = '';
+    importUploadPct.value = 0;
   }
 }
 
@@ -408,17 +590,102 @@ onMounted(() => {
   font-size: 11px; font-weight: 700; line-height: 1.6;
   vertical-align: 1px;
 }
-.kr-import-modal { max-width: 820px; width: 100%; }
+.kr-import-modal { max-width: 920px; width: 100%; }
 .kr-import-body { padding: 12px 0; }
 .kr-em-field { display: flex; align-items: center; gap: 12px; }
-.kr-em-label { width: 150px; flex-shrink: 0; font-size: 13px; color: var(--text-secondary, #666); }
+/* Контраст важнее, чем визуальная иерархия — раньше брал --text-secondary (#6B5344),
+   на белой карточке выглядел как «грязно-серый», пользователь не видел подписи. */
+.kr-em-label {
+  width: 150px; flex-shrink: 0;
+  font-size: 13px; font-weight: 600;
+  color: var(--text, #2C1810);
+}
 .kr-em-input { flex: 1; padding: 6px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; font-size: 14px; background: var(--input-bg, #fff); color: inherit; }
 .kr-em-save-error { color: var(--danger, #e53935); font-size: 13px; }
 .kr-import-preview { margin-top: 16px; overflow-x: auto; }
-.kr-import-preview-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary, #666); }
+.kr-import-preview-title {
+  font-size: 13px; font-weight: 600; margin-bottom: 8px;
+  color: var(--text, #2C1810);
+}
 .kr-import-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.kr-import-table th { text-align: left; padding: 6px 10px; border-bottom: 2px solid var(--border-color, #e0e0e0); font-weight: 600; color: var(--text-secondary, #666); }
-.kr-import-table td { padding: 6px 10px; border-bottom: 1px solid var(--border-color, #eee); }
+.kr-import-table thead { background: var(--bk-brown, #502314); }
+.kr-import-table th {
+  text-align: left; padding: 8px 10px;
+  border-bottom: 2px solid var(--bk-brown, #502314);
+  font-weight: 700; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  color: #fff;
+}
+.kr-import-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-color, #eee); vertical-align: top; }
 .kr-import-ok td { background: #f1f8e9; }
 .kr-import-warn td { background: #fff8e1; }
+.kr-import-override td { background: #e8f0fe; }
+.kr-import-select {
+  width: 100%; padding: 5px 8px;
+  border: 1px solid var(--border-color, #ddd); border-radius: 6px;
+  font-size: 13px; background: var(--input-bg, #fff); color: inherit;
+}
+.kr-import-hint {
+  font-size: 11.5px; color: #8B7355;
+  margin-top: 3px;
+}
+.kr-import-search {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.kr-import-search-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--input-bg, #fff);
+  color: inherit;
+}
+.kr-import-search-count {
+  font-size: 12px; color: var(--text-secondary, #6B5344);
+  white-space: nowrap;
+}
+.kr-import-empty {
+  padding: 14px; text-align: center;
+  color: var(--text-secondary, #6B5344);
+  font-style: italic;
+}
+.kr-import-progress {
+  margin-top: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+/* Подвальный вариант: блок прогресса между таблицей превью и кнопками.
+   Пользователь к моменту клика «Применить» уже прокручен вниз, поэтому
+   полоска должна быть прямо там, а не на самом верху модалки. */
+.kr-import-progress-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #eee);
+}
+.kr-import-progress-bar {
+  position: relative;
+  height: 8px; width: 100%;
+  background: #F0E8DC;
+  border-radius: 4px; overflow: hidden;
+}
+.kr-import-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #E76F51 0%, #F4A261 100%);
+  transition: width .15s ease-out;
+}
+.kr-import-progress-indeterminate {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, #E76F51 35%, #F4A261 65%, transparent 100%);
+  animation: krProgressSlide 1.2s infinite linear;
+}
+@keyframes krProgressSlide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.kr-import-progress-label {
+  font-size: 12.5px;
+  color: var(--text-secondary, #6B5344);
+}
 </style>

@@ -78,7 +78,21 @@
               <div v-if="catalogLoading" class="kr-em-sub">Загрузка каталога...</div>
               <div v-else class="kr-em-catalog">
                 <div v-for="keg in catalog" :key="keg.code" class="kr-em-keg-row">
-                  <span class="kr-em-keg-name">{{ keg.name }}</span>
+                  <button
+                    type="button"
+                    class="kr-em-keg-thumb"
+                    :class="{ 'has-photo': keg.photo_url }"
+                    :disabled="!keg.photo_url"
+                    :title="keg.photo_url ? 'Открыть фото' : 'Фото не загружено'"
+                    @click="openKegPhoto(keg)"
+                  >
+                    <img v-if="keg.photo_url" :src="keg.photo_url" :alt="keg.name" />
+                    <span v-else class="kr-em-keg-thumb-ph">🛢️</span>
+                  </button>
+                  <div class="kr-em-keg-info">
+                    <div class="kr-em-keg-name">{{ keg.name }}</div>
+                    <div class="kr-em-keg-code">{{ keg.code }}</div>
+                  </div>
                   <input
                     type="number"
                     min="0"
@@ -95,16 +109,41 @@
           <div v-if="saveError" class="kr-em-save-error">{{ saveError }}</div>
 
           <div class="modal-actions kr-em-actions">
-            <button class="btn" @click="downloadExcel" :disabled="saving">Скачать Excel</button>
-            <button class="btn primary" @click="printTtn" :disabled="saving">🖨️ Печать</button>
+            <button class="btn kr-em-icon-btn" @click="downloadExcel" :disabled="saving" title="Скачать Excel" aria-label="Скачать Excel">
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2.5" fill="#107C41"/>
+                <path d="M9 8 L15 16 M15 8 L9 16" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button class="btn kr-em-icon-btn" @click="printTtn" :disabled="saving" title="Печать" aria-label="Печать">🖨️</button>
             <button v-if="!readonly" class="btn btn-danger" @click="cancelReturn" :disabled="saving">Отменить</button>
+            <button v-if="form && form.status === 'ROUTED'" class="btn btn-warn" @click="unroute" :disabled="saving" title="Откатить статус в «Отправлена» и уведомить ресторан">Отменить маршрутизацию</button>
             <button class="btn btn-danger" @click="deleteRequest" :disabled="saving">Удалить</button>
-            <button class="btn" @click="$emit('close')">Закрыть</button>
-            <button v-if="!readonly" class="btn primary" @click="save" :disabled="saving">
-              {{ saving ? 'Сохранение...' : 'Сохранить' }}
+            <button v-if="!readonly" class="btn" @click="save(false)" :disabled="saving">
+              {{ saving && !routing ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+            <button
+              v-if="canRoute"
+              class="btn primary"
+              @click="save(true)"
+              :disabled="saving || !routeReady"
+              :title="routeReady ? 'Сохранить и маршрутизировать' : 'Заполните машину и водителя'"
+            >
+              {{ routing ? 'Маршрутизация...' : 'Маршрутизировать' }}
             </button>
           </div>
         </template>
+
+        <!-- Полноэкранный просмотр фото кеги -->
+        <div v-if="photoUrl" class="kr-em-photo-overlay" @click.self="photoUrl = ''">
+          <div class="kr-em-photo-modal">
+            <div class="kr-em-photo-head">
+              <span>{{ photoName }}</span>
+              <button class="kr-em-photo-close" @click="photoUrl = ''" aria-label="Закрыть">×</button>
+            </div>
+            <img :src="photoUrl" :alt="photoName" />
+          </div>
+        </div>
       </div>
     </div>
   </Teleport>
@@ -130,9 +169,25 @@ const loading = ref(false);
 const catalogLoading = ref(false);
 const loadError = ref('');
 const saving = ref(false);
+const routing = ref(false);
 const saveError = ref('');
 const kegQties = ref({});
 const bsoError = ref('');
+const photoUrl = ref('');
+const photoName = ref('');
+
+function openKegPhoto(keg) {
+  if (!keg.photo_url) return;
+  photoUrl.value = keg.photo_url;
+  photoName.value = keg.name;
+}
+
+const canRoute = computed(() => form.value && form.value.status === 'SUBMITTED');
+const routeReady = computed(() => {
+  const v = (form.value?.vehicle || '').trim();
+  const d = (form.value?.driver || '').trim();
+  return !!v && !!d;
+});
 
 function validateBso() {
   const s = (form.value?.bso_series || '').trim();
@@ -247,9 +302,10 @@ function setKegQty(code, val) {
   else delete kegQties.value[code];
 }
 
-async function save() {
+async function save(route = false) {
   if (!validateBso()) return;
   saving.value = true;
+  routing.value = !!route;
   saveError.value = '';
   try {
     const items = Object.entries(kegQties.value)
@@ -264,6 +320,7 @@ async function save() {
       sender_position_name: form.value.sender_position_name,
       items,
     };
+    if (route) body._route = true;
     const res = await fetch(`/api/keg-returns/${props.id}`, {
       method: 'PATCH',
       credentials: 'include',
@@ -271,7 +328,28 @@ async function save() {
       body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Ошибка сохранения');
+    if (!res.ok) throw new Error(data.error || (route ? 'Ошибка маршрутизации' : 'Ошибка сохранения'));
+    emit('close');
+  } catch (e) {
+    saveError.value = e.message;
+  } finally {
+    saving.value = false;
+    routing.value = false;
+  }
+}
+
+async function unroute() {
+  if (!confirm('Откатить маршрутизацию? Заявка вернётся в статус «Отправлена», ресторан получит уведомление в Telegram и push.')) return;
+  saving.value = true;
+  saveError.value = '';
+  try {
+    const res = await fetch(`/api/keg-returns/${props.id}/unroute`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка отмены маршрутизации');
     emit('close');
   } catch (e) {
     saveError.value = e.message;
@@ -332,9 +410,55 @@ onMounted(() => {
 .kr-em-kegs-block { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
 .kr-em-kegs-title { font-size: 13px; font-weight: 600; color: var(--text-secondary, #666); }
 .kr-em-catalog { display: flex; flex-direction: column; gap: 8px; }
-.kr-em-keg-row { display: grid; grid-template-columns: 1fr 110px; gap: 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--border-color, #eee); border-radius: 8px; background: var(--card, #fff); }
-.kr-em-keg-name { font-size: 14px; line-height: 1.3; word-wrap: break-word; }
+.kr-em-keg-row {
+  display: grid; grid-template-columns: 56px 1fr 110px;
+  gap: 14px; align-items: center;
+  padding: 10px 12px; border: 1px solid var(--border-color, #eee);
+  border-radius: 8px; background: var(--card, #fff);
+}
+.kr-em-keg-thumb {
+  width: 48px; height: 48px; border-radius: 8px;
+  border: 1px solid #ECE3D6; background: #FFF8F0;
+  overflow: hidden; padding: 0; cursor: zoom-in;
+  display: flex; align-items: center; justify-content: center;
+  font-family: inherit;
+}
+.kr-em-keg-thumb:disabled { cursor: default; }
+.kr-em-keg-thumb.has-photo:hover { border-color: #E76F51; }
+.kr-em-keg-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.kr-em-keg-thumb-ph { font-size: 22px; color: #C7B9A7; }
+.kr-em-keg-info { min-width: 0; }
+.kr-em-keg-name { font-size: 14px; font-weight: 500; line-height: 1.3; color: #2C1A12; word-wrap: break-word; }
+.kr-em-keg-code {
+  font-size: 11px; color: #8B7355; margin-top: 2px;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
 .kr-em-qty { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center; background: var(--input-bg, #fff); color: inherit; }
+.kr-em-photo-overlay {
+  position: fixed; inset: 0; z-index: 1100;
+  background: rgba(20,10,5,.72); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.kr-em-photo-modal {
+  background: #fff; border-radius: 14px; overflow: hidden;
+  max-width: 100%; max-height: 100%;
+  display: flex; flex-direction: column;
+}
+.kr-em-photo-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 12px 14px; background: #2C1A12; color: #fff;
+  font-size: 14px;
+}
+.kr-em-photo-close {
+  background: none; border: none; color: #fff;
+  font-size: 28px; line-height: 1; cursor: pointer; padding: 0 6px;
+  font-family: inherit;
+}
+.kr-em-photo-modal img {
+  display: block; max-width: 80vw; max-height: 78vh; object-fit: contain;
+  background: #FAF6EF;
+}
 .kr-em-qty:disabled { background: var(--input-disabled-bg, #f5f5f5); }
 .kr-em-sub { font-size: 13px; color: var(--text-secondary, #999); }
 .kr-em-loading, .kr-em-error { padding: 24px; text-align: center; }
@@ -342,6 +466,16 @@ onMounted(() => {
 .kr-em-save-error { color: var(--danger, #e53935); font-size: 13px; padding: 0 16px 8px; }
 .kr-em-field-error { color: var(--danger, #e53935); font-size: 12px; }
 .kr-em-actions { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.kr-em-icon-btn {
+  padding: 6px 10px;
+  font-size: 18px;
+  line-height: 1;
+  min-width: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.kr-em-icon-btn svg { display: block; }
 .kr-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
 .kr-badge-DRAFT { background: #e0e0e0; color: #555; }
 .kr-badge-SUBMITTED { background: #fff3e0; color: #e65100; }
@@ -349,6 +483,8 @@ onMounted(() => {
 .kr-badge-CANCELLED { background: #fce4ec; color: #c62828; }
 .btn-danger { background: #fce4ec; color: #c62828; }
 .btn-danger:hover { background: #f8bbd0; }
+.btn-warn { background: #FFF3E0; color: #C16B4D; }
+.btn-warn:hover { background: #FFE0B2; }
 
 /* История замен БСО */
 .kr-em-bso-history {

@@ -151,13 +151,17 @@ function krGetReturnWithItems($pdo, $id) {
     if (!$row) return null;
 
     $items = $pdo->prepare("
-        SELECT kri.id, kri.keg_code, kri.quantity, kc.name AS keg_name
+        SELECT kri.id, kri.keg_code, kri.quantity,
+               COALESCE((SELECT p.name FROM products p
+                          WHERE p.sku = kri.keg_code AND p.legal_entity_group = ?
+                          ORDER BY p.is_active DESC, p.id ASC LIMIT 1),
+                        kc.name) AS keg_name
         FROM keg_return_items kri
         JOIN keg_catalog kc ON kc.code = kri.keg_code
         WHERE kri.request_id = ?
         ORDER BY kc.sort_order, kri.keg_code
     ");
-    $items->execute([(int)$id]);
+    $items->execute([$row['legal_entity_group'] ?? 'BK_VM', (int)$id]);
     $row['items'] = $items->fetchAll();
 
     // История замен БСО (старые номера → текущий). Используется в карточке
@@ -204,10 +208,17 @@ function krLegalCodeForRestaurant(int $restaurantNumber, string $group): string 
 function krNotifyRouted(PDO $pdo, array $row): void {
     $bsoStr  = trim(($row['bso_series'] ?? '') . ' ' . ($row['bso_number'] ?? ''));
     $bsoDate = !empty($row['return_date']) ? date('d.m.Y', strtotime($row['return_date'])) : '';
+    $vehicle = trim((string)($row['vehicle'] ?? '')) ?: '—';
+    $driver  = trim((string)($row['driver']  ?? '')) ?: '—';
     $link    = 'https://supply-department.online/restaurant/keg-returns?id=' . (int)$row['id'];
-    $tgMsg   = '✅ ТТН №' . $bsoStr . ' от ' . $bsoDate . ' готова к печати.' . "\n"
-             . 'Открыть заявку: ' . $link . "\n"
-             . 'Распечатайте и не забудьте взять подпись водителя.';
+    // По новой логике ТТН печатается заранее, до маршрутизации — у ресторана
+    // на руках уже бланк, не хватает только машины и водителя. Сообщаем эти
+    // два поля прямо в первой строке, чтобы их можно было сразу вписать.
+    $tgMsg   = '✅ Заявка №' . $bsoStr . ' от ' . $bsoDate . ' маршрутизирована.' . "\n"
+             . 'Машина: ' . $vehicle . "\n"
+             . 'Водитель: ' . $driver . "\n"
+             . 'Впишите эти данные в уже распечатанную ТТН и возьмите подпись водителя.' . "\n"
+             . 'Открыть заявку: ' . $link;
     try {
         krNotifyRestaurant($pdo, (int)$row['restaurant_id'], $tgMsg);
     } catch (Throwable $e) {
@@ -223,8 +234,8 @@ function krNotifyRouted(PDO $pdo, array $row): void {
         $rr = $rNum->fetch();
         if ($rr && (int)$rr['number'] > 0) {
             pushSendToRestaurant($pdo, (int)$rr['number'], (string)($rr['legal_entity_group'] ?: 'BK_VM'), [
-                'title' => '✅ ТТН готова к печати',
-                'body'  => 'Заявка ' . $bsoStr . ' от ' . $bsoDate . ' маршрутизирована',
+                'title' => '✅ Маршрутизация: ' . $bsoStr,
+                'body'  => 'Машина: ' . $vehicle . ' · Водитель: ' . $driver . '. Впишите в распечатанную ТТН.',
                 'url'   => '/restaurant/keg-returns?id=' . (int)$row['id'],
                 'tag'   => 'keg-routed-' . (int)$row['id'],
             ]);
@@ -257,6 +268,43 @@ function krNotifyRouted(PDO $pdo, array $row): void {
         }
     } catch (Throwable $e) {
         error_log('krNotifyRouted PDF failed for #' . (int)$row['id'] . ': ' . $e->getMessage());
+    }
+}
+
+/**
+ * Уведомление ресторана об отмене маршрутизации (ROUTED → SUBMITTED).
+ * Шлём текстовое сообщение в Telegram и web-push. PDF не дёргаем — он был
+ * актуален только под маршрутизированный статус.
+ */
+function krNotifyUnrouted(PDO $pdo, array $row): void {
+    $bsoStr  = trim(($row['bso_series'] ?? '') . ' ' . ($row['bso_number'] ?? ''));
+    $bsoDate = !empty($row['return_date']) ? date('d.m.Y', strtotime($row['return_date'])) : '';
+    $link    = 'https://supply-department.online/restaurant/keg-returns?id=' . (int)$row['id'];
+    $tgMsg   = '↩️ Маршрутизация по ТТН №' . $bsoStr . ' от ' . $bsoDate . ' отменена.' . "\n"
+             . 'Ожидайте нового назначения водителя и машины.' . "\n"
+             . 'Открыть: ' . $link;
+    try {
+        krNotifyRestaurant($pdo, (int)$row['restaurant_id'], $tgMsg);
+    } catch (Throwable $e) {
+        error_log('krNotifyUnrouted text failed for #' . (int)$row['id'] . ': ' . $e->getMessage());
+    }
+    try {
+        if (!function_exists('pushSendToRestaurant')) {
+            require_once __DIR__ . '/push_send.php';
+        }
+        $rNum = $pdo->prepare("SELECT number, legal_entity_group FROM restaurants WHERE id = ?");
+        $rNum->execute([(int)$row['restaurant_id']]);
+        $rr = $rNum->fetch();
+        if ($rr && (int)$rr['number'] > 0) {
+            pushSendToRestaurant($pdo, (int)$rr['number'], (string)($rr['legal_entity_group'] ?: 'BK_VM'), [
+                'title' => '↩️ Маршрутизация отменена',
+                'body'  => 'ТТН ' . $bsoStr . ' от ' . $bsoDate . '. Ожидайте нового назначения водителя и машины.',
+                'url'   => '/restaurant/keg-returns?id=' . (int)$row['id'],
+                'tag'   => 'keg-unrouted-' . (int)$row['id'],
+            ]);
+        }
+    } catch (Throwable $e) {
+        error_log('krNotifyUnrouted push failed for #' . (int)$row['id'] . ': ' . $e->getMessage());
     }
 }
 
@@ -402,6 +450,86 @@ function krNormalizeAddress(string $addr): string {
     return $addr;
 }
 
+/**
+ * Адрес → массив значимых токенов. Используется в нечётком матчинге импорта
+ * маршрутизации. Цель — сравнивать адреса, в которых одно и то же место
+ * написано по-разному: «г. Минск, пл. Свободы, Дом 17 ресторан» и
+ * «Минск, свободы, 17 (немига)» должны дать пересекающиеся токены.
+ */
+function krAddressTokens(string $addr): array {
+    $a = mb_strtolower(trim($addr), 'UTF-8');
+    $a = str_replace('ё', 'е', $a);
+    // Содержимое в круглых скобках выкидываем — обычно это пояснения вроде
+    // «(Немига)», «(Простор)», «(Аэропорт)». Они мешают сравнению.
+    $a = preg_replace('/\([^)]*\)/u', ' ', $a);
+    // Любая пунктуация и спецсимволы → пробел. Оставляем только буквы и цифры.
+    $a = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $a);
+    $tokens = preg_split('/\s+/u', trim($a), -1, PREG_SPLIT_NO_EMPTY);
+    // Стоп-слова — типовые адресные префиксы и шум, ни о чём не говорящий
+    // конкретному адресу. «д» (дом) и «к» (корпус) короткие — отсеялись бы
+    // фильтром длины ниже, но оставляю явно для читаемости списка.
+    $stop = [
+        'г','город','гор',
+        'ул','улица',
+        'пр','прт','проспект',
+        'пл','площадь',
+        'пер','переулок',
+        'тр','тракт',
+        'мкад',
+        'д','дом','корп','корпус','к',
+        'оф','офис','пом','помещение',
+        'ресторан','рест','номер','сектор',
+    ];
+    return array_values(array_filter($tokens, function($t) use ($stop) {
+        if (in_array($t, $stop, true)) return false;
+        if (mb_strlen($t, 'UTF-8') <= 1) return false; // одиночные буквы — шум
+        return true;
+    }));
+}
+
+/**
+ * Похожесть двух адресов как Jaccard-индекс по их токенам + бонус за
+ * совпавший токен с цифрой (это почти всегда номер дома). 0.0 — совсем
+ * разные, 1.0 — все значимые слова и номер совпали.
+ *
+ * Жёсткие правила несовпадения (моментальный 0.0):
+ *  — у обеих сторон есть город из списка БК, и города разные;
+ *  — у обеих сторон есть номер дома (токен с цифрой), и номера разные.
+ * Это защищает от ложных матчей по совпадению только улицы.
+ */
+function krAddressMatchScore(string $a, string $b): float {
+    $aTok = krAddressTokens($a);
+    $bTok = krAddressTokens($b);
+    if (empty($aTok) || empty($bTok)) return 0.0;
+    $aSet = array_values(array_unique($aTok));
+    $bSet = array_values(array_unique($bTok));
+
+    // Города из active BK_VM рестораны. Если у обеих сторон город есть и
+    // они разные — это разные адреса, что бы там по словам не пересекалось.
+    static $cities = ['минск','гродно','брест','витебск','гомель','могилев',
+        'бобруйск','лида','мозырь','пинск','полоцк','солигорск','барановичи'];
+    $aCities = array_intersect($aSet, $cities);
+    $bCities = array_intersect($bSet, $cities);
+    if (!empty($aCities) && !empty($bCities) && empty(array_intersect($aCities, $bCities))) {
+        return 0.0;
+    }
+
+    // Номер дома — токен с цифрой. Если у обеих сторон есть, и не пересекаются,
+    // это разные дома (одна улица не считается «тот же адрес»).
+    $aDigits = array_filter($aSet, fn($t) => (bool)preg_match('/\d/u', $t));
+    $bDigits = array_filter($bSet, fn($t) => (bool)preg_match('/\d/u', $t));
+    $digitInter = array_intersect($aDigits, $bDigits);
+    if (!empty($aDigits) && !empty($bDigits) && empty($digitInter)) {
+        return 0.0;
+    }
+
+    $inter = array_values(array_intersect($aSet, $bSet));
+    $union = array_values(array_unique(array_merge($aSet, $bSet)));
+    $jaccard = count($union) > 0 ? count($inter) / count($union) : 0.0;
+    if (!empty($digitInter)) $jaccard += 0.2;
+    return min(1.0, $jaccard);
+}
+
 function krInsertItems($pdo, $requestId, array $items) {
     $stmt = $pdo->prepare("
         INSERT INTO keg_return_items (request_id, keg_code, quantity)
@@ -441,8 +569,22 @@ $isRestaurant = (bool)$krRestSession && !$krPortalUser;
 
 if ($endpoint === 'keg-catalog') {
     if ($method !== 'GET') krRespond(['error' => 'Метод не поддерживается'], 405);
-    $rows = $pdo->query("SELECT code, name, photo_url, sort_order FROM keg_catalog WHERE active = 1 ORDER BY sort_order, code")->fetchAll();
-    krRespond($rows);
+    $catGroup = $krRestSession['legal_entity_group']
+        ?? (isset($_GET['legal_entity_group']) ? trim($_GET['legal_entity_group']) : 'BK_VM');
+    if (!in_array($catGroup, ['BK_VM', 'PS'], true)) $catGroup = 'BK_VM';
+    $stmt = $pdo->prepare("
+        SELECT kc.code,
+               COALESCE((SELECT p.name FROM products p
+                          WHERE p.sku = kc.code AND p.legal_entity_group = ?
+                          ORDER BY p.is_active DESC, p.id ASC LIMIT 1),
+                        kc.name) AS name,
+               kc.photo_url, kc.sort_order
+        FROM keg_catalog kc
+        WHERE kc.active = 1
+        ORDER BY kc.sort_order, kc.code
+    ");
+    $stmt->execute([$catGroup]);
+    krRespond($stmt->fetchAll());
 }
 
 // ═══ Роутинг keg-returns ═══
@@ -461,11 +603,27 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     $filterGroup = isset($_GET['legal_entity_group']) ? trim($_GET['legal_entity_group']) : 'BK_VM';
     if (!in_array($filterGroup, ['BK_VM', 'PS'])) $filterGroup = 'BK_VM';
     krRequireGroupAccess($krPortalUser, $filterGroup);
+
+    // Доп. фильтры из query-параметров — повторяют фильтры списка на странице,
+    // чтобы экспортилось ровно то, что пользователь видит.
+    $filterStatus = isset($_GET['status']) ? trim($_GET['status']) : '';
+    if ($filterStatus !== '' && !in_array($filterStatus, ['SUBMITTED', 'ROUTED', 'CANCELLED'], true)) $filterStatus = '';
+    $filterRestaurantId = isset($_GET['restaurant_id']) && $_GET['restaurant_id'] !== '' ? (int)$_GET['restaurant_id'] : 0;
+    $filterFrom = isset($_GET['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['from']) ? $_GET['from'] : '';
+    $filterTo   = isset($_GET['to'])   && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['to'])   ? $_GET['to']   : '';
+
+    $where = ["kr.legal_entity_group = ?", "kr.status != 'DRAFT'"];
+    $params = [$filterGroup];
+    if ($filterStatus !== '')        { $where[] = "kr.status = ?";       $params[] = $filterStatus; }
+    if ($filterRestaurantId > 0)     { $where[] = "kr.restaurant_id = ?"; $params[] = $filterRestaurantId; }
+    if ($filterFrom !== '')          { $where[] = "kr.return_date >= ?"; $params[] = $filterFrom; }
+    if ($filterTo !== '')            { $where[] = "kr.return_date <= ?"; $params[] = $filterTo; }
+
     // Одна строка = одна позиция кеги в заявке. Заявка с N разными кегами
     // даст N строк. Так видны количества каждой кеги, а не только сумма.
     // Внешний код берём из products.external_code (мап по sku=keg_catalog.code).
     // keg_catalog.code — это артикул кеги, а не внешний код.
-    $rows = $pdo->prepare("
+    $sql = "
         SELECT kr.id AS request_id,
                kr.return_date, kr.status, kr.bso_series, kr.bso_number,
                kr.vehicle, kr.driver, kr.sender_position_name,
@@ -473,7 +631,12 @@ if ($method === 'GET' && $krSubSlug === 'export') {
                r.number AS restaurant_number, r.city AS restaurant_city,
                r.address AS restaurant_address, r.pickup_address,
                kri.keg_code AS sku, kri.quantity,
-               kc.name AS keg_name,
+               COALESCE((SELECT p2.name
+                          FROM products p2
+                          WHERE p2.sku = kri.keg_code AND p2.legal_entity_group = kr.legal_entity_group
+                          ORDER BY p2.is_active DESC, p2.id ASC
+                          LIMIT 1),
+                        kc.name) AS keg_name,
                (SELECT p.external_code
                   FROM products p
                   WHERE p.sku = kri.keg_code AND p.legal_entity_group = kr.legal_entity_group
@@ -483,10 +646,11 @@ if ($method === 'GET' && $krSubSlug === 'export') {
         JOIN restaurants r ON r.id = kr.restaurant_id
         LEFT JOIN keg_return_items kri ON kri.request_id = kr.id
         LEFT JOIN keg_catalog kc ON kc.code = kri.keg_code
-        WHERE kr.legal_entity_group = ? AND kr.status != 'DRAFT'
+        WHERE " . implode(' AND ', $where) . "
         ORDER BY kr.return_date DESC, kr.id DESC, kri.keg_code
-    ");
-    $rows->execute([$filterGroup]);
+    ";
+    $rows = $pdo->prepare($sql);
+    $rows->execute($params);
     $list = $rows->fetchAll();
 
     $statusLabels = ['DRAFT'=>'Черновик','SUBMITTED'=>'Отправлена','ROUTED'=>'Маршрутизирована','CANCELLED'=>'Отменена'];
@@ -788,18 +952,24 @@ if ($method === 'PATCH' && $krId && $krAction === null) {
         }
     }
 
-    // Автоматически SUBMITTED → ROUTED если vehicle И driver заполнены.
-    // Флаг $krWillRoute — чтобы после UPDATE проверить rowCount и не слать лишних уведомлений.
+    // Маршрутизация — только по явному флагу _route в теле запроса.
+    // Раньше PATCH сам переводил SUBMITTED→ROUTED при заполненных машине и водителе,
+    // из-за чего «Сохранить» в портальной модалке незаметно маршрутизировал заявку.
+    // Теперь «Сохранить» и «Маршрутизировать» — это две разные кнопки на фронте.
     $krWillRoute = false;
-    if (!$isRestaurant && $row['status'] === 'SUBMITTED') {
+    if (!$isRestaurant && !empty($body['_route'])) {
+        if ($row['status'] !== 'SUBMITTED') {
+            krRespond(['error' => 'Маршрутизировать можно только заявку в статусе «Отправлена»'], 422);
+        }
         $newVehicle = isset($body['vehicle']) ? trim($body['vehicle']) : ($row['vehicle'] ?? '');
         $newDriver  = isset($body['driver'])  ? trim($body['driver'])  : ($row['driver'] ?? '');
-        if ($newVehicle !== '' && $newDriver !== '') {
-            $krWillRoute = true;
-            $sets[] = "status = ?";
-            $vals[] = 'ROUTED';
-            $sets[] = "routed_at = NOW()";
+        if ($newVehicle === '' || $newDriver === '') {
+            krRespond(['error' => 'Для маршрутизации заполните машину и водителя'], 422);
         }
+        $krWillRoute = true;
+        $sets[] = "status = ?";
+        $vals[] = 'ROUTED';
+        $sets[] = "routed_at = NOW()";
     }
 
     // BSO уникальность при смене
@@ -954,6 +1124,39 @@ if ($method === 'POST' && $krId && $krAction === 'cancel') {
     $pdo->prepare("UPDATE keg_returns SET status = 'CANCELLED', cancelled_at = NOW() WHERE id = ?")->execute([$krId]);
     $row = krGetReturnWithItems($pdo, $krId);
     krRespond($row);
+}
+
+// ── POST /keg-returns/{id}/unroute ── откат маршрутизации (ROUTED → SUBMITTED)
+// Доступен только закупке. Машина/водитель остаются, чтобы при повторной
+// маршрутизации не вбивать заново. Ресторану летит уведомление (TG + push),
+// что заявка снова в статусе «Отправлена».
+if ($method === 'POST' && $krId && $krAction === 'unroute') {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+    krRequirePortalAccess($krPortalUser, 'edit');
+    krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
+
+    if ($row['status'] !== 'ROUTED') {
+        krRespond(['error' => 'Отменить маршрутизацию можно только для заявки в статусе «Маршрутизирована»'], 422);
+    }
+
+    // Защита от гонки: переключаем только если ещё ROUTED. Машину и водителя
+    // обнуляем — при повторной маршрутизации логисты пришлют новые данные,
+    // а старые могут ввести в заблуждение (логист может назначить другого).
+    $stmt = $pdo->prepare("
+        UPDATE keg_returns
+        SET status = 'SUBMITTED', routed_at = NULL, vehicle = NULL, driver = NULL
+        WHERE id = ? AND status = 'ROUTED'
+    ");
+    $stmt->execute([$krId]);
+    if ($stmt->rowCount() === 0) {
+        krRespond(['error' => 'Статус заявки уже изменился, обновите страницу'], 409);
+    }
+
+    $rowAfter = krGetReturnWithItems($pdo, $krId);
+    if ($rowAfter) krNotifyUnrouted($pdo, $rowAfter);
+    krRespond($rowAfter);
 }
 
 // ── POST /keg-returns/{id}/replace-bso ──
@@ -1576,19 +1779,53 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
         krRespond(['error' => 'Не удалось прочитать файл — проверьте формат'], 422);
     }
 
-    // Ищем строку заголовков (содержит «Водитель» или «Адрес точки»)
+    // Ищем строку заголовков и индексы нужных колонок в ней.
+    // Раньше колонки были захардкожены под наш шаблон (E=машина), но в реальном
+    // файле логистов структура может быть другая: колонка E часто это «Вес
+    // заявки брутто, кг», а гос. номер сидит под подписью «Гос. номер
+    // транспортного средства». Поэтому ищем колонки по тексту заголовка.
     $headerIdx = -1;
+    $colDriver = null; $colCustomer = null; $colAddress = null; $colVehicle = null;
     foreach ($sheetData as $idx => $row2) {
-        foreach ($row2 as $cell) {
-            $c = mb_strtolower(trim((string)$cell));
-            if ($c === 'водитель' || strpos($c, 'адрес точки') !== false) {
-                $headerIdx = $idx;
-                break 2;
+        $tmpDriver = null; $tmpCustomer = null; $tmpAddress = null; $tmpVehicle = null;
+        foreach ($row2 as $colIdx => $cell) {
+            $c = mb_strtolower(trim((string)$cell), 'UTF-8');
+            if ($c === '') continue;
+            if ($tmpDriver === null && ($c === 'водитель' || strpos($c, 'фио водителя') !== false)) {
+                $tmpDriver = $colIdx;
+            } elseif ($tmpCustomer === null && (strpos($c, 'заказчик') !== false || strpos($c, 'клиент') !== false)) {
+                $tmpCustomer = $colIdx;
+            } elseif ($tmpAddress === null && strpos($c, 'адрес') !== false) {
+                $tmpAddress = $colIdx;
+            } elseif ($tmpVehicle === null && (
+                    strpos($c, 'гос') !== false && strpos($c, 'номер') !== false
+                    || strpos($c, 'гос. номер') !== false
+                    || strpos($c, 'госномер') !== false
+                    || $c === 'машина'
+                    || strpos($c, 'номер машины') !== false
+                    || strpos($c, 'номер тс') !== false
+                    || strpos($c, 'номер транспорт') !== false
+                )) {
+                $tmpVehicle = $colIdx;
             }
+        }
+        // Заголовочная строка должна содержать хотя бы «Водитель» И «Адрес».
+        if ($tmpDriver !== null && $tmpAddress !== null) {
+            $headerIdx = $idx;
+            $colDriver = $tmpDriver;
+            $colCustomer = $tmpCustomer;
+            $colAddress = $tmpAddress;
+            $colVehicle = $tmpVehicle;
+            break;
         }
     }
     if ($headerIdx < 0) {
-        krRespond(['error' => 'Не найдена строка заголовков (нет колонки «Водитель»)'], 422);
+        krRespond(['error' => 'Не найдена строка заголовков (нет колонок «Водитель» и «Адрес»)'], 422);
+    }
+    if ($colVehicle === null) {
+        // Fallback на старый формат: «Машина» в колонке E, либо непосредственно
+        // после «Адрес точки». Это сохраняет совместимость со старым шаблоном.
+        $colVehicle = ($colAddress !== null) ? ($colAddress + 2) : 4;
     }
 
     // Парсим строки данных с поддержкой объединённых ячеек (значение только в первой строке группы)
@@ -1599,10 +1836,10 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
 
     foreach ($sheetData as $idx => $row2) {
         if ($idx <= $headerIdx) continue;
-        $driver   = trim((string)($row2[0] ?? ''));
-        $customer = trim((string)($row2[1] ?? ''));
-        $address  = trim((string)($row2[2] ?? ''));
-        $vehicle  = trim((string)($row2[4] ?? ''));
+        $driver   = trim((string)($row2[$colDriver] ?? ''));
+        $customer = $colCustomer !== null ? trim((string)($row2[$colCustomer] ?? '')) : '';
+        $address  = trim((string)($row2[$colAddress] ?? ''));
+        $vehicle  = trim((string)($row2[$colVehicle] ?? ''));
 
         if ($driver !== '')   $currentDriver   = $driver;
         if ($customer !== '') $currentCustomer = $customer;
@@ -1616,6 +1853,31 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
             'vehicle'  => $currentVehicle,
         ];
     }
+
+    // Файл логистов на ОДИН день обычно содержит строки и со склада «Прилесье 6»
+    // (сухое — оттуда забирают кеги), и со склада «Прилесье 1» (холод/мороз —
+    // другие водители, кег вообще нет). Для одного и того же адреса ресторана
+    // в файле могут оказаться две строки с разными водителями. Для возврата
+    // кег нас интересует только Прилесье 6: если в группе по адресу есть хотя
+    // бы одна такая строка — оставляем ровно её и выкидываем 1-ку. Если же
+    // ни одна строка не помечена «Прилесье» — оставляем как было (на случай
+    // файла без явного указания склада, чтобы не сломать обратную совместимость).
+    $byAddr = [];
+    foreach ($parsed as $p) {
+        $key = krNormalizeAddress($p['address']);
+        $byAddr[$key][] = $p;
+    }
+    $isPrilesye6 = function($row) {
+        $c = mb_strtolower((string)($row['customer'] ?? ''), 'UTF-8');
+        return strpos($c, 'прилесье 6') !== false || strpos($c, 'прилесье-6') !== false;
+    };
+    $filtered = [];
+    foreach ($byAddr as $rowsByKey) {
+        $p6 = array_values(array_filter($rowsByKey, $isPrilesye6));
+        $useRows = !empty($p6) ? $p6 : $rowsByKey;
+        foreach ($useRows as $r) $filtered[] = $r;
+    }
+    $parsed = $filtered;
 
     // Дедупликация по (address, customer) — оставляем первый
     $seen = [];
@@ -1635,21 +1897,69 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
         FROM keg_returns kr
         JOIN restaurants r ON r.id = kr.restaurant_id
         WHERE kr.return_date = ? AND kr.legal_entity_group = 'BK_VM' AND kr.status = 'SUBMITTED'
+        ORDER BY r.number
     ");
     $reqStmt->execute([$returnDate]);
     $requests = $reqStmt->fetchAll();
 
+    // Список «всех доступных» для ручного сопоставления на фронте.
+    // Возвращается отдельно от preview, чтобы юзер мог переназначить
+    // адрес-несовпадение на нужную заявку через селект.
+    $availableRequests = [];
+    foreach ($requests as $req) {
+        $availableRequests[] = [
+            'request_id'         => (int)$req['id'],
+            'restaurant_number'  => (int)$req['restaurant_number'],
+            'restaurant_city'    => $req['restaurant_city'],
+            'restaurant_address' => $req['restaurant_address'],
+            'current_driver'     => $req['driver'],
+            'current_vehicle'    => $req['vehicle'],
+        ];
+    }
+
     $preview = [];
     $commitActions = [];
 
+    // Готовим сравниваемые строки заявок: в БД restaurants.address обычно без города
+    // (Минск/Гродно/… живёт в отдельной колонке r.city). Чтобы избежать ложных
+    // совпадений вида «Минск Космонавтов 81» ↔ «Гродно Космонавтов 81»,
+    // склеиваем «город + адрес» один раз и дальше работаем с этим.
+    $requestsFull = [];
+    foreach ($requests as $req) {
+        $city = trim((string)($req['restaurant_city'] ?? ''));
+        $addr = trim((string)($req['restaurant_address'] ?? ''));
+        $full = $city !== '' && $addr !== '' ? ($city . ', ' . $addr) : ($city !== '' ? $city : $addr);
+        $requestsFull[] = ['req' => $req, 'full' => $full];
+    }
+
     foreach ($unique as $fileRow) {
         $normAddr = krNormalizeAddress($fileRow['address']);
-        // Матчинг по адресу (LIKE с обеих сторон)
+        // Шаг 1: точный/подстрочный матч. Самый надёжный, попадает в идеальные случаи.
         $candidates = [];
-        foreach ($requests as $req) {
-            $normReqAddr = krNormalizeAddress($req['restaurant_address']);
+        foreach ($requestsFull as $rf) {
+            $normReqAddr = krNormalizeAddress($rf['full']);
             if (strpos($normReqAddr, $normAddr) !== false || strpos($normAddr, $normReqAddr) !== false) {
-                $candidates[] = $req;
+                $candidates[] = $rf['req'];
+            }
+        }
+        // Шаг 2: нечёткий матч по токенам. Срабатывает, если в файле и БД
+        // адрес написан по-разному («г. Минск, пл. Свободы, Дом 17 ресторан»
+        // vs «Минск, свободы, 17 (Немига)»). Порог 0.5 — это примерно
+        // «половина значимых слов и номер дома совпали».
+        if (empty($candidates)) {
+            $scored = [];
+            foreach ($requestsFull as $rf) {
+                $score = krAddressMatchScore($fileRow['address'], $rf['full']);
+                if ($score >= 0.5) $scored[] = ['req' => $rf['req'], 'score' => $score];
+            }
+            if (!empty($scored)) {
+                usort($scored, fn($x, $y) => $y['score'] <=> $x['score']);
+                $top = $scored[0]['score'];
+                // Берём всех с очень близким скором (±0.05) — если тай,
+                // ниже фильтр по «Воглия/Бургер» отсеет лишних.
+                foreach ($scored as $s) {
+                    if ($top - $s['score'] <= 0.05) $candidates[] = $s['req'];
+                }
             }
         }
         // Уточняем по customer если несколько кандидатов
@@ -1692,14 +2002,59 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
     $commitVal = $_POST['commit'] ?? $body['commit'] ?? null;
     $isCommit = ($commitVal === 'true' || $commitVal === true || $commitVal === 1 || $commitVal === '1');
 
+    // Ручные оверрайды от фронта: { "0": 123, "5": null, ... } — индекс строки
+    // превью → request_id (или null чтобы «не назначать»). Перекрывают авто-матч.
+    $overridesRaw = $_POST['overrides'] ?? $body['overrides'] ?? null;
+    $overrides = [];
+    if (is_string($overridesRaw) && $overridesRaw !== '') {
+        $decoded = json_decode($overridesRaw, true);
+        if (is_array($decoded)) $overrides = $decoded;
+    } elseif (is_array($overridesRaw)) {
+        $overrides = $overridesRaw;
+    }
+
+    // Множество SUBMITTED-заявок для валидации оверрайдов (защита от подмены)
+    $validRequestIds = [];
+    foreach ($requests as $req) $validRequestIds[(int)$req['id']] = $req;
+
     if ($isCommit) {
+        // Собираем итоговый план применения: по каждой строке превью —
+        // либо ручной оверрайд, либо авто-матч. Если есть и то и то, оверрайд побеждает.
+        $applyPlan = [];
+        foreach ($preview as $idx => $pv) {
+            $fileRow = $pv['row'];
+            $reqId = null;
+            if (array_key_exists((string)$idx, $overrides) || array_key_exists($idx, $overrides)) {
+                $ov = $overrides[(string)$idx] ?? $overrides[$idx] ?? null;
+                if ($ov === null || $ov === '' || $ov === 'null') {
+                    continue; // юзер выбрал «не назначать»
+                }
+                $reqId = (int)$ov;
+                if (!isset($validRequestIds[$reqId])) continue; // защита от подмены
+            } elseif (!empty($pv['match']['request_id'])) {
+                $reqId = (int)$pv['match']['request_id'];
+            } else {
+                continue;
+            }
+            $applyPlan[] = ['req_id' => $reqId, 'file' => $fileRow];
+        }
+
+        // Защита от двойного назначения одной заявки разным файловым строкам:
+        // первая выигрывает, дубли отбрасываем.
+        $seenReq = [];
+        $applyPlanUnique = [];
+        foreach ($applyPlan as $row) {
+            if (isset($seenReq[$row['req_id']])) continue;
+            $seenReq[$row['req_id']] = true;
+            $applyPlanUnique[] = $row;
+        }
+
         $pendingNotifications = [];
         $pdo->beginTransaction();
         try {
-            foreach ($commitActions as $action) {
-                $req  = $action['req'];
-                $file = $action['file'];
-                if ($action['warning'] === 'не найден') continue;
+            foreach ($applyPlanUnique as $action) {
+                $reqId = (int)$action['req_id'];
+                $file  = $action['file'];
                 $stmt = $pdo->prepare("
                     UPDATE keg_returns SET vehicle = ?, driver = ?, status = 'ROUTED', routed_at = NOW()
                     WHERE id = ? AND status = 'SUBMITTED'
@@ -1707,11 +2062,10 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
                 $stmt->execute([
                     $file['vehicle'] ?? '',
                     $file['driver']  ?? '',
-                    (int)$req['id'],
+                    $reqId,
                 ]);
-                // Собираем уведомления только для тех строк, которые реально переключились.
                 if ($stmt->rowCount() > 0) {
-                    $pendingNotifications[] = (int)$req['id'];
+                    $pendingNotifications[] = $reqId;
                 }
             }
             $pdo->commit();
@@ -1725,10 +2079,17 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
             $routedRow = krGetReturnWithItems($pdo, $rid);
             if ($routedRow) krNotifyRouted($pdo, $routedRow);
         }
-        krRespond(['preview' => $preview, 'committed' => count($commitActions)]);
+        krRespond([
+            'preview' => $preview,
+            'available_requests' => $availableRequests,
+            'committed' => count($applyPlanUnique),
+        ]);
     }
 
-    krRespond(['preview' => $preview]);
+    krRespond([
+        'preview' => $preview,
+        'available_requests' => $availableRequests,
+    ]);
 }
 
 // Если ни один маршрут не сработал

@@ -2734,7 +2734,10 @@ function syncStateToRoute() {
   }
   if (!target) return;
   const resolved = router.resolve(target);
-  if (resolved.fullPath !== route.fullPath) {
+  // Сравниваем только path. Если уже на нужной странице — не делаем replace,
+  // чтобы не затереть query (например, ?id=46 из push-уведомления, по которому
+  // открывается конкретная заявка возврата кег).
+  if (resolved.path !== route.path) {
     router.replace(target).catch(() => {});
   }
 }

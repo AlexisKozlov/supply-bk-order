@@ -259,9 +259,11 @@ onMounted(async () => {
   letter-spacing: .04em; color: #8C7B6E;
 }
 .krt-input {
-  width: 100%; padding: 11px 12px; border-radius: 10px;
+  width: 100%; padding: 0 12px; border-radius: 10px;
   border: 1.5px solid #E8DCC8; background: #fff; color: #2C1A12;
-  font-size: 15px; font-family: inherit; transition: border-color .15s, box-shadow .15s;
+  font-size: 15px; font-family: inherit;
+  height: 44px; box-sizing: border-box; line-height: 1.2;
+  transition: border-color .15s, box-shadow .15s;
   -webkit-appearance: none; appearance: none;
 }
 .krt-input:focus {
