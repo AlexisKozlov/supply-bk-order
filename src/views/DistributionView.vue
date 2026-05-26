@@ -51,12 +51,12 @@
             :disabled="!undoStack.length"
             :title="undoStack.length ? 'Отменить последнее действие (Ctrl+Z)' : 'Нет действий для отмены'"
             @click="undo"
-          >↶ Отменить</button>
-          <button v-if="activeSession.status === 'active'" class="dist-btn ghost" @click="showAddProduct = true">+ Товар</button>
-          <button class="dist-btn ghost" @click="exportExcel">Excel</button>
-          <button v-if="activeSession.status === 'active'" class="dist-btn ghost danger" @click="askCloseSession">Закрыть</button>
-          <button v-if="activeSession.status === 'closed'" class="dist-btn ghost" @click="reopenSession">Открыть</button>
-          <button class="dist-btn ghost danger" @click="askDeleteSession">Удалить</button>
+          ><span class="btn-icon">↶</span><span class="btn-text"> Отменить</span></button>
+          <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Добавить товар" @click="showAddProduct = true"><span class="btn-icon">＋</span><span class="btn-text"> Товар</span></button>
+          <button class="dist-btn ghost" title="Скачать Excel" @click="exportExcel"><span class="btn-icon">⬇</span><span class="btn-text"> Excel</span></button>
+          <button v-if="activeSession.status === 'active'" class="dist-btn ghost danger" title="Закрыть сессию" @click="askCloseSession"><span class="btn-icon">✕</span><span class="btn-text"> Закрыть</span></button>
+          <button v-if="activeSession.status === 'closed'" class="dist-btn ghost" title="Открыть сессию" @click="reopenSession"><span class="btn-icon">↻</span><span class="btn-text"> Открыть</span></button>
+          <button class="dist-btn ghost danger" title="Удалить сессию" @click="askDeleteSession"><span class="btn-icon">🗑</span><span class="btn-text"> Удалить</span></button>
         </div>
       </div>
 
@@ -150,9 +150,13 @@
                 class="td-cell"
                 :class="cellClass(rest.number, p.id)"
                 :title="cellTitle"
-                @click="markShipped(rest.number, p)"
+                @click="onCellClick(rest.number, p, $event)"
                 @contextmenu.prevent="markCrossed(rest.number, p)"
                 @dblclick.stop="startEditQty(rest.number, p, $event)"
+                @touchstart.passive="onTouchStart(rest.number, p)"
+                @touchend="onTouchEnd($event)"
+                @touchmove="cancelLongPress"
+                @touchcancel="cancelLongPress"
               >
                 <span v-if="getCellStatus(rest.number, p.id) === 1" class="cell-ok">✓</span>
                 <span v-else-if="getCellStatus(rest.number, p.id) === 2" class="cell-no">✗</span>
@@ -621,7 +625,8 @@ onUnmounted(() => {
 // ЛКМ ставит «отгружено», повторный ЛКМ по уже отгруженной — сброс в пусто.
 // ПКМ ставит «не нужно», повторный — сброс. Это упрощает работу: оператор
 // держит две кнопки мыши и не циклит через все три состояния.
-const cellTitle = 'ЛКМ — отгружено, ПКМ — не нужно, двойной клик — указать количество';
+// На touch-устройствах ПКМ заменяется long-press (см. onTouchStart).
+const cellTitle = 'ЛКМ — отгружено, ПКМ — не нужно, двойной клик — кол-во. На телефоне: тап — ✓, долгое нажатие — ✗, двойной тап — кол-во';
 
 function markShipped(restNum, product) {
   const cur = getCellStatus(restNum, product.id);
@@ -633,6 +638,38 @@ function markCrossed(restNum, product) {
   const cur = getCellStatus(restNum, product.id);
   const next = cur === 2 ? 0 : 2;
   setStatus(restNum, product, next);
+}
+
+// Long-press на touch — эквивалент ПКМ. Удерживаем 500 мс — ставим ✗,
+// и подавляем последующий click чтобы не сработал markShipped по отпусканию.
+const LONG_PRESS_MS = 500;
+let longPressTimer = null;
+let longPressFired = false;
+function onTouchStart(restNum, product) {
+  longPressFired = false;
+  cancelLongPress();
+  longPressTimer = setTimeout(() => {
+    longPressFired = true;
+    markCrossed(restNum, product);
+    if (navigator.vibrate) navigator.vibrate(15); // тактильная обратная связь
+  }, LONG_PRESS_MS);
+}
+function onTouchEnd(event) {
+  cancelLongPress();
+  if (longPressFired) {
+    // long-press уже отработал — не даём системе сгенерировать click
+    event.preventDefault();
+    longPressFired = false;
+  }
+}
+function cancelLongPress() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+}
+// Обёртка click: если long-press только что сработал — игнорируем
+// синтетический click, который Safari всё же может прислать.
+function onCellClick(restNum, product, event) {
+  if (longPressFired) { event.preventDefault(); longPressFired = false; return; }
+  markShipped(restNum, product);
 }
 
 async function setStatus(restNum, product, next) {
@@ -1186,6 +1223,64 @@ async function exportExcel() {
 .prod-del { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 18px; padding: 0; line-height: 1; }
 .prod-del:hover { color: #C62828; }
 .prod-selected { margin-top: 12px; padding: 10px; background: #fdfbf8; border-radius: var(--radius-sm); }
+
+/* ═══ Mobile (<= 600px) ═══
+   Цель: пальцем удобно ставить ✓/✗ в матрице и не тратить
+   половину экрана на шапку. */
+@media (max-width: 600px) {
+  .dist { padding: 12px 10px; }
+
+  /* Шапка: убираем wrap, ужимаем заголовок, кнопки в одну строку */
+  .dist-header { gap: 6px; margin-bottom: 10px; }
+  .dist-back { padding: 4px; }
+  .dist-session-name { font-size: 15px; }
+  .dist-actions { gap: 4px; width: 100%; justify-content: flex-end; }
+  /* На мобиле прячем подписи у кнопок и оставляем иконки, чтобы 5 кнопок
+     помещались в строку. На десктопе работают полные подписи. */
+  .dist-actions .dist-btn { padding: 6px 8px; font-size: 13px; min-width: 36px; }
+  .dist-actions .btn-text { display: none; }
+  .dist-actions .btn-icon { font-size: 15px; }
+
+  /* Сводка: 2 карточки по 50%, прогресс на отдельной строке */
+  .dist-stats { gap: 6px; margin-bottom: 10px; }
+  .dist-stat { flex: 1; min-width: 0; padding: 8px 10px; }
+  .dist-stat.wide { flex-basis: 100%; padding: 10px 12px; }
+  .dist-stat-val { font-size: 20px; }
+  .dist-stat-label { font-size: 10px; }
+  .dist-stat-pct { font-size: 12px; }
+
+  /* Табы дней: однострочный скролл вместо переноса */
+  .dist-day-bar { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .dist-day { flex-shrink: 0; }
+
+  /* Фильтры в столбик */
+  .dist-filters { flex-direction: column; align-items: stretch; gap: 6px; }
+  .dist-sel { width: 100%; padding: 8px 10px; font-size: 13px; }
+  .dist-chk { padding: 4px 0; }
+
+  /* Таблица: tap-target минимум 44 px, увеличенный шрифт, видимый gap */
+  .dist-table-wrap { max-height: calc(100vh - 380px); border-radius: 8px; }
+  .dist-tbl { font-size: 13px; }
+  .dist-tbl th { padding: 6px 4px; font-size: 11px; }
+  .th-rest { min-width: 140px; }
+  .th-prod { min-width: 64px; padding: 6px 4px !important; }
+  .th-prod-name { font-size: 11px; }
+  .th-note { min-width: 90px; }
+  .dist-tbl td { padding: 8px 4px; }
+  .td-cell { min-width: 56px; min-height: 44px; }
+  .cell-ok, .cell-no { font-size: 18px; }
+  .td-rest { padding-left: 6px !important; font-size: 11px; }
+  .rest-num { font-size: 13px; }
+  .rest-addr { display: block; font-size: 10px; margin-left: 0; color: var(--text-muted); }
+
+  /* Поле примечания: больше, чтобы поместилась клавиатура */
+  .note-input { font-size: 13px; padding: 6px 8px; }
+  .td-note { padding: 8px 6px !important; }
+
+  /* Модалки: шире на маленьком экране */
+  .dist-modal { padding: 18px 14px; width: 95vw; }
+  .dist-modal.sm { width: 90vw; }
+}
 </style>
 
 <style>
