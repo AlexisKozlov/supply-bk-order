@@ -45,6 +45,13 @@
           </span>
         </div>
         <div class="dist-actions">
+          <button
+            v-if="activeSession.status === 'active'"
+            class="dist-btn ghost"
+            :disabled="!undoStack.length"
+            :title="undoStack.length ? 'Отменить последнее действие (Ctrl+Z)' : 'Нет действий для отмены'"
+            @click="undo"
+          >↶ Отменить</button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost" @click="showAddProduct = true">+ Товар</button>
           <button class="dist-btn ghost" @click="exportExcel">Excel</button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost danger" @click="askCloseSession">Закрыть</button>
@@ -65,8 +72,12 @@
         </div>
         <div class="dist-stat wide">
           <div class="dist-stat-row">
-            <span class="dist-stat-label">Отгружено</span>
-            <span class="dist-stat-pct">{{ totalShipped }} / {{ totalCells }} ({{ progressPct }}%)</span>
+            <span class="dist-stat-label">Обработано</span>
+            <span class="dist-stat-pct">
+              <span class="dist-pct-ok">{{ totalShipped }} ✓</span>
+              <span v-if="totalNotNeeded" class="dist-pct-no"> + {{ totalNotNeeded }} ✗</span>
+              <span class="dist-pct-tot"> = {{ totalProcessed }} / {{ totalCells }} ({{ progressPct }}%)</span>
+            </span>
           </div>
           <div class="dist-progress">
             <div class="dist-progress-fill" :style="{ width: progressPct + '%' }"></div>
@@ -99,9 +110,9 @@
           <option value="">Все города</option>
           <option v-for="c in cities" :key="c" :value="c">{{ c }}</option>
         </select>
-        <label class="dist-chk">
-          <input type="checkbox" v-model="hideShipped"/>
-          Скрыть отгруженных
+        <label class="dist-chk" title="Прячет рестораны, у которых по всем товарам уже принято решение (✓ или ✗)">
+          <input type="checkbox" v-model="hideProcessed"/>
+          Скрыть обработанных
         </label>
       </div>
 
@@ -138,7 +149,9 @@
                 v-for="p in sessionProducts" :key="p.id"
                 class="td-cell"
                 :class="cellClass(rest.number, p.id)"
-                @click="cycleStatus(rest.number, p)"
+                :title="cellTitle"
+                @click="markShipped(rest.number, p)"
+                @contextmenu.prevent="markCrossed(rest.number, p)"
                 @dblclick.stop="startEditQty(rest.number, p, $event)"
               >
                 <span v-if="getCellStatus(rest.number, p.id) === 1" class="cell-ok">✓</span>
@@ -317,7 +330,7 @@ const sessionData = ref(null);
 // Filters
 const regionFilter = ref('');
 const cityFilter = ref('');
-const hideShipped = ref(false);
+const hideProcessed = ref(false);
 const dayFilter = ref(0);
 
 const dayShort = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ' };
@@ -357,6 +370,15 @@ const entriesMap = reactive({});
 const notesMap = reactive({});
 const editingNote = ref(null);
 const editNoteValue = ref('');
+
+// Undo: храним последние 20 действий. Каждая запись содержит достаточно,
+// чтобы повторить обратную операцию без лишних запросов к серверу.
+const UNDO_LIMIT = 20;
+const undoStack = ref([]);
+function pushUndo(action) {
+  undoStack.value.push(action);
+  if (undoStack.value.length > UNDO_LIMIT) undoStack.value.shift();
+}
 
 // ═══ Computed ═══
 const sessionProducts = computed(() => sessionData.value?.products || []);
@@ -404,7 +426,9 @@ const filteredRestaurants = computed(() => {
     rests = rests.filter(r => getRegion(r) === regionFilter.value);
   }
   if (cityFilter.value) rests = rests.filter(r => r.city === cityFilter.value);
-  if (hideShipped.value) {
+  if (hideProcessed.value) {
+    // Прячем ресторан, только если по ВСЕМ товарам уже принято решение
+    // (✓ или ✗). Иначе ресторан останется висеть и сбивать оператора.
     rests = rests.filter(r => {
       return sessionProducts.value.some(p => getCellStatus(r.number, p.id) === 0);
     });
@@ -420,13 +444,26 @@ const totalShipped = computed(() => {
   return count;
 });
 
+const totalNotNeeded = computed(() => {
+  let count = 0;
+  for (const key in entriesMap) {
+    if (entriesMap[key]?.shipped === 2) count++;
+  }
+  return count;
+});
+
+const totalProcessed = computed(() => totalShipped.value + totalNotNeeded.value);
+
 const totalCells = computed(() => {
   return allRestaurants.value.length * sessionProducts.value.length;
 });
 
+// «Обработано» включает и отгрузки, и явные отказы — это полное закрытие
+// клетки. Раньше показывали только отгрузки и оператор не понимал, что
+// ещё нужно решить, а что уже закрыто.
 const progressPct = computed(() => {
   if (!totalCells.value) return 0;
-  return Math.round(totalShipped.value / totalCells.value * 100);
+  return Math.round(totalProcessed.value / totalCells.value * 100);
 });
 
 // ═══ Helpers ═══
@@ -493,7 +530,10 @@ function fmtDate(d) {
 }
 
 // ═══ Load ═══
-onMounted(() => loadSessions());
+onMounted(() => {
+  loadSessions();
+  window.addEventListener('keydown', onKeydown);
+});
 
 // При смене юрлица: закрываем открытую сессию (если она не той группы) и перезагружаем список
 watch(() => orderStore.settings.legalEntity, async () => {
@@ -572,17 +612,36 @@ function closeDetail() {
   loadSessions();
 }
 
-onUnmounted(() => stopAutoRefresh());
+onUnmounted(() => {
+  stopAutoRefresh();
+  window.removeEventListener('keydown', onKeydown);
+});
 
-// ═══ Cycle status: 0 → 1(✓) → 2(✗) → 0 ═══
-async function cycleStatus(restNum, product) {
+// ═══ Mouse actions ═══
+// ЛКМ ставит «отгружено», повторный ЛКМ по уже отгруженной — сброс в пусто.
+// ПКМ ставит «не нужно», повторный — сброс. Это упрощает работу: оператор
+// держит две кнопки мыши и не циклит через все три состояния.
+const cellTitle = 'ЛКМ — отгружено, ПКМ — не нужно, двойной клик — указать количество';
+
+function markShipped(restNum, product) {
+  const cur = getCellStatus(restNum, product.id);
+  const next = cur === 1 ? 0 : 1; // toggle с любого состояния
+  setStatus(restNum, product, next);
+}
+
+function markCrossed(restNum, product) {
+  const cur = getCellStatus(restNum, product.id);
+  const next = cur === 2 ? 0 : 2;
+  setStatus(restNum, product, next);
+}
+
+async function setStatus(restNum, product, next) {
   if (activeSession.value?.status === 'closed') return;
   const k = entryKey(restNum, product.id);
-  const current = entriesMap[k]?.shipped || 0;
-  const next = current === 0 ? 1 : current === 1 ? 2 : 0;
   if (!entriesMap[k]) entriesMap[k] = { shipped: 0, qty: null, version: 0 };
   const prev = entriesMap[k].shipped;
   const prevVersion = entriesMap[k].version || 0;
+  if (prev === next) return; // ничего не изменилось — RPC не дёргаем
   entriesMap[k].shipped = next;
   const { data, error } = await db.rpc('dist_toggle_shipped', {
     session_product_id: product.id,
@@ -591,7 +650,6 @@ async function cycleStatus(restNum, product) {
     version: prevVersion,
   });
   if (error === 'conflict') {
-    // Другой пользователь успел раньше — откатываем оптимизм и подтягиваем актуальное.
     toastStore.show('Кто-то изменил эту клетку, обновляю', 'warning');
     await loadSessionData(activeSession.value.id);
     return;
@@ -602,6 +660,7 @@ async function cycleStatus(restNum, product) {
     return;
   }
   if (data?.version) entriesMap[k].version = data.version;
+  pushUndo({ type: 'shipped', restNum: String(restNum), spId: product.id, prev, next });
 }
 
 // ═══ Edit qty ═══
@@ -645,6 +704,7 @@ async function saveQty() {
     return;
   }
   if (data?.version) entriesMap[k].version = data.version;
+  pushUndo({ type: 'qty', restNum, spId, prev: prevQty, next: val });
 }
 
 async function resetQty() {
@@ -672,6 +732,49 @@ async function resetQty() {
     return;
   }
   if (data?.version) entriesMap[k].version = data.version;
+  pushUndo({ type: 'qty', restNum, spId, prev: prevQty, next: null });
+}
+
+// ═══ Undo последней мутации ═══
+// Возвращаем клетку к предыдущему значению, отправив тот же RPC с актуальной
+// версией (берём её из entriesMap, потому что версия уже могла измениться).
+async function undo() {
+  if (!activeSession.value || activeSession.value.status === 'closed') return;
+  const action = undoStack.value.pop();
+  if (!action) return;
+  const k = entryKey(action.restNum, action.spId);
+  const ver = entriesMap[k]?.version || 0;
+  if (action.type === 'shipped') {
+    if (entriesMap[k]) entriesMap[k].shipped = action.prev;
+    const { error } = await db.rpc('dist_toggle_shipped', {
+      session_product_id: action.spId,
+      restaurant_number: action.restNum,
+      shipped: action.prev,
+      version: ver,
+    });
+    if (error) toastStore.show('Не удалось отменить', 'error');
+    else await loadSessionData(activeSession.value.id);
+  } else if (action.type === 'qty') {
+    if (entriesMap[k]) entriesMap[k].qty = action.prev;
+    const { error } = await db.rpc('dist_update_qty', {
+      session_product_id: action.spId,
+      restaurant_number: action.restNum,
+      qty: action.prev,
+      version: ver,
+    });
+    if (error) toastStore.show('Не удалось отменить', 'error');
+    else await loadSessionData(activeSession.value.id);
+  }
+}
+
+function onKeydown(e) {
+  // Ctrl+Z / Cmd+Z = undo. Не перехватываем когда юзер печатает в input/textarea.
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    const tag = (e.target?.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+    undo();
+  }
 }
 
 // ═══ Notes ═══
@@ -990,6 +1093,9 @@ async function exportExcel() {
 .dist-stat-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
 .dist-stat-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .dist-stat-pct { font-size: 13px; font-weight: 700; color: var(--bk-brown); }
+.dist-pct-ok { color: var(--green); }
+.dist-pct-no { color: #C62828; }
+.dist-pct-tot { color: var(--text-secondary); font-weight: 600; }
 .dist-progress { height: 6px; background: var(--border-light); border-radius: 3px; overflow: hidden; }
 .dist-progress-fill { height: 100%; background: linear-gradient(90deg, var(--bk-orange), var(--green)); border-radius: 3px; transition: width 0.4s ease; }
 
