@@ -772,25 +772,34 @@ function normalizeResponsible(rp) {
   return rp.split(',').map(s => s.trim()).filter(Boolean);
 }
 
-onMounted(async () => {
+onMounted(() => {
   window.addEventListener('beforeunload', beforeUnloadHandler);
   document.addEventListener('click', closePickerOnOutsideClick);
-  const [usersRes, seriesRes] = await Promise.all([
-    db.rpc('get_users_list_short'),
-    db.rpc('get_protocol_series', { legal_entity: orderStore.settings.legalEntity }),
-  ]);
-  if (usersRes.data) allUsers.value = usersRes.data;
-  if (seriesRes.data) seriesList.value = seriesRes.data;
+});
 
-  const id = route.params.id;
-  if (id && id !== 'new') await loadProtocol(id);
-  else {
+// Справочники + загрузка протокола. Watch с immediate вместо onMounted,
+// чтобы при переходе между /protocols/:id с разными id KeepAlive не показывал
+// данные предыдущего протокола (см. AppLayout, ключ — route.name).
+watch(() => route.params.id, async (id) => {
+  if (allUsers.value.length === 0 || seriesList.value.length === 0) {
+    const [usersRes, seriesRes] = await Promise.all([
+      db.rpc('get_users_list_short'),
+      db.rpc('get_protocol_series', { legal_entity: orderStore.settings.legalEntity }),
+    ]);
+    if (usersRes.data) allUsers.value = usersRes.data;
+    if (seriesRes.data) seriesList.value = seriesRes.data;
+  }
+  if (id && id !== 'new') {
+    await loadProtocol(id);
+  } else {
     protocol.value.created_by = userStore.currentUser?.name;
-    // Если есть series_id из query (напр. создание из списка с фильтром)
-    if (route.query.series_id) { protocol.value.series_id = Number(route.query.series_id); onSeriesChange(); }
+    if (route.query.series_id) {
+      protocol.value.series_id = Number(route.query.series_id);
+      onSeriesChange();
+    }
     takeSnapshot();
   }
-});
+}, { immediate: true });
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', beforeUnloadHandler);

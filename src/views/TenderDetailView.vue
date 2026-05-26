@@ -1176,7 +1176,11 @@ async function exportComparison() {
   }
 }
 
-onMounted(() => { loadTender(); });
+// watch с immediate вместо onMounted: при переходе между /tenders/:id с разными
+// id KeepAlive в AppLayout переиспользует тот же компонент (ключ — route.name),
+// и onMounted срабатывает один раз. Watch гарантирует перезагрузку данных
+// при каждой смене id.
+watch(() => route.params.id, () => { loadTender(); }, { immediate: true });
 </script>
 
 <style scoped>
