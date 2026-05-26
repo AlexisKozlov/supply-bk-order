@@ -140,22 +140,44 @@
         ]);
     }
 
+    // Поле version защищает от молчаливой потери чужих правок: фронт
+    // присылает version, который у него был, бэк сверяет — если в БД
+    // уже выше, значит кто-то нас опередил, отвечаем 409 + актуальное
+    // значение. Если version не прислали — работаем как раньше (для
+    // bulk-операций и переходного периода).
     if ($fn === 'dist_toggle_shipped') {
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         $restNum = $body['restaurant_number'] ?? '';
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
+        $expectedVersion = isset($body['version']) ? (int)$body['version'] : null;
         if (!$spId || !$restNum) respond(['error' => 'Не указан товар или ресторан'], 400);
         $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
         $sgVal = $sg->fetchColumn();
         if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
-        // Upsert
-        $s = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, shipped)
-            VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), updated_at = NOW()");
-        $s->execute([$spId, $restNum, $shipped]);
-        respond(['success' => true]);
+
+        if ($expectedVersion !== null) {
+            $cur = $pdo->prepare("SELECT shipped, qty, version, updated_by FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
+            $cur->execute([$spId, $restNum]);
+            $row = $cur->fetch();
+            if ($row && (int)$row['version'] !== $expectedVersion) {
+                respond([
+                    'error' => 'conflict',
+                    'message' => 'Другой пользователь изменил эту клетку',
+                    'current' => ['shipped' => (int)$row['shipped'], 'qty' => $row['qty'], 'version' => (int)$row['version'], 'updated_by' => $row['updated_by']],
+                ], 409);
+            }
+        }
+
+        $s = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, shipped, created_by, updated_by, version)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1");
+        $s->execute([$spId, $restNum, $shipped, $authUserName, $authUserName]);
+
+        $vs = $pdo->prepare("SELECT version FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
+        $vs->execute([$spId, $restNum]);
+        respond(['success' => true, 'version' => (int)$vs->fetchColumn()]);
     }
 
     if ($fn === 'dist_update_qty') {
@@ -163,17 +185,34 @@
         $spId = intval($body['session_product_id'] ?? 0);
         $restNum = $body['restaurant_number'] ?? '';
         $qty = $body['qty'] ?? null;
+        $expectedVersion = isset($body['version']) ? (int)$body['version'] : null;
         if (!$spId || !$restNum) respond(['error' => 'Не указан товар или ресторан'], 400);
         $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
         $sgVal = $sg->fetchColumn();
         if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
-        // Upsert
-        $s = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, qty)
-            VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE qty = VALUES(qty), updated_at = NOW()");
-        $s->execute([$spId, $restNum, $qty]);
-        respond(['success' => true]);
+
+        if ($expectedVersion !== null) {
+            $cur = $pdo->prepare("SELECT shipped, qty, version, updated_by FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
+            $cur->execute([$spId, $restNum]);
+            $row = $cur->fetch();
+            if ($row && (int)$row['version'] !== $expectedVersion) {
+                respond([
+                    'error' => 'conflict',
+                    'message' => 'Другой пользователь изменил эту клетку',
+                    'current' => ['shipped' => (int)$row['shipped'], 'qty' => $row['qty'], 'version' => (int)$row['version'], 'updated_by' => $row['updated_by']],
+                ], 409);
+            }
+        }
+
+        $s = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, qty, created_by, updated_by, version)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON DUPLICATE KEY UPDATE qty = VALUES(qty), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1");
+        $s->execute([$spId, $restNum, $qty, $authUserName, $authUserName]);
+
+        $vs = $pdo->prepare("SELECT version FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
+        $vs->execute([$spId, $restNum]);
+        respond(['success' => true, 'version' => (int)$vs->fetchColumn()]);
     }
 
     if ($fn === 'dist_add_products') {
@@ -221,28 +260,36 @@
         $sgVal = $sg->fetchColumn();
         if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
-        $s = $pdo->prepare("INSERT INTO dist_notes (session_id, restaurant_number, note)
-            VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE note = VALUES(note)");
-        $s->execute([$sessionId, $restNum, $note]);
+        $s = $pdo->prepare("INSERT INTO dist_notes (session_id, restaurant_number, note, created_by, updated_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE note = VALUES(note), updated_by = VALUES(updated_by)");
+        $s->execute([$sessionId, $restNum, $note, $authUserName, $authUserName]);
         respond(['success' => true]);
     }
 
+    // Массовая отметка отгрузки для группы ресторанов. Один многострочный
+    // INSERT вместо N круговых трипов (было до ~57 запросов в сети, стало 1).
     if ($fn === 'dist_bulk_toggle') {
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         $restaurantNumbers = $body['restaurant_numbers'] ?? [];
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
         if (!$spId || empty($restaurantNumbers)) respond(['error' => 'Нет данных'], 400);
+        if (count($restaurantNumbers) > 5000) respond(['error' => 'Слишком много ресторанов в одном запросе (макс. 5000)'], 400);
         $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
         $sgVal = $sg->fetchColumn();
         if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
-        $ins = $pdo->prepare("INSERT INTO dist_entries (session_product_id, restaurant_number, shipped)
-            VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), updated_at = NOW()");
+
+        $placeholders = [];
+        $params = [];
         foreach ($restaurantNumbers as $rn) {
-            $ins->execute([$spId, $rn, $shipped]);
+            $placeholders[] = '(?, ?, ?, ?, ?, 1)';
+            array_push($params, $spId, (string)$rn, $shipped, $authUserName, $authUserName);
         }
-        respond(['success' => true]);
+        $sql = "INSERT INTO dist_entries (session_product_id, restaurant_number, shipped, created_by, updated_by, version) VALUES "
+            . implode(',', $placeholders)
+            . " ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1";
+        $pdo->prepare($sql)->execute($params);
+        respond(['success' => true, 'updated' => count($restaurantNumbers)]);
     }

@@ -550,6 +550,8 @@ async function loadSessionData(id) {
         id: e.id,
         shipped: parseInt(e.shipped) || 0,
         qty: e.qty ?? null,
+        version: parseInt(e.version) || 1,
+        updated_by: e.updated_by || null,
       };
     }
     for (const key in notesMap) delete notesMap[key];
@@ -578,19 +580,28 @@ async function cycleStatus(restNum, product) {
   const k = entryKey(restNum, product.id);
   const current = entriesMap[k]?.shipped || 0;
   const next = current === 0 ? 1 : current === 1 ? 2 : 0;
-  if (!entriesMap[k]) entriesMap[k] = { shipped: 0, qty: null };
+  if (!entriesMap[k]) entriesMap[k] = { shipped: 0, qty: null, version: 0 };
   const prev = entriesMap[k].shipped;
+  const prevVersion = entriesMap[k].version || 0;
   entriesMap[k].shipped = next;
-  try {
-    await db.rpc('dist_toggle_shipped', {
-      session_product_id: product.id,
-      restaurant_number: String(restNum),
-      shipped: next,
-    });
-  } catch (e) {
+  const { data, error } = await db.rpc('dist_toggle_shipped', {
+    session_product_id: product.id,
+    restaurant_number: String(restNum),
+    shipped: next,
+    version: prevVersion,
+  });
+  if (error === 'conflict') {
+    // Другой пользователь успел раньше — откатываем оптимизм и подтягиваем актуальное.
+    toastStore.show('Кто-то изменил эту клетку, обновляю', 'warning');
+    await loadSessionData(activeSession.value.id);
+    return;
+  }
+  if (error) {
     entriesMap[k].shipped = prev;
     toastStore.show('Ошибка сохранения', 'error');
+    return;
   }
+  if (data?.version) entriesMap[k].version = data.version;
 }
 
 // ═══ Edit qty ═══
@@ -611,32 +622,56 @@ async function saveQty() {
   if (!editingQty.value) return;
   const { restNum, spId } = editingQty.value;
   const k = entryKey(restNum, spId);
-  if (!entriesMap[k]) entriesMap[k] = { shipped: 0, qty: null };
+  if (!entriesMap[k]) entriesMap[k] = { shipped: 0, qty: null, version: 0 };
   const val = editQtyValue.value.toString().trim() || null;
+  const prevQty = entriesMap[k].qty;
+  const prevVersion = entriesMap[k].version || 0;
   entriesMap[k].qty = val;
   editingQty.value = null;
-  try {
-    await db.rpc('dist_update_qty', {
-      session_product_id: spId,
-      restaurant_number: restNum,
-      qty: val,
-    });
-  } catch { toastStore.show('Ошибка', 'error'); }
+  const { data, error } = await db.rpc('dist_update_qty', {
+    session_product_id: spId,
+    restaurant_number: restNum,
+    qty: val,
+    version: prevVersion,
+  });
+  if (error === 'conflict') {
+    toastStore.show('Кто-то изменил эту клетку, обновляю', 'warning');
+    await loadSessionData(activeSession.value.id);
+    return;
+  }
+  if (error) {
+    entriesMap[k].qty = prevQty;
+    toastStore.show('Ошибка', 'error');
+    return;
+  }
+  if (data?.version) entriesMap[k].version = data.version;
 }
 
 async function resetQty() {
   if (!editingQty.value) return;
   const { restNum, spId } = editingQty.value;
   const k = entryKey(restNum, spId);
+  const prevQty = entriesMap[k]?.qty ?? null;
+  const prevVersion = entriesMap[k]?.version || 0;
   if (entriesMap[k]) entriesMap[k].qty = null;
   editingQty.value = null;
-  try {
-    await db.rpc('dist_update_qty', {
-      session_product_id: spId,
-      restaurant_number: restNum,
-      qty: null,
-    });
-  } catch { toastStore.show('Ошибка', 'error'); }
+  const { data, error } = await db.rpc('dist_update_qty', {
+    session_product_id: spId,
+    restaurant_number: restNum,
+    qty: null,
+    version: prevVersion,
+  });
+  if (error === 'conflict') {
+    toastStore.show('Кто-то изменил эту клетку, обновляю', 'warning');
+    await loadSessionData(activeSession.value.id);
+    return;
+  }
+  if (error) {
+    if (entriesMap[k]) entriesMap[k].qty = prevQty;
+    toastStore.show('Ошибка', 'error');
+    return;
+  }
+  if (data?.version) entriesMap[k].version = data.version;
 }
 
 // ═══ Notes ═══
@@ -675,15 +710,11 @@ function debounceSearchAdd() {
 }
 
 async function searchProducts(query, target) {
-  if (!query || query.length < 2) { target.value = []; return; }
-  try {
-    const le = orderStore.settings.legalEntity;
-    const params = new URLSearchParams({ q: query, legal_entity: le, limit: '15' });
-    const r = await fetch(`/api/search_products?${params}`, {
-      headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' },
-    });
-    if (r.ok) target.value = await r.json();
-  } catch { target.value = []; }
+  const { data } = await db.searchProducts(query, {
+    legalEntity: orderStore.settings.legalEntity,
+    limit: 15,
+  });
+  target.value = data || [];
 }
 
 function addProductToNew(pr) {

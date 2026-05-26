@@ -232,9 +232,33 @@ async function rpc(fn, params = {}) {
   } catch (e) { trackServerStatus(false); return { data: null, error: e.message }; }
 }
 
+// Поиск товаров по названию/артикулу. Идёт в /api/search_products
+// (отдельный эндпоинт, а не RPC), но использует общий buildHeaders/retry.
+// Раньше 8 разных мест в коде дёргали fetch('/api/search_products') и
+// вручную клеили X-Session-Token — это ломалось при любой смене схемы
+// авторизации.
+async function searchProducts(query, opts = {}) {
+  const q = String(query || '').trim();
+  if (q.length < 2) return { data: [], error: null };
+  const params = new URLSearchParams({ q, limit: String(opts.limit || 15) });
+  if (opts.legalEntity) params.set('legal_entity', opts.legalEntity);
+  if (opts.supplier) params.set('supplier', opts.supplier);
+  try {
+    const r = await fetchWithRetry(`${API_BASE}/search_products?${params}`, { method: 'GET', headers: buildHeaders() });
+    trackServerStatus(true);
+    if (r.status === 401) { handleAuthError(); return { data: [], error: 'Session expired' }; }
+    if (!r.ok) {
+      if (r.status >= 500) trackServerStatus(false);
+      return { data: [], error: r.statusText };
+    }
+    return { data: await r.json(), error: null };
+  } catch (e) { trackServerStatus(false); return { data: [], error: e.message }; }
+}
+
 export const db = {
   from(t) { return new QueryBuilder(t); },
   rpc(fn, p) { return rpc(fn, p); },
+  searchProducts(q, opts) { return searchProducts(q, opts); },
 };
 
 export function setSessionToken(t) { localStorage.setItem('bk_session_token', t); }
