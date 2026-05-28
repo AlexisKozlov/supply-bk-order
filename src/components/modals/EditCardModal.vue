@@ -88,7 +88,7 @@
             <input v-model="form.gtin" placeholder="" />
           </div>
           <div class="modal-field">
-            <span class="modal-field-label">Видимость</span>
+            <span class="modal-field-label">Активность</span>
             <select v-model="form.is_active">
               <option :value="true">Да</option>
               <option :value="false">Нет</option>
@@ -293,7 +293,7 @@ const FIELD_LABELS = {
   name: 'Наименование', sku: 'Артикул', supplier: 'Поставщик',
   qty_per_box: 'Штук в коробке', boxes_per_pallet: 'Коробок на паллете',
   multiplicity: 'Кратность', unit_of_measure: 'Ед. измерения',
-  analog_group: 'Группа аналогов', is_active: 'Видимость', is_traceable: 'Прослеживаемость', category: 'Хранение',
+  analog_group: 'Группа аналогов', is_active: 'Активность', is_traceable: 'Прослеживаемость', category: 'Хранение',
   weight_netto: 'Нетто (г)', weight_brutto: 'Брутто (г)', external_code: 'Внешний код', gtin: 'GTIN',
 };
 

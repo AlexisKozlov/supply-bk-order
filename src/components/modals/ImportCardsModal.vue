@@ -217,7 +217,7 @@ const importFields = [
   { key: 'weight_netto', label: 'Вес нетто' },
   { key: 'weight_brutto', label: 'Вес брутто' },
   { key: 'is_traceable', label: 'Прослеживаемость' },
-  { key: 'is_active', label: 'Видимость' },
+  { key: 'is_active', label: 'Активность' },
 ];
 
 function createDefaultFieldModes() {
@@ -284,6 +284,7 @@ const COLUMN_MAP = {
   'прослеживаемость':                  'is_traceable',
   'маркировка':                        'is_traceable',
   'активная':                          'active',
+  'активность':                        'active',
   'видимость':                         'active',
   'группа аналогов (new)':             'analog_group',
   'группа аналогов':                   'analog_group',

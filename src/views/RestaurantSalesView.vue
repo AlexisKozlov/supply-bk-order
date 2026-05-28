@@ -274,7 +274,7 @@ async function loadData() {
 }
 
 async function loadProducts() {
-  const { data } = await db.from('products').select('sku, name, analog_group, supplier').eq('is_active', 1);
+  const { data } = await db.from('products').select('sku, name, analog_group, supplier');
   if (!data) return;
   const gs = new Set(), bg = {};
   for (const p of data) {

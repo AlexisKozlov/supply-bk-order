@@ -702,19 +702,20 @@ const groupsWithData = computed(() => {
   return arr;
 });
 
-// Все группы (включая нулевые) — для поиска по скрытым
+// Все группы (включая нулевые и одиночные товары без analog_group) — для поиска
 const allGroups = computed(() => {
   const map = new Map();
   for (const item of items.value) {
-    if (!item.analog_group) continue;
     const isForeign = !!(filterSupplier.value && item.supplier_name !== filterSupplier.value);
-    if (!map.has(item.analog_group)) {
-      map.set(item.analog_group, {
-        name: item.analog_group, items: [], rawTotalStock: 0, rawTotalConsumption: 0,
+    const key = item.analog_group || `__solo__:${item.sku || item.id}`;
+    const displayName = item.analog_group || `${item.sku || ''} ${item.name || ''}`.trim() || '—';
+    if (!map.has(key)) {
+      map.set(key, {
+        name: displayName, items: [], rawTotalStock: 0, rawTotalConsumption: 0,
         supplierCounts: {}, categoryCounts: {}, hasOwn: false,
       });
     }
-    const g = map.get(item.analog_group);
+    const g = map.get(key);
     const d = calcDays(item.stock, item.consumption);
     g.items.push({ ...item, _foreign: isForeign, daysOfStock: d, displayStock: toUnit(item.stock, item.qtyPerBox), displayConsumption: toUnit(item.consumption, item.qtyPerBox) });
     g.rawTotalStock += item.stock;

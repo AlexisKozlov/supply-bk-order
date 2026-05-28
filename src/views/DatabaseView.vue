@@ -5,7 +5,7 @@
       <div v-if="activeTab==='products'" style="display:flex;gap:8px;align-items:center;">
         <button v-if="inactiveCount" class="db-active-toggle" :class="{ active: showOnlyActive }" @click="showOnlyActive = !showOnlyActive">
           <span class="db-at-switch"><span class="db-at-knob"></span></span>
-          Только активные <span class="db-at-count">{{ inactiveCount }} скрыто</span>
+          Только активные <span class="db-at-count">{{ inactiveCount }} неактивно</span>
         </button>
         <button v-if="noAnalogCount" class="db-active-toggle" :class="{ active: showNoAnalog }" @click="showNoAnalog = !showNoAnalog">
           <span class="db-at-switch"><span class="db-at-knob"></span></span>
@@ -76,7 +76,7 @@
             <span v-if="p.boxes_per_pallet">{{ p.boxes_per_pallet }}/пал</span>
             <span v-if="p.multiplicity > 1">×{{ p.multiplicity }}</span>
             <span v-if="p.is_traceable == 1" class="db-card-traceable-badge">прослеж.</span>
-            <span v-if="p.is_active === 0 || p.is_active === '0'" class="db-card-inactive-badge">скрыта</span>
+            <span v-if="p.is_active === 0 || p.is_active === '0'" class="db-card-inactive-badge">неактивна</span>
           </div>
           <div v-if="showIncomplete && getMissingFields(p).length" class="db-card-missing">
             Не заполнено: {{ getMissingFields(p).join(', ') }}
