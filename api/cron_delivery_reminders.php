@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Europe/Minsk'); // Минск (+03:00) — совпадает с TZ MariaDB
 /**
  * Cron: напоминания ресторанам о подаче заявок поставщикам и об основной поставке.
  * Запуск каждые 5 минут: php /var/www/bk-calc/api/cron_delivery_reminders.php

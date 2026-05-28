@@ -2,6 +2,9 @@
 // Telegram Bot для Supply Department
 // Webhook: https://supply-department.online/api/telegram_bot.php
 
+// Часовой пояс по умолчанию — Минск (+03:00). Совпадает с TZ MariaDB.
+date_default_timezone_set('Europe/Minsk');
+
 $envFile = '/var/www/bk-calc-secrets/.env';
 if (!file_exists($envFile)) exit;
 foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {

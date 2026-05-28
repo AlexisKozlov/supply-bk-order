@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Europe/Minsk'); // Минск (+03:00) — совпадает с TZ MariaDB
 /**
  * Крон-скрипт: чистка протухших черновых файлов опросов.
  * Запуск раз в день: crontab -e → 30 3 * * * php /var/www/bk-calc/api/cron_survey_files_cleanup.php

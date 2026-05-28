@@ -51,6 +51,57 @@ function askAI($question, $context, $chatId = null, array $history = []) {
     return null;
 }
 
+/**
+ * Конвертирует распространённые Markdown-конструкции в HTML, который
+ * понимает Telegram parse_mode=HTML. Применяется к ответу AI перед
+ * sendMessage — в system prompt мы просим HTML, но LLM иногда срывается
+ * в Markdown (особенно жирный **текст**), и пользователь видит звёздочки
+ * как есть.
+ *
+ * Конвертим только то, что точно Markdown, чтобы не сломать валидный HTML,
+ * который AI уже мог сгенерировать (<b>, <a href>).
+ */
+function botMdToHtml(string $text): string
+{
+    if ($text === '') return $text;
+
+    // Блочный код ```...``` → <pre>...</pre> (без языковой подсветки)
+    $text = preg_replace_callback('/```(?:\w+)?\n?([\s\S]*?)```/u', function($m) {
+        $inner = htmlspecialchars($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return '<pre>' . rtrim($inner, "\n") . '</pre>';
+    }, $text) ?? $text;
+
+    // Инлайн-код `text` → <code>text</code>. Защита: не трогать содержимое,
+    // если внутри уже есть < или > (там может быть HTML).
+    $text = preg_replace_callback('/`([^`\n<>]+)`/u', function($m) {
+        return '<code>' . htmlspecialchars($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</code>';
+    }, $text) ?? $text;
+
+    // Жирный **текст** → <b>текст</b>. Точный паттерн, чтобы не задеть
+    // одиночные * в тексте вида «1 * 2 = 2».
+    $text = preg_replace('/\*\*([^\*\n]+?)\*\*/u', '<b>$1</b>', $text) ?? $text;
+
+    // Жирный __текст__ → <b>текст</b> (альтернативный Markdown-синтаксис).
+    $text = preg_replace('/__([^_\n]+?)__/u', '<b>$1</b>', $text) ?? $text;
+
+    // Заголовки ### / ## / # в начале строки → <b>заголовок</b>.
+    $text = preg_replace('/^#{1,6}\s+(.+)$/m', '<b>$1</b>', $text) ?? $text;
+
+    // Markdown-bullets «- » или «* » в начале строки → «• ».
+    // Аккуратно: только если за пробелом не идёт «*» (это бы был bold).
+    $text = preg_replace('/^[\-\*]\s+(?!\*)/m', '• ', $text) ?? $text;
+
+    // Markdown-ссылки [текст](url) → <a href="url">текст</a>.
+    // Требуем https://... в URL, чтобы не путать с обычными скобками.
+    $text = preg_replace_callback('/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/u', function($m) {
+        $label = htmlspecialchars($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $url   = htmlspecialchars($m[2], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return "<a href=\"{$url}\">{$label}</a>";
+    }, $text) ?? $text;
+
+    return $text;
+}
+
 function getSystemPrompt() {
     return <<<'PROMPT'
 Ты — ассистент отдела закупок сети Burger King в Беларуси.

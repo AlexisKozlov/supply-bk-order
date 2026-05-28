@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Europe/Minsk'); // Минск (+03:00) — совпадает с TZ MariaDB
 /**
  * Крон-скрипт: уведомления об истекающих протоколах (ПСЦ).
  * Запуск раз в день: crontab -e → 0 9 * * * php /var/www/bk-calc/api/cron_psc_expiry.php

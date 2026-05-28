@@ -1,4 +1,8 @@
 <?php
+// Часовой пояс по умолчанию — Минск (+03:00). Совпадает с TZ MariaDB,
+// устраняет 3-часовой рассинхрон между date(...) в PHP и NOW() в SQL.
+date_default_timezone_set('Europe/Minsk');
+
 /**
  * API роутер. Подключает модули из includes/.
  *

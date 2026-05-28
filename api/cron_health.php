@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Europe/Minsk'); // Минск (+03:00) — совпадает с TZ MariaDB
 // Cron: проверка здоровья сервера
 // Запуск каждые 2 минуты в crontab
 // Запрещено запускать через HTTP — внутри есть shell_exec.

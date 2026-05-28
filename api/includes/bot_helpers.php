@@ -315,6 +315,11 @@ function handleFreeText($chatId, $text, $user) {
 
     $menuMarkup = ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]];
     if ($answer) {
+        // AI иногда срывается в Markdown (звёздочки **жирный**, ## заголовки,
+        // - bullets). Telegram при parse_mode=HTML их не понимает и показывает
+        // как есть. botMdToHtml пре-обрабатывает ответ — звёздочки больше не
+        // увидите.
+        $answer = botMdToHtml($answer);
         if (mb_strlen($answer) > 4000) {
             $answer = mb_substr($answer, 0, 3990) . "\n\n…";
         }

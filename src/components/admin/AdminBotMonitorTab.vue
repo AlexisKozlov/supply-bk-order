@@ -22,29 +22,29 @@
       <div class="bm-cards">
         <div class="bm-card">
           <div class="bm-card-label">Всего за 24 ч</div>
-          <div class="bm-card-value">{{ formatNumber(data.totals.total_24h) }}</div>
+          <div class="bm-card-value">{{ formatNumber(data.totals?.total_24h) }}</div>
         </div>
         <div class="bm-card bm-card-ok">
           <div class="bm-card-label">Успешно</div>
-          <div class="bm-card-value">{{ formatNumber(data.totals.ok_24h) }}</div>
+          <div class="bm-card-value">{{ formatNumber(data.totals?.ok_24h) }}</div>
           <div class="bm-card-sub">{{ okPct }}%</div>
         </div>
         <div class="bm-card bm-card-fail">
           <div class="bm-card-label">С ошибкой</div>
-          <div class="bm-card-value">{{ formatNumber(data.totals.fail_24h) }}</div>
+          <div class="bm-card-value">{{ formatNumber(data.totals?.fail_24h) }}</div>
           <div class="bm-card-sub">{{ failPct }}%</div>
         </div>
         <div class="bm-card">
           <div class="bm-card-label">Заблокировали бота</div>
-          <div class="bm-card-value">{{ data.blocked.users + data.blocked.ro_telegram }}</div>
+          <div class="bm-card-value">{{ (data.blocked?.users || 0) + (data.blocked?.ro_telegram || 0) }}</div>
           <div class="bm-card-sub">
-            сотрудников: {{ data.blocked.users }} · ресторанов: {{ data.blocked.ro_telegram }}
+            сотрудников: {{ data.blocked?.users || 0 }} · ресторанов: {{ data.blocked?.ro_telegram || 0 }}
           </div>
         </div>
       </div>
 
       <!-- Поминутный график за 24 ч -->
-      <div v-if="data.timeline_24h.length" class="bm-section">
+      <div v-if="data.timeline_24h?.length" class="bm-section">
         <h3>Активность по часам (за 24 ч)</h3>
         <div class="bm-timeline">
           <div v-for="t in timelineForChart" :key="t.bucket" class="bm-bar"
@@ -61,7 +61,7 @@
       </div>
 
       <!-- AI-блокировки -->
-      <div v-if="data.ai_blocked.length" class="bm-section">
+      <div v-if="data.ai_blocked?.length" class="bm-section">
         <h3>AI-провайдеры в блокировке</h3>
         <table class="bm-table">
           <thead><tr><th>Провайдер</th><th>Модель</th><th>До</th><th>Причина</th></tr></thead>
@@ -83,7 +83,7 @@
           <table class="bm-table">
             <thead><tr><th>Метод</th><th>Всего</th><th>Ошибок</th></tr></thead>
             <tbody>
-              <tr v-for="(m, i) in data.by_method" :key="i" :class="{ 'bm-row-bad': m.fail_count > 0 }">
+              <tr v-for="(m, i) in (data.by_method || [])" :key="i" :class="{ 'bm-row-bad': m.fail_count > 0 }">
                 <td><code>{{ m.method }}</code></td>
                 <td>{{ formatNumber(m.total) }}</td>
                 <td>{{ m.fail_count > 0 ? formatNumber(m.fail_count) : '—' }}</td>
@@ -95,11 +95,11 @@
         <!-- По error_code -->
         <div class="bm-section bm-half">
           <h3>Коды ошибок (за 24 ч)</h3>
-          <div v-if="!data.by_error_code.length" class="bm-empty">✓ Ошибок не было</div>
+          <div v-if="!data.by_error_code?.length" class="bm-empty">✓ Ошибок не было</div>
           <table v-else class="bm-table">
             <thead><tr><th>Код</th><th>Сколько раз</th><th>Что значит</th></tr></thead>
             <tbody>
-              <tr v-for="(e, i) in data.by_error_code" :key="i">
+              <tr v-for="(e, i) in (data.by_error_code || [])" :key="i">
                 <td><code>{{ e.error_code }}</code></td>
                 <td>{{ formatNumber(e.cnt) }}</td>
                 <td class="bm-error-hint">{{ errorCodeHint(e.error_code) }}</td>
@@ -110,7 +110,7 @@
       </div>
 
       <!-- Топ заблокированных -->
-      <div v-if="data.top_failing.length" class="bm-section">
+      <div v-if="data.top_failing?.length" class="bm-section">
         <h3>Чаще всего ошибки (за 24 ч)</h3>
         <table class="bm-table">
           <thead><tr><th>Chat ID</th><th>Кол-во ошибок</th></tr></thead>
@@ -124,7 +124,7 @@
       </div>
 
       <!-- Последние ошибки -->
-      <div v-if="data.last_failures.length" class="bm-section">
+      <div v-if="data.last_failures?.length" class="bm-section">
         <h3>Последние ошибки</h3>
         <table class="bm-table">
           <thead><tr><th>Время</th><th>Метод</th><th>Chat ID</th><th>HTTP</th><th>Код</th><th>Описание</th></tr></thead>
@@ -158,8 +158,12 @@ async function load() {
   loading.value = true;
   error.value = '';
   try {
+    // db.rpc возвращает { data, error } — распаковываем. Без этого
+    // data.value = { data: {...}, error: null } и шаблон падал на
+    // data.totals === undefined.
     const r = await db.rpc('tg_admin_monitor', {});
-    data.value = r;
+    if (r?.error) throw new Error(r.error);
+    data.value = r?.data ?? null;
   } catch (e) {
     error.value = e?.message || 'Не удалось загрузить статистику';
   } finally {
@@ -171,14 +175,14 @@ defineExpose({ load });
 onMounted(load);
 
 const okPct = computed(() => {
-  const t = data.value?.totals.total_24h || 0;
+  const t = data.value?.totals?.total_24h || 0;
   if (!t) return 0;
-  return Math.round(((data.value?.totals.ok_24h || 0) / t) * 100);
+  return Math.round(((data.value?.totals?.ok_24h || 0) / t) * 100);
 });
 const failPct = computed(() => {
-  const t = data.value?.totals.total_24h || 0;
+  const t = data.value?.totals?.total_24h || 0;
   if (!t) return 0;
-  return Math.round(((data.value?.totals.fail_24h || 0) / t) * 100);
+  return Math.round(((data.value?.totals?.fail_24h || 0) / t) * 100);
 });
 
 const timelineForChart = computed(() => {

@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Europe/Minsk'); // Минск (+03:00) — совпадает с TZ MariaDB
 /**
  * Импорт графика доставок Камако из Excel в supplier_schedules
  * Запуск: php api/import_kamako.php
