@@ -47,6 +47,24 @@ if (!$input) exit;
 // Определяем chatId для ошибок
 $_CHAT_ID = $input['message']['chat']['id'] ?? $input['callback_query']['message']['chat']['id'] ?? null;
 
+// Любая активность от пользователя = бот снова доступен. Сбрасываем
+// флажок «заблокировал бота» в обеих таблицах подписок. Если он не
+// блокировал — UPDATE'ы не задевают строки (фильтр на tg_blocked_at IS NOT NULL).
+$_INCOMING_CHAT = $input['message']['chat']['id']
+    ?? $input['edited_message']['chat']['id']
+    ?? $input['callback_query']['from']['id']
+    ?? null;
+if ($_INCOMING_CHAT) {
+    try {
+        $pdo->prepare("UPDATE users SET tg_blocked_at = NULL WHERE telegram_chat_id = ? AND tg_blocked_at IS NOT NULL")
+            ->execute([(string)$_INCOMING_CHAT]);
+        $pdo->prepare("UPDATE ro_telegram_subs SET tg_blocked_at = NULL WHERE chat_id = ? AND tg_blocked_at IS NOT NULL")
+            ->execute([(int)$_INCOMING_CHAT]);
+    } catch (Throwable $e) {
+        error_log('[telegram_bot] unblock-on-incoming failed: ' . $e->getMessage());
+    }
+}
+
 // Глобальный обработчик ошибок — бот никогда не падает молча
 set_exception_handler(function(Throwable $e) {
     global $_CHAT_ID;
@@ -57,33 +75,29 @@ set_exception_handler(function(Throwable $e) {
 });
 
 // ═══ Telegram helpers ═══
+// Все ниже — тонкие обёртки над tg_client.php. Сам клиент через cURL,
+// проверяет ответ Telegram, логирует ошибки в error_log с префиксом
+// [tg-client]. Бизнес-сигнатуры функций сохранены, чтобы не править
+// сотни вызовов sendMessage/editMessage/… в коде бота.
 
+require_once __DIR__ . '/includes/tg_client.php';
+
+// Тонкие обёртки — берут глобальный $pdo и передают в опции, чтобы
+// tg_client сам помечал заблокированных пользователей (HTTP 403 / chat
+// not found). Сбрасывается флаг в начале обработки входящего сообщения.
 function sendMessage($chatId, $text, $replyMarkup = null) {
-    global $BOT_TOKEN;
-    $data = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML'];
-    if ($replyMarkup) $data['reply_markup'] = json_encode($replyMarkup);
-    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage";
-    $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-    @file_get_contents($url, false, stream_context_create($opts));
+    global $pdo;
+    return tgClientSend($chatId, $text, ['reply_markup' => $replyMarkup, 'pdo' => $pdo])['ok'];
 }
 
 function editMessage($chatId, $messageId, $text, $replyMarkup = null) {
-    global $BOT_TOKEN;
-    $data = ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $text, 'parse_mode' => 'HTML'];
-    if ($replyMarkup) $data['reply_markup'] = json_encode($replyMarkup);
-    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/editMessageText";
-    $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-    @file_get_contents($url, false, stream_context_create($opts));
+    global $pdo;
+    return tgClientEdit($chatId, $messageId, $text, ['reply_markup' => $replyMarkup, 'pdo' => $pdo])['ok'];
 }
 
 function editMessageReplyMarkup($chatId, $messageId, $replyMarkup = null) {
-    global $BOT_TOKEN;
-    $data = ['chat_id' => $chatId, 'message_id' => $messageId];
-    if ($replyMarkup !== null) $data['reply_markup'] = json_encode($replyMarkup);
-    else $data['reply_markup'] = json_encode(['inline_keyboard' => []]);
-    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/editMessageReplyMarkup";
-    $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-    @file_get_contents($url, false, stream_context_create($opts));
+    global $pdo;
+    return tgClientEditReplyMarkup($chatId, $messageId, $replyMarkup, ['pdo' => $pdo])['ok'];
 }
 
 /**
@@ -213,47 +227,35 @@ function rrShowMyReminders($pdo, $chatId, $editMsgId = null) {
 }
 
 function answerCallback($callbackId, $text = '', $showAlert = false) {
-    global $BOT_TOKEN;
-    $params = ['callback_query_id' => $callbackId, 'text' => $text];
-    if ($showAlert) $params['show_alert'] = true;
-    tgHttpGet("https://api.telegram.org/bot{$BOT_TOKEN}/answerCallbackQuery?" . http_build_query($params));
+    return tgClientAnswerCallback($callbackId, $text, $showAlert)['ok'];
 }
 
 function sendMessageAndGetId($chatId, $text) {
-    global $BOT_TOKEN;
-    $data = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML'];
-    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage";
-    $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-    $response = @file_get_contents($url, false, stream_context_create($opts));
-    if ($response) {
-        $result = json_decode($response, true);
-        return $result['result']['message_id'] ?? null;
-    }
-    return null;
+    global $pdo;
+    $r = tgClientSend($chatId, $text, ['pdo' => $pdo]);
+    return $r['result']['message_id'] ?? null;
 }
 
 function deleteMessage($chatId, $messageId) {
-    global $BOT_TOKEN;
-    tgHttpGet("https://api.telegram.org/bot{$BOT_TOKEN}/deleteMessage?" . http_build_query(['chat_id' => $chatId, 'message_id' => $messageId]));
+    global $pdo;
+    return tgClientDelete($chatId, $messageId, ['pdo' => $pdo])['ok'];
 }
 
 function sendTyping($chatId) {
-    global $BOT_TOKEN;
-    tgHttpGet("https://api.telegram.org/bot{$BOT_TOKEN}/sendChatAction?" . http_build_query(['chat_id' => $chatId, 'action' => 'typing']));
+    global $pdo;
+    return tgClientTyping($chatId, ['pdo' => $pdo])['ok'];
 }
 
 function sendDocument($chatId, $filename, $content, $caption = '') {
-    global $BOT_TOKEN;
-    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendDocument";
-    $boundary = uniqid('--', true);
-    $body = "--{$boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{$chatId}\r\n";
-    if ($caption) {
-        $body .= "--{$boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{$caption}\r\n";
-        $body .= "--{$boundary}\r\nContent-Disposition: form-data; name=\"parse_mode\"\r\n\r\nHTML\r\n";
-    }
-    $body .= "--{$boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{$filename}\"\r\nContent-Type: text/csv\r\n\r\n{$content}\r\n--{$boundary}--\r\n";
-    $opts = ['http' => ['method' => 'POST', 'header' => "Content-Type: multipart/form-data; boundary={$boundary}", 'content' => $body, 'timeout' => 30]];
-    @file_get_contents($url, false, stream_context_create($opts));
+    // Раньше слался без mime → Telegram сам угадывал. По факту в бот
+    // отдавались csv-выгрузки, mime ставим явно. На вызывающей стороне
+    // это не отражается — caption передаётся в HTML.
+    global $pdo;
+    return tgClientSendDocument($chatId, $filename, $content, [
+        'mime'    => 'text/csv',
+        'caption' => $caption,
+        'pdo'     => $pdo,
+    ])['ok'];
 }
 
 require_once __DIR__ . '/includes/legal_entities.php';

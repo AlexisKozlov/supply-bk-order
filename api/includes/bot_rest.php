@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/so_deadline.php';
+require_once __DIR__ . '/tg_client.php';
 
 // ═══ Инициализация Telegram-токена и низкоуровневых хелперов ═══
 // При загрузке из telegram_bot.php токен и функции уже определены — function_exists
@@ -11,47 +12,32 @@ if (empty($BOT_TOKEN)) {
     $BOT_TOKEN = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
 }
 
+// Fallback-обёртки для web-контекста (когда bot_rest.php загружается из api/index.php,
+// а не из telegram_bot.php). Все ходят через единый tg_client — никаких больше
+// @file_get_contents без проверки ответа. PDO передаём, чтобы клиент сам
+// помечал заблокированных пользователей при ошибках 403 / chat not found.
 if (!function_exists('sendMessage')) {
     function sendMessage($chatId, $text, $replyMarkup = null) {
-        global $BOT_TOKEN;
-        if (!$BOT_TOKEN) { error_log('[bot_rest] sendMessage skipped: empty BOT_TOKEN'); return; }
-        $data = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML'];
-        if ($replyMarkup) $data['reply_markup'] = json_encode($replyMarkup);
-        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage";
-        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-        @file_get_contents($url, false, stream_context_create($opts));
+        global $pdo;
+        return tgClientSend($chatId, $text, ['reply_markup' => $replyMarkup, 'pdo' => $pdo])['ok'];
     }
 }
 if (!function_exists('editMessage')) {
     function editMessage($chatId, $messageId, $text, $replyMarkup = null) {
-        global $BOT_TOKEN;
-        if (!$BOT_TOKEN) return;
-        $data = ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $text, 'parse_mode' => 'HTML'];
-        if ($replyMarkup) $data['reply_markup'] = json_encode($replyMarkup);
-        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/editMessageText";
-        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-        @file_get_contents($url, false, stream_context_create($opts));
+        global $pdo;
+        return tgClientEdit($chatId, $messageId, $text, ['reply_markup' => $replyMarkup, 'pdo' => $pdo])['ok'];
     }
 }
 if (!function_exists('editMessageReplyMarkup')) {
     function editMessageReplyMarkup($chatId, $messageId, $replyMarkup = null) {
-        global $BOT_TOKEN;
-        if (!$BOT_TOKEN) return;
-        $data = ['chat_id' => $chatId, 'message_id' => $messageId];
-        $data['reply_markup'] = json_encode($replyMarkup ?: ['inline_keyboard' => []]);
-        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/editMessageReplyMarkup";
-        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-        @file_get_contents($url, false, stream_context_create($opts));
+        global $pdo;
+        return tgClientEditReplyMarkup($chatId, $messageId, $replyMarkup, ['pdo' => $pdo])['ok'];
     }
 }
 if (!function_exists('deleteMessage')) {
     function deleteMessage($chatId, $messageId) {
-        global $BOT_TOKEN;
-        if (!$BOT_TOKEN) return;
-        $data = ['chat_id' => $chatId, 'message_id' => $messageId];
-        $url = "https://api.telegram.org/bot{$BOT_TOKEN}/deleteMessage";
-        $opts = ['http' => ['method' => 'POST', 'header' => 'Content-Type: application/json', 'content' => json_encode($data), 'timeout' => 10]];
-        @file_get_contents($url, false, stream_context_create($opts));
+        global $pdo;
+        return tgClientDelete($chatId, $messageId, ['pdo' => $pdo])['ok'];
     }
 }
 
@@ -1881,16 +1867,14 @@ function restNotifySubscribers($pdo, $botToken, $restaurantNumber, $text, $reply
     $s->execute([$restaurantNumber]);
     $chatIds = $s->fetchAll(PDO::FETCH_COLUMN);
     foreach ($chatIds as $cid) {
-        if (function_exists('sendMessage')) {
-            @sendMessage($cid, $text, $replyMarkup);
-            continue;
-        }
-        $data = ['chat_id' => $cid, 'text' => $text, 'parse_mode' => 'HTML'];
-        if ($replyMarkup) $data['reply_markup'] = $replyMarkup;
-        $data = json_encode($data);
-        $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $data, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-        curl_exec($ch); curl_close($ch);
+        // sendMessage уже определена (fallback в начале bot_rest.php или
+        // оригинал из telegram_bot.php). Любой контекст — через единый клиент.
+        tgClientSend($cid, $text, [
+            'reply_markup' => $replyMarkup,
+            'token'        => $botToken,
+            'timeout'      => 5,
+            'pdo'          => $pdo,
+        ]);
     }
 }
 
@@ -2225,15 +2209,11 @@ function corrStartInput($chatId, $msgId, $restNum, $deliveryDate) {
 
 // Удалить сообщения пользователя и бота, отправить новое внизу. Возвращает message_id нового.
 function corrReplace($chatId, $userMsgId, &$state, $text, $keyboard = null) {
-    global $BOT_TOKEN;
+    global $pdo;
     if ($userMsgId) @deleteMessage($chatId, $userMsgId);
     if (!empty($state['msg_id'])) @deleteMessage($chatId, $state['msg_id']);
-    $payload = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML'];
-    if ($keyboard) $payload['reply_markup'] = json_encode($keyboard);
-    $ch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage");
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($payload), CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 10]);
-    $resp = json_decode(curl_exec($ch), true); curl_close($ch);
-    $newMsgId = $resp['result']['message_id'] ?? null;
+    $r = tgClientSend($chatId, $text, ['reply_markup' => $keyboard, 'pdo' => $pdo]);
+    $newMsgId = $r['result']['message_id'] ?? null;
     if ($newMsgId) $state['msg_id'] = $newMsgId;
     return $newMsgId;
 }
@@ -2456,18 +2436,9 @@ function corrNotifyPurchasersBatch($pdo, $corrIds, $restNum, $deliveryDate, $sub
 
     $sentMessages = [];
     foreach ($recipients as $r) {
-        $payload = json_encode([
-            'chat_id' => $r['telegram_chat_id'],
-            'text' => $msgData['text'],
-            'parse_mode' => 'HTML',
-            'reply_markup' => json_encode($msgData['keyboard']),
-        ]);
-        $ch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage");
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 10]);
-        $resp = curl_exec($ch); curl_close($ch);
-        $respData = json_decode($resp, true);
-        if (isset($respData['result']['message_id'])) {
-            $sentMessages[] = ['chat_id' => $r['telegram_chat_id'], 'message_id' => $respData['result']['message_id']];
+        $resp = tgClientSend($r['telegram_chat_id'], $msgData['text'], ['reply_markup' => $msgData['keyboard'], 'pdo' => $pdo]);
+        if (!empty($resp['result']['message_id'])) {
+            $sentMessages[] = ['chat_id' => $r['telegram_chat_id'], 'message_id' => $resp['result']['message_id']];
         }
     }
     // Сохраняем batch_ids + message_ids в каждой записи

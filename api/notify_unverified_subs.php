@@ -36,6 +36,8 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 
+require_once __DIR__ . '/includes/tg_client.php';
+
 // Шаг 1. Автоверификация тех, кто уже привязал аккаунт через код раньше.
 $auto = $pdo->exec("
     UPDATE ro_telegram_subs rs
@@ -100,35 +102,17 @@ foreach ($rows as $row) {
     $chatId = (int)$row['chat_id'];
     if ($chatId === 0) continue;
 
-    $payload = json_encode([
-        'chat_id' => $chatId,
-        'text' => $text,
-        'parse_mode' => 'HTML',
-        'disable_web_page_preview' => true,
+    $r = tgClientSend($chatId, $text, [
+        'disable_preview' => true,
+        'token'           => $BOT_TOKEN,
+        'pdo'             => $pdo,
     ]);
-    $ch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage");
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_TIMEOUT => 10,
-    ]);
-    $resp = curl_exec($ch);
-    $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    $ok = false;
-    if ($resp) {
-        $j = json_decode($resp, true);
-        $ok = !empty($j['ok']);
-    }
-    if ($ok) {
+    if ($r['ok']) {
         $sent++;
         echo "  ok  {$chatId}\n";
     } else {
         $fail++;
-        echo "  err {$chatId} (http {$http}): " . substr((string)$resp, 0, 160) . "\n";
+        echo "  err {$chatId} (http {$r['http_code']}, code {$r['error_code']}): " . substr((string)$r['description'], 0, 160) . "\n";
     }
 
     // Грубо ограничиваем темп: не более 20 сообщений в секунду.

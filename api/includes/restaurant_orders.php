@@ -3787,40 +3787,39 @@ if ($roAction === 'report-missing-gtin' && $method === 'POST') {
                 $text .= "\n🔗 <a href=\"" . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . "\">Разобрать</a>";
             }
             foreach ($chatIds as $chatId) {
-                // Если есть фото — шлём sendPhoto с caption, иначе sendMessage
+                // Если есть фото — шлём sendPhoto с caption (мультипарт CURLFile,
+                // tg_client.php sendPhoto пока не оборачивает). Без фото — обычный
+                // sendMessage через единый клиент.
                 if ($photoAbsPath && is_file($photoAbsPath)) {
-                    $url = "https://api.telegram.org/bot{$botToken}/sendPhoto";
                     $cfile = new CURLFile($photoAbsPath);
                     $payload = [
-                        'chat_id' => $chatId,
-                        'photo' => $cfile,
-                        'caption' => $text,
+                        'chat_id'    => $chatId,
+                        'photo'      => $cfile,
+                        'caption'    => $text,
                         'parse_mode' => 'HTML',
                     ];
-                    $ch = curl_init($url);
+                    $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendPhoto");
                     curl_setopt_array($ch, [
                         CURLOPT_RETURNTRANSFER => true,
-                        CURLOPT_POST => true,
-                        CURLOPT_POSTFIELDS => $payload,
-                        CURLOPT_TIMEOUT => 15,
+                        CURLOPT_POST           => true,
+                        CURLOPT_POSTFIELDS     => $payload,
+                        CURLOPT_TIMEOUT        => 15,
                         CURLOPT_CONNECTTIMEOUT => 5,
                     ]);
+                    $resp = curl_exec($ch);
+                    $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+                    if ($resp !== false && $http === 200) $tgSent++;
                 } else {
-                    $payload = json_encode(['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML']);
-                    $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-                    curl_setopt_array($ch, [
-                        CURLOPT_RETURNTRANSFER => true,
-                        CURLOPT_POST => true,
-                        CURLOPT_POSTFIELDS => $payload,
-                        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                        CURLOPT_TIMEOUT => 5,
-                        CURLOPT_CONNECTTIMEOUT => 3,
+                    require_once __DIR__ . '/tg_client.php';
+                    $r = tgClientSend($chatId, $text, [
+                        'token'           => $botToken,
+                        'timeout'         => 5,
+                        'connect_timeout' => 3,
+                        'pdo'             => $pdo,
                     ]);
+                    if ($r['ok']) $tgSent++;
                 }
-                $resp = curl_exec($ch);
-                $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                if ($resp !== false && $http === 200) $tgSent++;
             }
         } catch (Exception $e) {
             error_log('[ro/report-missing-gtin] TG error: ' . $e->getMessage());

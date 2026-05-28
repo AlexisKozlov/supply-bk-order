@@ -362,67 +362,29 @@ function tgHttpGet($url, $timeout = 5) {
 }
 
 function sendTelegramMessage($botToken, $chatId, $text, $parseMode = 'HTML') {
+    global $pdo;
     if (!$botToken || !$chatId) return false;
-    $payload = json_encode([
-        'chat_id' => $chatId,
-        'text' => $text,
-        'parse_mode' => $parseMode,
-        'disable_notification' => false,
-    ]);
-    $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_TIMEOUT => 5,
-        CURLOPT_CONNECTTIMEOUT => 2,
-    ]);
-    $result = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    return $code === 200;
+    require_once __DIR__ . '/tg_client.php';
+    return tgClientSend($chatId, $text, [
+        'parse_mode'      => $parseMode,
+        'token'           => $botToken,
+        'timeout'         => 5,
+        'connect_timeout' => 2,
+        'pdo'             => $pdo,
+    ])['ok'];
 }
 
 function sendTelegramBulk($botToken, $chatIds, $text, $parseMode = 'HTML', $replyMarkup = null) {
+    global $pdo;
     if (!$botToken || empty($chatIds)) return 0;
-    $sent = 0;
-    // Батчи по 25 — Telegram лимит ~30 msg/sec
-    $batches = array_chunk($chatIds, 25);
-    foreach ($batches as $batch) {
-        $mh = curl_multi_init();
-        $handles = [];
-        foreach ($batch as $chatId) {
-            $msgData = [
-                'chat_id' => $chatId,
-                'text' => $text,
-                'parse_mode' => $parseMode,
-                'disable_notification' => false,
-            ];
-            if ($replyMarkup) $msgData['reply_markup'] = $replyMarkup;
-            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode($msgData),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                CURLOPT_TIMEOUT => 10,
-                CURLOPT_CONNECTTIMEOUT => 3,
-            ]);
-            curl_multi_add_handle($mh, $ch);
-            $handles[] = $ch;
-        }
-        $running = null;
-        do { curl_multi_exec($mh, $running); if ($running) curl_multi_select($mh); } while ($running > 0);
-        foreach ($handles as $ch) {
-            if (curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) $sent++;
-            curl_multi_remove_handle($mh, $ch);
-            curl_close($ch);
-        }
-        curl_multi_close($mh);
-        if (count($batches) > 1) usleep(100000); // 100ms пауза между батчами
-    }
-    return $sent;
+    require_once __DIR__ . '/tg_client.php';
+    $r = tgClientSendBulk($chatIds, $text, [
+        'parse_mode'   => $parseMode,
+        'reply_markup' => $replyMarkup,
+        'token'        => $botToken,
+        'pdo'          => $pdo,
+    ]);
+    return $r['sent'];
 }
 
 /**
@@ -432,57 +394,32 @@ function sendTelegramBulk($botToken, $chatIds, $text, $parseMode = 'HTML', $repl
 function getSubscribedChatIds($pdo, $settingField) {
     $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary', 'data_updates', 'expiring_items', 'restaurant_sales'];
     if (!in_array($settingField, $allowed)) {
-        // Без фильтра — всем
-        $s = $pdo->query("SELECT telegram_chat_id FROM users WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
+        // Без фильтра — всем, кроме заблокировавших бота.
+        $s = $pdo->query("SELECT telegram_chat_id FROM users
+                          WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''
+                            AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)");
         return $s->fetchAll(PDO::FETCH_COLUMN);
     }
     $s = $pdo->prepare("SELECT u.telegram_chat_id
         FROM users u
         LEFT JOIN telegram_settings ts ON ts.user_name = u.name
         WHERE u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id != ''
-          AND COALESCE(ts.`$settingField`, 1) = 1");
+          AND COALESCE(ts.`$settingField`, 1) = 1
+          AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY)");
     $s->execute();
     return $s->fetchAll(PDO::FETCH_COLUMN);
 }
 
 function sendTelegramDocument($botToken, $chatId, $filename, $content, $caption = '') {
+    global $pdo;
     if (!$botToken || !$chatId) return false;
-    $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    $boundary = '----BkCalc' . bin2hex(random_bytes(8));
-    $crlf = "\r\n";
-    $body  = "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"chat_id\"{$crlf}{$crlf}{$chatId}{$crlf}";
-    if ($caption !== '') {
-        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"caption\"{$crlf}{$crlf}{$caption}{$crlf}";
-        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"parse_mode\"{$crlf}{$crlf}HTML{$crlf}";
-    }
-    $body .= "--{$boundary}{$crlf}";
-    $body .= "Content-Disposition: form-data; name=\"document\"; filename=\"{$filename}\"{$crlf}";
-    $body .= "Content-Type: {$mime}{$crlf}{$crlf}";
-    $body .= $content . $crlf;
-    $body .= "--{$boundary}--{$crlf}";
-    $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendDocument");
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $body,
-        CURLOPT_HTTPHEADER => ['Content-Type: multipart/form-data; boundary=' . $boundary],
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 30,
-    ]);
-    $result = curl_exec($ch);
-    $curlErr = curl_error($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($result === false || $curlErr) {
-        error_log("[sendTelegramDocument] curl error chat={$chatId}: " . ($curlErr ?: 'unknown'));
-        return false;
-    }
-    $data = json_decode($result, true);
-    if (!is_array($data) || empty($data['ok'])) {
-        $desc = is_array($data) ? ($data['description'] ?? 'no description') : 'bad response';
-        error_log("[sendTelegramDocument] Telegram error chat={$chatId} http={$httpCode}: {$desc}");
-        return false;
-    }
-    return true;
+    require_once __DIR__ . '/tg_client.php';
+    return tgClientSendDocument($chatId, $filename, $content, [
+        'mime'    => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'caption' => $caption,
+        'token'   => $botToken,
+        'pdo'     => $pdo,
+    ])['ok'];
 }
 
 function dbColumnExists($pdo, $table, $column) {
@@ -669,7 +606,7 @@ function notifyProtocolParticipants($pdo, $protocolId, $topic, $date, $participa
 
         // Находим chat_id участников
         $ph = implode(',', array_fill(0, count($participants), '?'));
-        $s = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name IN ({$ph}) AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
+        $s = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name IN ({$ph}) AND telegram_chat_id IS NOT NULL AND telegram_chat_id != '' AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)");
         $s->execute($participants);
         $chatIds = $s->fetchAll(PDO::FETCH_COLUMN);
         if ($chatIds) sendTelegramBulk($botToken, $chatIds, $text, 'HTML', $keyboard);
@@ -766,7 +703,7 @@ $ROLE_TEMPLATES = [
     'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','supplier-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','pallet-storage'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full','protocols'=>'full','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'full','tasks'=>'full','dashboard'=>'full','supply-assistant'=>'full'],
     'manager' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','supplier-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'none','pallet-calc'=>'full','pallet-storage'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full','protocols'=>'full','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'full','surveys'=>'full','tasks'=>'full','dashboard'=>'full','supply-assistant'=>'full'],
     'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','supplier-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','pallet-storage'=>'none','cards'=>'view','corrections'=>'edit','chat'=>'edit','marketing'=>'edit','protocols'=>'edit','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'none','surveys'=>'edit','tasks'=>'full','dashboard'=>'none','supply-assistant'=>'full'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','supplier-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','pallet-storage'=>'none','cards'=>'view','corrections'=>'view','chat'=>'view','marketing'=>'view','protocols'=>'view','restaurant-orders'=>'view','supplier-orders'=>'view','truck-loading'=>'none','surveys'=>'view','tasks'=>'view','dashboard'=>'none','supply-assistant'=>'view'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','supplier-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','pallet-storage'=>'none','cards'=>'view','corrections'=>'view','chat'=>'view','marketing'=>'view','protocols'=>'view','restaurant-orders'=>'view','supplier-orders'=>'view','truck-loading'=>'none','surveys'=>'view','tasks'=>'full','dashboard'=>'none','supply-assistant'=>'view'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [

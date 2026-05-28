@@ -40,6 +40,7 @@ $pdo->exec("SET SESSION max_statement_time = 30");
 
 require_once __DIR__ . '/includes/legal_entities.php';
 require_once __DIR__ . '/includes/so_deadline.php';
+require_once __DIR__ . '/includes/tg_client.php';
 
 // TTL одноразовых токенов входа в кабинет ресторана (синхронизировано с helpers.php).
 if (!defined('RO_AUTH_TOKEN_TTL_MINUTES')) define('RO_AUTH_TOKEN_TTL_MINUTES', 10);
@@ -52,35 +53,16 @@ if ($__nowHour < 9 || $__nowHour >= 22) {
     exit;
 }
 
+// Тонкая обёртка над tg_client для совместимости с уже написанным кодом.
+// Раньше возвращала raw JSON или false. Никто из вызывающих этим не
+// пользуется кроме «if (tgSend(...))», поэтому возвращаем bool.
+// PDO передаём в опции — клиент сам пометит заблокированных пользователей.
 function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
-    global $BOT_TOKEN;
-    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage";
-    $payload = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML'];
-    if ($disablePreview) $payload['disable_web_page_preview'] = true;
-    if ($replyMarkup) $payload['reply_markup'] = $replyMarkup;
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => json_encode($payload),
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 10,
-    ]);
-    $result = curl_exec($ch);
-    $curlErr = curl_error($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($result === false || $curlErr) {
-        error_log("[tgSend] curl error chat={$chatId}: " . ($curlErr ?: 'unknown'));
-        return false;
-    }
-    $data = json_decode($result, true);
-    if (!is_array($data) || empty($data['ok'])) {
-        $desc = is_array($data) ? ($data['description'] ?? 'no description') : 'bad response';
-        error_log("[tgSend] Telegram error chat={$chatId} http={$httpCode}: {$desc}");
-        return false;
-    }
-    return $result;
+    global $pdo;
+    $opts = ['pdo' => $pdo];
+    if ($disablePreview) $opts['disable_preview'] = true;
+    if ($replyMarkup)    $opts['reply_markup']    = $replyMarkup;
+    return tgClientSend($chatId, $text, $opts)['ok'];
 }
 
 /**
@@ -88,43 +70,12 @@ function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
  * $content — сырое содержимое файла (строка).
  */
 function tgSendDocument($chatId, $filename, $content, $caption = '', $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-    global $BOT_TOKEN;
-    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendDocument";
-    $boundary = '----BkCalc' . bin2hex(random_bytes(8));
-    $crlf = "\r\n";
-    $body  = "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"chat_id\"{$crlf}{$crlf}{$chatId}{$crlf}";
-    if ($caption !== '') {
-        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"caption\"{$crlf}{$crlf}{$caption}{$crlf}";
-        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"parse_mode\"{$crlf}{$crlf}HTML{$crlf}";
-    }
-    $body .= "--{$boundary}{$crlf}";
-    $body .= "Content-Disposition: form-data; name=\"document\"; filename=\"{$filename}\"{$crlf}";
-    $body .= "Content-Type: {$mime}{$crlf}{$crlf}";
-    $body .= $content . $crlf;
-    $body .= "--{$boundary}--{$crlf}";
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $body,
-        CURLOPT_HTTPHEADER => ['Content-Type: multipart/form-data; boundary=' . $boundary],
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 30,
-    ]);
-    $result = curl_exec($ch);
-    $curlErr = curl_error($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($result === false || $curlErr) {
-        error_log("[tgSendDocument] curl error chat={$chatId} file={$filename}: " . ($curlErr ?: 'unknown'));
-        return false;
-    }
-    $data = json_decode($result, true);
-    if (!is_array($data) || empty($data['ok'])) {
-        $desc = is_array($data) ? ($data['description'] ?? 'no description') : 'bad response';
-        error_log("[tgSendDocument] Telegram error chat={$chatId} file={$filename} http={$httpCode}: {$desc}");
-        return false;
-    }
-    return $result;
+    global $pdo;
+    return tgClientSendDocument($chatId, $filename, $content, [
+        'mime'    => $mime,
+        'caption' => $caption,
+        'pdo'     => $pdo,
+    ])['ok'];
 }
 
 function dateFromWeekStartByDow(DateTime $weekStart, int $dow, int $weekOffset = 0): DateTime {
@@ -274,7 +225,7 @@ foreach ($notifications as $n) {
         SELECT u.telegram_chat_id, ts.psc_expiry
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.name = ? AND u.telegram_chat_id IS NOT NULL AND ts.psc_expiry = 1
+        WHERE u.name = ? AND u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.psc_expiry = 1
     ");
     $u->execute([$targetUser]);
     $user = $u->fetch();
@@ -294,7 +245,7 @@ if ($hour === 9 && $minute < 5) {
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.daily_summary = 1
+        WHERE u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.daily_summary = 1
     ")->fetchAll();
 
     foreach ($users as $user) {
@@ -411,7 +362,7 @@ if (!empty($recentPrices)) {
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.price_changed = 1
+        WHERE u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.price_changed = 1
     ")->fetchAll();
 
     foreach ($recentPrices as $rp) {
@@ -440,7 +391,7 @@ if (!empty($overdueOrders)) {
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.overdue_delivery = 1
+        WHERE u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.overdue_delivery = 1
     ")->fetchAll();
 
     foreach ($overdueOrders as $od) {
@@ -473,7 +424,7 @@ if (!empty($recentUploads)) {
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.data_updates = 1
+        WHERE u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.data_updates = 1
     ")->fetchAll();
 
     foreach ($recentUploads as $up) {
@@ -514,7 +465,7 @@ foreach ($recentSalesByGroup as $recentSales) {
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.restaurant_sales = 1
+        WHERE u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.restaurant_sales = 1
     ")->fetchAll();
 
     $text = "🍽 <b>Новые данные реализации</b>\n\n";
@@ -555,7 +506,7 @@ if (!empty($lowStockData)) {
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.low_stock = 1
+        WHERE u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.low_stock = 1
     ")->fetchAll();
 
     foreach ($lowStockData as $ls) {
@@ -581,7 +532,7 @@ if ($dow === 5 && $hour === 17 && $minute < 5) {
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.daily_summary = 1
+        WHERE u.telegram_chat_id IS NOT NULL AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY) AND ts.daily_summary = 1
     ")->fetchAll();
 
     foreach ($users as $user) {
@@ -671,7 +622,7 @@ try {
         // Определяем создателя заказа для уведомления
         $createdBy = $p['created_by'] ?: null;
         if (!$createdBy) continue;
-        $userSt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? AND telegram_chat_id IS NOT NULL");
+        $userSt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? AND telegram_chat_id IS NOT NULL AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)");
         $userSt->execute([$createdBy]);
         $chatId = $userSt->fetchColumn();
         if (!$chatId) continue;
@@ -733,7 +684,8 @@ try {
         // Подписанные рестораны только из группы юрлиц этого сбора (BK_VM или PS).
         $subsStmt = $pdo->prepare("SELECT DISTINCT s.chat_id, s.restaurant_number, s.notify_stock_reminders
             FROM ro_telegram_subs s
-            JOIN restaurants r ON r.number = s.restaurant_number AND r.legal_entity_group = ?");
+            JOIN restaurants r ON r.number = s.restaurant_number AND r.legal_entity_group = ?
+            WHERE s.tg_blocked_at IS NULL OR s.tg_blocked_at < NOW() - INTERVAL 30 DAY");
         $subsStmt->execute([$sc['legal_entity_group']]);
         $subs = $subsStmt->fetchAll();
         foreach ($subs as $sub) {
@@ -805,6 +757,7 @@ try {
               AND rs.legal_entity_group = ?
               AND (rs.verified_at IS NOT NULL
                    OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
+              AND (rs.tg_blocked_at IS NULL OR rs.tg_blocked_at < NOW() - INTERVAL 30 DAY)
               AND EXISTS (
                   SELECT 1 FROM restaurants r
                   JOIN delivery_schedule ds ON ds.restaurant_id = r.id
@@ -841,7 +794,7 @@ try {
             $btns = ['inline_keyboard' => [
                 [['text' => '🏠 Открыть кабинет', 'url' => "{$siteUrl}/restaurant?tg_token={$token}"]],
             ]];
-            sendMessage($m['telegram_chat_id'], $text, $btns);
+            tgSend($m['telegram_chat_id'], $text, false, $btns);
             $sent++;
 
             $pdo->prepare("INSERT INTO tg_notification_log (notification_key, sent_at) VALUES (?, NOW())")->execute([$dedupKey]);
@@ -894,6 +847,7 @@ try {
             WHERE restaurant_number = ?
               AND legal_entity_group = ?
               AND notify_so_reminders = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
         ");
         foreach ($schRows as $s) {
             $rn = $s['restaurant_number'];
@@ -1222,6 +1176,7 @@ try {
                 WHERE restaurant_number = ?
                   AND legal_entity_group = ?
                   AND notify_so_reminders = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+                  AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
             ");
             $subStmt->execute([$rn, $c['group']]);
             $subChats = $subStmt->fetchAll(PDO::FETCH_COLUMN);
@@ -1283,6 +1238,7 @@ try {
             WHERE sss.supplier_id = ?
               AND u.telegram_chat_id IS NOT NULL
               AND u.telegram_chat_id != ''
+              AND (u.tg_blocked_at IS NULL OR u.tg_blocked_at < NOW() - INTERVAL 30 DAY)
             ORDER BY u.name
         ");
         $subsStmt->execute([$sup['id']]);
@@ -1589,6 +1545,7 @@ try {
               AND rs.chat_id IS NOT NULL
               AND (rs.verified_at IS NOT NULL
                    OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
+              AND (rs.tg_blocked_at IS NULL OR rs.tg_blocked_at < NOW() - INTERVAL 30 DAY)
               AND sr.id IS NULL
         ");
         $roPendingChats->execute([$surveyId, $surveyGroup]);

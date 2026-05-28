@@ -315,6 +315,7 @@ if ($saved > 0) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) { $log('TG: bot token не задан, уведомления пропущены'); }
     else {
+        require_once __DIR__ . '/includes/tg_client.php';
         // Соберём текст сводки.
         $lines = [];
         foreach ($savedItems as $it) {
@@ -333,7 +334,8 @@ if ($saved > 0) {
 
         // Кому слать: admin OR permissions.restaurant-sales in (edit, full); telegram_chat_id обязателен.
         $users = $pdo->query("SELECT name, role, permissions, telegram_chat_id FROM users
-                              WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id <> ''")->fetchAll();
+                              WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id <> ''
+                                AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)")->fetchAll();
         $sentCount = 0;
         foreach ($users as $u) {
             $role = $u['role'] ?? 'user';
@@ -348,26 +350,14 @@ if ($saved > 0) {
             if (!$eligible) continue;
             $chatId = (int)$u['telegram_chat_id'];
             if (!$chatId) continue;
-            // Простой POST в TG API (без curl-обёртки — чтобы не тянуть рантайм других кронов).
-            $payload = [
-                'chat_id' => $chatId,
-                'text' => $text,
-                'parse_mode' => 'HTML',
-                'disable_web_page_preview' => true,
-            ];
-            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode($payload),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                CURLOPT_TIMEOUT => 5,
-                CURLOPT_CONNECTTIMEOUT => 2,
+            $r = tgClientSend($chatId, $text, [
+                'disable_preview' => true,
+                'token'           => $botToken,
+                'timeout'         => 5,
+                'connect_timeout' => 2,
+                'pdo'             => $pdo,
             ]);
-            curl_exec($ch);
-            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            if ($code === 200) $sentCount++;
+            if ($r['ok']) $sentCount++;
         }
         $log("TG: уведомлено получателей: $sentCount");
     }

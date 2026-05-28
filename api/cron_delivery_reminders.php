@@ -44,29 +44,18 @@ if (!empty($_ENV['VAPID_PUBLIC']) && !empty($_ENV['VAPID_PRIVATE']) && is_file(_
     require_once __DIR__ . '/includes/push_send.php';
 }
 
+require_once __DIR__ . '/includes/tg_client.php';
+
 function rtgSend($botToken, $chatId, $text, $replyMarkup = null) {
+    global $pdo;
     if (!$botToken || !$chatId) return false;
-    $data = [
-        'chat_id' => $chatId,
-        'text' => $text,
-        'parse_mode' => 'HTML',
-        'disable_notification' => false,
-    ];
-    if ($replyMarkup) $data['reply_markup'] = json_encode($replyMarkup);
-    $payload = json_encode($data);
-    $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_TIMEOUT => 5,
-        CURLOPT_CONNECTTIMEOUT => 2,
-    ]);
-    curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    return $code === 200;
+    return tgClientSend($chatId, $text, [
+        'reply_markup'    => $replyMarkup,
+        'token'           => $botToken,
+        'timeout'         => 5,
+        'connect_timeout' => 2,
+        'pdo'             => $pdo,
+    ])['ok'];
 }
 
 $tz = new DateTimeZone('Europe/Minsk');
@@ -267,8 +256,21 @@ foreach ($pdo->query("SELECT supplier_id, delivery_dow, deadline_time, reminder_
     ];
 }
 
+// Активные временные периоды графиков (на сегодня и вперёд).
+// Если у поставщика есть такой период — на даты внутри него
+// напоминания должны идти по временному графику, а не основному.
+$tempPeriods = [];  // supplier_id => ['date_from', 'date_to']
+foreach ($pdo->query("SELECT supplier_id, date_from, date_to FROM so_supplier_temp_schedule_periods WHERE date_to >= CURDATE()") as $p) {
+    $tempPeriods[$p['supplier_id']] = [
+        'date_from' => $p['date_from'],
+        'date_to'   => $p['date_to'],
+    ];
+}
+
 // Все активные подписки на локальных поставщиков (без фильтра по order_day —
-// напоминания могут быть за N дней до дня подачи)
+// напоминания могут быть за N дней до дня подачи). Берём строки из ОСНОВНОГО
+// расписания; для тех, чья дата поставки попадает в активный временный период,
+// строку пропустим и возьмём аналог из so_supplier_temp_schedule_items.
 $stmt = $pdo->prepare("
     SELECT
         ss.order_day, ss.delivery_day,
@@ -293,6 +295,79 @@ $stmt = $pdo->prepare("
       AND r.active = 1
 ");
 $stmt->execute();
+$mainRows = $stmt->fetchAll();
+
+// Строки из временных графиков (только для поставщиков с активным периодом).
+// Дедлайны берём так же, как для основного — из supplier_schedule_deadlines
+// или supplier_default_deadlines (поведение остаётся прежним).
+$tempRows = [];
+if ($tempPeriods) {
+    $supIds = array_keys($tempPeriods);
+    $ph = implode(',', array_fill(0, count($supIds), '?'));
+    $tempStmt = $pdo->prepare("
+        SELECT
+            ssi.order_day, ssi.delivery_day,
+            sub.id AS subscription_id, sub.portal_enabled, sub.telegram_enabled,
+            s.id AS supplier_id, s.short_name AS supplier_name,
+            r.id AS restaurant_pk, r.number AS restaurant_number, r.legal_entity_group,
+            sd.deadline_time AS deadline_override,
+            sd.reminder_times AS reminder_times_override
+        FROM so_supplier_temp_schedule_items ssi
+        JOIN so_supplier_temp_schedule_periods sp ON sp.id = ssi.period_id
+        JOIN restaurant_reminder_subscriptions sub
+            ON sub.restaurant_id = ssi.restaurant_id AND sub.supplier_id = sp.supplier_id
+        JOIN suppliers s ON s.id = sp.supplier_id
+        JOIN restaurants r ON r.id = ssi.restaurant_id
+        LEFT JOIN supplier_schedule_deadlines sd
+            ON sd.supplier_id = sp.supplier_id
+           AND sd.restaurant_id = ssi.restaurant_id
+           AND sd.order_day = ssi.order_day
+        WHERE sp.supplier_id IN ($ph)
+          AND ssi.is_active = 1
+          AND sub.is_enabled = 1
+          AND s.is_active = 1
+          AND s.so_enabled = 0
+          AND r.active = 1
+    ");
+    $tempStmt->execute($supIds);
+    $tempRows = $tempStmt->fetchAll();
+}
+
+/**
+ * Грубая оценка даты ближайшей поставки для строки расписания (для проверки,
+ * попадает ли она в активный временный период).
+ */
+$rrEstDelivery = function ($orderDay, $deliveryDay) use ($now, $todayDow, $tz) {
+    $diffOrder = ($orderDay - $todayDow + 7) % 7;
+    $dt = clone $now;
+    $dt->modify("+{$diffOrder} days");
+    $diffDeliv = ($deliveryDay - $orderDay + 7) % 7;
+    if ($diffDeliv === 0) $diffDeliv = 7;
+    $dt->modify("+{$diffDeliv} days");
+    return $dt->format('Y-m-d');
+};
+
+// Сначала из основных — пропускаем те, что попадают в активный темп-период.
+// Затем добавляем подходящие строки из темпа.
+$rowsToProcess = [];
+foreach ($mainRows as $row) {
+    $supId = $row['supplier_id'];
+    if (isset($tempPeriods[$supId])) {
+        $dd = $rrEstDelivery((int)$row['order_day'], (int)$row['delivery_day']);
+        $p = $tempPeriods[$supId];
+        if ($dd >= $p['date_from'] && $dd <= $p['date_to']) continue; // заменено временным
+    }
+    $rowsToProcess[] = $row;
+}
+foreach ($tempRows as $row) {
+    $supId = $row['supplier_id'];
+    $p = $tempPeriods[$supId] ?? null;
+    if (!$p) continue;
+    $dd = $rrEstDelivery((int)$row['order_day'], (int)$row['delivery_day']);
+    if ($dd >= $p['date_from'] && $dd <= $p['date_to']) {
+        $rowsToProcess[] = $row;
+    }
+}
 
 $tgList = $pdo->prepare("
     SELECT rts.id, rts.chat_id, rts.first_name, rts.username
@@ -300,11 +375,12 @@ $tgList = $pdo->prepare("
     JOIN ro_telegram_subs rts ON rts.id = rrts.ro_tg_sub_id
     WHERE rrts.subscription_id = ? AND rrts.is_active = 1
       AND rts.verified_at IS NOT NULL AND rts.chat_id IS NOT NULL
+      AND (rts.tg_blocked_at IS NULL OR rts.tg_blocked_at < NOW() - INTERVAL 30 DAY)
 ");
 
 $sentPortal = 0; $sentTg = 0; $skipped = 0;
 
-foreach ($stmt->fetchAll() as $row) {
+foreach ($rowsToProcess as $row) {
     $supplierId  = $row['supplier_id'];
     $restPk      = (int)$row['restaurant_pk'];
     $orderDay    = (int)$row['order_day'];
@@ -439,6 +515,7 @@ $mainTgList = $pdo->prepare("
     JOIN ro_telegram_subs rts ON rts.id = rmts.ro_tg_sub_id
     WHERE rmts.subscription_id = ? AND rmts.is_active = 1
       AND rts.verified_at IS NOT NULL AND rts.chat_id IS NOT NULL
+      AND (rts.tg_blocked_at IS NULL OR rts.tg_blocked_at < NOW() - INTERVAL 30 DAY)
 ");
 
 $sentMainPortal = 0; $sentMainTg = 0; $skippedMain = 0;

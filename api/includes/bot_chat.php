@@ -1,6 +1,8 @@
 <?php
 // ═══ Чат ресторанов с отделом закупок ═══
 
+require_once __DIR__ . '/tg_client.php';
+
 /**
  * HTML-эскейп для подстановки user-controlled значений в parse_mode=HTML.
  * Без него first_name из Telegram (или текст сообщения) могут содержать
@@ -165,9 +167,6 @@ function chatNotifyPurchasers($pdo, $restNum, $senderName, $preview) {
     $text = "💬 Сообщение от ресторана <b>" . chatEsc((string)$restNum) . "</b> (" . chatEsc($senderName) . "):\n" . chatEsc($preview);
 
     foreach ($recipients as $r) {
-        $payload = json_encode(['chat_id' => $r['telegram_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);
-        $ch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage");
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-        curl_exec($ch); curl_close($ch);
+        tgClientSend($r['telegram_chat_id'], $text, ['timeout' => 5, 'pdo' => $pdo]);
     }
 }

@@ -16,7 +16,7 @@
     </div>
 
     <!-- Меню «⋮» в правом верхнем углу -->
-    <button v-if="canEditCard" class="card-menu-btn" @click.stop="cardMenuOpen = !cardMenuOpen" title="Меню">
+    <button v-if="canEditCardEffective" class="card-menu-btn" @click.stop="cardMenuOpen = !cardMenuOpen" title="Меню">
       <TaskIcon name="more" :size="14"/>
     </button>
     <div v-if="cardMenuOpen" class="card-menu" v-click-outside-card="() => cardMenuOpen = false" @click.stop>
@@ -56,7 +56,7 @@
     <!-- Заголовок + чекбокс «Готово → в архив». Маркер чужой карточки —
          маленькая иконка перед заголовком с тултипом. -->
     <div class="task-card-title-row">
-      <input v-if="canEditCard" type="checkbox" class="task-card-done-chk"
+      <input v-if="canEditCardEffective" type="checkbox" class="task-card-done-chk"
              :checked="!!card.is_done"
              @click.stop
              @change="completeAndArchive"
@@ -167,7 +167,7 @@
             </span>
           </div>
         </div>
-        <button v-if="canEditCard" class="subtask-add-sticker"
+        <button v-if="canEditCardEffective" class="subtask-add-sticker"
                 @click.stop="$emit('open-subtask', { parent: card, subtask: st })"
                 title="Добавить стикер (приоритет, срок, метку)">
           <TaskIcon name="plus" :size="12"/>
@@ -227,6 +227,7 @@ import TaskIcon from './TaskIcon.vue';
 import DatetimePicker from './DatetimePicker.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksStore } from '@/stores/tasksStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import { useTouchDrag } from '@/composables/useTouchDrag.js';
 const dlg = useTasksDialogs();
@@ -237,6 +238,13 @@ const props = defineProps({
   labels: { type: Array, default: () => [] },
   canEditCard: { type: Boolean, default: true },
 });
+
+// Без права edit на модуль «Задачи» бэк отдаёт 403 на любые мутации,
+// поэтому скрываем чекбокс/меню/добавление подзадач, чтобы клик не давал
+// иллюзии перехода в архив с откатом по reload.
+const userStore = useUserStore();
+const hasTasksEdit = computed(() => userStore.hasAccess('tasks', 'edit'));
+const canEditCardEffective = computed(() => props.canEditCard && hasTasksEdit.value);
 const emit = defineEmits(['open', 'open-chat', 'open-subtask', 'subtasks-changed', 'dragstart', 'dragend']);
 
 const store = useTasksStore();
