@@ -246,3 +246,128 @@
 
         respond(['success' => true, 'deleted' => $del]);
     }
+
+    // ─── Мониторинг отправок бота (страница /admin?tab=tg-monitor) ───
+    // Возвращает агрегаты из tg_send_log за последние 24 часа + срез по
+    // заблокировавшим бота из users/ro_telegram_subs. Тяжёлых JOIN нет —
+    // только индексированные SELECT по ts/ok.
+    if ($fn === 'tg_admin_monitor') {
+        requireAdmin($authUser);
+
+        // Сводные счётчики за 24 часа
+        $row = $pdo->query("
+            SELECT
+                COUNT(*) AS total_24h,
+                SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_24h,
+                SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS fail_24h
+            FROM tg_send_log
+            WHERE ts > NOW() - INTERVAL 24 HOUR
+        ")->fetch();
+        $totals = [
+            'total_24h' => (int)($row['total_24h'] ?? 0),
+            'ok_24h'    => (int)($row['ok_24h'] ?? 0),
+            'fail_24h'  => (int)($row['fail_24h'] ?? 0),
+        ];
+
+        // Разрезы за 24 часа: по методу
+        $byMethod = $pdo->query("
+            SELECT method, COUNT(*) AS total, SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_count
+            FROM tg_send_log
+            WHERE ts > NOW() - INTERVAL 24 HOUR
+            GROUP BY method
+            ORDER BY total DESC
+            LIMIT 12
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($byMethod as &$m) {
+            $m['total'] = (int)$m['total'];
+            $m['ok_count'] = (int)$m['ok_count'];
+            $m['fail_count'] = $m['total'] - $m['ok_count'];
+        }
+        unset($m);
+
+        // Разрез по error_code (только ошибки)
+        $byErrorCode = $pdo->query("
+            SELECT error_code, COUNT(*) AS cnt
+            FROM tg_send_log
+            WHERE ts > NOW() - INTERVAL 24 HOUR
+              AND ok = 0
+              AND error_code IS NOT NULL
+            GROUP BY error_code
+            ORDER BY cnt DESC
+            LIMIT 10
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($byErrorCode as &$e) {
+            $e['error_code'] = (int)$e['error_code'];
+            $e['cnt'] = (int)$e['cnt'];
+        }
+        unset($e);
+
+        // Топ chat_id с ошибками за 24 часа (часто = заблокированные/удалённые)
+        $topFailing = $pdo->query("
+            SELECT chat_id, COUNT(*) AS cnt
+            FROM tg_send_log
+            WHERE ts > NOW() - INTERVAL 24 HOUR
+              AND ok = 0
+              AND chat_id IS NOT NULL
+            GROUP BY chat_id
+            ORDER BY cnt DESC
+            LIMIT 10
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($topFailing as &$t) {
+            $t['chat_id'] = (int)$t['chat_id'];
+            $t['cnt'] = (int)$t['cnt'];
+        }
+        unset($t);
+
+        // Последние 20 ошибок
+        $lastFailures = $pdo->query("
+            SELECT method, chat_id, http_code, error_code, error_text, ts
+            FROM tg_send_log
+            WHERE ts > NOW() - INTERVAL 24 HOUR AND ok = 0
+            ORDER BY id DESC
+            LIMIT 20
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
+        // Поминутный таймлайн за час и почасовой за сутки
+        $timeline24h = $pdo->query("
+            SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:00') AS bucket,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS fail_count
+            FROM tg_send_log
+            WHERE ts > NOW() - INTERVAL 24 HOUR
+            GROUP BY bucket
+            ORDER BY bucket
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($timeline24h as &$tl) {
+            $tl['total']      = (int)$tl['total'];
+            $tl['fail_count'] = (int)$tl['fail_count'];
+        }
+        unset($tl);
+
+        // Сколько пользователей сейчас заблокировало бота
+        $blockedUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE tg_blocked_at IS NOT NULL")->fetchColumn();
+        $blockedRoSubs = (int)$pdo->query("SELECT COUNT(*) FROM ro_telegram_subs WHERE tg_blocked_at IS NOT NULL")->fetchColumn();
+
+        // Сколько AI-провайдеров сейчас в блокировке
+        $aiBlocked = $pdo->query("
+            SELECT provider, model, blocked_until, reason
+            FROM tg_provider_block
+            WHERE blocked_until > NOW()
+            ORDER BY blocked_until DESC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
+        respond([
+            'totals'         => $totals,
+            'by_method'      => $byMethod,
+            'by_error_code'  => $byErrorCode,
+            'top_failing'    => $topFailing,
+            'last_failures'  => $lastFailures,
+            'timeline_24h'   => $timeline24h,
+            'blocked'        => [
+                'users'        => $blockedUsers,
+                'ro_telegram'  => $blockedRoSubs,
+            ],
+            'ai_blocked'     => $aiBlocked,
+            'generated_at'   => date('Y-m-d H:i:s'),
+        ]);
+    }

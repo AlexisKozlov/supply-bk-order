@@ -28,7 +28,7 @@ function getQuickReply($text, $user) {
         }
         $hour = (int)(new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H');
         $greeting = $hour < 12 ? 'Доброе утро' : ($hour < 18 ? 'Добрый день' : 'Добрый вечер');
-        return "{$greeting}, <b>{$name}</b>! Чем могу помочь?\n\nЗадайте вопрос или выберите раздел в меню.";
+        return "{$greeting}, <b>" . htmlspecialchars((string)$name, ENT_QUOTES, 'UTF-8') . "</b>! Чем могу помочь?\n\nЗадайте вопрос или выберите раздел в меню.";
     }
 
     // Благодарности
@@ -41,7 +41,7 @@ function getQuickReply($text, $user) {
 
     // Прощания
     if (preg_match('/^(пока|до свидания|до встречи|бай|bye|удачи|всего доброго)\b/u', $t)) {
-        return "До связи, <b>{$name}</b>! Хорошего дня.";
+        return "До связи, <b>" . htmlspecialchars((string)$name, ENT_QUOTES, 'UTF-8') . "</b>! Хорошего дня.";
     }
 
     // Как дела — только если дальше нет вопроса
@@ -98,6 +98,46 @@ function isFollowUp($text) {
     // Короткие уточняющие фразы
     return preg_match('/^(а (по|для|у|в|на|что|как)|а если|ещё|еще|и (по|для|ещё|еще)|то же|тоже самое|аналогично|по (бк|вм|пс|бургер|воглия|пицца)|для (бк|вм|пс|бургер|воглия|пицца))/u', $t)
         && mb_strlen($t) < 100;
+}
+
+// ═══ Память диалогов с AI ═══
+// Хранит до 5 последних пар «вопрос-ответ» по chat_id. Нужно для
+// мульти-шаговых диалогов: «остаток молока в 67-м?» → «а в 33-м?»
+// AI без истории не поймёт, что речь о том же товаре.
+//
+// Хранилище — tg_state(chat_id, mode='ai_history'), TTL 1 час. Очищается
+// автоматически при /menu через tgStateClear($chatId) (без аргумента mode).
+
+const AI_HISTORY_MAX_PAIRS = 5;
+const AI_HISTORY_TTL_SEC = 3600;
+const AI_HISTORY_MAX_CHARS = 500;
+
+/** Возвращает массив [{role, content}, ...] для скармливания в AI. */
+function aiHistoryGet($chatId): array {
+    if (!function_exists('tgStateGet')) return [];
+    $st = tgStateGet($chatId, 'ai_history');
+    if (!is_array($st) || empty($st['messages']) || !is_array($st['messages'])) return [];
+    return $st['messages'];
+}
+
+/** Добавляет пару (user, assistant) и обрезает до AI_HISTORY_MAX_PAIRS пар. */
+function aiHistoryAppend($chatId, string $question, string $answer): void {
+    if (!function_exists('tgStateSet') || !function_exists('tgStateGet')) return;
+    $msgs = aiHistoryGet($chatId);
+    $msgs[] = ['role' => 'user',      'content' => mb_substr($question, 0, AI_HISTORY_MAX_CHARS)];
+    $msgs[] = ['role' => 'assistant', 'content' => mb_substr($answer,   0, AI_HISTORY_MAX_CHARS)];
+    // Оставляем только последние N пар (=2*N сообщений).
+    $maxMsgs = AI_HISTORY_MAX_PAIRS * 2;
+    if (count($msgs) > $maxMsgs) {
+        $msgs = array_slice($msgs, -$maxMsgs);
+    }
+    tgStateSet($chatId, 'ai_history', ['messages' => $msgs], AI_HISTORY_TTL_SEC);
+}
+
+/** Сброс памяти AI (явно вызывать не обязательно — /menu чистит её через tgStateClear). */
+function aiHistoryClear($chatId): void {
+    if (!function_exists('tgStateClear')) return;
+    tgStateClear($chatId, 'ai_history');
 }
 
 function selectRelevantLookups($q) {
@@ -238,8 +278,13 @@ function handleFreeText($chatId, $text, $user) {
         }
         $context .= $lookupContext;
 
+        $aiAttempted = true;
         try {
-            $answer = askAI($effectiveText, $context);
+            // chat_id — для refresh «печатает…» между провайдерами.
+            // history — последние 5 пар вопрос-ответ, чтобы AI понимал
+            // follow-up'ы вроде «а в другом ресторане?».
+            $history = aiHistoryGet($chatId);
+            $answer = askAI($effectiveText, $context, $chatId, $history);
         } catch (Exception $e) {
             error_log("Bot askAI error: " . $e->getMessage());
         }
@@ -248,6 +293,13 @@ function handleFreeText($chatId, $text, $user) {
         if (!$answer) {
             $answer = buildDirectAnswer($lookupContext);
         }
+
+        // Сохраняем удачную пару в память для следующих follow-up'ов.
+        if ($answer) {
+            aiHistoryAppend($chatId, $effectiveText, $answer);
+        }
+    } else {
+        $aiAttempted = false;
     }
 
     $aiTime = round(microtime(true) - $aiStart, 1);
@@ -268,10 +320,20 @@ function handleFreeText($chatId, $text, $user) {
         }
         sendMessage($chatId, $answer, $menuMarkup);
     } else {
-        $hint = "Не удалось обработать запрос.\n\nПопробуйте уточнить вопрос:\n";
-        $hint .= "• Укажите <b>артикул</b> или <b>полное название</b> товара\n";
-        $hint .= "• Добавьте контекст: «остаток», «цена», «когда приедет», «аналоги»\n";
-        $hint .= "• Или используйте кнопки меню ниже";
+        // Если AI вызывался и не вернул ничего — это либо «все провайдеры
+        // умерли», либо у lookup нет данных. Различаем по $aiAttempted,
+        // чтобы пользователь понимал что не так.
+        if (!empty($aiAttempted)) {
+            $hint = "🤖 ИИ-ассистент сейчас недоступен (превышены квоты у провайдеров). Попробуйте через пару минут.\n\nЕсли срочно — пользуйтесь меню:\n";
+            $hint .= "• /today — сводка на сегодня\n";
+            $hint .= "• /stock — критичные остатки\n";
+            $hint .= "• /cards — поиск карточек товаров";
+        } else {
+            $hint = "Не удалось обработать запрос.\n\nПопробуйте уточнить вопрос:\n";
+            $hint .= "• Укажите <b>артикул</b> или <b>полное название</b> товара\n";
+            $hint .= "• Добавьте контекст: «остаток», «цена», «когда приедет», «аналоги»\n";
+            $hint .= "• Или используйте кнопки меню ниже";
+        }
         sendMessage($chatId, $hint, ['inline_keyboard' => [
             [['text' => '🔍 Поиск карточек', 'callback_data' => 'cmd_cards']],
             [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']],

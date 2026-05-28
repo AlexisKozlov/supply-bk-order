@@ -818,11 +818,11 @@ function lookupSupplier($question, $entity) {
 
     if (!empty($matched)) {
         foreach ($matched as $sup) {
-            $context .= "\n<b>{$sup['short_name']}</b>";
-            if ($sup['full_name']) $context .= " ({$sup['full_name']})";
+            $context .= "\n<b>" . htmlspecialchars((string)$sup['short_name'], ENT_QUOTES, 'UTF-8') . "</b>";
+            if ($sup['full_name']) $context .= " (" . htmlspecialchars((string)$sup['full_name'], ENT_QUOTES, 'UTF-8') . ")";
             $context .= "\n";
-            if ($sup['email']) $context .= "  Email: {$sup['email']}\n";
-            if ($sup['telegram']) $context .= "  Telegram: {$sup['telegram']}\n";
+            if ($sup['email']) $context .= "  Email: " . htmlspecialchars((string)$sup['email'], ENT_QUOTES, 'UTF-8') . "\n";
+            if ($sup['telegram']) $context .= "  Telegram: " . htmlspecialchars((string)$sup['telegram'], ENT_QUOTES, 'UTF-8') . "\n";
             if ($sup['whatsapp']) $context .= "  WhatsApp: {$sup['whatsapp']}\n";
             if ($sup['dlt']) $context .= "  DLT (срок доставки): {$sup['dlt']} дн.\n";
             if ($sup['doc']) $context .= "  Срок документов: {$sup['doc']} дн.\n";
@@ -1063,7 +1063,7 @@ function lookupDeliveries($question, $entity) {
                 $overdue = $o['days_overdue'];
                 $status = $overdue > 0 ? "просрочена на {$overdue} дн." : ($overdue == 0 ? 'сегодня' : 'через ' . abs($overdue) . ' дн.');
                 $orderUrl = "{$SITE_URL}/order?orderId={$o['id']}&mode=view";
-                $context .= "\n<b>{$o['supplier']}</b> — приход {$delivery} ({$status}) (<a href=\"{$orderUrl}\">открыть</a>)\n";
+                $context .= "\n<b>" . htmlspecialchars((string)$o['supplier'], ENT_QUOTES, 'UTF-8') . "</b> — приход {$delivery} ({$status}) (<a href=\"{$orderUrl}\">открыть</a>)\n";
                 $orderItems = array_filter($allItems, fn($item) => $item['order_id'] == $o['id']);
                 $totalBoxes = 0;
                 foreach ($orderItems as $item) {

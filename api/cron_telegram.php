@@ -45,6 +45,17 @@ require_once __DIR__ . '/includes/tg_client.php';
 // TTL одноразовых токенов входа в кабинет ресторана (синхронизировано с helpers.php).
 if (!defined('RO_AUTH_TOKEN_TTL_MINUTES')) define('RO_AUTH_TOKEN_TTL_MINUTES', 10);
 
+// Чистка журнала отправок раз в час: записи старше 30 дней удаляются,
+// чтобы tg_send_log не разросся на годы. Не блокируем выходом дальше:
+// чистка идёт даже в тихие часы.
+try {
+    if ((int)date('i') < 5) { // раз в час в первую минуту
+        $pdo->exec("DELETE FROM tg_send_log WHERE ts < NOW() - INTERVAL 30 DAY LIMIT 10000");
+    }
+} catch (Throwable $e) {
+    error_log('[cron_telegram] tg_send_log cleanup failed: ' . $e->getMessage());
+}
+
 // Тихие часы: 22:00–09:00 по Минску — никакие уведомления не отправляем.
 // Выходим до всех проверок, чтобы дедуп не пометил неотправленные сообщения как доставленные.
 $__nowHour = (int)(new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H');

@@ -496,15 +496,8 @@ function cmdRestSubsStats($chatId, $msgId) {
 
 function restShowMySubs($chatId, $msgId = null) {
     global $pdo;
-    // Сброс режимов
-    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/corr_data_{$chatId}.json");
-    @unlink(sys_get_temp_dir() . "/rest_stock_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/sc_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/sc_data_{$chatId}.json");
-    @unlink(sys_get_temp_dir() . "/chat_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt");
+    // Сброс всех режимов одним вызовом — раньше было 8 @unlink в /tmp.
+    tgStateClear($chatId);
 
     $subs = botGetSubscribedRestaurants($pdo, $chatId);
     $btns = [];
@@ -537,7 +530,7 @@ function restShowMySubs($chatId, $msgId = null) {
             $label = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
             $addr = trim((string)($sub['address'] ?: $sub['city'] ?: ''));
             $addr = $addr !== '' ? mb_substr($addr, 0, 42) : 'адрес не указан';
-            $text .= "• <b>{$label}</b> — {$addr}\n";
+            $text .= "• <b>" . soEsc($label) . "</b> — " . soEsc($addr) . "\n";
         }
         $text .= "\n";
 
@@ -717,7 +710,7 @@ function soBotCountAccessibleSoSuppliers($pdo, $chatId) {
 // Камако: выбор ресторана
 function soOrderSelectRest($chatId, $msgId, $supplierId) {
     global $pdo;
-    @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt");
+    tgStateClear($chatId, 'restord');
     $subs = botGetSubscribedRestaurants($pdo, $chatId);
     $restNums = array_column($subs, 'restaurant_number');
     $supName = soGetSupplierName($pdo, $supplierId);
@@ -748,7 +741,7 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
 // Камако: выбор дня
 function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     global $pdo;
-    @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt");
+    tgStateClear($chatId, 'restord');
     $supName = soGetSupplierName($pdo, $supplierId);
     $botData = soGetBotAvailableDates($pdo, $supplierId, $restNum);
     $rest = $botData['rest'];
@@ -826,7 +819,7 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
 // Камако: показ товаров для ввода
 function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
-    @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt");
+    tgStateClear($chatId, 'restord');
     $supName = soGetSupplierName($pdo, $supplierId);
     $rest = soGetRestaurantContext($pdo, $restNum);
     if (!$rest) {
@@ -926,13 +919,12 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     }
     $text .= "</code>";
 
-    // Сохраняем режим ввода
-    $modeData = json_encode([
-        'supplier_id' => $supplierId,
+    // Сохраняем режим ввода — TTL 30 мин (раньше /tmp файл проверялся через filemtime).
+    tgStateSet($chatId, 'soord', [
+        'supplier_id'       => $supplierId,
         'restaurant_number' => (string)$restNum,
-        'delivery_date' => $deliveryDate,
-    ], JSON_UNESCAPED_UNICODE);
-    file_put_contents(sys_get_temp_dir() . "/soord_{$chatId}.txt", $modeData);
+        'delivery_date'     => $deliveryDate,
+    ], 1800);
 
     $btns = [
         [['text' => '🚫 Поставка не нужна', 'callback_data' => "soord_skip_{$supplierId}_{$restNum}_{$deliveryDate}"]],
@@ -1031,26 +1023,16 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
 // Камако: обработка текстового ввода
 function soOrderProcessInput($chatId, $text) {
     global $pdo;
-    $modeFile = sys_get_temp_dir() . "/soord_{$chatId}.txt";
-    if (!file_exists($modeFile)) {
+    $state = tgStateGet($chatId, 'soord');
+    if ($state === null) {
         sendMessage($chatId, "❌ Сначала откройте заявку через меню бота.");
         return;
     }
-    $mode = trim((string)file_get_contents($modeFile));
-    @unlink($modeFile);
+    tgStateClear($chatId, 'soord');
 
-    $state = json_decode($mode, true);
-    if (is_array($state)) {
-        $supplierId = $state['supplier_id'] ?? '';
-        $restNum = $state['restaurant_number'] ?? '';
-        $deliveryDate = $state['delivery_date'] ?? '';
-    } else {
-        $parts = explode('_', $mode);
-        if (count($parts) < 4) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
-        $supplierId = $parts[1] ?? '';
-        $restNum = $parts[2] ?? '';
-        $deliveryDate = $parts[3] ?? '';
-    }
+    $supplierId   = (string)($state['supplier_id'] ?? '');
+    $restNum      = (string)($state['restaurant_number'] ?? '');
+    $deliveryDate = (string)($state['delivery_date'] ?? '');
     if (!$supplierId || !$restNum || !$deliveryDate) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
 
     // Проверка подписки: нельзя отправить заявку за ресторан, на который не подписан
@@ -1370,13 +1352,14 @@ function restShowSchedule($chatId, $msgId) {
 // ═══ Остатки склада для ресторанов ═══
 
 function restStockStart($chatId, $msgId) {
-    @unlink(sys_get_temp_dir() . "/rest_stock_{$chatId}.txt");
+    tgStateClear($chatId, 'rest_stock');
     $text = "📦 <b>Остатки склада</b>\n";
     $text .= "─────────────────────\n";
     $text .= "Введите <b>название</b> или <b>артикул</b> товара.\n";
     $text .= "Бот покажет сколько на складе.";
 
-    file_put_contents(sys_get_temp_dir() . "/rest_stock_{$chatId}.txt", $msgId);
+    // TTL 30 минут — раньше /tmp проверял filemtime; теперь expires_at.
+    tgStateSet($chatId, 'rest_stock', ['bot_msg_id' => (int)$msgId], 1800);
 
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => [
         [['text' => '◂ Назад', 'callback_data' => 'rest_menu_main']],
@@ -1386,8 +1369,8 @@ function restStockStart($chatId, $msgId) {
 function restStockSearch($chatId, $query, $userMsgId = null) {
     global $pdo, $BOT_TOKEN;
 
-    $modeFile = sys_get_temp_dir() . "/rest_stock_{$chatId}.txt";
-    $botMsgId = file_exists($modeFile) ? (intval(trim(@file_get_contents($modeFile))) ?: null) : null;
+    $stockState = tgStateGet($chatId, 'rest_stock');
+    $botMsgId = (int)($stockState['bot_msg_id'] ?? 0) ?: null;
 
     $q = trim($query);
     if (mb_strlen($q) < 2) {
@@ -1396,7 +1379,7 @@ function restStockSearch($chatId, $query, $userMsgId = null) {
         corrReplace($chatId, $userMsgId, $state, "Введите минимум 2 символа.", ['inline_keyboard' => [
             [['text' => '◂ Назад', 'callback_data' => 'rest_menu_main']],
         ]]);
-        if (!empty($state['msg_id'])) @file_put_contents($modeFile, $state['msg_id']);
+        if (!empty($state['msg_id'])) tgStateSet($chatId, 'rest_stock', ['bot_msg_id' => (int)$state['msg_id']], 1800);
         return;
     }
 
@@ -1538,7 +1521,7 @@ function restScSelectRest($chatId, $msgId, $collectionId) {
         $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}{$done}", 'callback_data' => "sc_rest_{$collectionId}_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_sc_start']];
-    editMessage($chatId, $msgId, "📋 <b>{$colName}</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
+    editMessage($chatId, $msgId, "📋 <b>" . soEsc($colName) . "</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
 }
 
 function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
@@ -1589,7 +1572,7 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     $totalProducts = count($products);
     $filledProducts = count(array_filter($products, fn($p) => !empty($existing[$p['id']])));
 
-    $text = "📋 <b>{$colName}</b>\n";
+    $text = "📋 <b>" . soEsc($colName) . "</b>\n";
     $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "─────────────────────\n";
     $text .= "Заполните остатки по {$totalProducts} позициям";
@@ -1614,8 +1597,7 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     $btns[] = [['text' => '◂ Назад', 'callback_data' => $backCb]];
 
     // Очищаем старый текстовый-режим, если был — больше через текст не вводим
-    @unlink(sys_get_temp_dir() . "/sc_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/sc_data_{$chatId}.json");
+    tgStateClear($chatId, 'sc');
 
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
@@ -1638,9 +1620,8 @@ function restScBuildWebLink(PDO $pdo, $chatId, $restNum): ?string {
 function restScProcessInput($chatId, $text, $userMsgId) {
     global $pdo;
 
-    $dataFile = sys_get_temp_dir() . "/sc_data_{$chatId}.json";
-    $state = json_decode(@file_get_contents($dataFile), true);
-    if (!$state) { @unlink(sys_get_temp_dir() . "/sc_{$chatId}.txt"); return; }
+    $state = tgStateGet($chatId, 'sc');
+    if (!$state || empty($state['products'])) { tgStateClear($chatId, 'sc'); return; }
 
     $products = $state['products'];
     $collectionId = $state['collection_id'];
@@ -1651,8 +1632,7 @@ function restScProcessInput($chatId, $text, $userMsgId) {
     $colCheck->execute([$collectionId]);
     $colStatus = $colCheck->fetchColumn();
     if ($colStatus !== 'active') {
-        @unlink(sys_get_temp_dir() . "/sc_{$chatId}.txt");
-        @unlink($dataFile);
+        tgStateClear($chatId, 'sc');
         sendMessage($chatId, "⛔ Сбор закрыт. Отправка данных невозможна.");
         return;
     }
@@ -1729,8 +1709,7 @@ function restScProcessInput($chatId, $text, $userMsgId) {
     }
 
     // Чистим
-    @unlink(sys_get_temp_dir() . "/sc_{$chatId}.txt");
-    @unlink($dataFile);
+    tgStateClear($chatId, 'sc');
 
     $unitLabels = ['boxes' => 'кор', 'pieces' => 'шт', 'kg' => 'кг', 'liters' => 'л'];
     $confirmText = "✅ <b>Остатки сохранены!</b>\n🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n─────────────────────\n";
@@ -2096,8 +2075,8 @@ function corrShowHistory($chatId, $msgId, $page = 0) {
             $name = mb_substr($c['product_name'], 0, 25);
             $reviewDate = $c['reviewed_at'] ? date('d.m H:i', strtotime($c['reviewed_at'])) : '';
             $prettyRest = formatRestaurantNumber($c['restaurant_number']);
-            $text .= "{$si} Р-н <b>{$prettyRest}</b> {$dateFmt} | {$actionLabel} {$name} " . corrFmtQty($c['quantity']) . " {$uom}";
-            if ($c['reviewer_name']) $text .= " — {$c['reviewer_name']}";
+            $text .= "{$si} Р-н <b>" . soEsc($prettyRest) . "</b> {$dateFmt} | {$actionLabel} " . soEsc($name) . " " . corrFmtQty($c['quantity']) . " " . soEsc($uom);
+            if ($c['reviewer_name']) $text .= " — " . soEsc($c['reviewer_name']);
             $text .= " <i>{$reviewDate}</i>\n";
         }
     }
@@ -2117,8 +2096,7 @@ function corrShowHistory($chatId, $msgId, $page = 0) {
 // Шаг 1: выбор ресторана
 function corrStart($chatId, $msgId) {
     global $pdo;
-    @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/corr_data_{$chatId}.json");
+    tgStateClear($chatId, 'corr');
 
     $subs = botGetSubscribedRestaurants($pdo, $chatId);
     if (!$subs) {
@@ -2180,8 +2158,8 @@ function corrStartInput($chatId, $msgId, $restNum, $deliveryDate) {
     $existing = $st->fetchAll();
 
     $state = ['rest' => $restNum, 'date' => $deliveryDate, 'items' => [], 'step' => 'items', 'msg_id' => $msgId];
-    @file_put_contents(sys_get_temp_dir() . "/corr_{$chatId}.txt", "corr_items");
-    @file_put_contents(sys_get_temp_dir() . "/corr_data_{$chatId}.json", json_encode($state));
+    // TTL 30 минут — раньше /tmp проверял filemtime > 1800; теперь то же через expires_at.
+    tgStateSet($chatId, 'corr', ['mode' => 'corr_items', 'state' => $state], 1800);
 
     $text = "✏️ <b>Ресторан {$restNum}</b> | {$found['date_fmt']}\n";
     $text .= "⏰ Дедлайн: {$found['deadline_fmt']}\n";
@@ -2221,9 +2199,9 @@ function corrReplace($chatId, $userMsgId, &$state, $text, $keyboard = null) {
 // Обработка текстового ввода
 function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
     global $pdo;
-    $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
-    $state = json_decode(@file_get_contents($dataFile), true);
-    if (!$state) { @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt"); return; }
+    $corrSt = tgStateGet($chatId, 'corr');
+    $state = is_array($corrSt['state'] ?? null) ? $corrSt['state'] : null;
+    if (!$state) { tgStateClear($chatId, 'corr'); return; }
 
     $step = $state['step'] ?? '';
 
@@ -2302,8 +2280,8 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
         $summary .= "─────────────────────\n";
         foreach ($items as $item) {
             $actionLabel = $item['action'] === 'add' ? 'Добавить' : 'Убрать';
-            $label = $item['sku'] !== '-' ? "<b>{$item['sku']}</b> {$item['product_name']}" : $item['product_name'];
-            $summary .= "• {$actionLabel}: {$label} — " . corrFmtQty($item['qty']) . " {$item['unit']}\n";
+            $label = $item['sku'] !== '-' ? "<b>" . soEsc($item['sku']) . "</b> " . soEsc($item['product_name']) : soEsc($item['product_name']);
+            $summary .= "• {$actionLabel}: {$label} — " . corrFmtQty($item['qty']) . " " . soEsc($item['unit']) . "\n";
         }
         if ($errors) $summary .= "\n⚠️ " . implode("\n", $errors) . "\n";
         $summary .= "─────────────────────\n";
@@ -2345,7 +2323,8 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
             [['text' => '◂ Отмена', 'callback_data' => 'corr_rev_cancel']],
         ]];
         corrReplace($chatId, $userMsgId, $state, $reviewText, $btns);
-        @file_put_contents($dataFile, json_encode($state));
+        // Перезаписываем payload с накопленным state (TTL продлевается).
+        tgStateSet($chatId, 'corr', ['mode' => 'corr_items', 'state' => $state], 1800);
         return;
     }
 }
@@ -2353,15 +2332,14 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
 // Отправка пакета корректировок
 function corrSubmitBatch($chatId) {
     global $pdo, $BOT_TOKEN;
-    $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
-    $state = json_decode(@file_get_contents($dataFile), true);
+    $corrSt = tgStateGet($chatId, 'corr');
+    $state = is_array($corrSt['state'] ?? null) ? $corrSt['state'] : null;
     if (!$state || empty($state['items'])) { sendMessage($chatId, "Нет позиций для отправки."); return; }
 
     // Проверка подписки: нельзя отправить корректировку за ресторан, на который не подписан
     if (!botIsSubscribedToRestaurant($pdo, $chatId, $state['rest'])) {
         sendMessage($chatId, "⛔ У вас нет доступа к ресторану №{$state['rest']}.");
-        @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
-        @unlink($dataFile);
+        tgStateClear($chatId, 'corr');
         return;
     }
 
@@ -2371,8 +2349,7 @@ function corrSubmitBatch($chatId) {
     foreach ($deliveries as $d) { if ($d['date'] === $state['date']) { $found = $d; break; } }
     if (!$found) {
         sendMessage($chatId, "⛔ Дедлайн корректировки прошёл.");
-        @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
-        @unlink($dataFile);
+        tgStateClear($chatId, 'corr');
         return;
     }
 
@@ -2400,9 +2377,8 @@ function corrSubmitBatch($chatId) {
         $corrIds[] = $pdo->lastInsertId();
     }
 
-    // Чистим temp
-    @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
-    @unlink($dataFile);
+    // Чистим состояние диалога — корректировка отправлена.
+    tgStateClear($chatId, 'corr');
 
     // Отбивка ресторану
     $cnt = count($state['items']);
@@ -2628,7 +2604,7 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
 
     $text = "📋 <b>Результат корректировки заказа</b>\n";
     $prettyFirstRest = formatRestaurantNumber($first['restaurant_number']);
-    $text .= "🏪 Ресторан <b>{$prettyFirstRest}</b> | Доставка: {$dateFmt}\n";
+    $text .= "🏪 Ресторан <b>" . soEsc($prettyFirstRest) . "</b> | Доставка: {$dateFmt}\n";
     $text .= "─────────────────────\n";
     $approvedCount = 0; $rejectedCount = 0;
     foreach ($items as $c) {
@@ -2947,9 +2923,9 @@ function restRoSendLogins($chatId, $msgId) {
         $msgText = "🛒 <b>Заказы ресторанов — новая система</b>\n";
         $msgText .= "━━━━━━━━━━━━━━━━━━━━\n\n";
         $msgText .= "Для подачи заявок используйте веб-форму:\n\n";
-        $msgText .= "🏪 Ресторан: <b>{$prettyRn}</b> ({$addr})\n";
+        $msgText .= "🏪 Ресторан: <b>" . soEsc($prettyRn) . "</b> (" . soEsc($addr) . ")\n";
         $msgText .= "🔗 Ссылка: {$siteUrl}/restaurant\n";
-        $msgText .= "👤 Логин: <b>{$prettyRn}</b>\n";
+        $msgText .= "👤 Логин: <b>" . soEsc($prettyRn) . "</b>\n";
         $msgText .= "🔑 Пароль выдаёт отдел закупок\n\n";
         $msgText .= "⏰ Дедлайн подачи заявки: <b>до 10:00</b> (день перед доставкой)\n";
 

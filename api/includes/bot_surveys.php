@@ -1,27 +1,19 @@
 <?php
 // ═══ Опросы для ресторанов через Telegram-бот ═══
 
-function surveyGetStateFile($chatId) {
-    return sys_get_temp_dir() . "/survey_{$chatId}.json";
-}
+// Состояние опроса — в tg_state с TTL 2 часа (7200 сек), как было через
+// filemtime у файлов /tmp/survey_*.json.
 
 function surveyLoadState($chatId) {
-    $file = surveyGetStateFile($chatId);
-    if (!file_exists($file)) return null;
-    if (time() - filemtime($file) > 7200) {
-        @unlink($file);
-        return null;
-    }
-    $data = @json_decode(file_get_contents($file), true);
-    return is_array($data) ? $data : null;
+    return tgStateGet($chatId, 'survey');
 }
 
 function surveySaveState($chatId, $state) {
-    @file_put_contents(surveyGetStateFile($chatId), json_encode($state));
+    tgStateSet($chatId, 'survey', $state, 7200);
 }
 
 function surveyClearState($chatId) {
-    @unlink(surveyGetStateFile($chatId));
+    tgStateClear($chatId, 'survey');
 }
 
 function surveyGetActiveSurvey($surveyId) {

@@ -710,9 +710,8 @@ function askGeminiWithTools($question, $entity, $userName, $user = null) {
     $apiKey = $GEMINI_API_KEY ?: ($_ENV['GEMINI_API_KEY'] ?? '');
     if (!$apiKey) return null;
 
-    // Проверяем кэш квоты Gemini
-    $geminiBlock = sys_get_temp_dir() . '/gemini_tools_blocked.txt';
-    if (file_exists($geminiBlock) && time() - filemtime($geminiBlock) < 3600) {
+    // Проверяем блокировку Gemini tools в БД (заменяет /tmp/gemini_tools_blocked.txt)
+    if (tgProviderBlocked('gemini', 'tools')) {
         error_log("Gemini tools: blocked by quota cache");
         return null;
     }
@@ -829,9 +828,9 @@ function callGeminiToolsApi($url, $payload) {
     if (!$response || $httpCode !== 200) {
         $respPreview = $response ? mb_substr($response, 0, 500) : '(empty)';
         error_log("Gemini Tools API error: HTTP {$httpCode}, err={$err}, resp={$respPreview}");
-        // Если квота исчерпана — запоминаем на час
+        // Если квота исчерпана — блокируем Gemini tools на час
         if ($httpCode === 429 || strpos($response ?: '', 'quota') !== false) {
-            @file_put_contents(sys_get_temp_dir() . '/gemini_tools_blocked.txt', 'blocked');
+            tgProviderBlock('gemini', 'tools', 3600, $httpCode === 429 ? '429' : 'quota');
         }
         return null;
     }
@@ -899,15 +898,10 @@ function askGroqWithTools($question, $entity, $userName, $user = null) {
     $apiKey = $GLOBALS['GROQ_API_KEY'] ?? '';
     if (!$apiKey) return null;
 
-    // Кэш rate limit
-    $cacheFile = sys_get_temp_dir() . '/groq_tools_blocked.json';
-    $blocked = [];
-    if (file_exists($cacheFile)) {
-        $blocked = json_decode(file_get_contents($cacheFile), true) ?: [];
-    }
+    // Блокировка модели в БД (заменяет /tmp/groq_tools_blocked.json)
     $model = 'llama-3.3-70b-versatile';
-    if (isset($blocked[$model]) && time() < $blocked[$model]) {
-        error_log("Groq tools: {$model} rate-limited");
+    if (tgProviderBlocked('groq', 'tools-' . $model)) {
+        error_log("Groq tools: {$model} rate-limited (skip)");
         return null;
     }
 
@@ -1008,8 +1002,7 @@ function askGroqWithTools($question, $entity, $userName, $user = null) {
                 $waitSec = 600;
                 if (preg_match('/try again in (\d+)m/i', $response, $mm)) $waitSec = intval($mm[1]) * 60;
                 elseif ($shortWait > 0) $waitSec = intval(ceil($shortWait));
-                $blocked[$model] = time() + $waitSec;
-                @file_put_contents($cacheFile, json_encode($blocked));
+                tgProviderBlock('groq', 'tools-' . $model, max(60, $waitSec), '429');
             }
             return null;
         }

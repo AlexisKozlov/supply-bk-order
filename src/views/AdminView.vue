@@ -45,6 +45,9 @@
         <BkIcon name="bell" size="sm"/> Крон напоминаний
         <span v-if="cronErrCount" class="adm-tab-dot"></span>
       </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'bot-monitor' }" @click="activeTab = 'bot-monitor'">
+        <BkIcon name="analytics" size="sm"/> Бот-монитор
+      </button>
     </div>
 
     <!-- ═══ Пользователи ═══ -->
@@ -843,6 +846,11 @@
       </table>
     </div>
 
+    <!-- ═══ Бот-монитор ═══ -->
+    <div v-if="activeTab === 'bot-monitor'" class="adm-section">
+      <AdminBotMonitorTab />
+    </div>
+
     <!-- ═══ Модалка обновления (changelog) ═══ -->
     <Teleport to="body">
       <div v-if="changelogModal.show" class="modal" @click.self="tryCloseChangelog">
@@ -989,6 +997,7 @@ const router = useRouter();
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import AdminRestaurantAccountsTab from '@/components/admin/AdminRestaurantAccountsTab.vue';
 import AdminEmailImportsTab from '@/components/admin/AdminEmailImportsTab.vue';
+import AdminBotMonitorTab from '@/components/admin/AdminBotMonitorTab.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
@@ -996,7 +1005,7 @@ const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/Conf
 const userStore = useUserStore();
 const toast = useToastStore();
 
-const activeTab = useTabRoute('users', ['users', 'restaurant-accounts', 'email-imports', 'sessions', 'audit', 'feedback', 'broadcast', 'stats', 'backup', 'maintenance', 'cron-reminders']);
+const activeTab = useTabRoute('users', ['users', 'restaurant-accounts', 'email-imports', 'sessions', 'audit', 'feedback', 'broadcast', 'stats', 'backup', 'maintenance', 'cron-reminders', 'bot-monitor']);
 const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);

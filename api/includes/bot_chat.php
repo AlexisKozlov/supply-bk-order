@@ -15,7 +15,7 @@ function chatEsc(?string $v): string {
 // Шаг 1: выбор ресторана
 function chatStart($chatId, $msgId) {
     global $pdo;
-    @unlink(sys_get_temp_dir() . "/chat_{$chatId}.txt");
+    tgStateClear($chatId, 'chat');
 
     $subs = botGetSubscribedRestaurants($pdo, $chatId);
 
@@ -43,7 +43,9 @@ function chatStart($chatId, $msgId) {
 
 // Шаг 2: режим ввода
 function chatInputMode($chatId, $msgId, $restNum) {
-    file_put_contents(sys_get_temp_dir() . "/chat_{$chatId}.txt", $restNum);
+    // TTL 1 час — раньше так было через filemtime; теперь то же самое
+    // через expires_at в БД (выживает перезагрузку и не гонит race condition).
+    tgStateSet($chatId, 'chat', ['rest' => $restNum], 3600);
 
     $text = "💬 <b>Сообщение в отдел закупок</b>\n";
     $text .= "🏪 Ресторан <b>{$restNum}</b>\n";

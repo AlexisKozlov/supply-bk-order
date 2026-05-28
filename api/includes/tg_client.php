@@ -46,6 +46,39 @@ function tgIsBlockingError(array $result): bool
 }
 
 /**
+ * Запись в журнал отправок. Вызывается из tgClientCall и tgClientSendDocument
+ * после каждого запроса в Telegram API. Используется страницей мониторинга в
+ * админке (/admin?tab=tg-monitor) и для отладки.
+ *
+ * Защита от рекурсии: если сам INSERT упадёт, логирование молча игнорируется
+ * (чтобы ошибка в логе не превратилась в фатал самого клиента).
+ *
+ * Если в опциях передали 'no_log' => true (см. cleanup-крон), запись пропускается.
+ */
+function tgLogSend(string $method, $chatId, array $result, array $opts = []): void
+{
+    if (!empty($opts['no_log'])) return;
+    try {
+        $pdo = $opts['pdo'] ?? ($GLOBALS['pdo'] ?? null);
+        if (!($pdo instanceof PDO)) return;
+        $errText = $result['description'] ?? $result['curl_error'] ?? null;
+        $pdo->prepare("
+            INSERT INTO tg_send_log (method, chat_id, ok, http_code, error_code, error_text)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ")->execute([
+            $method,
+            $chatId ? (int)$chatId : null,
+            !empty($result['ok']) ? 1 : 0,
+            (int)($result['http_code'] ?? 0),
+            isset($result['error_code']) ? (int)$result['error_code'] : null,
+            $errText !== null ? mb_substr((string)$errText, 0, 255) : null,
+        ]);
+    } catch (Throwable $e) {
+        // молча — иначе попытка логирования сломает клиент
+    }
+}
+
+/**
  * Помечает chat_id как «заблокировал бота» в обеих таблицах с подписками:
  * users.telegram_chat_id и ro_telegram_subs.chat_id. Дата ставится только
  * если её ещё нет — чтобы знать момент первой блокировки.
@@ -163,6 +196,9 @@ function tgClientCall(string $method, array $params, array $opts = []): array
         && isset($params['chat_id']) && tgIsBlockingError($result)) {
         tgMarkChatBlocked($opts['pdo'], $params['chat_id'], $result['description'] ?? null);
     }
+
+    // Журнал отправок — для /admin?tab=tg-monitor.
+    tgLogSend($method, $params['chat_id'] ?? null, $result, $opts);
 
     return $result;
 }
@@ -374,6 +410,8 @@ function tgClientSendDocument($chatId, string $filename, string $content, array 
     if (!empty($opts['pdo']) && $opts['pdo'] instanceof PDO && tgIsBlockingError($result)) {
         tgMarkChatBlocked($opts['pdo'], $chatId, $result['description'] ?? null);
     }
+    // Журнал.
+    tgLogSend('sendDocument', $chatId, $result, $opts);
     return $result;
 }
 

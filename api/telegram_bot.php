@@ -24,7 +24,15 @@ $dsn = 'mysql:host=' . ($_ENV['DB_HOST'] ?? 'localhost') . ';dbname=' . ($_ENV['
 $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_TIMEOUT => 3,
 ]);
+// Лимит на отдельный SQL-запрос — 5 секунд. Без него тяжёлый запрос
+// (большой JOIN, lock) подвесил бы webhook на весь PHP-FPM timeout, и
+// пользователь видел бы «бот не отвечает». При срабатывании MariaDB
+// кидает PDOException, его ловит глобальный set_exception_handler выше.
+// AI-инструменты в bot_tools.php переопределяют этот лимит наверх (30 сек),
+// потому что им нужны более тяжёлые отчёты.
+try { $pdo->exec("SET SESSION max_statement_time = 5"); } catch (Throwable $e) {}
 
 // Проверка секретного токена вебхука — обязательная.
 // Без этого любой из интернета мог бы слать боту поддельные сообщения
@@ -65,14 +73,90 @@ if ($_INCOMING_CHAT) {
     }
 }
 
-// Глобальный обработчик ошибок — бот никогда не падает молча
+/**
+ * Уведомление админов в Telegram о критической ошибке бота. Срабатывает
+ * максимум раз в 10 минут на одну сигнатуру (file:line:message-hash),
+ * чтобы fatal в горячем коде не завалил админа сотней сообщений в час.
+ *
+ * Best-effort: любое исключение внутри (PDO мёртв, нет токена, нет admin'ов)
+ * проглатывается — иначе уведомление само станет источником fatal'ов.
+ *
+ * Дедуп хранится в tg_state с chat_id=0 и mode='err:{sig}', TTL 600 сек.
+ */
+function tgNotifyAdminError(string $where, string $message, string $file, int $line): void {
+    try {
+        global $pdo;
+        if (!isset($pdo) || !($pdo instanceof PDO)) return;
+        // Сигнатура: file + line + первые 80 символов сообщения.
+        $sig = substr(md5($file . ':' . $line . ':' . substr($message, 0, 80)), 0, 12);
+        $mode = 'err:' . $sig;
+        if (function_exists('tgStateGet') && tgStateGet(0, $mode) !== null) {
+            return; // уже уведомили за последние 10 минут
+        }
+        // Список адресатов — все админы с привязанным TG, не заблокировавшие бота.
+        $admins = $pdo->query("
+            SELECT name, telegram_chat_id
+            FROM users
+            WHERE role = 'admin' AND telegram_chat_id IS NOT NULL AND telegram_chat_id <> ''
+              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        if (!$admins) return;
+
+        $safeMsg = tgEsc(mb_substr($message, 0, 400));
+        $safeFile = tgEsc(basename($file));
+        $text = "⚠️ <b>Ошибка Telegram-бота</b>\n"
+              . "<i>{$where}</i>\n\n"
+              . "<code>{$safeMsg}</code>\n\n"
+              . "📄 {$safeFile}:{$line}\n"
+              . "🕒 " . date('d.m H:i');
+        foreach ($admins as $a) {
+            if (function_exists('tgClientSend')) {
+                @tgClientSend((int)$a['telegram_chat_id'], $text, ['pdo' => $pdo]);
+            }
+        }
+        // Запоминаем дедуп
+        if (function_exists('tgStateSet')) {
+            tgStateSet(0, $mode, ['file' => $file, 'line' => $line, 'msg' => mb_substr($message, 0, 200)], 600);
+        }
+    } catch (Throwable $e) {
+        // Best-effort: сама нотификация не должна породить новый fatal.
+        error_log('[TelegramBot] notify admin failed: ' . $e->getMessage());
+    }
+}
+
+// Глобальный обработчик ошибок — бот никогда не падает молча. Telegram'у
+// всегда отвечаем 200 OK, иначе webhook уйдёт в retry-петлю (минута, 5
+// мин, час, день) и забьёт очередь на много дней при постоянной ошибке.
+// Пользователю шлём короткое сообщение, в лог пишем подробности, админу —
+// уведомление с дедупом (см. tgNotifyAdminError).
 set_exception_handler(function(Throwable $e) {
     global $_CHAT_ID;
     if ($_CHAT_ID) {
         sendMessage($_CHAT_ID, "⚠️ Произошла ошибка. Попробуйте ещё раз или используйте /menu");
     }
     error_log('[TelegramBot] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    tgNotifyAdminError('Exception', $e->getMessage(), $e->getFile(), $e->getLine());
+    if (!headers_sent()) http_response_code(200);
 });
+
+// Fatal errors (out of memory, parse error, segfault) set_exception_handler
+// не ловит — нужен shutdown-handler. Иначе при OOM PHP отдаёт 500 и
+// Telegram опять начинает retry-петлю.
+register_shutdown_function(function() {
+    $err = error_get_last();
+    if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+        error_log('[TelegramBot] FATAL ' . $err['message'] . ' in ' . $err['file'] . ':' . $err['line']);
+        tgNotifyAdminError('FATAL', $err['message'], $err['file'], $err['line']);
+        if (!headers_sent()) http_response_code(200);
+    }
+});
+
+// HTML-escape для подстановки строк из БД и user-input в parse_mode=HTML.
+// Без него имя товара/поставщика/юрлица с & или < ломает разметку, и
+// Telegram молча отвергает всё сообщение (HTTP 400 «can't parse entities»).
+function tgEsc(?string $v): string {
+    return htmlspecialchars((string)$v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
 
 // ═══ Telegram helpers ═══
 // Все ниже — тонкие обёртки над tg_client.php. Сам клиент через cURL,
@@ -260,6 +344,7 @@ function sendDocument($chatId, $filename, $content, $caption = '') {
 
 require_once __DIR__ . '/includes/legal_entities.php';
 require_once __DIR__ . '/includes/helpers.php';
+require_once __DIR__ . '/includes/bot_state.php';
 require_once __DIR__ . '/includes/bot_ai.php';
 require_once __DIR__ . '/includes/bot_lookup.php';
 require_once __DIR__ . '/includes/bot_helpers.php';
@@ -532,7 +617,7 @@ function cmdStock($chatId, $user, $editMsgId = null) {
         $daily = round($i['consumption'] / max($i['period_days'], 1), 1);
         $icon = $i['days_left'] <= 0 ? '🔴' : '🟠';
         $uLabel = getUomLabel($i['uom'] ?? 'шт');
-        $text .= "{$icon} <b>{$name}</b>\n";
+        $text .= "{$icon} <b>" . tgEsc($name) . "</b>\n";
         $text .= "  {$i['stock']} {$uLabel} · {$daily}/день · <b>{$i['days_left']} дн.</b>\n";
     }
     botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
@@ -571,7 +656,7 @@ function cmdConsumption($chatId, $user, $editMsgId = null) {
         $name = $i['name'] ? mb_substr($i['name'], 0, 28) : $i['sku'];
         $uLabel = getUomLabel($i['uom'] ?? 'шт');
         $num = $n + 1;
-        $text .= "<b>{$num}.</b> {$name}\n";
+        $text .= "<b>{$num}.</b> " . tgEsc($name) . "\n";
         $text .= "  <b>{$daily}</b> {$uLabel}/день · {$i['consumption']} за {$days} дн.\n";
     }
     botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
@@ -616,7 +701,7 @@ function cmdPrices($chatId, $user, $editMsgId = null) {
         $pctRaw = $c['old_price'] > 0 ? round(($c['new_price'] - $c['old_price']) / $c['old_price'] * 100) : 0;
         $pct = $pctRaw > 0 ? "+{$pctRaw}%" : "{$pctRaw}%";
         $arrow = $c['new_price'] > $c['old_price'] ? '▲' : ($c['new_price'] < $c['old_price'] ? '▼' : '•');
-        $text .= "{$arrow} <b>{$name}</b>\n";
+        $text .= "{$arrow} <b>" . tgEsc($name) . "</b>\n";
         $text .= "  {$c['old_price']} → <b>{$c['new_price']}</b> ({$pct}) · {$date}\n";
     }
     botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
@@ -980,7 +1065,7 @@ function cmdSales($chatId, $user, $editMsgId = null) {
         }
         $num = $i + 1;
         $total = number_format($r['total'], 0, '.', ' ');
-        $text .= "<b>{$num}.</b> {$r['analog_group']}\n";
+        $text .= "<b>{$num}.</b> " . tgEsc($r['analog_group']) . "\n";
         $text .= "  <b>{$total}</b> · {$r['avg_day']}/день · {$r['avg_rc']} рест.{$trendIcon}\n";
     }
 
@@ -1015,7 +1100,7 @@ function cmdCards($chatId, $user = null, $editMsgId = null) {
         setUserMode($user['name'], 'cards');
     }
     // Для всех (и ресторанов без аккаунта) — temp-файл (msg_id сохраним после отправки)
-    file_put_contents(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt", $editMsgId ?: '0');
+    tgStateSet($chatId, 'cards', ['bot_msg_id' => $editMsgId ?: 0]);
 
     $s = $pdo->prepare("SELECT COUNT(*) as cnt FROM cards");
     $s->execute();
@@ -1152,7 +1237,7 @@ function cardsSendReplace($chatId, $userMsgId, $botMsgId, $text, $keyboard = nul
     $resp = json_decode(curl_exec($ch), true); curl_close($ch);
     $newMsgId = $resp['result']['message_id'] ?? null;
     // Сохраняем новый msg_id для следующего поиска
-    if ($newMsgId) @file_put_contents(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt", $newMsgId);
+    if ($newMsgId) tgStateSet($chatId, 'cards', ['bot_msg_id' => (int)$newMsgId]);
     return $newMsgId;
 }
 
@@ -1281,11 +1366,11 @@ function searchCardDirect($chatId, $query, $userMsgId = null, $botMsgId = null) 
             }
         }
 
-        $msg = "❌ По запросу «<b>{$queryRaw}</b>» карточек не найдено.\n\n";
+        $msg = "❌ По запросу «<b>" . tgEsc($queryRaw) . "</b>» карточек не найдено.\n\n";
         if (!empty($suggestions)) {
             $msg .= "Возможно, вы имели в виду:\n";
             foreach ($suggestions as $c) {
-                $msg .= "• <b>{$c['id']}</b> {$c['name']}\n";
+                $msg .= "• <b>" . tgEsc($c['id']) . "</b> " . tgEsc($c['name']) . "\n";
             }
             $msg .= "\nОтправьте артикул для точного поиска.";
         } else {
@@ -1328,7 +1413,7 @@ function searchCardDirect($chatId, $query, $userMsgId = null, $botMsgId = null) 
         }
     }
 
-    $text = "🔍 По запросу «<b>{$queryRaw}</b>»:\n\n";
+    $text = "🔍 По запросу «<b>" . tgEsc($queryRaw) . "</b>»:\n\n";
     foreach ($results as $i => $r) {
         $c = $r['card'];
         $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
@@ -1579,7 +1664,7 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0, $editMsgId = null)
             $text .= "<b>⚠️ Критичные:</b>\n";
             foreach (array_slice($zoneGroups['red'], 0, 10) as $g) {
                 $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
-                $text .= "🔴 <b>{$g['name']}</b> · {$g['days']}д. · {$g['totalStock']} ост. · {$daily}/д\n";
+                $text .= "🔴 <b>" . tgEsc($g['name']) . "</b> · {$g['days']}д. · {$g['totalStock']} ост. · {$daily}/д\n";
             }
             if ($zoneCounts['red'] > 10) {
                 $text .= "<i>… +" . ($zoneCounts['red'] - 10) . " ещё</i>\n";
@@ -1592,7 +1677,7 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0, $editMsgId = null)
             $text .= "<b>🟠 Внимание:</b>\n";
             foreach (array_slice($zoneGroups['orange'], 0, 8) as $g) {
                 $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
-                $text .= "🟠 <b>{$g['name']}</b> · {$g['days']}д. · {$g['totalStock']} ост. · {$daily}/д\n";
+                $text .= "🟠 <b>" . tgEsc($g['name']) . "</b> · {$g['days']}д. · {$g['totalStock']} ост. · {$daily}/д\n";
             }
             if ($zoneCounts['orange'] > 8) {
                 $text .= "<i>… +" . ($zoneCounts['orange'] - 8) . " ещё</i>\n";
@@ -1641,7 +1726,7 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0, $editMsgId = null)
     foreach ($pageItems as $g) {
         $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
         $daysStr = $g['days'] >= 999 ? '∞' : $g['days'];
-        $text .= "<b>{$g['name']}</b> · {$daysStr}д. · {$g['totalStock']} ост. · {$daily}/д\n";
+        $text .= "<b>" . tgEsc($g['name']) . "</b> · {$daysStr}д. · {$g['totalStock']} ост. · {$daily}/д\n";
 
         // Показываем состав группы, если > 1 товара
         if (count($g['items']) > 1) {
@@ -1800,7 +1885,10 @@ if (isset($input['inline_query'])) {
                 'id' => (string)$i,
                 'title' => "{$c['id']} {$c['name']}",
                 'description' => $analogsStr ? 'Аналоги: ' . implode(', ', $analogs) : 'Нет аналогов',
-                'input_message_content' => ['message_text' => "<b>{$c['id']}</b> {$c['name']}{$analogsStr}", 'parse_mode' => 'HTML'],
+                'input_message_content' => [
+                    'message_text' => "<b>" . tgEsc($c['id']) . "</b> " . tgEsc($c['name']) . tgEsc($analogsStr),
+                    'parse_mode' => 'HTML',
+                ],
             ];
         }
     }
@@ -1820,6 +1908,26 @@ if (isset($input['callback_query'])) {
     $msgId = $cb['message']['message_id'];
     $data = $cb['data'] ?? '';
 
+    // Rate-limit: больше 30 нажатий в минуту от одного chat_id — отказ.
+    // Защищает БД и Telegram API от долбёжки. Использует ту же таблицу
+    // failed_login_attempts, что и rate-limit для 6-значного кода, с
+    // ключом 'tg_cb_{chat_id}'. Старые записи (>5 минут) чистим.
+    try {
+        $cbKey = 'tg_cb_' . $chatId;
+        $pdo->prepare("DELETE FROM failed_login_attempts WHERE user_name = ? AND attempted_at < (NOW() - INTERVAL 5 MINUTE)")
+            ->execute([$cbKey]);
+        $cntCb = $pdo->prepare("SELECT COUNT(*) FROM failed_login_attempts WHERE user_name = ? AND attempted_at > (NOW() - INTERVAL 1 MINUTE)");
+        $cntCb->execute([$cbKey]);
+        if ((int)$cntCb->fetchColumn() >= 30) {
+            answerCallback($cb['id'], 'Слишком часто. Подождите минуту.', true);
+            exit;
+        }
+        $pdo->prepare("INSERT INTO failed_login_attempts (ip_address, user_name) VALUES (?, ?)")
+            ->execute(['0.0.0.0', $cbKey]);
+    } catch (Throwable $e) {
+        // если таблицы нет или БД упала — пропускаем rate-limit и работаем
+    }
+
     // Кнопки меню — всё редактируем в том же сообщении
     if (str_starts_with($data, 'cmd_')) {
         $cmd = substr($data, 4);
@@ -1832,7 +1940,7 @@ if (isset($input['callback_query'])) {
                 cmdCards($chatId, $user, $msgId);
             } else {
                 // cards_exit — выход из режима поиска
-                @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
+                tgStateClear($chatId, 'cards');
                 if ($user) {
                     setUserMode($user['name'], null);
                     editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
@@ -1851,8 +1959,8 @@ if (isset($input['callback_query'])) {
         switch ($cmd) {
             case 'menu':
                 setUserMode($user['name'], null);
-                @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
-                @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt"); // сброс режима ввода заявки
+                tgStateClear($chatId, 'cards');
+                tgStateClear($chatId, 'restord'); // сброс режима ввода заявки
                 editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
                 break;
             case 'orders': cmdOrders($chatId, $user, $msgId); break;
@@ -1871,7 +1979,7 @@ if (isset($input['callback_query'])) {
                 if (count($entities) <= 1) {
                     $current = getUserEntity($user);
                     $btns = [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]];
-                    editMessage($chatId, $msgId, "🏢 Вам доступно одно юрлицо: <b>{$current}</b>", ['inline_keyboard' => $btns]);
+                    editMessage($chatId, $msgId, "🏢 Вам доступно одно юрлицо: <b>" . tgEsc($current) . "</b>", ['inline_keyboard' => $btns]);
                 } else {
                     $current = getUserEntity($user);
                     $btns = [];
@@ -1881,7 +1989,7 @@ if (isset($input['callback_query'])) {
                         $btns[] = [['text' => "{$mark}{$short} — {$le}", 'callback_data' => "entity_{$idx}"]];
                     }
                     $btns[] = [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']];
-                    editMessage($chatId, $msgId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>{$current}</b>\n\nНажмите для переключения:", ['inline_keyboard' => $btns]);
+                    editMessage($chatId, $msgId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>" . tgEsc($current) . "</b>\n\nНажмите для переключения:", ['inline_keyboard' => $btns]);
                 }
                 break;
             case 'sales': cmdSales($chatId, $user, $msgId); break;
@@ -1901,7 +2009,9 @@ if (isset($input['callback_query'])) {
                 break;
             case 'upload_order_file':
                 if (!botRequireAdmin($user, $chatId, $msgId)) break;
-                file_put_contents(sys_get_temp_dir() . "/import_{$chatId}.txt", 'order_file');
+                // TTL 10 минут на режим загрузки — если админ передумал,
+                // флаг не висит вечно (раньше /tmp хранил его до перезагрузки).
+                tgStateSet($chatId, 'import', ['type' => 'order_file'], 600);
                 editMessage($chatId, $msgId, "📄 <b>Файл заказа</b>\n─────────────────────\nОтправьте файл Excel для ресторанов.\nОн будет доступен всем ресторанам через бот.", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
                 break;
             // import удалён из бота — используйте сайт
@@ -2187,7 +2297,7 @@ if (isset($input['callback_query'])) {
             $short = getEntityShort($entities[$idx]);
             answerCallback($cb['id'], "Выбрано: {$short}");
             $menuBtns = ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]];
-            editMessage($chatId, $msgId, "✅ Юрлицо переключено на <b>{$entities[$idx]}</b>\n\nТеперь все данные показываются для этого юрлица.", $menuBtns);
+            editMessage($chatId, $msgId, "✅ Юрлицо переключено на <b>" . tgEsc($entities[$idx]) . "</b>\n\nТеперь все данные показываются для этого юрлица.", $menuBtns);
         } else {
             answerCallback($cb['id'], 'Ошибка выбора');
         }
@@ -2292,7 +2402,7 @@ if (isset($input['callback_query'])) {
     }
     if ($data === 'chat_cancel') {
         answerCallback($cb['id']);
-        @unlink(sys_get_temp_dir() . "/chat_{$chatId}.txt");
+        tgStateClear($chatId, 'chat');
         restShowMySubs($chatId, $msgId);
         exit;
     }
@@ -2597,8 +2707,7 @@ if (isset($input['callback_query'])) {
         $ids = corrGetBatchPendingIds($pdo, $corrId);
         if (empty($ids)) { editMessage($chatId, $msgId, "⚠️ Все позиции уже обработаны."); exit; }
         $state = ['step' => 'review_comment', 'corr_ids' => $ids, 'msg_id' => $msgId];
-        @file_put_contents(sys_get_temp_dir() . "/corr_{$chatId}.txt", "corr_review");
-        @file_put_contents(sys_get_temp_dir() . "/corr_data_{$chatId}.json", json_encode($state));
+        tgStateSet($chatId, 'corr', ['mode' => 'corr_review', 'state' => $state]);
         editMessage($chatId, $msgId, "💬 Введите комментарий.\nПосле ввода выберите действие:", ['inline_keyboard' => [
             [['text' => '◂ Отмена', 'callback_data' => 'corr_rev_cancel']],
         ]]);
@@ -2624,8 +2733,7 @@ if (isset($input['callback_query'])) {
         $batchIds = corrGetBatchAllIds($pdo, $corrId);
         if (empty($batchIds)) { editMessage($chatId, $msgId, "⚠️ Заявка не найдена."); exit; }
         $state = ['step' => 'final_comment', 'batch_ids' => $batchIds, 'msg_id' => $msgId];
-        @file_put_contents(sys_get_temp_dir() . "/corr_{$chatId}.txt", "corr_review");
-        @file_put_contents(sys_get_temp_dir() . "/corr_data_{$chatId}.json", json_encode($state));
+        tgStateSet($chatId, 'corr', ['mode' => 'corr_review', 'state' => $state]);
         editMessage($chatId, $msgId, "💬 Введите итоговый комментарий для ресторана:", ['inline_keyboard' => [
             [['text' => '◂ Отмена', 'callback_data' => 'corr_rev_cancel']],
         ]]);
@@ -2633,48 +2741,47 @@ if (isset($input['callback_query'])) {
     }
     // Отправить с итоговым комментарием
     if ($data === 'corr_fc_send') {
-        $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
-        $state = json_decode(@file_get_contents($dataFile), true);
+        $corrSt = tgStateGet($chatId, 'corr');
+        $state  = $corrSt['state'] ?? [];
         $comment = $state['final_comment'] ?? '';
         $batchIds = $state['batch_ids'] ?? [];
         $user = corrCheckBotAccess($pdo, $chatId, $batchIds, $cb['id']);
         if (!$user) exit;
         if ($batchIds && !corrCheckReviewer($pdo, $batchIds[0], $chatId, $cb['id'])) exit;
-        @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt"); @unlink($dataFile);
+        tgStateClear($chatId, 'corr');
         answerCallback($cb['id']);
         if ($batchIds) corrSendResultToRestaurant($pdo, $batchIds, $user['name'], $comment);
         exit;
     }
     // Принять с комментарием (IDs и комментарий в state)
     if ($data === 'corr_cappr_go') {
-        $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
-        $state = json_decode(@file_get_contents($dataFile), true);
+        $corrSt = tgStateGet($chatId, 'corr');
+        $state  = $corrSt['state'] ?? [];
         $comment = $state['review_comment'] ?? null;
         $ids = $state['corr_ids'] ?? [];
         if (!corrCheckBotAccess($pdo, $chatId, $ids, $cb['id'])) exit;
         if ($ids && !corrCheckReviewer($pdo, $ids[0], $chatId, $cb['id'])) exit;
-        @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt"); @unlink($dataFile);
+        tgStateClear($chatId, 'corr');
         answerCallback($cb['id']);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'approve', $comment);
         exit;
     }
     // Отклонить с комментарием
     if ($data === 'corr_crej_go') {
-        $dataFile = sys_get_temp_dir() . "/corr_data_{$chatId}.json";
-        $state = json_decode(@file_get_contents($dataFile), true);
+        $corrSt = tgStateGet($chatId, 'corr');
+        $state  = $corrSt['state'] ?? [];
         $comment = $state['review_comment'] ?? null;
         $ids = $state['corr_ids'] ?? [];
         if (!corrCheckBotAccess($pdo, $chatId, $ids, $cb['id'])) exit;
         if ($ids && !corrCheckReviewer($pdo, $ids[0], $chatId, $cb['id'])) exit;
-        @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt"); @unlink($dataFile);
+        tgStateClear($chatId, 'corr');
         answerCallback($cb['id']);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'reject', $comment);
         exit;
     }
     if ($data === 'corr_rev_cancel') {
         answerCallback($cb['id']);
-        @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
-        @unlink(sys_get_temp_dir() . "/corr_data_{$chatId}.json");
+        tgStateClear($chatId, 'corr');
         editMessage($chatId, $msgId, "Отменено.");
         exit;
     }
@@ -2758,7 +2865,7 @@ if (isset($input['callback_query'])) {
     }
     if (str_starts_with($data, 'restord_rest_')) {
         answerCallback($cb['id']);
-        @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt"); // сброс режима ввода
+        tgStateClear($chatId, 'restord'); // сброс режима ввода
         soOrderSelectDay($chatId, $msgId, soGetPlanetaSupplierId(), substr($data, 12));
         exit;
     }
@@ -2837,42 +2944,39 @@ if (!$msg) exit;
 
 $chatId = $msg['chat']['id'];
 
-// Режим чата с отделом закупок — обрабатывает и текст, и фото
-$chatModeFile = sys_get_temp_dir() . "/chat_{$chatId}.txt";
-if (file_exists($chatModeFile)) {
-    if (time() - filemtime($chatModeFile) > 3600) {
-        @unlink($chatModeFile);
-    } else {
-        $chatModeContent = trim(@file_get_contents($chatModeFile));
-        $chatRestNum = explode('|', $chatModeContent)[0];
-        $msgText = trim($msg['text'] ?? $msg['caption'] ?? '');
-        $photoFileId = null;
-        if (isset($msg['photo'])) {
-            $photos = $msg['photo'];
-            $photoFileId = end($photos)['file_id'] ?? null;
-        }
-        if ($msgText || $photoFileId) {
-            if (str_starts_with($msgText, '/')) {
-                @unlink($chatModeFile);
-                // Пусть обработается как команда ниже
-            } else {
-                chatProcessMessage($chatId, $msgText, $chatRestNum, $msg['message_id'] ?? null, $msg['from'] ?? [], $photoFileId);
-                exit;
-            }
-        } elseif (isset($msg['document']) || isset($msg['voice']) || isset($msg['video']) || isset($msg['sticker'])) {
-            // В чате принимаем только текст и фото
-            $userMsgId = $msg['message_id'] ?? null;
-            if ($userMsgId) @deleteMessage($chatId, $userMsgId);
+// Режим чата с отделом закупок — обрабатывает и текст, и фото.
+// TTL 1 час задан в самом tg_state.expires_at (см. chatStart в bot_chat.php).
+$chatState = tgStateGet($chatId, 'chat');
+if ($chatState !== null) {
+    $chatRestNum = (string)($chatState['rest'] ?? '');
+    $msgText = trim($msg['text'] ?? $msg['caption'] ?? '');
+    $photoFileId = null;
+    if (isset($msg['photo'])) {
+        $photos = $msg['photo'];
+        $photoFileId = end($photos)['file_id'] ?? null;
+    }
+    if ($msgText || $photoFileId) {
+        if (str_starts_with($msgText, '/')) {
+            tgStateClear($chatId, 'chat');
+            // Пусть обработается как команда ниже
+        } else {
+            chatProcessMessage($chatId, $msgText, $chatRestNum, $msg['message_id'] ?? null, $msg['from'] ?? [], $photoFileId);
             exit;
         }
+    } elseif (isset($msg['document']) || isset($msg['voice']) || isset($msg['video']) || isset($msg['sticker'])) {
+        // В чате принимаем только текст и фото
+        $userMsgId = $msg['message_id'] ?? null;
+        if ($userMsgId) @deleteMessage($chatId, $userMsgId);
+        exit;
     }
 }
 
-// Режим загрузки файла заказа
-$importModeFile = sys_get_temp_dir() . "/import_{$chatId}.txt";
-if (file_exists($importModeFile) && isset($msg['document'])) {
-    $importType = trim(@file_get_contents($importModeFile));
-    @unlink($importModeFile);
+// Режим загрузки файла заказа. TTL 10 минут — выставляется при нажатии
+// кнопки «Загрузить файл» (см. ниже, mode='import').
+$importState = tgStateGet($chatId, 'import');
+if ($importState !== null && isset($msg['document'])) {
+    $importType = (string)($importState['type'] ?? '');
+    tgStateClear($chatId, 'import');
     $user = getUser($chatId);
     // Дополнительная страховка: даже если флаг как-то остался в /tmp, файл
     // обработается только если у юзера роль admin/manager.
@@ -2881,19 +2985,41 @@ if (file_exists($importModeFile) && isset($msg['document'])) {
     if ($user && $isAdminUploader && $importType === 'order_file') {
         $fileId = $msg['document']['file_id'] ?? null;
         $fileName = $msg['document']['file_name'] ?? 'file';
+        $fileSize = (int)($msg['document']['file_size'] ?? 0);
+        // Лимит 5 МБ: Excel-файл заказа реально весит 100-500 КБ. Больше
+        // значит ошибка/мусор/архив — рассылать ресторанам нет смысла.
+        $maxFileBytes = 5 * 1024 * 1024;
+        if ($fileId && $fileSize > $maxFileBytes) {
+            $mb = round($fileSize / 1024 / 1024, 1);
+            sendMessage($chatId, "❌ Файл слишком большой: <b>{$mb} МБ</b>. Максимум 5 МБ. Проверьте, что это именно Excel-файл заказа.");
+            exit;
+        }
+        // Принимаем только реальные xlsx/xls. Иначе админ может случайно
+        // отправить .pdf/.docx/что-угодно — и бот разошлёт мусор всем
+        // ресторанам, они попытаются открыть и сломаются.
+        $fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+        if ($fileId && !in_array($fileExt, ['xlsx', 'xls'], true)) {
+            sendMessage($chatId, "❌ Поддерживаются только файлы <b>.xlsx</b> или <b>.xls</b>. Получено: <code>" . htmlspecialchars($fileExt ?: 'без расширения', ENT_QUOTES, 'UTF-8') . "</code>.\nЗагрузите Excel-файл заказа.");
+            exit;
+        }
         if ($fileId) {
             $pdo->prepare("INSERT INTO order_file (file_name, file_path, telegram_file_id, uploaded_by) VALUES (?, '', ?, ?)")
                 ->execute([$fileName, $fileId, $user['name']]);
 
-            // Уведомляем подписчиков ресторанов о новом файле — только подтверждённые подписки.
+            // Уведомляем подписчиков ресторанов о новом файле — только подтверждённые
+            // и не заблокировавшие бота. Имя загрузившего экранируем: если в name
+            // случайно окажется <, & или " — parse_mode=HTML отвергнет сообщение и
+            // часть ресторанов файл не получит.
             $restSubs = $pdo->query("
                 SELECT DISTINCT chat_id FROM ro_telegram_subs
                 WHERE verified_at IS NOT NULL
+                  AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
             ")->fetchAll(PDO::FETCH_COLUMN);
+            $uploaderName = htmlspecialchars((string)$user['name'], ENT_QUOTES, 'UTF-8');
             $notifSent = 0;
             foreach ($restSubs as $subCid) {
                 if ((string)$subCid === (string)$chatId) continue; // не отправляем загрузившему
-                $notifText = "📄 <b>Новый файл заказа</b>\n\nЗагружен: " . date('d.m.Y H:i') . "\nОт: {$user['name']}";
+                $notifText = "📄 <b>Новый файл заказа</b>\n\nЗагружен: " . date('d.m.Y H:i') . "\nОт: {$uploaderName}";
                 $notifPayload = json_encode([
                     'chat_id' => $subCid,
                     'document' => $fileId,
@@ -2904,14 +3030,17 @@ if (file_exists($importModeFile) && isset($msg['document'])) {
                 curl_setopt_array($nch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $notifPayload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
                 $nres = json_decode(curl_exec($nch), true); curl_close($nch);
                 if (!empty($nres['ok'])) $notifSent++;
+                // Telegram даёт ~30 msg/sec на бот, для документов ещё ниже.
+                // 50мс ≈ 20 msg/sec — безопасно для рассылок 50+ ресторанам.
+                usleep(50000);
             }
 
             $notifInfo = $restSubs ? " Отправлено ресторанам: {$notifSent}." : "";
-            sendMessage($chatId, "✅ <b>Файл заказа обновлён</b>\n📄 {$fileName}\n\nРестораны теперь могут скачать его через бот.{$notifInfo}", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
+            sendMessage($chatId, "✅ <b>Файл заказа обновлён</b>\n📄 " . htmlspecialchars($fileName, ENT_QUOTES, 'UTF-8') . "\n\nРестораны теперь могут скачать его через бот.{$notifInfo}", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
             exit;
         }
     }
-    @unlink($importModeFile);
+    tgStateClear($chatId, 'import');
 }
 
 // Фото, документы, голос — вежливый ответ
@@ -2983,10 +3112,10 @@ if (preg_match('/^\d{6}$/', $text)) {
 
 // /start
 if ($text === '/start') {
-    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
+    tgStateClear($chatId, 'cards');
     $user = getUser($chatId);
     if ($user) {
-        $greeting = "Привет, <b>{$user['name']}</b>! 👋\n\n";
+        $greeting = "Привет, <b>" . tgEsc($user['name']) . "</b>! 👋\n\n";
         sendMessage($chatId, $greeting . getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
     } else {
         // Показываем выбор роли: отдел закупок или ресторан
@@ -3004,9 +3133,9 @@ if ($text === '/help' || $text === '/menu') {
     $user = getUser($chatId);
     if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     setUserMode($user['name'], null); // сброс режима
-    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt"); // сброс режима ввода заявки
-    @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt"); // сброс режима ввода заявки поставщику
+    tgStateClear($chatId, 'cards');
+    tgStateClear($chatId, 'restord'); // сброс режима ввода заявки
+    tgStateClear($chatId, 'soord'); // сброс режима ввода заявки поставщику
     $tips = "\n\n" . botCommandsHelpText()
           . "\n\n💡 <i>Можно также спросить текстом:</i>\n"
           . "• Какой остаток молока?\n"
@@ -3088,7 +3217,7 @@ if ($text === '/entity') {
     $entities = $user['legal_entities'];
     if (count($entities) <= 1) {
         $current = getUserEntity($user);
-        sendMessage($chatId, "🏢 Вам доступно одно юрлицо: <b>{$current}</b>");
+        sendMessage($chatId, "🏢 Вам доступно одно юрлицо: <b>" . tgEsc($current) . "</b>");
         exit;
     }
     $current = getUserEntity($user);
@@ -3098,7 +3227,7 @@ if ($text === '/entity') {
         $short = getEntityShort($le);
         $buttons[] = [['text' => "{$mark}{$short} — {$le}", 'callback_data' => "entity_{$idx}"]];
     }
-    sendMessage($chatId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>{$current}</b>\n\nНажмите для переключения:", ['inline_keyboard' => $buttons]);
+    sendMessage($chatId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>" . tgEsc($current) . "</b>\n\nНажмите для переключения:", ['inline_keyboard' => $buttons]);
     exit;
 }
 
@@ -3168,49 +3297,40 @@ if ($text === '/psc') {
     exit;
 }
 
-// Режим остатков склада (через файл — работает и без аккаунта)
-// Режим сбора остатков
-$scModeFile = sys_get_temp_dir() . "/sc_{$chatId}.txt";
-if (file_exists($scModeFile)) {
-    if (time() - filemtime($scModeFile) > 1800) {
-        @unlink($scModeFile);
-        @unlink(sys_get_temp_dir() . "/sc_data_{$chatId}.json");
-    } elseif (!str_starts_with($text, '/')) {
+// Режим сбора остатков. TTL 30 минут задан в tgStateSet (см. restScStart).
+$scState = tgStateGet($chatId, 'sc');
+if ($scState !== null) {
+    if (!str_starts_with($text, '/')) {
         $userMsgId = $msg['message_id'] ?? null;
         restScProcessInput($chatId, $text, $userMsgId);
         exit;
     } else {
-        @unlink($scModeFile);
-        @unlink(sys_get_temp_dir() . "/sc_data_{$chatId}.json");
+        tgStateClear($chatId, 'sc');
     }
 }
 
-$stockModeFile = sys_get_temp_dir() . "/rest_stock_{$chatId}.txt";
-if (file_exists($stockModeFile)) {
-    if (time() - filemtime($stockModeFile) > 1800) {
-        @unlink($stockModeFile);
-    } elseif (!str_starts_with($text, '/')) {
+// Режим остатков склада. TTL 30 минут задан в tgStateSet (см. restStockStart).
+$stockState = tgStateGet($chatId, 'rest_stock');
+if ($stockState !== null) {
+    if (!str_starts_with($text, '/')) {
         $userMsgId = $msg['message_id'] ?? null;
         restStockSearch($chatId, $text, $userMsgId);
         exit;
     } else {
-        @unlink($stockModeFile);
+        tgStateClear($chatId, 'rest_stock');
     }
 }
 
-// Режим корректировки заказа (через файл — работает и без аккаунта)
-$corrFile = sys_get_temp_dir() . "/corr_{$chatId}.txt";
-if (file_exists($corrFile)) {
-    if (time() - filemtime($corrFile) > 1800) {
-        @unlink($corrFile);
-        @unlink(sys_get_temp_dir() . "/corr_data_{$chatId}.json");
-    } elseif (!str_starts_with($text, '/')) {
+// Режим корректировки заказа (доступен и без аккаунта). TTL 30 минут
+// выставляется в tgStateSet (см. corrStart в bot_rest.php).
+$corrSt = tgStateGet($chatId, 'corr');
+if ($corrSt !== null) {
+    if (!str_starts_with($text, '/')) {
         $userMsgId = $msg['message_id'] ?? null;
-        corrProcessTextInput($chatId, $text, trim(@file_get_contents($corrFile)), $userMsgId);
+        corrProcessTextInput($chatId, $text, (string)($corrSt['mode'] ?? 'corr_items'), $userMsgId);
         exit;
     } else {
-        @unlink($corrFile);
-        @unlink(sys_get_temp_dir() . "/corr_data_{$chatId}.json");
+        tgStateClear($chatId, 'corr');
     }
 }
 
@@ -3220,47 +3340,38 @@ if (!str_starts_with($text, '/')) {
     if (surveyProcessComment($chatId, $text, $userMsgId)) exit;
 }
 
-// Режим ввода заявки поставщику (Камако и др.)
-$soOrderFile = sys_get_temp_dir() . "/soord_{$chatId}.txt";
-if (file_exists($soOrderFile)) {
-    if (time() - filemtime($soOrderFile) > 1800) {
-        @unlink($soOrderFile);
-    } else {
-        $soMode = trim(@file_get_contents($soOrderFile));
-        $soState = json_decode($soMode, true);
-        $isNewSoMode = is_array($soState)
-            && !empty($soState['supplier_id'])
-            && !empty($soState['restaurant_number'])
-            && !empty($soState['delivery_date']);
-        $isLegacySoMode = $soMode && str_starts_with($soMode, 'soord_');
+// Режим ввода заявки поставщику (Камако и др.). TTL 30 минут задан в
+// tgStateSet (см. soOrderShowProducts в bot_rest.php).
+$soSt = tgStateGet($chatId, 'soord');
+if ($soSt !== null) {
+    $isNewSoMode = !empty($soSt['supplier_id']) && !empty($soSt['restaurant_number']) && !empty($soSt['delivery_date']);
+    $isLegacySoMode = isset($soSt['mode']) && str_starts_with((string)$soSt['mode'], 'soord_');
 
-        if ($isNewSoMode || $isLegacySoMode) {
-            if (str_starts_with($text, '/')) {
-                @unlink($soOrderFile);
-            } else {
-                @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt");
-                $userMsgId = $msg['message_id'] ?? null;
-                if ($userMsgId) @deleteMessage($chatId, $userMsgId);
-                soOrderProcessInput($chatId, $text);
-                exit;
-            }
+    if ($isNewSoMode || $isLegacySoMode) {
+        if (str_starts_with($text, '/')) {
+            tgStateClear($chatId, 'soord');
+        } else {
+            tgStateClear($chatId, 'restord');
+            $userMsgId = $msg['message_id'] ?? null;
+            if ($userMsgId) @deleteMessage($chatId, $userMsgId);
+            soOrderProcessInput($chatId, $text);
+            exit;
         }
     }
 }
 
-// Режим поиска карточек (temp-файл) — работает и без привязки аккаунта
-$cardsModeFile = sys_get_temp_dir() . "/cards_mode_{$chatId}.txt";
-if (file_exists($cardsModeFile)) {
-    // Автоочистка: если файл старше 30 минут — удаляем
-    if (time() - filemtime($cardsModeFile) > 1800) {
-        @unlink($cardsModeFile);
-    } elseif (!str_starts_with($text, '/')) {
+// Режим поиска карточек — работает и без привязки аккаунта. TTL не нужен:
+// активный режим автоматически прерывается при /команде, иначе хранится
+// до явного выхода (раньше /tmp хранил 30 мин).
+$cardsState = tgStateGet($chatId, 'cards');
+if ($cardsState !== null) {
+    if (!str_starts_with($text, '/')) {
         $userMsgId = $msg['message_id'] ?? null;
-        $botMsgId = intval(trim(@file_get_contents($cardsModeFile))) ?: null;
+        $botMsgId = (int)($cardsState['bot_msg_id'] ?? 0) ?: null;
         searchCardDirect($chatId, $text, $userMsgId, $botMsgId);
         exit;
     } else {
-        @unlink($cardsModeFile);
+        tgStateClear($chatId, 'cards');
     }
 }
 
@@ -3289,8 +3400,8 @@ if ($userMode === 'cards') {
         // Пусть проваливается в handleFreeText
     } else {
         $userMsgId = $msg['message_id'] ?? null;
-        $cardsModeFile2 = sys_get_temp_dir() . "/cards_mode_{$chatId}.txt";
-        $botMsgId = file_exists($cardsModeFile2) ? (intval(trim(@file_get_contents($cardsModeFile2))) ?: null) : null;
+        $cardsSt = tgStateGet($chatId, 'cards');
+        $botMsgId = (int)($cardsSt['bot_msg_id'] ?? 0) ?: null;
         searchCardDirect($chatId, $text, $userMsgId, $botMsgId);
         exit;
     }
