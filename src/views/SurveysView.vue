@@ -567,6 +567,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
+import { appConfirm } from '@/lib/appDialogs.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useUserStore } from '@/stores/userStore.js'
 import { exportSurveyToExcel } from '@/lib/surveyExport.js'
@@ -1188,7 +1189,7 @@ async function saveSurvey() {
 
 async function sendSurvey() {
   if (!canSendSurvey.value) return
-  if (!confirm('Разослать этот опрос ресторанам в боте и кабинете?')) return
+  if (!(await appConfirm('Разослать этот опрос ресторанам в боте и кабинете?', { title: 'Рассылка опроса', okText: 'Разослать' }))) return
   sending.value = true; clearMessage()
   try {
     const { data } = await db.rpc('survey_send', { id: form.value.id })
@@ -1201,7 +1202,7 @@ async function sendSurvey() {
 
 async function closeSurvey() {
   if (!canCloseSurvey.value) return
-  if (!confirm('Закрыть опрос? После этого рестораны не смогут ответить.')) return
+  if (!(await appConfirm('Закрыть опрос? После этого рестораны не смогут ответить.', { okText: 'Закрыть', danger: true }))) return
   closing.value = true; clearMessage(); menuOpen.value = false
   try {
     await db.rpc('survey_close', { id: form.value.id })
@@ -1214,7 +1215,7 @@ async function closeSurvey() {
 
 async function deleteSurvey() {
   if (!canDeleteSurvey.value) return
-  if (!confirm('Удалить опрос? Это действие нельзя отменить.')) return
+  if (!(await appConfirm('Удалить опрос? Это действие нельзя отменить.', { okText: 'Удалить', danger: true }))) return
   deleting.value = true; clearMessage(); menuOpen.value = false
   try {
     await db.rpc('survey_delete', { id: form.value.id })
@@ -1232,7 +1233,7 @@ async function deleteSurvey() {
 async function deleteResponse(response) {
   if (!canManageResponses.value || !response?.id || !form.value.id) return
   const label = formatRestaurantNumber(response.restaurant_number, response.legal_entity_group)
-  if (!confirm(`Удалить ответ ресторана ${label}?`)) return
+  if (!(await appConfirm(`Удалить ответ ресторана ${label}?`, { okText: 'Удалить', danger: true }))) return
   deletingResponseId.value = Number(response.id); clearMessage()
   try {
     await db.rpc('survey_response_delete', { id: response.id, survey_id: form.value.id })

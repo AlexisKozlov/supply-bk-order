@@ -255,6 +255,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import { tasksApi } from '@/lib/tasksApi.js';
+import { appConfirm, appAlert, appPrompt } from '@/lib/appDialogs.js';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import TaskIcon from './TaskIcon.vue';
 
@@ -357,15 +358,15 @@ function labelsOfBoard(boardId) {
   return b?.labels || [];
 }
 
-function onCreateClick() {
-  const title = prompt('Название шаблона:');
+async function onCreateClick() {
+  const title = await appPrompt('Название шаблона:', '', { title: 'Новый шаблон', okText: 'Создать' });
   if (!title || !title.trim()) return;
   tasksApi.createTemplate({ title: title.trim() })
     .then(async (r) => {
       await loadTemplates();
       openEditor(r.id);
     })
-    .catch(e => alert('Ошибка: ' + e.message));
+    .catch(e => appAlert('Ошибка: ' + e.message, { type: 'error' }));
 }
 
 async function openEditor(id) {
@@ -377,7 +378,7 @@ async function openEditor(id) {
     for (const s of current.value.schedules || []) {
       if (s.is_active) loadPreview(s.id);
     }
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 function saveField(field) {
@@ -398,7 +399,7 @@ function removeAssignee(u) {
 }
 function saveAssignees() {
   tasksApi.setTemplateAssignees(current.value.id, current.value.assignees)
-    .catch(e => alert('Ошибка: ' + e.message));
+    .catch(e => appAlert('Ошибка: ' + e.message, { type: 'error' }));
 }
 
 function addChecklistItem() {
@@ -415,18 +416,18 @@ function removeChecklistItem(i) {
 function saveChecklist() {
   const items = (current.value.checklist || []).map((it, i) => ({ title: it.title, sort_order: i }));
   tasksApi.setTemplateChecklist(current.value.id, items)
-    .catch(e => alert('Ошибка: ' + e.message));
+    .catch(e => appAlert('Ошибка: ' + e.message, { type: 'error' }));
 }
 
 async function addSchedule() {
   if (!boardsFull.value.length) {
-    alert('Сначала создайте хотя бы одну доску для назначения расписаний');
+    await appAlert('Сначала создайте хотя бы одну доску для назначения расписаний', { type: 'warning' });
     return;
   }
   const b = boardsFull.value[0];
   const col = (b.columns || []).find(c => !c.is_archive_column);
   if (!col) {
-    alert('У доски «' + b.title + '» нет неархивных колонок');
+    await appAlert('У доски «' + b.title + '» нет неархивных колонок', { type: 'warning' });
     return;
   }
   try {
@@ -441,14 +442,14 @@ async function addSchedule() {
     });
     // Перезагружаем редактор
     await openEditor(current.value.id);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 // Сохранение простых полей расписания (колонка, срок задачи).
 async function saveScheduleField(s, field) {
   const payload = { [field]: s[field] };
   try { await tasksApi.updateSchedule(s.id, payload); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 // Сохраняет весь блок повтора целиком (бэк пересчитывает следующую дату).
@@ -465,7 +466,7 @@ async function saveRecurrence(s) {
     });
     // Перечитываем редактор — обновятся «Следующая дата» и заголовок расписания.
     await openEditor(current.value.id);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 function onKindChange(s) {
@@ -534,7 +535,7 @@ async function onScheduleBoardChange(s) {
       target_column_id: s.target_column_id,
       label_ids: [],
     });
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 async function toggleScheduleActive(s) {
@@ -548,15 +549,15 @@ async function toggleLabel(s, labelId) {
   if (set.has(labelId)) set.delete(labelId); else set.add(labelId);
   s.label_ids = Array.from(set);
   try { await tasksApi.updateSchedule(s.id, { label_ids: s.label_ids }); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 async function deleteSchedule(id) {
-  if (!confirm('Удалить это расписание? Шаблон останется.')) return;
+  if (!(await appConfirm('Удалить это расписание? Шаблон останется.', { okText: 'Удалить', danger: true }))) return;
   try {
     await tasksApi.deleteSchedule(id);
     await openEditor(current.value.id);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 async function runScheduleNow(id) {
@@ -569,7 +570,7 @@ async function runScheduleNow(id) {
       const s = (current.value.schedules || []).find(x => x.id === id);
       if (s) { expandedCards.value[id] = false; toggleScheduleCards(s); }
     }
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 async function loadPreview(id) {
@@ -582,11 +583,11 @@ async function loadPreview(id) {
 }
 
 async function deleteTemplate() {
-  if (!confirm('Удалить шаблон и все его расписания? Уже созданные карточки останутся.')) return;
+  if (!(await appConfirm('Удалить шаблон и все его расписания? Уже созданные карточки останутся.', { okText: 'Удалить', danger: true }))) return;
   try {
     await tasksApi.deleteTemplate(current.value.id);
     goBack();
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 function priorityLabel(p) {

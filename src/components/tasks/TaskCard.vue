@@ -218,14 +218,25 @@
         </div>
       </div>
     </Teleport>
+    <ConfirmModal v-if="confirmModal.show"
+                  :title="confirmModal.title"
+                  :message="confirmModal.message"
+                  :ok-text="confirmModal.okText"
+                  :cancel-text="confirmModal.cancelText"
+                  @confirm="onConfirmOk"
+                  @cancel="onConfirmCancel"/>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, inject, nextTick } from 'vue';
+import { computed, ref, inject, nextTick, defineAsyncComponent } from 'vue';
 import TaskIcon from './TaskIcon.vue';
 import DatetimePicker from './DatetimePicker.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
+import { confirmProtocolDueChange } from '@/lib/protocolDueGuard.js';
+import { useConfirm } from '@/composables/useConfirm.js';
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
@@ -619,8 +630,9 @@ async function setPriority(p) {
 
 async function setDue(e) {
   const v = e.target?.value || '';
-  closePopover();
   const due = v ? v.replace('T', ' ') + ':00' : null;
+  closePopover();
+  if (!(await confirmProtocolDueChange(props.card, due, confirmAction))) return;
   try {
     await tasksApi.updateCard(props.card.id, { due_date: due });
     props.card.due_date = due;
@@ -630,10 +642,12 @@ async function setDue(e) {
 // Колбэк нового календаря (DatetimePicker отдаёт уже отформатированное
 // «YYYY-MM-DD HH:MM:SS» или null).
 async function onCardDuePicked(iso) {
+  const due = iso || null;
   closePopover();
+  if (!(await confirmProtocolDueChange(props.card, due, confirmAction))) return;
   try {
-    await tasksApi.updateCard(props.card.id, { due_date: iso || null });
-    props.card.due_date = iso || null;
+    await tasksApi.updateCard(props.card.id, { due_date: due });
+    props.card.due_date = due;
   } catch (er) { showError(er); }
 }
 

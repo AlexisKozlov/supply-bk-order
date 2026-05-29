@@ -138,6 +138,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { parseRestaurantInput } from '@/lib/legalEntities.js';
+import { appConfirm, appPrompt } from '@/lib/appDialogs.js';
 
 const store = useRestaurantOrderStore();
 const toast = useToastStore();
@@ -231,7 +232,7 @@ async function handleBulkCreate() {
     return;
   }
   if (bulkMode.value === 'all') {
-    if (!confirm('Затереть пароли ВСЕМ ресторанам? Все активные сессии будут продолжать работать со старыми паролями (пока не выйдут), но войти заново можно будет только с новым паролем.')) return;
+    if (!(await appConfirm('Затереть пароли ВСЕМ ресторанам? Все активные сессии будут продолжать работать со старыми паролями (пока не выйдут), но войти заново можно будет только с новым паролем.', { title: 'Сброс паролей всем', okText: 'Затереть', danger: true }))) return;
   }
   busy.value = true;
   try {
@@ -250,9 +251,9 @@ async function handleBulkCreate() {
 async function handleSetEmail(u) {
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
   const current = u.email || '';
-  const value = prompt(`Email для ресторана ${label}:\n\nТолько рабочий: @burger-king.by или @dodopizza.by.\nПосле сохранения на этот адрес уйдёт письмо для подтверждения. Чтобы очистить email — оставьте поле пустым.`, current);
+  const value = await appPrompt(`Только рабочий: @burger-king.by или @dodopizza.by.\nПосле сохранения на этот адрес уйдёт письмо для подтверждения. Чтобы очистить email — оставьте поле пустым.`, current, { title: `Email для ресторана ${label}`, okText: 'Сохранить' });
   if (value === null) return;
-  const trimmed = value.trim();
+  const trimmed = String(value).trim();
   if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
     toast.error('Похоже, email указан с ошибкой', '');
     return;
@@ -280,7 +281,7 @@ async function handleSetEmail(u) {
 async function handleSetPassword(u) {
   const verb = u.has_password ? 'Новый пароль' : 'Задайте пароль';
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
-  const pass = prompt(`${verb} для ресторана ${label} (минимум 8 символов):`);
+  const pass = await appPrompt('Минимум 8 символов', '', { title: `${verb} для ресторана ${label}`, okText: 'Сохранить' });
   if (!pass) return;
   if (pass.length < 8) {
     toast.error('Слишком короткий пароль', 'Минимум 8 символов');
@@ -301,7 +302,7 @@ async function handleSetPassword(u) {
 async function handleToggleUser(u) {
   const next = u.is_active ? 0 : 1;
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
-  if (!confirm(`${u.is_active ? 'Отключить' : 'Включить'} ресторан ${label}?`)) return;
+  if (!(await appConfirm(`${u.is_active ? 'Отключить' : 'Включить'} ресторан ${label}?`, { okText: u.is_active ? 'Отключить' : 'Включить', danger: !!u.is_active }))) return;
   busy.value = true;
   try {
     await store.adminToggleUser(u.restaurant_number, u.legal_entity_group, next);

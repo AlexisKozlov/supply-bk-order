@@ -130,7 +130,46 @@
         </details>
 
         <div v-if="req?.status === 'SENT'" class="trm-sent-banner">
-          ✓ Заявка отправлена охране. История машин зафиксирована.
+          <div class="trm-sent-head">✓ Заявка отправлена охране</div>
+
+          <div v-if="sendLog.length" class="trm-sent-list">
+            <div v-for="(s, si) in sendLog" :key="s.id" class="trm-sent-card" :class="{ 'trm-sent-card-err': s.smtp_error }">
+              <div class="trm-sent-row">
+                <span class="trm-sent-label">Когда:</span>
+                <span>{{ formatDateTime(s.sent_at) }}</span>
+              </div>
+              <div class="trm-sent-row">
+                <span class="trm-sent-label">Кто отправил:</span>
+                <span>{{ s.sent_by || '—' }}</span>
+              </div>
+              <div class="trm-sent-row">
+                <span class="trm-sent-label">Кому:</span>
+                <span>
+                  <code v-for="(r, ri) in s.recipients" :key="ri" class="trm-sent-addr">{{ r }}</code>
+                  <span v-if="!s.recipients.length" class="trm-sent-empty">—</span>
+                </span>
+              </div>
+              <div v-if="s.cc_email" class="trm-sent-row">
+                <span class="trm-sent-label">Копия:</span>
+                <code class="trm-sent-addr">{{ s.cc_email }}</code>
+              </div>
+              <div class="trm-sent-row">
+                <span class="trm-sent-label">Машин в заявке:</span>
+                <span>{{ activeVehicles.length }}</span>
+              </div>
+              <div v-if="s.smtp_error" class="trm-sent-row trm-sent-error">
+                <span class="trm-sent-label">Ошибка SMTP:</span>
+                <span>{{ s.smtp_error }}</span>
+              </div>
+              <div v-if="si === 0" class="trm-sent-actions">
+                <button class="trm-btn ghost" @click="downloadXlsx">Скачать xlsx ещё раз</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="trm-sent-manual">
+            Отправлено вручную через свою почту. Истории отправки в системе нет.
+            <div class="trm-sent-actions"><button class="trm-btn ghost" @click="downloadXlsx">Скачать xlsx ещё раз</button></div>
+          </div>
         </div>
       </div>
 
@@ -157,6 +196,7 @@
 import { ref, reactive, computed, onMounted, defineAsyncComponent } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { normalizePlate, normalizePhone } from '@/lib/titNormalize.js';
+import { appConfirm, appAlert } from '@/lib/appDialogs.js';
 
 const TitSendModal = defineAsyncComponent(() => import('@/components/modals/TitSendModal.vue'));
 
@@ -166,6 +206,7 @@ const emit = defineEmits(['close', 'changed']);
 const req = ref(null);
 const vehicles = ref([]);
 const emails = ref([]);
+const sendLog = ref([]);
 const supplierDefaults = ref(null);
 const recommendedWarehouses = ref([6]);
 const loaded = ref(false);
@@ -275,6 +316,7 @@ async function reload() {
       end_time_local:   dbDateTimeToLocal(v.end_time,   req.value?.delivery_date, '16:00'),
     }));
     emails.value = data.emails || [];
+    sendLog.value = data.send_log || [];
     supplierDefaults.value = data.supplier_defaults || null;
     recommendedWarehouses.value = Array.isArray(data.recommended_warehouses) ? data.recommended_warehouses : [6];
     // Базовые поля для редактирования (поставщик/юрлицо/дата)
@@ -323,12 +365,12 @@ function addVehicle() {
   });
 }
 
-async function saveVehicle(v, confirm) {
+async function saveVehicle(v, doConfirm) {
   try {
     const plateOk = normalizePlate(v.plate).valid;
     const phoneOk = normalizePhone(v.phone).valid;
-    if (confirm && (!plateOk || !phoneOk)) {
-      alert('Для подтверждения нужны валидный номер машины и телефон.');
+    if (doConfirm && (!plateOk || !phoneOk)) {
+      await appAlert('Для подтверждения нужны валидный номер машины и телефон.', { type: 'warning' });
       return;
     }
     const { data, error: e } = await db.rpc('tit_vehicle_save', {
@@ -338,18 +380,18 @@ async function saveVehicle(v, confirm) {
       warehouse: v.warehouse, entry_kind: v.entry_kind,
       start_time: localToDbDateTime(v.start_time_local),
       end_time:   localToDbDateTime(v.end_time_local),
-      confirm,
+      confirm: doConfirm,
     });
     if (e || data?.error) throw new Error(e || data.error);
     await reload();
     emit('changed');
   } catch (e) {
-    alert('Не удалось сохранить: ' + (e.message || e));
+    await appAlert('Не удалось сохранить: ' + (e.message || e), { type: 'error' });
   }
 }
 
 async function deleteVehicle(v) {
-  if (!confirm('Удалить эту машину из заявки?')) return;
+  if (!(await appConfirm('Удалить эту машину из заявки?', { okText: 'Удалить', danger: true }))) return;
   if (!v.id) {
     // ещё не сохранена — просто убираем из памяти
     vehicles.value = vehicles.value.filter(x => x !== v);
@@ -359,7 +401,7 @@ async function deleteVehicle(v) {
     await db.rpc('tit_vehicle_delete', { vehicle_id: v.id, request_id: props.id });
     await reload();
     emit('changed');
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 async function applyDefaults() {
@@ -367,25 +409,25 @@ async function applyDefaults() {
     await db.rpc('tit_apply_supplier_default', { request_id: props.id });
     await reload();
     emit('changed');
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 async function cancelRequest() {
-  if (!confirm('Отменить заявку? Машины не удалятся, но в xlsx охране не уйдёт.')) return;
+  if (!(await appConfirm('Отменить заявку? Машины не удалятся, но в xlsx охране не уйдёт.', { title: 'Отмена заявки', okText: 'Отменить заявку', danger: true }))) return;
   try {
     await db.rpc('tit_cancel', { id: props.id });
     emit('changed');
     emit('close');
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { appAlert('Ошибка: ' + e.message, { type: 'error' }); }
 }
 
 async function deleteRequest() {
-  if (!confirm('Удалить заявку полностью? Запись исчезнет из списка, привязанные письма станут «непривязанными».')) return;
+  if (!(await appConfirm('Удалить заявку полностью? Запись исчезнет из списка, привязанные письма станут «непривязанными».', { okText: 'Удалить', danger: true }))) return;
   try {
     await db.rpc('tit_delete', { id: props.id });
     emit('changed');
     emit('close');
-  } catch (e) { alert('Не удалось удалить: ' + (e.message || e)); }
+  } catch (e) { appAlert('Не удалось удалить: ' + (e.message || e), { type: 'error' }); }
 }
 
 // Автоматически удаляем пустую заявку при закрытии: если за время сессии
@@ -414,14 +456,14 @@ async function downloadXlsx() {
     const a = document.createElement('a');
     a.href = url; a.download = data.filename || 'tit.xlsx'; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (e) { alert('Не удалось скачать: ' + (e.message || e)); }
+  } catch (e) { appAlert('Не удалось скачать: ' + (e.message || e), { type: 'error' }); }
 }
 
 function openPreview() { previewOpen.value = true; }
 function onSent() { previewOpen.value = false; emit('changed'); emit('close'); }
 
 async function markSent() {
-  if (!confirm('Пометить заявку как отправленную? Письмо через сайт не пойдёт — используйте, когда отправили вручную через свою почту.')) return;
+  if (!(await appConfirm('Пометить заявку как отправленную? Письмо через сайт не пойдёт — используйте, когда отправили вручную через свою почту.', { title: 'Пометить отправленной', okText: 'Пометить' }))) return;
   markingSent.value = true;
   try {
     const { error: e } = await db.rpc('tit_mark_sent', { id: props.id });
@@ -429,7 +471,7 @@ async function markSent() {
     emit('changed');
     emit('close');
   } catch (e) {
-    alert('Не удалось: ' + (e.message || e));
+    await appAlert('Не удалось: ' + (e.message || e), { type: 'error' });
   } finally {
     markingSent.value = false;
   }
@@ -507,7 +549,19 @@ onMounted(reload);
 .trm-email-body { color: #6B4F00; font-size: 12px; white-space: pre-wrap; max-height: 100px; overflow: hidden; line-height: 1.4; }
 .trm-email-parsed { font-size: 12px; color: #6B4F00; margin-top: 6px; }
 
-.trm-sent-banner { background: #E8F5E9; border: 1.5px solid #66BB6A; color: #1B5E20; padding: 14px; border-radius: 10px; text-align: center; }
+.trm-sent-banner { background: #E8F5E9; border: 1.5px solid #66BB6A; color: #1B5E20; padding: 14px 16px; border-radius: 10px; }
+.trm-sent-head { font-size: 15px; font-weight: 700; margin-bottom: 10px; text-align: center; }
+.trm-sent-list { display: flex; flex-direction: column; gap: 10px; }
+.trm-sent-card { background: #fff; border: 1px solid #C5E1A5; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.trm-sent-card-err { border-color: #EF9A9A; background: #FFEBEE; }
+.trm-sent-row { display: flex; gap: 8px; font-size: 13px; color: #1B5E20; align-items: baseline; flex-wrap: wrap; }
+.trm-sent-row.trm-sent-error { color: #B71C1C; }
+.trm-sent-label { min-width: 130px; color: #558B2F; font-weight: 600; }
+.trm-sent-card-err .trm-sent-label { color: #B71C1C; }
+.trm-sent-addr { font-family: ui-monospace, Menlo, monospace; background: #F1F8E9; color: #33691E; padding: 1px 6px; border-radius: 4px; margin-right: 4px; font-size: 12px; display: inline-block; }
+.trm-sent-empty { color: #8C7B6E; }
+.trm-sent-actions { margin-top: 6px; display: flex; gap: 8px; }
+.trm-sent-manual { background: #fff; border: 1px dashed #C5E1A5; padding: 12px; border-radius: 8px; font-size: 13px; color: #33691E; text-align: center; }
 
 .trm-loading, .trm-error { padding: 60px 20px; text-align: center; color: #8C7B6E; }
 .trm-error { color: #B91C1C; }

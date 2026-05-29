@@ -199,14 +199,25 @@
         </div>
       </div>
     </Teleport>
+    <ConfirmModal v-if="confirmModal.show"
+                  :title="confirmModal.title"
+                  :message="confirmModal.message"
+                  :ok-text="confirmModal.okText"
+                  :cancel-text="confirmModal.cancelText"
+                  @confirm="onConfirmOk"
+                  @cancel="onConfirmCancel"/>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, h, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, h, nextTick, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import TaskIcon from './TaskIcon.vue';
 import DatetimePicker from './DatetimePicker.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
+import { confirmProtocolDueChange } from '@/lib/protocolDueGuard.js';
+import { useConfirm } from '@/composables/useConfirm.js';
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 
@@ -401,6 +412,7 @@ async function setDue(iso) {
   const card = editor.value?.card;
   closeEditor();
   if (!card) return;
+  if (!(await confirmProtocolDueChange(card, iso || null, confirmAction))) return;
   try { await store.updateCard(card.id, { due_date: iso || null }); }
   catch (e) { showError(e); }
 }

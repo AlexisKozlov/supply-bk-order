@@ -1134,6 +1134,23 @@ if ($action === 'board' && $id && $method === 'GET') {
         }
     }
 
+    // Признак «карточка пришла из решения протокола» — для confirm на фронте
+    // при изменении дедлайна (двунаправленный sync с decision).
+    if ($cards) {
+        $ids = array_column($cards, 'id');
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $pdcMap = [];
+        try {
+            $st = $pdo->prepare("SELECT card_id, decision_id FROM protocol_decision_cards WHERE card_id IN ($ph)");
+            $st->execute($ids);
+            foreach ($st->fetchAll() as $r) $pdcMap[(int)$r['card_id']] = (int)$r['decision_id'];
+        } catch (\Throwable $e) { /* таблиц протоколов может не быть */ }
+        foreach ($cards as &$cc) {
+            $cc['protocol_decision_id'] = $pdcMap[(int)$cc['id']] ?? null;
+        }
+        unset($cc);
+    }
+
     $s = $pdo->prepare("SELECT * FROM tasks_labels WHERE board_id = ? ORDER BY sort_order, id");
     $s->execute([$boardId]);
     $labels = $s->fetchAll();
@@ -1666,6 +1683,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         // у каждого ответственного — своя копия на своей доске. На текущей карточке
         // покажем имена ОСТАЛЬНЫХ ответственных по тому же решению (read-only).
         $protocolCoAssignees = [];
+        $protocolDecisionId  = null;
         try {
             $pca = $pdo->prepare("
                 SELECT DISTINCT pdc2.user_name
@@ -1675,6 +1693,11 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             ");
             $pca->execute([$cardId]);
             $protocolCoAssignees = array_column($pca->fetchAll(), 'user_name');
+            // Признак протокольной карточки — для фронтового confirm при смене дедлайна.
+            $pd = $pdo->prepare("SELECT decision_id FROM protocol_decision_cards WHERE card_id = ? LIMIT 1");
+            $pd->execute([$cardId]);
+            $val = $pd->fetchColumn();
+            $protocolDecisionId = $val !== false ? (int)$val : null;
         } catch (\Throwable $e) { /* таблицы протоколов могут отсутствовать в части окружений */ }
 
         // Таймер: суммы по пользователям + открытый интервал
@@ -1694,6 +1717,7 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             'subtasks'    => $subtasks,
             'parent'      => $parentInfo,
             'protocol_co_assignees' => $protocolCoAssignees,
+            'protocol_decision_id'  => $protocolDecisionId,
             'timer'       => $timer,
             'dependencies' => tCardDependencies($pdo, $cardId),
         ]);
@@ -1761,6 +1785,40 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             $extra = $extraBase + ['due_date' => $changes['due_date']['to']];
             foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
                 taskPushNotif($pdo, $t, 'due_changed', $cardId, tBoardForRecipient($pdo, $cardId, $t, $card['board_id']), $tUserName, $extra);
+            }
+            // Протокольная задача — распространить новую дату на решение и
+            // на карточки остальных соисполнителей. Фронт показывает confirm
+            // перед отправкой PATCH, так что согласие пользователя уже есть.
+            $pdcStmt = $pdo->prepare("SELECT decision_id FROM protocol_decision_cards WHERE card_id = ? LIMIT 1");
+            $pdcStmt->execute([$cardId]);
+            $decId = (int)$pdcStmt->fetchColumn();
+            if ($decId > 0) {
+                $newDue   = $changes['due_date']['to']; // 'YYYY-MM-DD HH:MM:SS' или null
+                $newDate  = $newDue ? substr($newDue, 0, 10) : null;
+                $pdo->prepare("UPDATE protocol_decisions SET deadline = ? WHERE id = ?")
+                    ->execute([$newDate, $decId]);
+                // Карточки остальных соисполнителей: ставим тот же due_date,
+                // пишем историю и шлём уведомления.
+                $siblings = $pdo->prepare("SELECT card_id FROM protocol_decision_cards WHERE decision_id = ? AND card_id <> ?");
+                $siblings->execute([$decId, $cardId]);
+                foreach ($siblings->fetchAll() as $row) {
+                    $sibId = (int)$row['card_id'];
+                    $sibCur = $pdo->prepare("SELECT due_date, board_id, title FROM tasks_cards WHERE id = ?");
+                    $sibCur->execute([$sibId]);
+                    $sib = $sibCur->fetch();
+                    if (!$sib) continue;
+                    if ($sib['due_date'] === $newDue) continue;
+                    $pdo->prepare("UPDATE tasks_cards SET due_date = ? WHERE id = ?")
+                        ->execute([$newDue, $sibId]);
+                    tHistory($pdo, $sibId, $tUserName, 'updated', [
+                        'due_date' => ['from' => $sib['due_date'], 'to' => $newDue],
+                        'reason'   => 'sync_from_protocol_sibling',
+                    ]);
+                    $sibExtra = ['card_title' => $sib['title'], 'board_title' => '', 'due_date' => $newDue];
+                    foreach (tCardRecipients($pdo, $sibId, [$tUserName]) as $rcp) {
+                        taskPushNotif($pdo, $rcp, 'due_changed', $sibId, tBoardForRecipient($pdo, $sibId, $rcp, $sib['board_id']), $tUserName, $sibExtra);
+                    }
+                }
             }
         }
         if (isset($body['is_done'])) {

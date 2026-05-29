@@ -326,6 +326,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 
 const toast = useToastStore();
 
@@ -514,7 +515,7 @@ async function toggleBarcodePrimary(row) {
 }
 
 async function deleteBarcodeRow(row) {
-  if (!confirm(`Удалить штрихкод ${row.barcode} (товар ${row.sku})?`)) return;
+  if (!(await appConfirm(`Удалить штрихкод ${row.barcode} (товар ${row.sku})?`, { okText: 'Удалить', danger: true }))) return;
   try {
     const res = await fetch(`/api/ro/admin/barcodes/${row.id}`, {
       method: 'DELETE',

@@ -562,6 +562,7 @@
 import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
+import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
@@ -939,13 +940,13 @@ async function handleExtendDeadline() {
   if (!selectedDate.value) return;
   const currentDeadlineDate = selectedDeadline.value?.split(' ')?.[0] || '';
   const currentDeadlineTime = selectedDeadline.value?.split(' ')?.[1]?.substring(0, 5) || '15:00';
-  const deadlineDate = prompt('Дата дедлайна (YYYY-MM-DD):', currentDeadlineDate);
+  const deadlineDate = await appPrompt('Формат YYYY-MM-DD', currentDeadlineDate, { title: 'Дата дедлайна', okText: 'Далее' });
   if (!deadlineDate) return;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(deadlineDate)) {
     toast.warning('Неверная дата', 'Введите дату в формате YYYY-MM-DD');
     return;
   }
-  const time = prompt('Новое время дедлайна для этой даты (HH:MM):', currentDeadlineTime);
+  const time = await appPrompt('Формат HH:MM (например 15:00)', currentDeadlineTime, { title: 'Новое время дедлайна', okText: 'Сохранить' });
   if (!time) return;
   if (!/^\d{1,2}:\d{2}$/.test(time)) {
     toast.warning('Неверный формат', 'Введите время в формате HH:MM (например 15:00)');

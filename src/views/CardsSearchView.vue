@@ -371,6 +371,7 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUserStore } from '../stores/userStore'
+import { appConfirm } from '@/lib/appDialogs.js'
 
 const MaintenanceScreen = defineAsyncComponent(() => import('@/components/MaintenanceScreen.vue'))
 
@@ -1087,7 +1088,7 @@ async function updateCard() {
 // Удалить карточку
 async function deleteCard() {
   if (!editingCard.value) return
-  if (!confirm(`Удалить карточку ${editingCard.value.id}?`)) return
+  if (!(await appConfirm(`Удалить карточку ${editingCard.value.id}?`, { okText: 'Удалить', danger: true }))) return
 
   try {
     const res = await fetchWithTimeout(`${API_BASE}/cards/${encodeURIComponent(editingCard.value.id)}`, {

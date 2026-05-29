@@ -986,6 +986,7 @@
 import { ref, reactive, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative, toLocalDateStr } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
@@ -2266,7 +2267,7 @@ async function sendBugReply() {
 }
 
 async function deleteBugReport(r) {
-  if (!confirm('Удалить обращение #' + r.id + '?')) return;
+  if (!(await appConfirm('Удалить обращение #' + r.id + '?', { okText: 'Удалить', danger: true }))) return;
   await db.rpc('delete_bug_report', { id: r.id });
   bugDetail.value = null;
   toast.success('Обращение удалено');

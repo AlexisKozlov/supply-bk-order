@@ -258,6 +258,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { roFetch } from '@/lib/roUtils.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 
 const BurgerSpinner = defineAsyncComponent(() => import('@/components/ui/BurgerSpinner.vue'));
 const toast = useToastStore();
@@ -484,7 +485,7 @@ function cancelEdit() {
   formComment.value = '';
 }
 async function askCancel(batch) {
-  if (!confirm('Отозвать корректировку? Это действие нельзя отменить.')) return;
+  if (!(await appConfirm('Отозвать корректировку? Это действие нельзя отменить.', { okText: 'Отозвать', danger: true }))) return;
   busy.value = true;
   try {
     await roFetch('/api/restaurant-corrections/cancel', {

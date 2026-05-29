@@ -99,12 +99,21 @@ function warehouseFromStockSheet(sheetName) {
 }
 
 export function extractStockReportDateFromName(fileName) {
-  const fullDateMatch = String(fileName || '').match(/(\d{2})[.\-_](\d{2})[.\-_](\d{2,4})/);
+  const name = String(fileName || '');
+  // 1) ISO: YYYY-MM-DD / YYYY_MM_DD / YYYY.MM.DD — у новых файлов Stock_mailing
+  //    Якорим, чтобы регулярка ниже (dd.mm.yyyy) не выдрала «26-05-27» из «2026-05-27».
+  const isoMatch = name.match(/(?<!\d)(\d{4})[.\-_](\d{2})[.\-_](\d{2})(?!\d)/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+  // 2) dd.mm.yyyy / dd.mm.yy — классический формат с днём впереди
+  const fullDateMatch = name.match(/(?<!\d)(\d{2})[.\-_](\d{2})[.\-_](\d{2,4})(?!\d)/);
   if (fullDateMatch) {
     const y = fullDateMatch[3].length === 2 ? '20' + fullDateMatch[3] : fullDateMatch[3];
     return `${y}-${fullDateMatch[2]}-${fullDateMatch[1]}`;
   }
-  const shortDateMatch = String(fileName || '').match(/(\d{2})[.\-_](\d{2})(?![.\-_\d])/);
+  // 3) dd.mm без года — берём текущий год
+  const shortDateMatch = name.match(/(?<!\d)(\d{2})[.\-_](\d{2})(?![.\-_\d])/);
   if (shortDateMatch) {
     return `${new Date().getFullYear()}-${shortDateMatch[2]}-${shortDateMatch[1]}`;
   }

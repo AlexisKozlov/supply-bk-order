@@ -1196,6 +1196,7 @@ import { useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { appConfirm, appAlert, appPrompt } from '@/lib/appDialogs.js';
 import { formatDate, formatTime, formatDateTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
@@ -1375,7 +1376,7 @@ async function openOrderHistory(order) {
   try {
     historyEvents.value = await store.adminGetOrderHistory(order.id);
   } catch (e) {
-    alert('Не удалось загрузить историю: ' + (e.message || ''));
+    await appAlert('Не удалось загрузить историю: ' + (e.message || ''), { type: 'error' });
   } finally {
     historyLoading.value = false;
   }
@@ -1726,7 +1727,7 @@ function copyUnmatched() {
 async function handleStockFile(event) {
   const file = event.target.files[0];
   if (!file) return;
-  const dateStr = prompt('Дата остатков (ГГГГ-ММ-ДД):', new Date().toISOString().slice(0, 10));
+  const dateStr = await appPrompt('Формат: ГГГГ-ММ-ДД', new Date().toISOString().slice(0, 10), { title: 'Дата остатков', okText: 'Далее' });
   if (!dateStr) { event.target.value = ''; return; }
   stockUploading.value = true;
   stockMessage.value = '';
@@ -1985,10 +1986,10 @@ function closeExportModal() {
   showExportModal.value = false;
 }
 
-function closeOrderModal() {
+async function closeOrderModal() {
   if (saving.value) return; // block close during save
   if (originalEditItems.value !== null && JSON.stringify(editItems.value) !== originalEditItems.value) {
-    if (!confirm('Закрыть? Несохранённые изменения будут потеряны')) return;
+    if (!(await appConfirm('Закрыть? Несохранённые изменения будут потеряны', { okText: 'Закрыть', danger: true }))) return;
   }
   showOrderModal.value = false;
   originalEditItems.value = null;
@@ -2417,7 +2418,7 @@ async function changeDeliveryDate() {
 
 async function handleDeleteOrder(order) {
   if (!order?.id) return;
-  if (!confirm(`Удалить заказ ресторана ${formatRestaurantNumber(order.restaurant_number, order.legal_entity_group)}?`)) return;
+  if (!(await appConfirm(`Удалить заказ ресторана ${formatRestaurantNumber(order.restaurant_number, order.legal_entity_group)}?`, { okText: 'Удалить', danger: true }))) return;
   saving.value = true;
   try {
     await store.adminDeleteOrder(order.id);
@@ -2457,7 +2458,7 @@ async function handleBulkCreate() {
   const warn = bulkMode.value === 'all'
     ? 'Назначить пароль ВСЕМ активным ресторанам? У существующих пароль будет заменён.'
     : 'Назначить пароль только тем ресторанам, у которых пароля ещё нет?';
-  if (!confirm(warn)) return;
+  if (!(await appConfirm(warn, { title: 'Назначить пароли', okText: 'Назначить' }))) return;
   usersBusy.value = true;
   try {
     const result = await store.adminCreateBulkUsers(bulkPassword.value, bulkMode.value);
@@ -2475,9 +2476,9 @@ async function handleBulkCreate() {
 async function handleSetEmail(u) {
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
   const current = u.email || '';
-  const value = prompt(`Email для ресторана ${label}:\n\nПосле сохранения на этот адрес уйдёт письмо для подтверждения. Чтобы очистить email — оставьте поле пустым.`, current);
+  const value = await appPrompt(`После сохранения на этот адрес уйдёт письмо для подтверждения. Чтобы очистить email — оставьте поле пустым.`, current, { title: `Email для ресторана ${label}`, okText: 'Сохранить' });
   if (value === null) return; // отмена
-  const trimmed = value.trim();
+  const trimmed = String(value).trim();
   if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
     toast.error('Похоже, email указан с ошибкой', '');
     return;
@@ -2501,7 +2502,7 @@ async function handleSetEmail(u) {
 async function handleSetPassword(u) {
   const verb = u.has_password ? 'Новый пароль' : 'Задайте пароль';
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
-  const pass = prompt(`${verb} для ресторана ${label} (минимум 8 символов):`);
+  const pass = await appPrompt('Минимум 8 символов', '', { title: `${verb} для ресторана ${label}`, okText: 'Сохранить' });
   if (!pass) return;
   if (pass.length < 8) {
     toast.error('Слишком короткий пароль', 'Минимум 8 символов');
@@ -2575,7 +2576,7 @@ async function saveFullTemplate() {
 }
 
 async function handleImportFromStock() {
-  if (!confirm(`Заменить шаблон «${tplCategory.value}» товарами, у которых есть остаток на складе? Текущие позиции в этой категории будут удалены.`)) return;
+  if (!(await appConfirm(`Заменить шаблон «${tplCategory.value}» товарами, у которых есть остаток на складе? Текущие позиции в этой категории будут удалены.`, { title: 'Заменить шаблон', okText: 'Заменить', danger: true }))) return;
   try {
     const result = await store.adminImportTemplateFromStock(tplLegalEntity.value, tplCategory.value);
     // Удаляем старые этой категории, добавляем новые

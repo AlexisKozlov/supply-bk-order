@@ -129,6 +129,7 @@ import SupplierContactEditModal from '@/components/modals/SupplierContactEditMod
 import SupplierContactBulkAddModal from '@/components/modals/SupplierContactBulkAddModal.vue';
 import SupplierContactBulkEditModal from '@/components/modals/SupplierContactBulkEditModal.vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { appConfirm, appAlert } from '@/lib/appDialogs.js';
 
 const restaurants = ref([]);
 const loadingList = ref(false);
@@ -272,14 +273,14 @@ async function onSaved() {
 }
 
 async function askDelete(contact) {
-  if (!window.confirm(`Удалить контакт «${contact.name}»?`)) return;
+  if (!(await appConfirm(`Удалить контакт «${contact.name}»?`, { okText: 'Удалить', danger: true }))) return;
   try {
     await apiPost('/api/restaurant-supplier-contacts/delete', { id: contact.id });
     await loadGroups();
     const overview = await apiGet('/api/restaurant-supplier-contacts/manager-overview').catch(() => null);
     if (overview?.restaurants) restaurants.value = overview.restaurants;
   } catch (e) {
-    alert(e.message || 'Не удалось удалить контакт');
+    appAlert(e.message || 'Не удалось удалить контакт', { type: 'error' });
   }
 }
 

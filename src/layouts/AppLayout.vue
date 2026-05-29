@@ -380,6 +380,9 @@
     <!-- Командная палитра (Ctrl+K или /) -->
     <CommandPalette ref="cmdPalette" />
 
+    <!-- Глобальные стилизованные диалоги (заменяют window.confirm/alert/prompt) -->
+    <AppDialogHost />
+
     <!-- Drag-from-anywhere виджет: на любой странице (кроме /tasks) висит
          маленькая пилюля в правом нижнем углу. Перетащил карточку
          бизнес-сущности с поддержкой application/x-bk-entity → создалась
@@ -404,6 +407,7 @@ import BroadcastPopup from '@/components/BroadcastPopup.vue';
 import BugReportButton from '@/components/BugReportButton.vue';
 import OfflineIndicator from '@/components/ui/OfflineIndicator.vue';
 import CommandPalette from '@/components/ui/CommandPalette.vue';
+import AppDialogHost from '@/components/modals/AppDialogHost.vue';
 // Виджет лениво грузится отдельным чанком, чтобы пользователи без доступа
 // к модулю tasks не тащили его в основной bundle.
 const TaskQuickDropWidget = defineAsyncComponent(() => import('@/components/tasks/TaskQuickDropWidget.vue'));
@@ -475,6 +479,7 @@ const toolsGroups = [
     { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
     { module: 'distribution', route: 'distribution', icon: 'distribute', label: 'Распределение' },
     { module: 'truck-loading', route: 'truck-loading', icon: 'truckLoad', label: 'Загрузка машин' },
+    { module: 'order', route: 'tit-requests', icon: 'truckLoad', label: 'Заявка на пропуск' },
     { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
     { module: 'pallet-storage', route: 'pallet-storage', icon: 'warehouse', label: 'Паллетовка склада' },
   ]},

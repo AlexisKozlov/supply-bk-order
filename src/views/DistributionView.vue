@@ -741,9 +741,9 @@ async function downloadTemplate() {
 
 // Распознаём значение клетки.
 //  - '' → пропустить (ничего не меняем)
-//  - '✓ / +' и т.п. → ставим ✓ (отгружено), qty не трогаем
-//  - '✗ / x / нет' и т.п. → ставим ✗ (не нужно), qty не трогаем
-//  - число (или текст с числом, типа «2 кор») → СОХРАНЯЕМ qty БЕЗ галки
+//  - '✓ / + / да / yes / true' → ставим ✓ (отгружено), qty не трогаем
+//  - '✗ / x / нет / no / false / -' → ставим ✗ (не нужно), qty не трогаем
+//  - число (включая 0 и 1, и текст с числом, типа «2 кор») → СОХРАНЯЕМ qty БЕЗ галки
 //    (statusOnly: false, shipped: null — closing-key для бэка «не трогай статус»)
 //    Так закупщик может массово загрузить «количество для каждого ресторана»,
 //    а галки потом поставить руками (или не поставить совсем).
@@ -752,8 +752,8 @@ function parseImportCell(raw) {
   const s = String(raw).trim();
   if (s === '') return null;
   const low = s.toLowerCase();
-  if (['✓', '+', 'да', 'y', 'yes', 'true', '1'].includes(low)) return { shipped: 1, qty: null };
-  if (['✗', 'x', 'х', '×', '-', 'нет', 'n', 'no', 'false', '0'].includes(low)) return { shipped: 2, qty: null };
+  if (['✓', '+', 'да', 'y', 'yes', 'true'].includes(low)) return { shipped: 1, qty: null };
+  if (['✗', 'x', 'х', '×', '-', 'нет', 'n', 'no', 'false'].includes(low)) return { shipped: 2, qty: null };
   // Число → только qty. shipped=null означает «не менять статус».
   if (/\d/.test(s)) return { shipped: null, qty: s };
   return { error: `Не понял значение «${s}»` };
@@ -948,11 +948,10 @@ function closeImport() {
 .td-shipped:hover { background: #C8E6C9 !important; }
 .td-crossed { background: #FFEBEE !important; }
 .td-crossed:hover { background: #FFCDD2 !important; }
-.td-custom { outline: 2px solid var(--bk-orange); outline-offset: -2px; }
 .cell-row { display: inline-flex; align-items: center; justify-content: center; gap: 4px; line-height: 1; }
 .cell-ok { color: var(--green); font-weight: 700; font-size: 14px; }
 .cell-no { color: #C62828; font-weight: 700; font-size: 14px; }
-.cell-qty { font-size: 12px; color: #E65100; font-weight: 700; }
+.cell-qty { font-size: 12px; color: #E65100; }
 
 /* Notes */
 .td-note { text-align: left; padding-left: 8px !important; font-size: 11px; color: var(--text-secondary); cursor: pointer; min-width: 120px; }

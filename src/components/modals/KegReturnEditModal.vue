@@ -152,6 +152,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 
 function authHeaders(extra = {}) {
   const t = localStorage.getItem('bk_session_token') || '';
@@ -201,16 +202,16 @@ function validateBso() {
 
 const readonly = computed(() => form.value && (form.value.status === 'ROUTED' || form.value.status === 'CANCELLED'));
 
-function checkRoutedWarning() {
+async function checkRoutedWarning() {
   const status = form.value?.status;
   if (status !== 'ROUTED' && status !== 'CANCELLED') {
-    return confirm('Заявка ещё не маршрутизирована. Водителя и автомобиль нужно будет вписать в накладную вручную. Продолжить?');
+    return await appConfirm('Заявка ещё не маршрутизирована. Водителя и автомобиль нужно будет вписать в накладную вручную. Продолжить?', { title: 'Скачивание накладной', okText: 'Продолжить' });
   }
   return true;
 }
 
 async function downloadExcel() {
-  if (!checkRoutedWarning()) return;
+  if (!(await checkRoutedWarning())) return;
   try {
     const res = await fetch(`/api/keg-returns/${props.id}/excel`, { credentials: 'include', headers: authHeaders() });
     if (!res.ok) {
@@ -232,7 +233,7 @@ async function downloadExcel() {
 }
 
 async function printTtn() {
-  if (!checkRoutedWarning()) return;
+  if (!(await checkRoutedWarning())) return;
   // window.open вызываем синхронно, иначе всплывают попап-блокеры.
   // Заполняем сначала about:blank, потом меняем location на ссылку с
   // одноразовым download-токеном (?dl=). Если токен не получили —
@@ -252,7 +253,7 @@ async function printTtn() {
 }
 
 async function deleteRequest() {
-  if (!confirm('Удалить заявку? Это нельзя отменить.')) return;
+  if (!(await appConfirm('Удалить заявку? Это нельзя отменить.', { okText: 'Удалить', danger: true }))) return;
   saving.value = true; saveError.value = '';
   try {
     const res = await fetch(`/api/keg-returns/${props.id}`, { method: 'DELETE', credentials: 'include', headers: authHeaders() });
@@ -339,7 +340,7 @@ async function save(route = false) {
 }
 
 async function unroute() {
-  if (!confirm('Откатить маршрутизацию? Заявка вернётся в статус «Отправлена», ресторан получит уведомление в Telegram и push.')) return;
+  if (!(await appConfirm('Откатить маршрутизацию? Заявка вернётся в статус «Отправлена», ресторан получит уведомление в Telegram и push.', { title: 'Откатить маршрутизацию', okText: 'Откатить', danger: true }))) return;
   saving.value = true;
   saveError.value = '';
   try {
@@ -359,7 +360,7 @@ async function unroute() {
 }
 
 async function cancelReturn() {
-  if (!confirm('Отменить заявку?')) return;
+  if (!(await appConfirm('Отменить заявку?', { okText: 'Отменить заявку', danger: true }))) return;
   saving.value = true;
   saveError.value = '';
   try {

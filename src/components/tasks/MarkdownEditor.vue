@@ -57,6 +57,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
+import { appPrompt } from '@/lib/appDialogs.js';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from 'tiptap-markdown';
 import TaskIcon from './TaskIcon.vue';
@@ -250,7 +251,7 @@ function cmd(name, ...args) {
 function isActive(...args) {
   return editor.value?.isActive(...args) || false;
 }
-function toggleLink() {
+async function toggleLink() {
   const ed = editor.value;
   if (!ed) return;
   if (ed.isActive('link')) {
@@ -258,7 +259,8 @@ function toggleLink() {
     return;
   }
   const prev = ed.getAttributes('link').href;
-  const url = (window.prompt('URL ссылки:', prev || 'https://') || '').trim();
+  const raw = await appPrompt('URL ссылки:', prev || 'https://', { title: 'Вставить ссылку', okText: 'Вставить' });
+  const url = (raw || '').trim();
   if (!url) return;
   ed.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
 }

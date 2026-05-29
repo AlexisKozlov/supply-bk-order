@@ -220,6 +220,7 @@
 <script setup>
 import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 
 function authHeaders(extra = {}) {
   const t = localStorage.getItem('bk_session_token') || '';
@@ -373,7 +374,7 @@ function openEdit(id) {
 }
 
 async function deleteRow(row) {
-  if (!confirm(`Удалить заявку №${row.bso_series || ''} ${row.bso_number || row.id}?`)) return;
+  if (!(await appConfirm(`Удалить заявку №${row.bso_series || ''} ${row.bso_number || row.id}?`, { okText: 'Удалить', danger: true }))) return;
   try {
     const res = await fetch(`/api/keg-returns/${row.id}`, { method: 'DELETE', credentials: 'include', headers: authHeaders() });
     const data = await res.json();

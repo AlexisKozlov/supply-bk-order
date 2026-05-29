@@ -367,6 +367,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useSupplyAssistantStore } from '@/stores/supplyAssistantStore.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
@@ -446,7 +447,7 @@ function fmtDateTime(dt) {
 // Удаление заказа из списка
 async function confirmDeleteOrder(id) {
   if (!canEdit.value) return;
-  if (!confirm('Удалить заказ? Это действие нельзя отменить.')) return;
+  if (!(await appConfirm('Удалить заказ? Это действие нельзя отменить.', { okText: 'Удалить', danger: true }))) return;
   try {
     await saStore.adminDeleteOrder(id);
     orders.value = orders.value.filter(o => o.id !== id);
@@ -552,7 +553,7 @@ async function saveEditOrder() {
 
 async function confirmDeleteCurrentOrder() {
   if (!editingOrder.value) return;
-  if (!confirm('Удалить этот заказ? Это действие нельзя отменить.')) return;
+  if (!(await appConfirm('Удалить этот заказ? Это действие нельзя отменить.', { okText: 'Удалить', danger: true }))) return;
   saving.value = true;
   try {
     await saStore.adminDeleteOrder(editingOrder.value.id);

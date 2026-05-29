@@ -174,6 +174,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 
 const emit = defineEmits(['updated', 'deleted', 'close']);
 
@@ -361,7 +362,7 @@ async function applyGroup(g) {
 async function deleteGroup(g) {
   if (!g.edit.selectedIds.length || g.saving) return;
   const n = g.edit.selectedIds.length;
-  if (!window.confirm(`Удалить ${n} контакт${ruEnding(n)}? Это действие нельзя отменить.`)) return;
+  if (!(await appConfirm(`Удалить ${n} контакт${ruEnding(n)}? Это действие нельзя отменить.`, { okText: 'Удалить', danger: true }))) return;
   g.saving = 'delete';
   error.value = '';
   result.value = null;

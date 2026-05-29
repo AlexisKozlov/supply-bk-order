@@ -337,6 +337,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useTabRoute } from '@/composables/useTabRoute.js';
 import { useTruckLoadingStore } from '@/stores/truckLoadingStore.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { exportTruckLoading } from '@/lib/truckLoadingExport.js';
 import { formatRestaurantNumber, parseRestaurantInput, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
@@ -605,13 +606,13 @@ async function handleUnconfirm() {
   catch (e) { toast.error('Ошибка', e.message); }
 }
 
-function handleReset() {
-  if (!confirm('Сбросить все назначения?')) return;
+async function handleReset() {
+  if (!(await appConfirm('Сбросить все назначения?', { okText: 'Сбросить', danger: true }))) return;
   store.resetAllAssignments();
 }
 
 async function handleAutoAssign() {
-  if (store.trucks.length && !confirm('Текущее распределение будет заменено. Продолжить?')) return;
+  if (store.trucks.length && !(await appConfirm('Текущее распределение будет заменено. Продолжить?', { okText: 'Заменить', danger: true }))) return;
   try { await store.autoAssign(); toast.success('Автораспределение выполнено'); }
   catch (e) { toast.error('Ошибка', e.message); }
 }
@@ -629,7 +630,7 @@ async function handleSaveVehicle(v) {
 }
 
 async function handleDeleteVehicle(id) {
-  if (!confirm('Удалить тип машины?')) return;
+  if (!(await appConfirm('Удалить тип машины?', { okText: 'Удалить', danger: true }))) return;
   try { await store.deleteVehicle(id); }
   catch (e) { toast.error('Ошибка', e.message); }
 }

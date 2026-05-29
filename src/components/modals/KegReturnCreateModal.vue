@@ -198,6 +198,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { buildAvailableDates, maskBsoSeries, maskBsoNumber } from '@/components/restaurant/keg/kegHelpers.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 
 const props = defineProps({
   restaurants: { type: Array, default: () => [] },
@@ -329,9 +330,9 @@ function hasDirtyData() {
   return false;
 }
 
-function closeIfClean() {
+async function closeIfClean() {
   if (saving.value) return;
-  if (hasDirtyData() && !confirm('Закрыть без сохранения?')) return;
+  if (hasDirtyData() && !(await appConfirm('Закрыть без сохранения?', { okText: 'Закрыть', danger: true }))) return;
   emit('close');
 }
 

@@ -568,6 +568,7 @@ import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useUserStore } from '@/stores/userStore.js'
+import { appConfirm, appAlert, appPrompt } from '@/lib/appDialogs.js'
 
 const userStore = useUserStore()
 
@@ -677,7 +678,7 @@ async function setWebhook() {
 }
 
 async function deleteWebhook() {
-  if (!confirm('Удалить вебхук? Бот перестанет получать сообщения.')) return
+  if (!(await appConfirm('Удалить вебхук? Бот перестанет получать сообщения.', { okText: 'Удалить', danger: true }))) return
   webhookSaving.value = true; webhookMsg.value = ''
   try {
     const { data } = await db.rpc('tg_admin_delete_webhook')
@@ -895,12 +896,12 @@ function reminderLabel(type) {
 }
 
 async function unlinkUser(u) {
-  if (!confirm(`Отвязать Telegram от ${u.name}? Пользователю нужно будет привязать бот заново.`)) return
+  if (!(await appConfirm(`Отвязать Telegram от ${u.name}? Пользователю нужно будет привязать бот заново.`, { okText: 'Отвязать', danger: true }))) return
   try {
     await db.rpc('tg_admin_unlink_user', { user_name: u.name })
     loadData()
   } catch (e) {
-    alert('Ошибка: ' + (e.message || e))
+    await appAlert('Ошибка: ' + (e.message || e), { type: 'error' })
   }
 }
 
@@ -911,21 +912,22 @@ async function unlinkExpiredSubs() {
     const { data: pre } = await db.rpc('tg_admin_unlink_expired', { confirm: false })
     const count = pre?.count || 0
     if (!count) {
-      alert('Просроченных подписок нет.')
+      await appAlert('Просроченных подписок нет.', { title: 'Чистка подписок' })
       return
     }
-    const ok = confirm(
+    const ok = await appConfirm(
       `Удалить ${count} просроченных Telegram-подписок?\n\n`
       + `Удалятся только записи без подтверждения, у которых истёк срок перепривязки. `
       + `Активные подписки и переходный период не затрагиваются. `
-      + `Сотрудники смогут привязаться заново обычным способом — через код в личном кабинете.`
+      + `Сотрудники смогут привязаться заново обычным способом — через код в личном кабинете.`,
+      { title: 'Чистка подписок', okText: 'Удалить', danger: true }
     )
     if (!ok) return
     const { data } = await db.rpc('tg_admin_unlink_expired', { confirm: true })
-    alert(`Удалено: ${data?.deleted || 0}`)
+    await appAlert(`Удалено: ${data?.deleted || 0}`, { title: 'Готово', type: 'success' })
     loadData()
   } catch (e) {
-    alert('Ошибка: ' + (e.message || e))
+    await appAlert('Ошибка: ' + (e.message || e), { type: 'error' })
   } finally {
     unlinkExpiredLoading.value = false
   }
@@ -933,7 +935,7 @@ async function unlinkExpiredSubs() {
 
 async function sendVegReminder(rest) {
   const defaultMsg = `Напоминание для ресторана ${rest.number}: пожалуйста, подайте заявку поставщику.`
-  const msg = prompt('Текст напоминания:', defaultMsg)
+  const msg = await appPrompt('Текст напоминания:', defaultMsg, { title: 'Отправить напоминание', okText: 'Отправить' })
   if (!msg) return
   try {
     const { data } = await db.rpc('tg_admin_send_restaurant_reminder', {
@@ -941,9 +943,9 @@ async function sendVegReminder(rest) {
       legal_entity_group: rest.legal_entity_group || (parseInt(rest.number, 10) >= 1000 ? 'PS' : 'BK_VM'),
       message: msg,
     })
-    alert(`Отправлено: ${data.sent} из ${data.total}`)
+    await appAlert(`Отправлено: ${data.sent} из ${data.total}`, { title: 'Готово', type: 'success' })
   } catch (e) {
-    alert('Ошибка: ' + (e.message || e))
+    await appAlert('Ошибка: ' + (e.message || e), { type: 'error' })
   }
 }
 
@@ -960,7 +962,7 @@ async function toggleRestNotif(sub, field) {
       if (String(s.chat_id) === String(sub.chat_id) && String(s.restaurant_number) === String(sub.restaurant_number)) s[field] = sub[field]
     }
   } catch (e) {
-    alert('Ошибка: ' + (e.message || e))
+    appAlert('Ошибка: ' + (e.message || e), { type: 'error' })
   }
 }
 
@@ -969,7 +971,7 @@ async function toggleSetting(user, field) {
     const { data } = await db.rpc('tg_admin_toggle_setting', { user_name: user.name, field })
     user[field] = data.value ? 1 : 0
   } catch (e) {
-    alert('Ошибка: ' + (e.message || e))
+    appAlert('Ошибка: ' + (e.message || e), { type: 'error' })
   }
 }
 
@@ -998,7 +1000,7 @@ async function sendBroadcast() {
   }
 
   if (!chatIds.length) { broadcastResult.value = 'Нет получателей'; return }
-  if (!confirm(`Отправить сообщение ${chatIds.length} получателям?`)) return
+  if (!(await appConfirm(`Отправить сообщение ${chatIds.length} получателям?`, { title: 'Рассылка', okText: 'Отправить' }))) return
 
   broadcastSending.value = true
   broadcastResult.value = ''

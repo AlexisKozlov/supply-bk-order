@@ -162,6 +162,7 @@ import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
@@ -232,7 +233,7 @@ async function loadList() {
 watch(filterStatus, () => loadList());
 
 async function dismiss(row) {
-  if (!confirm(`Отклонить письмо «${row.subject || row.from_email}»?`)) return;
+  if (!(await appConfirm(`Отклонить письмо «${row.subject || row.from_email}»?`, { okText: 'Отклонить', danger: true }))) return;
   try {
     const res = await fetch(`/api/email-imports/${row.id}/dismiss`, {
       method: 'POST',
@@ -316,7 +317,7 @@ async function toggleSender(s, val) {
 }
 
 async function deleteSender(s) {
-  if (!confirm(`Удалить ${s.email} из списка?`)) return;
+  if (!(await appConfirm(`Удалить ${s.email} из списка?`, { okText: 'Удалить', danger: true }))) return;
   try {
     const res = await fetch(`/api/email-imports/senders/${s.id}`, {
       method: 'DELETE',

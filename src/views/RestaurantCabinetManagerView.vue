@@ -5,17 +5,20 @@
         <h1>Кабинеты ресторанов</h1>
         <p>Управление тем, что видят рестораны в личном кабинете.</p>
       </div>
-      <button class="rcm-btn rcm-btn-primary" @click="reload" :disabled="loading">
+      <button v-if="activeManagerTab === 'info'" class="rcm-btn rcm-btn-primary" @click="reload" :disabled="loading">
         {{ loading ? 'Обновление...' : 'Обновить' }}
       </button>
     </div>
 
     <div class="rcm-tabs">
-      <button class="rcm-tab active">Важная информация</button>
+      <button class="rcm-tab" :class="{ active: activeManagerTab === 'info' }" type="button" @click="activeManagerTab = 'info'">Важная информация</button>
+      <button class="rcm-tab" :class="{ active: activeManagerTab === 'contacts' }" type="button" @click="activeManagerTab = 'contacts'">Контакты поставщиков</button>
       <button class="rcm-tab" disabled>Настройки кабинета</button>
     </div>
 
-    <div class="rcm-grid">
+    <ManagerSupplierContactsTab v-if="activeManagerTab === 'contacts'" />
+
+    <div v-if="activeManagerTab === 'info'" class="rcm-grid">
       <section class="rcm-panel">
         <div class="rcm-panel-head">
           <h2>Новое сообщение</h2>
@@ -159,8 +162,30 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref, watch, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { appConfirm } from '@/lib/appDialogs.js';
+
+const ManagerSupplierContactsTab = defineAsyncComponent(() => import('@/components/admin/ManagerSupplierContactsTab.vue'));
+
+const route = useRoute();
+const router = useRouter();
+const VALID_TABS = ['info', 'contacts'];
+const activeManagerTab = ref(VALID_TABS.includes(route.query.tab) ? route.query.tab : 'info');
+
+// При смене вкладки — обновляем ?tab= в URL (можно делиться ссылкой и жать «назад»).
+watch(activeManagerTab, (val) => {
+  const want = val === 'info' ? undefined : val;
+  if ((route.query.tab || undefined) === want) return;
+  const query = { ...route.query };
+  if (want) query.tab = want; else delete query.tab;
+  router.replace({ query }).catch(() => {});
+});
+watch(() => route.query.tab, (val) => {
+  const next = VALID_TABS.includes(val) ? val : 'info';
+  if (activeManagerTab.value !== next) activeManagerTab.value = next;
+});
 
 const store = useRestaurantOrderStore();
 const loading = ref(false);
@@ -275,7 +300,7 @@ async function togglePublished(post) {
 }
 
 async function deletePost(post) {
-  if (!window.confirm('Удалить сообщение из кабинетов ресторанов?')) return;
+  if (!(await appConfirm('Удалить сообщение из кабинетов ресторанов?', { okText: 'Удалить', danger: true }))) return;
   post._busy = true;
   try {
     await store.adminDeleteCabinetPost(post.id);

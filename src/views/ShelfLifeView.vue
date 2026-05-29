@@ -277,6 +277,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js';
+import { appConfirm, appPrompt, appAlert } from '@/lib/appDialogs.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -838,14 +839,17 @@ function promptReportDate(file) {
   const pad = n => String(n).padStart(2, '0');
   const fallback = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   const suggested = extractStockReportDateFromName(file.name) || fallback;
-  const value = window.prompt('На какую дату загрузить остатки? Формат: ГГГГ-ММ-ДД', suggested);
-  if (value == null) return null;
-  const clean = value.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
-    toastStore.error('Неверная дата', 'Введите дату в формате ГГГГ-ММ-ДД');
-    return null;
-  }
-  return clean;
+  // Сделана через утилитарный appPrompt — стилизованная модалка, а не нативный prompt.
+  return appPrompt('Формат: ГГГГ-ММ-ДД', suggested, { title: 'На какую дату загрузить остатки?', okText: 'Загрузить' })
+    .then(value => {
+      if (value == null) return null;
+      const clean = String(value).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+        toastStore.error('Неверная дата', 'Введите дату в формате ГГГГ-ММ-ДД');
+        return null;
+      }
+      return clean;
+    });
 }
 
 function loadStorageRules() {
@@ -967,7 +971,7 @@ async function handleUpload() {
     if (!file) return;
     uploading.value = true;
     try {
-      const reportDate = promptReportDate(file);
+      const reportDate = await promptReportDate(file);
       if (!reportDate) return;
       const storageRules = loadStorageRules();
       const productCategories = await loadProductCategories();
@@ -986,6 +990,18 @@ async function handleUpload() {
       let cellMsg = '';
       let skippedEntities = null;
       if (cellResult.cells.length) {
+        // Подстраховка от багов парсинга имени файла: если ячейки
+        // ушли бы на дату из будущего, переспрашиваем у пользователя.
+        const today = new Date();
+        const cellDateMs = new Date(cellResult.reportDate + 'T00:00:00').getTime();
+        const diffDays = Math.round((cellDateMs - today.setHours(0,0,0,0)) / 86400000);
+        if (diffDays > 1) {
+          const ok = await appConfirm(`Ячейки будут записаны за ${cellResult.reportDate}. Это правильная дата?`, { title: 'Подтвердите дату', okText: 'Да, записать' });
+          if (!ok) {
+            toastStore.warning('Ячейки не сохранены', 'Проверьте имя файла или дату.');
+            return;
+          }
+        }
         const cellItems = cellResult.cells.map(c => ({ ...c, report_date: cellResult.reportDate }));
         const cellRes = await db.rpc('save_warehouse_cells', { items: cellItems });
         if (cellRes.data?.count > 0) {

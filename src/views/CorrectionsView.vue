@@ -139,6 +139,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
+import { appConfirm } from '@/lib/appDialogs.js'
 import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useOrderStore } from '@/stores/orderStore.js'
@@ -255,7 +256,7 @@ async function submitReject() {
 
 async function deleteGroup(g) {
   const ids = g.items.map(i => i.id)
-  if (!confirm(`Удалить заявку (${ids.length} поз.) от рест. ${g.restaurant_number}?`)) return
+  if (!(await appConfirm(`Удалить заявку (${ids.length} поз.) от рест. ${g.restaurant_number}?`, { okText: 'Удалить', danger: true }))) return
   try {
     await db.rpc('correction_delete', { ids })
     toastStore.show('Удалено')
@@ -267,8 +268,8 @@ async function clearAll() {
   const pending = corrections.value.filter(c => c.status === 'pending' || c.status === 'in_progress').length
   const processed = corrections.value.filter(c => c.status === 'approved' || c.status === 'rejected').length
   const msg = `Будет удалено ${processed} обработанных заявок.\n${pending} необработанных останутся.\n\nПродолжить?`
-  if (!confirm(msg)) return
-  if (!confirm('Точно удалить? Это действие необратимо.')) return
+  if (!(await appConfirm(msg, { title: 'Очистить обработанные', okText: 'Удалить', danger: true }))) return
+  if (!(await appConfirm('Точно удалить? Это действие необратимо.', { okText: 'Удалить', danger: true }))) return
   try {
     await db.rpc('correction_clear_processed')
     toastStore.show('Обработанные заявки удалены')

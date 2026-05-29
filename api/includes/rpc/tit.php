@@ -201,12 +201,29 @@ if ($fn === 'tit_get') {
         $warehouses = titDetectWarehousesForOrder($pdo, $req['order_id'], $req['legal_entity']);
     }
 
+    // Лог отправок охране — для блока «Отправлено» в карточке (история, ошибки SMTP)
+    $sStmt = $pdo->prepare("
+        SELECT id, sent_at, sent_by, recipients, cc_email, smtp_error, smtp_message_id
+        FROM tit_send_log
+        WHERE request_id = ?
+        ORDER BY sent_at DESC, id DESC
+        LIMIT 20
+    ");
+    $sStmt->execute([$id]);
+    $sendLog = [];
+    foreach ($sStmt->fetchAll() as $row) {
+        $rec = json_decode((string)$row['recipients'], true);
+        $row['recipients'] = is_array($rec) ? $rec : [];
+        $sendLog[] = $row;
+    }
+
     respond([
         'request'          => $req,
         'vehicles'         => $vStmt->fetchAll(),
         'emails'           => $eStmt->fetchAll(),
         'supplier_defaults'=> $defaults,
         'recommended_warehouses' => $warehouses,
+        'send_log'         => $sendLog,
     ]);
 }
 

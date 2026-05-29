@@ -92,6 +92,7 @@ import { ref, computed, watch } from 'vue';
 import { useTasksStore } from '../../stores/tasksStore';
 import TaskIcon from './TaskIcon.vue';
 import ColorPalette from './ColorPalette.vue';
+import { appAlert } from '@/lib/appDialogs.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -151,7 +152,7 @@ async function save() {
     });
     close();
   } catch (e) {
-    alert('Не удалось сохранить настройки: ' + (e?.message || e));
+    await appAlert('Не удалось сохранить настройки: ' + (e?.message || e), { type: 'error' });
   } finally {
     saving.value = false;
   }

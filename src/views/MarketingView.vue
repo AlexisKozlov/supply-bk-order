@@ -189,6 +189,7 @@
 import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { formatDate, applyEntityFilter } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -374,7 +375,7 @@ async function saveGroup() {
 }
 
 async function deleteGroup() {
-  if (!confirm('Удалить группу?')) return;
+  if (!(await appConfirm('Удалить группу?', { okText: 'Удалить', danger: true }))) return;
   try {
     await db.rpc('delete_recipe_group', { id: groupModal.value.id });
     groupModal.value.show = false;
@@ -416,7 +417,7 @@ async function importRecipes(e) {
     }
 
     if (!parsed.length) { toast.error('Не найдено блюд', 'Проверьте формат файла'); return; }
-    if (!confirm(`Заменить все рецептуры юрлица «${legalEntity.value}» на импортируемые (${parsed.length} блюд)? Рецептуры других юрлиц не пострадают.`)) return;
+    if (!(await appConfirm(`Заменить все рецептуры юрлица «${legalEntity.value}» на импортируемые (${parsed.length} блюд)? Рецептуры других юрлиц не пострадают.`, { title: 'Импорт рецептур', okText: 'Импортировать', danger: true }))) return;
     const { data, error } = await db.rpc('import_recipes', { recipes: parsed, legal_entity: legalEntity.value });
     if (error) { toast.error('Ошибка импорта', error); return; }
     toast.success('Импортировано', `${data.imported} блюд`);

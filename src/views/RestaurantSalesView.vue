@@ -199,6 +199,7 @@ import { db } from '@/lib/apiClient.js';
 import { parseSalesFile } from '@/lib/salesImport.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { getEntityGroupCode, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -575,7 +576,7 @@ async function onFileSelected(e) {
     const skuMapped = result.skuMapped || 0;
     if (!items.length) { toast.error('Ошибка', 'Не удалось распознать данные'); return; }
     const groupLabel = getEntityGroupCode(orderStore.settings.legalEntity) === 'PS' ? 'Пицца Стар' : 'Бургер БК + Воглия Матта';
-    if (!confirm(`Загрузить ${items.length} записей реализации в «${groupLabel}»? БК и ВМ используют общие данные, поэтому будут обновлены записи всей группы. Другая группа юрлиц не пострадает.`)) return;
+    if (!(await appConfirm(`Загрузить ${items.length} записей реализации в «${groupLabel}»? БК и ВМ используют общие данные, поэтому будут обновлены записи всей группы. Другая группа юрлиц не пострадает.`, { title: 'Загрузка реализации', okText: 'Загрузить' }))) return;
     toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей в «${groupLabel}»…` + (skuMapped ? ` (${skuMapped} по артикулу)` : ''));
     for (let i = 0; i < items.length; i += 10000) {
       const isLast = i + 10000 >= items.length;

@@ -831,7 +831,7 @@
           <h2 class="sc-head-title">{{ stockCollection.collection?.name }}</h2>
           <p class="sc-head-sub">
             <span v-if="stockLastSubmittedAt">Последнее сохранение: {{ fmtDateTime(stockLastSubmittedAt) }}</span>
-            <span v-else>Если товара нет — оставьте поле пустым или поставьте 0.</span>
+            <span v-else>Если товара нет — поставьте 0.</span>
           </p>
         </div>
 
@@ -1026,7 +1026,14 @@
 
     <!-- ══════ TAB: Возврат кег ══════ -->
     <section v-if="activeTab === 'keg-returns' && !globalError" class="cab-section">
-      <RestaurantKegReturnsTab />
+      <div v-if="!kegReturnsLoaded" class="cab-empty-card"><BurgerSpinner text="Загрузка..." /></div>
+      <RestaurantKegReturnsTab v-else-if="kegReturnsEnabled" />
+      <div v-else class="cab-empty-card">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <h2>Возврат кег недоступен</h2>
+        <p>{{ kegReturnsDisabledReason }}</p>
+        <button class="pf-btn primary" style="margin-top:18px" @click="switchTab('dashboard')">На главную</button>
+      </div>
     </section>
 
     <!-- ══════ TAB: Профиль ══════ -->
@@ -1420,6 +1427,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
@@ -1855,6 +1863,8 @@ const mobileTabs = computed(() => {
 });
 
 const kegReturnsEnabled = ref(false);
+const kegReturnsLoaded = ref(false);
+const kegReturnsDisabledReason = ref('');
 async function loadKegReturnsAvailability() {
   try {
     const data = await roFetch('/api/keg-returns/restaurant-info');
@@ -1863,7 +1873,20 @@ async function loadKegReturnsAvailability() {
     const moduleOn = !!data.keg_returns_enabled;
     const restaurantOn = !!parseInt(data.pickup_weekdays || 0);
     kegReturnsEnabled.value = moduleOn && restaurantOn;
-  } catch { kegReturnsEnabled.value = false; }
+    if (!moduleOn) {
+      kegReturnsDisabledReason.value = data.keg_returns_disabled_reason
+        || 'Возврат кег временно отключён отделом закупок.';
+    } else if (!restaurantOn) {
+      kegReturnsDisabledReason.value = 'Для вашего ресторана не задан график возврата кег. Обратитесь в отдел закупок.';
+    } else {
+      kegReturnsDisabledReason.value = '';
+    }
+  } catch {
+    kegReturnsEnabled.value = false;
+    kegReturnsDisabledReason.value = 'Не удалось проверить доступность модуля. Попробуйте позже.';
+  } finally {
+    kegReturnsLoaded.value = true;
+  }
 }
 // ═══ Delivery (основная поставка) ═══
 const delSelectedDate = ref('');
@@ -2877,9 +2900,10 @@ async function loadSessions() {
 
 async function revokeSessionById(session) {
   if (!session?.id) return;
-  if (!confirm(session.is_current
+  const msg = session.is_current
       ? 'Выйти с этого устройства? Вас перебросит на экран входа.'
-      : `Завершить сессию устройства «${session.device_label || 'Устройство'}»?`)) return;
+      : `Завершить сессию устройства «${session.device_label || 'Устройство'}»?`;
+  if (!(await appConfirm(msg, { okText: session.is_current ? 'Выйти' : 'Завершить', danger: true }))) return;
   sessionRevoking.value = session.id;
   try {
     await roStore.revokeSession(session.id);
@@ -2898,7 +2922,7 @@ async function revokeSessionById(session) {
 }
 
 async function revokeOtherSessions() {
-  if (!confirm('Выйти со всех остальных устройств? На них появится экран входа.')) return;
+  if (!(await appConfirm('Выйти со всех остальных устройств? На них появится экран входа.', { okText: 'Выйти со всех', danger: true }))) return;
   sessionRevoking.value = 'others';
   try {
     const data = await roStore.revokeOtherSessions();

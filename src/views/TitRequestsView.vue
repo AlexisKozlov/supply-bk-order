@@ -82,6 +82,7 @@
 import { ref, reactive, computed, onMounted, defineAsyncComponent } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { appAlert } from '@/lib/appDialogs.js';
 
 const orderStore = useOrderStore();
 
@@ -195,7 +196,7 @@ async function createQuick() {
     openRequest(data.id);
     reload();
   } catch (e) {
-    alert('Не удалось создать заявку: ' + (e.message || e));
+    await appAlert('Не удалось создать заявку: ' + (e.message || e), { type: 'error' });
   } finally {
     creating.value = false;
   }

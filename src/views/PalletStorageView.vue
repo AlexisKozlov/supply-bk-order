@@ -159,6 +159,7 @@ import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -372,7 +373,7 @@ async function importRef(e) {
     if (!items.length) { toast.error('Не найдено товаров'); return; }
     const le = orderStore.settings.legalEntity;
     if (!le) { toast.error('Не выбрано юрлицо'); return; }
-    if (!confirm(`Импортировать ${items.length} товаров в справочник юрлица «${le}»? Записи других юрлиц не пострадают.`)) return;
+    if (!(await appConfirm(`Импортировать ${items.length} товаров в справочник юрлица «${le}»? Записи других юрлиц не пострадают.`, { title: 'Импорт справочника', okText: 'Импортировать' }))) return;
     const { error } = await db.rpc('import_pallet_reference', { items, legal_entity: le });
     if (error) throw error;
     toast.success(`Импортировано ${items.length} товаров в «${le}»`);

@@ -136,6 +136,7 @@ import { useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
+import { appConfirm } from '@/lib/appDialogs.js'
 import { getEntityGroup, getEntityGroupCode } from '@/lib/legalEntities.js'
 
 const orderStore = useOrderStore()
@@ -196,7 +197,7 @@ async function saveEdit(p) {
       updates.delivery_date = editDeliveryDate.value
       // Если платёж связан с заказом — спрашиваем, обновить ли дату и в заказе.
       if (p.order_id) {
-        const yes = window.confirm(`Дата прихода связана с заказом в истории поставок.\n\nОбновить дату прихода и там тоже?`)
+        const yes = await appConfirm(`Дата прихода связана с заказом в истории поставок.\n\nОбновить дату прихода и там тоже?`, { title: 'Изменение даты прихода', okText: 'Да, обновить' })
         if (yes) updates.cascade_delivery_to_order = true
       }
     }

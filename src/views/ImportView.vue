@@ -107,6 +107,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { parseFile } from '@/lib/importStock.js'
 import { parseStockMalling, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js'
+import { appPrompt, appConfirm } from '@/lib/appDialogs.js'
 import { parseSalesFile } from '@/lib/salesImport.js'
 import { parseCttPreorderXlsx, resolveCttPreorderRows, buildCttPreorderFilename, buildCttPreorderLabel } from '@/lib/cttJsonImport.js'
 import { getEntityGroupCode } from '@/lib/legalEntities.js'
@@ -157,7 +158,7 @@ async function startEmailImport(id) {
       orderStore.settings.legalEntity = row.legal_entity
     }
     if (row.legal_entity && row.legal_entity !== orderStore.settings.legalEntity) {
-      const ok = confirm(`В правиле для отправителя ${row.from_email} указано юрлицо «${row.legal_entity}». Переключить?`)
+      const ok = await appConfirm(`В правиле для отправителя ${row.from_email} указано юрлицо «${row.legal_entity}». Переключить?`, { title: 'Сменить юрлицо', okText: 'Переключить' })
       if (ok) orderStore.settings.legalEntity = row.legal_entity
     }
 
@@ -264,14 +265,14 @@ function localTimeForDate(dateStr) {
   return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-function promptReportDate(file) {
+async function promptReportDate(file) {
   const d = new Date()
   const pad = n => String(n).padStart(2, '0')
   const fallback = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
   const suggested = extractStockReportDateFromName(file.name) || fallback
-  const value = window.prompt('На какую дату загрузить остатки? Формат: ГГГГ-ММ-ДД', suggested)
+  const value = await appPrompt('Формат: ГГГГ-ММ-ДД', suggested, { title: 'На какую дату загрузить остатки?', okText: 'Загрузить' })
   if (value == null) return null
-  const clean = value.trim()
+  const clean = String(value).trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
     toast.error('Неверная дата', 'Введите дату в формате ГГГГ-ММ-ДД')
     return null
@@ -378,7 +379,7 @@ async function uploadFile(type, file) {
 
     } else if (type === 'shelf') {
       // Идентично ShelfLifeView: parseStockMalling → replace_stock_malling
-      const reportDate = promptReportDate(file)
+      const reportDate = await promptReportDate(file)
       if (!reportDate) return
       const storageRules = loadStorageRules()
       const productCategories = await loadProductCategories()

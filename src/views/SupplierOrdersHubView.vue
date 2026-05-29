@@ -49,6 +49,7 @@ import { ref, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
+import { appAlert, appConfirm } from '@/lib/appDialogs.js';
 
 const SupplierOrdersManagerView = defineAsyncComponent(() => import('@/views/SupplierOrdersManagerView.vue'));
 const SupplierConnectModal = defineAsyncComponent(() => import('@/components/modals/SupplierConnectModal.vue'));
@@ -71,10 +72,11 @@ async function disconnectSelected() {
   if (!selectedId.value) return;
   const sup = suppliers.value.find(s => s.id === selectedId.value);
   if (!sup) return;
-  const ok = confirm(
+  const ok = await appConfirm(
     `Отключить поставщика «${sup.name}» от модуля заявок?\n\n` +
     `Расписания, шаблоны и настройки сохранятся — при повторном подключении ` +
-    `всё вернётся. Рестораны перестанут видеть этого поставщика в своём кабинете.`
+    `всё вернётся. Рестораны перестанут видеть этого поставщика в своём кабинете.`,
+    { title: 'Отключить поставщика', okText: 'Отключить', danger: true }
   );
   if (!ok) return;
   disconnecting.value = true;
@@ -86,7 +88,7 @@ async function disconnectSelected() {
     sessionStorage.removeItem(storageKey());
     await loadList();
   } catch (e) {
-    alert('Ошибка отключения: ' + (e.message || e));
+    await appAlert('Ошибка отключения: ' + (e.message || e), { type: 'error' });
   } finally {
     disconnecting.value = false;
   }

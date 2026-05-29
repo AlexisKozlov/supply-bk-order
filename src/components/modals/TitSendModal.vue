@@ -82,6 +82,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { appConfirm, appAlert } from '@/lib/appDialogs.js';
 
 const props = defineProps({ id: { type: Number, required: true } });
 const emit = defineEmits(['close', 'sent']);
@@ -171,7 +172,9 @@ async function loadAll() {
 
 async function send() {
   if (!canSend.value) return;
-  if (!confirm('Отправить ' + rows.value.length + ' строк(и) на ' + checked.value.length + ' адрес(а) охраны?')) return;
+  if (!(await appConfirm(
+        `Отправить ${rows.value.length} строк(и) на ${checked.value.length} адрес(а) охраны?`,
+        { title: 'Отправка письма', okText: 'Отправить' }))) return;
   sending.value = true;
   try {
     const { data, error: e } = await db.rpc('tit_send_to_security', {
@@ -181,10 +184,10 @@ async function send() {
       body_text: mailBody.value,
     });
     if (e || data?.error) throw new Error(e || data.error);
-    alert('Письмо отправлено охране (' + (data.recipients || []).join(', ') + ')');
+    await appAlert('Письмо отправлено охране (' + (data.recipients || []).join(', ') + ')', { title: 'Отправлено', type: 'success' });
     emit('sent');
   } catch (e) {
-    alert('Не удалось отправить: ' + (e.message || e));
+    await appAlert('Не удалось отправить: ' + (e.message || e), { title: 'Ошибка', type: 'error' });
   } finally {
     sending.value = false;
   }
@@ -199,7 +202,7 @@ async function openInMyOutlook() {
     await downloadXlsx();
     const tos = checked.value;
     if (!tos.length) {
-      alert('Не выбраны получатели. Отметьте адреса охраны в списке выше.');
+      await appAlert('Не выбраны получатели. Отметьте адреса охраны в списке выше.', { type: 'warning' });
       return;
     }
     const mailto = 'mailto:' + encodeURIComponent(tos.join(','))
@@ -208,10 +211,10 @@ async function openInMyOutlook() {
     // window.location — открывает дефолтный почтовый клиент (Outlook на Windows).
     window.location.href = mailto;
     setTimeout(() => {
-      alert('Файл xlsx скачан. В открывшемся письме прикрепите его и нажмите «Отправить».');
+      appAlert('Файл xlsx скачан. В открывшемся письме прикрепите его и нажмите «Отправить».', { title: 'Готово' });
     }, 400);
   } catch (e) {
-    alert('Не удалось открыть в почте: ' + (e.message || e));
+    await appAlert('Не удалось открыть в почте: ' + (e.message || e), { type: 'error' });
   }
 }
 

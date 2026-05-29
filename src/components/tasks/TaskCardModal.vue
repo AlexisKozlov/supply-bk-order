@@ -685,12 +685,23 @@
         </div>
       </template>
     </aside>
+    <ConfirmModal v-if="confirmModal.show"
+                  :title="confirmModal.title"
+                  :message="confirmModal.message"
+                  :ok-text="confirmModal.okText"
+                  :cancel-text="confirmModal.cancelText"
+                  @confirm="onConfirmOk"
+                  @cancel="onConfirmCancel"/>
   </Teleport>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch, defineAsyncComponent } from 'vue';
 import { tasksApi } from '@/lib/tasksApi.js';
+import { confirmProtocolDueChange } from '@/lib/protocolDueGuard.js';
+import { useConfirm } from '@/composables/useConfirm.js';
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
@@ -1059,6 +1070,10 @@ function onKeydown(e) { if (e.key === 'Escape') close(); }
 function close() { emit('close'); }
 
 async function patch(payload) {
+  if ('due_date' in payload) {
+    const ok = await confirmProtocolDueChange(full.value?.card, payload.due_date, confirmAction);
+    if (!ok) return;
+  }
   try {
     await tasksApi.updateCard(props.cardId, payload);
     Object.assign(full.value.card, payload);
