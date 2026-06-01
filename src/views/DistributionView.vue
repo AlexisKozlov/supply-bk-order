@@ -4,7 +4,10 @@
     <template v-if="!activeSession">
       <div class="dist-top">
         <h1 class="page-title">Распределение новинок</h1>
-        <button class="dist-btn primary" @click="showCreate = true">+ Новая сессия</button>
+        <div class="dist-top-actions">
+          <button class="dist-btn ghost" @click="showOverview = true" title="Сводка по всем активным сессиям, сгруппированная по дням доставки">📋 Вывести распределение</button>
+          <button class="dist-btn primary" @click="showCreate = true">+ Новая сессия</button>
+        </div>
       </div>
 
       <div v-if="loading" class="dist-empty"><BurgerSpinner text="Загрузка..." /></div>
@@ -362,6 +365,9 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- Сводка распределения по дням доставки -->
+    <DistributionOverview v-if="showOverview" @close="showOverview = false" />
   </div>
 </template>
 
@@ -373,6 +379,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useDistributionSession } from '@/composables/useDistributionSession.js';
 import { exportDistExcel } from '@/lib/distExcel.js';
+import DistributionOverview from '@/components/distribution/DistributionOverview.vue';
 
 const orderStore = useOrderStore();
 const toastStore = useToastStore();
@@ -421,6 +428,7 @@ function fmtDate(d) {
 }
 
 // Create session
+const showOverview = ref(false);
 const showCreate = ref(false);
 const newName = ref('');
 const newProducts = ref([]);
@@ -843,7 +851,8 @@ function closeImport() {
 <style scoped>
 /* ═══ Layout ═══ */
 .dist { padding: 20px 24px; max-width: 100%; }
-.dist-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.dist-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 12px; flex-wrap: wrap; }
+.dist-top-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* ═══ Buttons ═══ */
 .dist-btn { padding: 7px 14px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all var(--transition); font-family: inherit; }

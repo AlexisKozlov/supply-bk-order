@@ -6,6 +6,7 @@
         <p>Подача транспорта поставщика на склад. Машины подтягиваются из ответов на email, можно добавить вручную.</p>
       </div>
       <div class="tit-header-actions">
+        <button class="tit-btn ghost" @click="showSettings = true" title="Получатели охраны">⚙ Настройки</button>
         <button class="tit-btn ghost" @click="reload" :disabled="loading">↻ Обновить</button>
         <button class="tit-btn primary" @click="createQuick" :disabled="creating">{{ creating ? 'Создаём…' : '＋ Создать' }}</button>
       </div>
@@ -75,6 +76,7 @@
 
     <TitRequestModal v-if="editId" :id="editId" @close="onModalClose" @changed="reload" />
     <TitUnmatchedModal v-if="showUnmatched" @close="showUnmatched = false; reload()" />
+    <TitSettingsModal v-if="showSettings" @close="showSettings = false" />
   </div>
 </template>
 
@@ -88,6 +90,7 @@ const orderStore = useOrderStore();
 
 const TitRequestModal   = defineAsyncComponent(() => import('@/components/modals/TitRequestModal.vue'));
 const TitUnmatchedModal = defineAsyncComponent(() => import('@/components/modals/TitUnmatchedModal.vue'));
+const TitSettingsModal  = defineAsyncComponent(() => import('@/components/modals/TitSettingsModal.vue'));
 
 const rows = ref([]);
 const loading = ref(false);
@@ -95,6 +98,7 @@ const error = ref('');
 const editId = ref(null);
 const creating = ref(false);
 const showUnmatched = ref(false);
+const showSettings = ref(false);
 const unmatchedCount = ref(0);
 
 const filters = reactive({

@@ -1347,9 +1347,10 @@ function formatLastUpdate(upd) {
 }
 .ds-col-item-content {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   flex: 1;
   min-width: 0;
 }
@@ -1361,10 +1362,10 @@ function formatLastUpdate(upd) {
 }
 .ds-col-item-lines {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 .ds-col-item-time {
   display: inline-block;

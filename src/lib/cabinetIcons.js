@@ -34,6 +34,7 @@ export const cabIconSvg = {
   kegReturn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>',
   reminders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
   corrections: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4"/><path d="m11 11 4.5 4.5"/><path d="m8 18 1.5-3.5 3.5-3.5 2 2-3.5 3.5L8 18Z"/></svg>',
+  contacts: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="12" cy="10" r="2.5"/><path d="M8 17c.7-2 2.2-3 4-3s3.3 1 4 3"/><path d="M4 8h2"/><path d="M4 12h2"/><path d="M4 16h2"/></svg>',
 };
 
 // ── Иконки для крупных плиток на дашборде ──
@@ -45,6 +46,7 @@ export const tileIconSvg = {
   reminders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
   corrections: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4"/><path d="m9 13 4.5-4.5 2 2L11 15H9v-2Z" fill="currentColor" fill-opacity="0.12"/><path d="M9 17h6"/></svg>',
   assistant: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4v2.5h6V4"/><path d="m9.5 12 2 2 3.5-3.5" fill="currentColor" fill-opacity="0.12"/><path d="M8.5 16h7"/></svg>',
+  contacts: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="12" cy="11" r="3" fill="currentColor" fill-opacity="0.1"/><path d="M7 17.5c1-2.3 2.8-3.5 5-3.5s4 1.2 5 3.5"/><path d="M3 9h2"/><path d="M3 13h2"/><path d="M3 17h2"/></svg>',
 };
 
 // ── Иконки поставщиков для внешних ссылок ──

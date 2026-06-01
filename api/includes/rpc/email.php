@@ -14,6 +14,7 @@
         $legalEntity = trim((string)($body['legal_entity'] ?? ''));
         $delivery    = trim((string)($body['delivery_date'] ?? ''));
         $itemsCount  = (int)($body['items_count'] ?? 0);
+        $orderId     = trim((string)($body['order_id'] ?? ''));
 
         if ($rawTo === '') respond(['error' => 'Не указан email получателя'], 400);
         if ($bodyText === '') respond(['error' => 'Пустое тело письма'], 400);
@@ -187,6 +188,25 @@
             ? '<div style="margin-top:18px;color:#4b5563;">Подробности — во вложении (Excel).</div>'
             : '';
 
+        // Просьба о скане накладной и данных машины — нужны модулю «Заявка
+        // на пропуск». Шаблон редактируется через таблицу tit_settings,
+        // чтобы менять текст без релиза. Если настройки нет — fallback.
+        $titAskHtml = '';
+        try {
+            $titStmt = $pdo->prepare("SELECT setting_value FROM tit_settings WHERE setting_key = 'email_template_addition' LIMIT 1");
+            $titStmt->execute();
+            $titAskRaw = (string)($titStmt->fetchColumn() ?: '');
+        } catch (Throwable $e) {
+            $titAskRaw = '';
+        }
+        if ($titAskRaw === '') {
+            $titAskRaw = "Перед отгрузкой, пожалуйста, пришлите скан накладной.\nВ ответ на это письмо укажите номер машины и телефон водителя.";
+        }
+        foreach (preg_split('/\r\n|\n|\r/', $titAskRaw) as $line) {
+            $line = trim($line);
+            if ($line !== '') $titAskHtml .= '<div style="margin-top:6px;">' . $esc($line) . '</div>';
+        }
+
         $html =
             '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
           . '<body style="margin:0;padding:0;background:#ffffff;color:#1f2937;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;font-size:14px;line-height:1.55;">'
@@ -196,6 +216,7 @@
           . $addressHtml
           . $itemsHtml
           . $attachLine
+          . ($titAskHtml ? '<div style="margin-top:18px;color:#1f2937;">' . $titAskHtml . '</div>' : '')
           . '<div style="margin-top:22px;color:#1f2937;">Спасибо!</div>'
           . '</div>'
           . '</body></html>';
@@ -305,7 +326,72 @@
         if (!$sendResult['success']) {
             respond(['error' => 'Не удалось отправить письмо: ' . ($sendResult['error'] ?? 'неизвестная ошибка')], 500);
         }
-        respond(['success' => true, 'sent_to' => $recipients, 'cc' => $ccFinal]);
+
+        // Создаём/обновляем «Заявку на пропуск» под этот заказ.
+        // Идемпотентно: при повторной отправке (если ничего ещё не пришло
+        // от поставщика) обновляем outgoing_message_id, чтобы парсер
+        // мог привязать ответ к свежему письму.
+        $titRequestId = null;
+        if ($orderId !== '' && $delivery !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $delivery)) {
+            try {
+                $supplierId = null;
+                if ($supplier !== '') {
+                    $sIdStmt = $pdo->prepare("
+                        SELECT id FROM suppliers
+                        WHERE legal_entity_group = ?
+                          AND (short_name = ? OR full_name = ?)
+                          AND is_active = 1
+                        ORDER BY (legal_entity = ?) DESC, id
+                        LIMIT 1
+                    ");
+                    $sIdStmt->execute([getEntityGroup($legalEntity), $supplier, $supplier, $legalEntity]);
+                    $supplierId = $sIdStmt->fetchColumn() ?: null;
+                }
+                $existing = $pdo->prepare("SELECT id FROM tit_requests WHERE order_id = ? LIMIT 1");
+                $existing->execute([$orderId]);
+                $existingId = $existing->fetchColumn();
+                $supplierEmail = $recipients[0] ?? '';
+                $titGroup = getEntityGroup($legalEntity);
+                $titNameForRecord = $supplierDisplay !== '' ? $supplierDisplay : $supplier;
+                if ($existingId) {
+                    $upd = $pdo->prepare("
+                        UPDATE tit_requests
+                        SET supplier_id = ?, supplier_name = ?, supplier_email = ?,
+                            legal_entity = ?, legal_entity_group = ?, delivery_date = ?,
+                            outgoing_message_id = COALESCE(?, outgoing_message_id),
+                            updated_at = NOW()
+                        WHERE id = ?
+                    ");
+                    $upd->execute([
+                        $supplierId, $titNameForRecord, $supplierEmail,
+                        $legalEntity, $titGroup, $delivery,
+                        $sendResult['message_id'] ?? null,
+                        $existingId,
+                    ]);
+                    $titRequestId = (int)$existingId;
+                } else {
+                    $ins = $pdo->prepare("
+                        INSERT INTO tit_requests
+                            (order_id, supplier_id, supplier_name, supplier_email,
+                             legal_entity, legal_entity_group, delivery_date,
+                             status, outgoing_message_id, created_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING', ?, ?)
+                    ");
+                    $ins->execute([
+                        $orderId, $supplierId, $titNameForRecord, $supplierEmail,
+                        $legalEntity, $titGroup, $delivery,
+                        $sendResult['message_id'] ?? null,
+                        $authUserName,
+                    ]);
+                    $titRequestId = (int)$pdo->lastInsertId();
+                }
+            } catch (Throwable $e) {
+                // Не блокируем ответ — заявку можно создать вручную позже.
+                error_log('[send_supplier_order_email] tit_request upsert failed: ' . $e->getMessage());
+            }
+        }
+
+        respond(['success' => true, 'sent_to' => $recipients, 'cc' => $ccFinal, 'tit_request_id' => $titRequestId]);
     }
 
     if ($fn === 'send_supplier_plan_email') {

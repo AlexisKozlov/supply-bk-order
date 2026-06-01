@@ -345,7 +345,23 @@ if ($fn === 'tit_update_basic') {
         $legalEntity, $group, $deliveryDate,
         $id,
     ]);
-    respond(['success' => true]);
+
+    // Если дата подачи изменилась и фронт попросил — переносим дату у машин
+    // на новую (время в/из сохраняем). Иначе дата машины осталась бы старой
+    // и расходилась с датой заявки.
+    $shifted = 0;
+    if (!empty($body['shift_vehicles']) && $deliveryDate !== (string)$row['delivery_date']) {
+        $upd = $pdo->prepare("
+            UPDATE tit_vehicles
+            SET start_time = IF(start_time IS NULL, NULL, TIMESTAMP(?, TIME(start_time))),
+                end_time   = IF(end_time   IS NULL, NULL, TIMESTAMP(?, TIME(end_time))),
+                updated_at = NOW()
+            WHERE request_id = ? AND deleted_at IS NULL
+        ");
+        $upd->execute([$deliveryDate, $deliveryDate, $id]);
+        $shifted = $upd->rowCount();
+    }
+    respond(['success' => true, 'vehicles_shifted' => $shifted]);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -805,9 +821,16 @@ if ($fn === 'tit_settings_get') {
 
 if ($fn === 'tit_settings_update') {
     $titRequireStaff();
-    if (!hasRole($authUser, ['admin'])) respond(['error' => 'Доступ только администратору'], 403);
     $allowed = ['test_mode', 'test_email', 'security_recipients', 'email_template_addition', 'imap_poll_minutes'];
     $updates = is_array($body['settings'] ?? null) ? $body['settings'] : [];
+    // Список получателей охраны и текст-дополнение письма закупщик правит сам;
+    // технические настройки (тестовый режим, адрес, частота опроса) — только админ.
+    $staffEditable = ['security_recipients', 'email_template_addition'];
+    foreach (array_keys($updates) as $k) {
+        if (!in_array($k, $staffEditable, true) && !hasRole($authUser, ['admin'])) {
+            respond(['error' => 'Эти настройки может менять только администратор'], 403);
+        }
+    }
     foreach ($updates as $k => $v) {
         if (!in_array($k, $allowed, true)) continue;
         if ($k === 'security_recipients') {

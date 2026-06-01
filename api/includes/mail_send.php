@@ -73,6 +73,12 @@ if (!function_exists('sendEmail')) {
             $user = $_ENV['SMTP_ORDER_USER'] ?? '';
             $pass = $_ENV['SMTP_ORDER_PASS'] ?? '';
             $fromNameDefault = $_ENV['SMTP_ORDER_FROM_NAME'] ?? 'Supply Department';
+        } elseif ($account === 'info') {
+            // info@ — для системных уведомлений сторонним получателям
+            // (охрана, поставщики и т.д.) от лица отдела закупок.
+            $user = $_ENV['SMTP_INFO_USER'] ?? '';
+            $pass = $_ENV['SMTP_INFO_PASS'] ?? '';
+            $fromNameDefault = $_ENV['SMTP_INFO_FROM_NAME'] ?? 'Supply Department';
         } else {
             $user = $_ENV['SMTP_USER'] ?? '';
             $pass = $_ENV['SMTP_PASS'] ?? '';
@@ -108,13 +114,14 @@ if (!function_exists('sendEmail')) {
             // антиспам-фильтры это любят. Пробел отключает автодобавление.
             $mail->XMailer = ' ';
 
-            // List-Unsubscribe + Auto-Submitted — для системных писем.
-            // Для заказного аккаунта (заявки поставщикам) не добавляем — это деловая
-            // переписка от живого человека, заголовки «автоматическое письмо» там вредны.
-            if ($account !== 'order') {
+            // List-Unsubscribe + Auto-Submitted — только для дефолтного аккаунта
+            // (системные уведомления вроде сброса пароля). Для order и info это
+            // вредно: order — деловая переписка, info — уведомления получателям
+            // (охрана и т.п.), которые MailCleaner и т.п. триггерят как рассылку
+            // (MC_NEWS_HFRMNOREPLY / MC_NEWS_HLISTUNSUB1) и кладут в спам.
+            if ($account !== 'order' && $account !== 'info') {
                 $mail->addCustomHeader('List-Unsubscribe', '<mailto:' . $user . '?subject=unsubscribe>');
                 $mail->addCustomHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
-                // RFC 3834: явно помечаем как авто-сгенерированное системное письмо.
                 $mail->addCustomHeader('Auto-Submitted', 'auto-generated');
             }
 
@@ -163,8 +170,14 @@ if (!function_exists('sendEmail')) {
                 $mail->Body = $body;
             }
 
+            // Свой контролируемый Message-Id — нужен модулю «Заявка на пропуск»
+            // для привязки входящих ответов через In-Reply-To. Если не задать,
+            // PHPMailer сгенерит сам, но мы не сможем сохранить его до send().
+            $msgHost = $_ENV['SMTP_HOST'] ?? 'supply-department.online';
+            $mail->MessageID = '<' . bin2hex(random_bytes(12)) . '@' . preg_replace('/[^a-z0-9\.\-]/i', '', $msgHost) . '>';
+
             $mail->send();
-            return ['success' => true];
+            return ['success' => true, 'message_id' => $mail->MessageID];
         } catch (PHPMailerException $e) {
             $err = $mail->ErrorInfo ?: $e->getMessage();
             error_log('[mail_send] PHPMailer error (acc=' . $account . '): ' . $err);

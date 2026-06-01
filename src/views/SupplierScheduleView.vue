@@ -22,6 +22,9 @@
         <button v-if="canEdit && activeSupplier" class="ssv-btn-ghost" @click="openDefaultsModal(activeSupplier)">
           Дефолты ({{ (defaults[activeSupplier.id] || []).length }})
         </button>
+        <button v-if="canEdit && activeSupplier" class="ssv-btn-ghost" @click="openTempScheduleModal">
+          Временный график
+        </button>
       </div>
     </div>
 
@@ -187,6 +190,15 @@
 
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
       @confirm="onConfirm" @cancel="onCancel" />
+
+    <SupplierTempScheduleModal
+      v-if="tempScheduleOpen && activeSupplier"
+      :supplier="activeSupplier"
+      :restaurants="tempScheduleRestaurants"
+      :main-schedules="tempScheduleMainItems"
+      @saved="onTempScheduleSaved"
+      @close="tempScheduleOpen = false"
+    />
   </div>
 </template>
 
@@ -201,6 +213,7 @@ import { getEntityGroupCode } from '@/lib/legalEntities.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const ReminderTimesEditor = defineAsyncComponent(() => import('@/components/ui/ReminderTimesEditor.vue'));
+const SupplierTempScheduleModal = defineAsyncComponent(() => import('@/components/modals/SupplierTempScheduleModal.vue'));
 
 const userStore = useUserStore();
 const orderStore = useOrderStore();
@@ -222,6 +235,50 @@ const selectedSupplierId = ref('');
 
 const canEdit = computed(() => userStore.hasAccess('supplier-schedule', 'edit'));
 const canDelete = computed(() => userStore.hasAccess('supplier-schedule', 'full'));
+
+const tempScheduleOpen = ref(false);
+const tempScheduleRestaurants = computed(() => {
+  if (!activeSupplier.value) return [];
+  const grp = activeSupplier.value.legal_entity_group;
+  return restaurants.value
+    .filter(r => r.legal_entity_group === grp)
+    .map(r => ({
+      id: r.id,
+      number: r.number,
+      city: r.city || '',
+      address: r.address || '',
+      legal_entity_group: r.legal_entity_group,
+    }));
+});
+const tempScheduleMainItems = computed(() => {
+  if (!activeSupplier.value) return [];
+  return rows.value
+    .filter(row => row.supplier_id === activeSupplier.value.id && row.is_active == 1)
+    .map(row => {
+      const rest = restaurants.value.find(r => r.id === row.restaurant_id);
+      return {
+        restaurant_number: rest ? rest.number : null,
+        order_day: row.order_day,
+        delivery_day: row.delivery_day,
+        is_active: row.is_active,
+      };
+    })
+    .filter(s => s.restaurant_number);
+});
+
+function openTempScheduleModal() {
+  tempScheduleOpen.value = true;
+}
+async function onTempScheduleSaved(res) {
+  if (res?.notified) {
+    const n = res?.notify || {};
+    const msg = `Уведомлено ${n.restaurants || 0} рест.: TG ${n.sent_tg || 0}, Push ${n.sent_push || 0}`;
+    toast.success('Сохранено и уведомлено', msg);
+  } else {
+    toast.success('Сохранено', 'Временный график обновлён');
+  }
+  await loadData();
+}
 
 // Колонки таблицы = дни поставок (Пн..Сб). Воскресенья поставок не бывает.
 const WEEKDAYS_NUM = [1,2,3,4,5,6];

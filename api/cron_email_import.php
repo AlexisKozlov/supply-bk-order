@@ -321,7 +321,9 @@ if ($saved > 0) {
         $lines = [];
         foreach ($savedItems as $it) {
             $typeName = $it['type'] === 'restaurant_sales' ? 'реализация'
-                      : ($it['type'] === 'stock_1c' ? 'остатки' : $it['type']);
+                      : ($it['type'] === 'stock_1c' ? 'остатки'
+                      : ($it['type'] === 'shelf_life' ? 'остатки (сроки годности)'
+                      : ($it['type'] === 'analysis' ? 'анализ запасов' : $it['type'])));
             $line = '• ' . htmlspecialchars($it['from_email'], ENT_QUOTES, 'UTF-8') . ' — ' . $typeName;
             if ($it['legal_entity']) $line .= ' / ' . htmlspecialchars($it['legal_entity'], ENT_QUOTES, 'UTF-8');
             if ($it['file_name']) $line .= ' (' . htmlspecialchars($it['file_name'], ENT_QUOTES, 'UTF-8') . ')';

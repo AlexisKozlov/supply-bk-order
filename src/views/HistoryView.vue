@@ -96,6 +96,7 @@
                 <button v-if="!isViewer && !order.received_at" class="ht-act" title="Редактировать" @click="editOrder(order)"><BkIcon name="edit" size="sm"/></button>
                 <span v-else-if="!isViewer && order.received_at" class="ht-act ht-act-disabled" title="Доставка принята, редактирование невозможно"><BkIcon name="edit" size="sm"/></span>
                 <button class="ht-act" title="Скопировать" @click="copyOrder(order)"><BkIcon name="copy" size="sm"/></button>
+                <button class="ht-act ht-act-ut" title="Таблица для 1С УТ" @click="openUtFromHistory(order)">1С</button>
                 <button class="ht-act" title="Ссылка" @click="copyOrderLink(order)"><BkIcon name="link" size="sm"/></button>
                 <button class="ht-act" title="История изменений" @click="openLogModal(order.id, 'order')"><BkIcon name="note" size="sm"/></button>
                 <button v-if="canDelete" class="ht-act ht-act-danger" title="Удалить" @click="deleteOrder(order)"><BkIcon name="delete" size="sm"/></button>
@@ -165,6 +166,14 @@
       :message="confirmModal.message"
       @confirm="onConfirmOk"
       @cancel="onConfirmCancel"
+    />
+
+    <OrderUtExportModal
+      v-if="utExport.show"
+      :rows="utExport.rows"
+      :supplier="utExport.supplier"
+      :delivery-date-text="utExport.deliveryDateText"
+      @close="utExport.show = false"
     />
 
     <!-- Order Drawer -->
@@ -248,7 +257,7 @@
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useHistoryStore } from '@/stores/historyStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -265,6 +274,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
+const OrderUtExportModal = defineAsyncComponent(() => import('@/components/modals/OrderUtExportModal.vue'));
 const CompareOrdersModal = defineAsyncComponent(() => import('@/components/modals/CompareOrdersModal.vue'));
 
 const historyStore  = useHistoryStore();
@@ -542,6 +552,45 @@ async function deleteOrder(order) {
   const result = await historyStore.deleteOrder(order.id);
   if (result.error) toast.error('Ошибка', result.error); else toast.success('Удалён', '');
 }
+
+// ─── Экспорт в 1С УТ ─────────────────────────────────────────────────────────
+const utExport = reactive({ show: false, rows: [], supplier: '', deliveryDateText: '' });
+async function openUtFromHistory(order) {
+  const items = order.order_items || [];
+  if (!items.length) { toast.error('Нет позиций', ''); return; }
+  const skus = items.map(i => i.sku).filter(Boolean);
+  let productMap = {};
+  if (skus.length) {
+    try {
+      const { data } = await db.from('products').select('sku, external_code, category').in('sku', skus);
+      if (Array.isArray(data)) productMap = Object.fromEntries(data.map(p => [p.sku, p]));
+    } catch (e) {
+      console.warn('[ut-export history] fetch products failed:', e);
+    }
+  }
+  const rows = items
+    .map(it => {
+      // qty_boxes в сохранённом заказе уже в учётных коробках.
+      const boxes = Math.round(parseFloat(it.qty_boxes) || 0);
+      if (boxes <= 0) return null;
+      const p = it.sku ? productMap[it.sku] : null;
+      return {
+        sku: it.sku || '',
+        name: it.name || '',
+        externalCode: p?.external_code || '',
+        category: p?.category || '',
+        accountingBoxes: boxes,
+      };
+    })
+    .filter(Boolean);
+  if (!rows.length) { toast.error('Нет позиций с заказом', ''); return; }
+  utExport.rows = rows;
+  utExport.supplier = order.supplier || '—';
+  utExport.deliveryDateText = order.delivery_date
+    ? new Date(order.delivery_date + 'T00:00:00').toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '';
+  utExport.show = true;
+}
 function loadPlan(plan) { router.push({ path: '/planning', query: { planId: plan.id } }); }
 function viewPlan(plan) { router.push({ path: '/planning', query: { planId: plan.id, mode: 'view' } }); }
 async function deletePlan(plan) {
@@ -643,6 +692,8 @@ function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s 
 .ht-act-danger:hover { background: #FEF2F2; }
 .ht-act-disabled { opacity: 0.25; cursor: not-allowed; pointer-events: auto; }
 .ht-act-disabled:hover { opacity: 0.3; background: none; border-color: transparent; }
+.ht-act-ut { font-size: 11px; font-weight: 800; color: #b35900; letter-spacing: 0.02em; min-width: 26px; }
+.ht-act-ut:hover { background: #FFF3E0; }
 
 /* ═══ DRAWER ═══ */
 .drawer-backdrop {

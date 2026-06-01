@@ -57,6 +57,25 @@
             <code>{{ addr }}</code>
           </label>
           <div v-if="!securityList.length" class="tsm-empty-recipients">Список адресов охраны пуст. Заполните в настройках модуля.</div>
+
+          <!-- Разовые получатели (только для этого письма, в список не сохраняются) -->
+          <label v-for="(addr, i) in extraRecipients" :key="'x' + i" class="tsm-recipient tsm-recipient-extra">
+            <input type="checkbox" checked disabled />
+            <code>{{ addr }}</code>
+            <span class="tsm-recipient-note">разово</span>
+            <button class="tsm-extra-del" @click.prevent="removeExtra(i)" title="Убрать">✕</button>
+          </label>
+        </div>
+
+        <div class="tsm-add-extra">
+          <input
+            v-model="extraInput"
+            type="email"
+            placeholder="Добавить ещё email (разово)"
+            @keyup.enter="addExtra"
+            class="tsm-extra-input"
+          />
+          <button class="ghost tsm-extra-add" @click="addExtra" :disabled="!extraInput.trim()">＋ Добавить</button>
         </div>
 
         <div class="tsm-cc">
@@ -92,6 +111,8 @@ const userStore = useUserStore();
 const rows = ref([]);
 const securityList = ref([]);
 const checked = ref([]);
+const extraRecipients = ref([]); // разовые адреса (в постоянный список не идут)
+const extraInput = ref('');
 const senderEmail = ref('');
 const loaded = ref(false);
 const error = ref('');
@@ -134,7 +155,21 @@ function resetMail() {
   mailBody.value = buildDefaultBody();
 }
 
-const canSend = computed(() => rows.value.length > 0 && checked.value.length > 0);
+// Итоговый список получателей: отмеченные из охраны + разовые, без дублей
+const allRecipients = computed(() => [...new Set([...checked.value, ...extraRecipients.value])]);
+const canSend = computed(() => rows.value.length > 0 && allRecipients.value.length > 0);
+
+function addExtra() {
+  const e = extraInput.value.trim();
+  if (!e) return;
+  // простая проверка email
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { extraInput.value = ''; return; }
+  if (!extraRecipients.value.includes(e) && !checked.value.includes(e)) {
+    extraRecipients.value.push(e);
+  }
+  extraInput.value = '';
+}
+function removeExtra(i) { extraRecipients.value.splice(i, 1); }
 
 function formatExcelDate(serial) {
   if (typeof serial !== 'number') return '';
@@ -173,13 +208,13 @@ async function loadAll() {
 async function send() {
   if (!canSend.value) return;
   if (!(await appConfirm(
-        `Отправить ${rows.value.length} строк(и) на ${checked.value.length} адрес(а) охраны?`,
+        `Отправить ${rows.value.length} строк(и) на ${allRecipients.value.length} адрес(а)?`,
         { title: 'Отправка письма', okText: 'Отправить' }))) return;
   sending.value = true;
   try {
     const { data, error: e } = await db.rpc('tit_send_to_security', {
       id: props.id,
-      recipients: checked.value,
+      recipients: allRecipients.value,
       subject: mailSubject.value,
       body_text: mailBody.value,
     });
@@ -200,7 +235,7 @@ async function openInMyOutlook() {
   //    минуя наш info@ и его NiceBayes-блок.
   try {
     await downloadXlsx();
-    const tos = checked.value;
+    const tos = allRecipients.value;
     if (!tos.length) {
       await appAlert('Не выбраны получатели. Отметьте адреса охраны в списке выше.', { type: 'warning' });
       return;
@@ -259,6 +294,11 @@ onMounted(loadAll);
 .tsm-recipients { display: flex; flex-direction: column; gap: 6px; }
 .tsm-recipient { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #fff; border: 1px solid #EDE2D2; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .tsm-recipient code { font-family: ui-monospace, Menlo, monospace; color: var(--bk-brown, #502314); }
+.tsm-recipient-extra { background: #FFF8E1; }
+.tsm-extra-del { margin-left: auto; border: none; background: none; color: #B91C1C; cursor: pointer; font-size: 14px; padding: 2px 6px; }
+.tsm-add-extra { display: flex; gap: 8px; margin-top: 8px; }
+.tsm-extra-input { flex: 1; height: 36px; border-radius: 8px; border: 1.5px solid #E5DDD3; padding: 0 12px; font-family: inherit; font-size: 13px; background: #fff; color: var(--bk-brown, #502314); }
+.tsm-extra-add { white-space: nowrap; }
 .tsm-recipient-locked { background: #FFF8E1; cursor: default; }
 .tsm-tick { color: #2E7D32; font-weight: 700; }
 .tsm-recipient-note { color: #8C7B6E; font-size: 11px; margin-left: auto; }

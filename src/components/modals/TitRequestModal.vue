@@ -263,15 +263,37 @@ async function clearSupplier() {
 }
 
 async function saveBasic() {
+  const oldDate = req.value?.delivery_date || '';
+  const newDate = basic.delivery_date || '';
+  // Дата подачи изменилась и в заявке есть машины — предлагаем сдвинуть их дату,
+  // чтобы дата машин не расходилась с датой заявки. Время в/из сохраняется.
+  let shift = false;
+  if (newDate && oldDate && newDate !== oldDate && activeVehicles.value.length > 0) {
+    const n = activeVehicles.value.length;
+    shift = await appConfirm(
+      `Дата подачи изменилась на ${formatDate(newDate)}. Сдвинуть дату у ${n} ${pluralizeVeh(n)} на эту же? Время подачи останется прежним.`,
+      { title: 'Сдвинуть дату машин', okText: 'Сдвинуть' }
+    );
+  }
   try {
-    await db.rpc('tit_update_basic', {
+    const { error: e } = await db.rpc('tit_update_basic', {
       id: props.id,
       legal_entity: basic.legal_entity,
       delivery_date: basic.delivery_date,
+      shift_vehicles: shift,
     });
+    if (e) throw new Error(e);
+    if (req.value) req.value.delivery_date = newDate;
+    if (shift) await reload(); // подтянуть обновлённые даты машин в UI
     emit('changed');
-  } catch (e) { alert('Не удалось сохранить: ' + (e.message || e)); }
+  } catch (e) { await appAlert('Не удалось сохранить: ' + (e.message || e), { type: 'error' }); }
 }
+const pluralizeVeh = (n) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'машины';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'машин';
+  return 'машин';
+};
 
 const activeVehicles = computed(() => vehicles.value.filter(v => !v.deleted_at));
 const canSend = computed(() => activeVehicles.value.length > 0 && activeVehicles.value.every(v => !v.needs_review));

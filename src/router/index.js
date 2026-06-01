@@ -67,6 +67,7 @@ const routes = [
       { path: 'tasks', name: 'tasks', component: () => import('@/views/TasksView.vue'), meta: { title: 'Задачи', module: 'tasks' } },
       { path: 'keg-returns', name: 'keg-returns', component: () => import('@/views/KegReturnsView.vue'), meta: { title: 'Возврат кег', module: 'restaurant-orders' } },
       { path: 'keg-returns/schedule', name: 'keg-returns-schedule', component: () => import('@/views/KegReturnsScheduleView.vue'), meta: { title: 'График возврата кег', module: 'restaurant-orders' } },
+      { path: 'tit-requests', name: 'tit-requests', component: () => import('@/views/TitRequestsView.vue'), meta: { title: 'Заявка на пропуск', module: 'order' } },
     ],
   },
   {

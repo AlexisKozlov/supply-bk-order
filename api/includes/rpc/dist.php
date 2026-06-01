@@ -366,3 +366,109 @@
         $pdo->prepare($sql)->execute($params);
         respond(['success' => true, 'updated' => count($restaurantNumbers)]);
     }
+
+    // Сводка распределения: по всем АКТИВНЫМ сессиям группы юр. лиц собирает
+    // неотгруженные позиции с кол-вом > 0 + рестораны с их днями доставки.
+    // Группировка (день → хранение → ресторан → товары) делается на фронте.
+    if ($fn === 'dist_get_overview') {
+        requireModuleAccess($authUser, 'distribution', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        if ($legalEntity && !checkLegalEntityAccess($authUser, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+
+        // Активные сессии группы
+        $s = $pdo->prepare("SELECT id, name FROM dist_sessions WHERE legal_entity_group = ? AND status = 'active' ORDER BY created_at");
+        $s->execute([$group]);
+        $sessions = $s->fetchAll();
+
+        if (empty($sessions)) {
+            respond(['sessions' => [], 'products' => [], 'entries' => [], 'restaurants' => []]);
+        }
+        $sessionIds = array_column($sessions, 'id');
+        $ph = implode(',', array_fill(0, count($sessionIds), '?'));
+
+        // Товары всех активных сессий (это «строки» матрицы). Распределение
+        // идёт по ВСЕМ ресторанам группы: пустая клетка = «ещё надо отдать».
+        $prodStmt = $pdo->prepare("
+            SELECT sp.id AS session_product_id, sp.session_id, sp.unit, sp.default_qty,
+                   COALESCE(sp.custom_name, p.name) AS product_name,
+                   COALESCE(sp.custom_sku, p.sku) AS article,
+                   p.external_code, p.category
+            FROM dist_session_products sp
+            LEFT JOIN products p ON p.id = sp.product_id
+            WHERE sp.session_id IN ($ph)
+        ");
+        $prodStmt->execute(array_values($sessionIds));
+        $products = $prodStmt->fetchAll();
+
+        // Дообогащение «ручных» товаров: позиция добавлена кастомно (без привязки
+        // к карточке), но в справочнике есть товар с таким же артикулом — тогда
+        // подтягиваем внешний код и условие хранения по артикулу.
+        $needSku = [];
+        foreach ($products as $r) {
+            if (empty($r['external_code']) && !empty($r['article'])) $needSku[(string)$r['article']] = true;
+        }
+        if (!empty($needSku)) {
+            $skuList = array_keys($needSku);
+            $sph = implode(',', array_fill(0, count($skuList), '?'));
+            $pl = $pdo->prepare("SELECT sku, external_code, category FROM products
+                                 WHERE legal_entity_group = ? AND sku IN ($sph) AND external_code IS NOT NULL AND external_code <> ''");
+            $pl->execute(array_merge([$group], $skuList));
+            $skuMap = [];
+            foreach ($pl->fetchAll() as $p) {
+                if (!isset($skuMap[$p['sku']])) $skuMap[$p['sku']] = $p; // первый по артикулу
+            }
+            foreach ($products as &$r) {
+                if (empty($r['external_code']) && !empty($r['article']) && isset($skuMap[(string)$r['article']])) {
+                    $r['external_code'] = $skuMap[(string)$r['article']]['external_code'];
+                    if (empty($r['category'])) $r['category'] = $skuMap[(string)$r['article']]['category'];
+                }
+            }
+            unset($r);
+        }
+
+        // Отметки по клеткам: ✓ отгружено (shipped=1) / ✗ не нужно (shipped=2)
+        // и переопределения количества. Пустых клеток тут нет — их фронт считает
+        // «надо отдать» (по стандартному количеству товара).
+        $spIds = array_column($products, 'session_product_id');
+        $entries = [];
+        if (!empty($spIds)) {
+            $eph = implode(',', array_fill(0, count($spIds), '?'));
+            $es = $pdo->prepare("SELECT session_product_id, restaurant_number, shipped, qty
+                                 FROM dist_entries
+                                 WHERE session_product_id IN ($eph)
+                                   AND (shipped <> 0 OR (qty IS NOT NULL AND TRIM(qty) NOT IN ('', '0')))");
+            $es->execute(array_values($spIds));
+            $entries = $es->fetchAll();
+        }
+
+        // Рестораны группы + дни доставки. dist_entries ссылается на номер
+        // ресторана, а delivery_schedule — на id; связываем через restaurants.
+        $rs = $pdo->prepare("SELECT id, number, address, city FROM restaurants WHERE active = 1 AND legal_entity_group = ? ORDER BY CAST(number AS UNSIGNED)");
+        $rs->execute([$group]);
+        $restaurants = $rs->fetchAll();
+
+        $restIds = array_column($restaurants, 'id');
+        $deliveryByNumber = [];
+        if (!empty($restIds)) {
+            $rph = implode(',', array_fill(0, count($restIds), '?'));
+            $ds = $pdo->prepare("SELECT restaurant_id, day_of_week FROM delivery_schedule WHERE restaurant_id IN ($rph) ORDER BY day_of_week");
+            $ds->execute(array_values($restIds));
+            $byId = [];
+            foreach ($ds->fetchAll() as $d) $byId[$d['restaurant_id']][] = intval($d['day_of_week']);
+            foreach ($restaurants as $r) {
+                $deliveryByNumber[(string)$r['number']] = $byId[$r['id']] ?? [];
+            }
+        }
+        $out = [];
+        foreach ($restaurants as $r) {
+            $out[] = [
+                'number'        => $r['number'],
+                'address'       => $r['address'],
+                'city'          => $r['city'],
+                'delivery_days' => $deliveryByNumber[(string)$r['number']] ?? [],
+            ];
+        }
+
+        respond(['sessions' => $sessions, 'products' => $products, 'entries' => $entries, 'restaurants' => $out]);
+    }

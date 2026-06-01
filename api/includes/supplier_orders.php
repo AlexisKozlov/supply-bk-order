@@ -172,6 +172,138 @@ function soOrderDateByDeliveryDate($deliveryDate, $orderDow) {
     return $deliveryObj->modify("-{$diff} days")->format('Y-m-d');
 }
 
+/**
+ * Уведомить рестораны об изменении временного графика поставщика.
+ * Шлёт Telegram (всем верифицированным подписчикам ресторана) + Push (PWA).
+ * Если $tempItems пуст, шлёт «временный график снят».
+ *
+ * @return array {sent_tg, sent_push, restaurants}
+ */
+function soNotifyTempScheduleChanged($pdo, $supplierId, $dateFrom, $dateTo, $tempItems) {
+    $stats = ['sent_tg' => 0, 'sent_push' => 0, 'restaurants' => 0];
+
+    // Имя поставщика и группа
+    $supSt = $pdo->prepare("SELECT short_name, legal_entity_group FROM suppliers WHERE id = ? LIMIT 1");
+    $supSt->execute([$supplierId]);
+    $sup = $supSt->fetch();
+    if (!$sup) return $stats;
+    $supName = $sup['short_name'] ?: 'Поставщик';
+    $supGroup = $sup['legal_entity_group'] ?? 'BK_VM';
+
+    // Все рестораны той же группы с расписанием для этого поставщика
+    $restSt = $pdo->prepare("
+        SELECT DISTINCT r.id, r.number, r.legal_entity_group
+        FROM restaurants r
+        JOIN supplier_schedules ss ON ss.restaurant_id = r.id AND ss.supplier_id = ? AND ss.is_active = 1
+        WHERE r.active = 1 AND r.legal_entity_group = ?
+        ORDER BY r.number
+    ");
+    $restSt->execute([$supplierId, $supGroup]);
+    $restaurants = $restSt->fetchAll();
+    if (!$restaurants) return $stats;
+
+    // Дни недели (короткие)
+    $dows = [1 => 'Пн', 2 => 'Вт', 3 => 'Ср', 4 => 'Чт', 5 => 'Пт', 6 => 'Сб', 7 => 'Вс'];
+
+    // Группируем items по restaurant_id → [{order_day, delivery_day}]
+    $byRest = [];
+    foreach ($tempItems as $it) {
+        $rid = (int)($it['restaurant_id'] ?? 0);
+        if (!$rid) continue;
+        $byRest[$rid][] = [
+            'order'    => (int)($it['order_day'] ?? 0),
+            'delivery' => (int)($it['delivery_day'] ?? 0),
+        ];
+    }
+
+    // Период в человекочитаемом виде
+    $fmt = function ($iso) {
+        if (!$iso) return '';
+        $dt = DateTime::createFromFormat('Y-m-d', $iso);
+        return $dt ? $dt->format('d.m') : $iso;
+    };
+    $periodStr = $fmt($dateFrom) . ' – ' . $fmt($dateTo);
+
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+
+    foreach ($restaurants as $r) {
+        $rid = (int)$r['id'];
+        $rNum = (int)$r['number'];
+        $rGroup = $r['legal_entity_group'];
+
+        // Дни этого ресторана из присланного temp-набора (или ничего — значит снято)
+        $items = $byRest[$rid] ?? [];
+        $isRemoved = empty($items) || !$dateFrom || !$dateTo;
+
+        if ($isRemoved) {
+            $titleHtml = "📅 <b>{$supName}</b> — временный график снят.\nГрафик заявок возвращён к обычному.";
+            $titlePlain = "{$supName}: временный график снят. График возвращён к обычному.";
+        } else {
+            $deliveryDays = [];
+            $orderPairs = [];
+            $seen = [];
+            foreach ($items as $it) {
+                if ($it['delivery'] >= 1 && $it['delivery'] <= 7) {
+                    if (!in_array($it['delivery'], $deliveryDays, true)) $deliveryDays[] = $it['delivery'];
+                }
+                $key = $it['order'] . '-' . $it['delivery'];
+                if (!isset($seen[$key]) && $it['order'] >= 1 && $it['delivery'] >= 1) {
+                    $orderPairs[] = $dows[$it['order']] . '→' . $dows[$it['delivery']];
+                    $seen[$key] = true;
+                }
+            }
+            sort($deliveryDays);
+            $deliveryList = implode(', ', array_map(fn($d) => $dows[$d] ?? '?', $deliveryDays));
+            $orderList = implode(', ', $orderPairs);
+
+            $titleHtml  = "📅 <b>{$supName}</b> — временный график на {$periodStr}\n";
+            $titleHtml .= "Дни поставки: <b>{$deliveryList}</b>\n";
+            $titleHtml .= "Подача заявок: {$orderList}";
+            $titlePlain = "{$supName}: временный график {$periodStr}. Дни поставки: {$deliveryList}. Подача: {$orderList}";
+        }
+
+        // Telegram — всем верифицированным подписчикам ресторана
+        if ($botToken) {
+            $tgSt = $pdo->prepare("
+                SELECT chat_id
+                FROM ro_telegram_subs
+                WHERE restaurant_number = ? AND legal_entity_group = ?
+                  AND verified_at IS NOT NULL AND chat_id IS NOT NULL
+            ");
+            $tgSt->execute([$rNum, $rGroup]);
+            $chatIds = $tgSt->fetchAll(PDO::FETCH_COLUMN);
+            $replyMarkup = json_encode([
+                'inline_keyboard' => [[
+                    ['text' => 'Открыть напоминания', 'url' => 'https://supply-department.online/restaurant/reminders'],
+                ]],
+            ]);
+            foreach ($chatIds as $chatId) {
+                $ok = sendTelegramMessage($botToken, $chatId, $titleHtml . "\n\n<i>Подробности в кабинете.</i>", 'HTML');
+                if ($ok) $stats['sent_tg']++;
+                // лёгкая защита от rate-limit Telegram
+                usleep(50000);
+            }
+        }
+
+        // Push (PWA)
+        try {
+            $pushSent = pushSendToRestaurant($pdo, $rNum, $rGroup, [
+                'title' => "{$supName}: временный график",
+                'body'  => $titlePlain,
+                'url'   => '/restaurant/reminders',
+                'tag'   => "temp-schedule-{$supplierId}",
+            ]);
+            $stats['sent_push'] += (int)$pushSent;
+        } catch (Throwable $e) {
+            error_log('[temp-schedule push] rest=' . $rNum . ' err=' . $e->getMessage());
+        }
+
+        $stats['restaurants']++;
+    }
+
+    return $stats;
+}
+
 function soGetTempSchedulePeriod($pdo, $supplierId, $deliveryDate = null) {
     if (!$supplierId) return null;
 
@@ -2084,6 +2216,85 @@ if ($soAction === 'admin') {
         }
 
         soRespond(['success' => true, 'updated' => $count]);
+    }
+
+    // --- Только временный график (без перезаписи основного) ---
+    if ($adminAction === 'temp-schedule' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+
+        $tempDateFrom = trim((string)($body['date_from'] ?? ''));
+        $tempDateTo   = trim((string)($body['date_to']   ?? ''));
+        $tempItems    = is_array($body['items'] ?? null) ? $body['items'] : [];
+
+        if (($tempDateFrom && !$tempDateTo) || (!$tempDateFrom && $tempDateTo)) {
+            soRespond(['error' => 'Для временного графика нужно указать обе даты периода'], 400);
+        }
+        if ($tempDateFrom && $tempDateTo && $tempDateFrom > $tempDateTo) {
+            soRespond(['error' => 'Дата окончания временного графика раньше даты начала'], 400);
+        }
+
+        $updatedBy = resolveActorName($pdo, $sessionUser);
+        $pdo->beginTransaction();
+        try {
+            if ($tempDateFrom && $tempDateTo && !empty($tempItems)) {
+                $upsert = $pdo->prepare("
+                    INSERT INTO so_supplier_temp_schedule_periods (supplier_id, date_from, date_to, updated_at, updated_by)
+                    VALUES (?, ?, ?, NOW(), ?)
+                    ON DUPLICATE KEY UPDATE
+                        date_from = VALUES(date_from),
+                        date_to = VALUES(date_to),
+                        updated_at = NOW(),
+                        updated_by = VALUES(updated_by)
+                ");
+                $upsert->execute([$supplierId, $tempDateFrom, $tempDateTo, $updatedBy]);
+
+                $period = soGetTempSchedulePeriod($pdo, $supplierId);
+                $periodId = (int)($period['id'] ?? 0);
+                if ($periodId <= 0) throw new RuntimeException('Не удалось сохранить период');
+
+                $pdo->prepare("DELETE FROM so_supplier_temp_schedule_items WHERE period_id = ?")->execute([$periodId]);
+                $ins = $pdo->prepare("
+                    INSERT INTO so_supplier_temp_schedule_items (period_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?, ?, NOW(), ?)
+                ");
+                foreach ($tempItems as $sch) {
+                    $restId = $sch['restaurant_id'] ?? null;
+                    if (!$restId) continue;
+                    $ins->execute([
+                        $periodId,
+                        (int)$restId,
+                        (int)($sch['order_day'] ?? 1),
+                        (int)($sch['delivery_day'] ?? 2),
+                        (int)($sch['is_active'] ?? 1),
+                        $updatedBy,
+                    ]);
+                }
+            } else {
+                // Если даты не указаны — удаляем существующий период (если есть)
+                $existing = soGetTempSchedulePeriod($pdo, $supplierId);
+                if ($existing) {
+                    $pdo->prepare("DELETE FROM so_supplier_temp_schedule_periods WHERE id = ?")
+                        ->execute([(int)$existing['id']]);
+                }
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            soRespond(['error' => 'Не удалось сохранить временный график: ' . $e->getMessage()], 500);
+        }
+
+        // Уведомление ресторанам (опционально, если notify=1)
+        $notifyResult = ['sent_tg' => 0, 'sent_push' => 0, 'restaurants' => 0];
+        if (!empty($body['notify'])) {
+            try {
+                require_once __DIR__ . '/push_send.php';
+                $notifyResult = soNotifyTempScheduleChanged($pdo, $supplierId, $tempDateFrom, $tempDateTo, $tempItems);
+            } catch (Throwable $e) {
+                error_log('[temp-schedule notify] err=' . $e->getMessage());
+            }
+        }
+        soRespond(['success' => true, 'notify' => $notifyResult]);
     }
 
     // --- Правила дедлайнов ---

@@ -370,6 +370,10 @@ body {
 .user-dropdown-btn.telegram-btn:hover { background: #EBF7FE; }
 .user-dropdown-btn.telegram-btn .tg-icon { font-size: 14px; transform: rotate(45deg); display: inline-block; }
 .user-dropdown-btn.telegram-btn .tg-connected { color: #22C55E; font-size: 12px; margin-left: auto; }
+.user-dropdown-btn.bug-btn { display: flex; align-items: center; gap: 6px; color: #b35900; }
+.user-dropdown-btn.bug-btn:hover { background: #FFF3E0; }
+.user-dropdown-btn.bug-btn .bug-icon { font-size: 14px; line-height: 1; }
+.user-dropdown-btn.bug-btn .bug-dot { width: 8px; height: 8px; border-radius: 50%; background: #dc2626; margin-left: auto; }
 
 /* ═══════ MAIN AREA ═══════ */
 .main-wrapper {

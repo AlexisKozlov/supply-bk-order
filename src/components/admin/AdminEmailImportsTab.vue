@@ -106,9 +106,10 @@
 
       <div class="aei-row aei-row-sender">
         <input v-model="newSender.email" type="email" placeholder="email@example.com" class="aei-input" />
-        <select v-model="newSender.type" class="aei-select">
+        <select v-model="newSender.type" class="aei-select" title="Тип по умолчанию. При открытии письма его можно сменить вручную.">
           <option value="restaurant_sales">Реализация ресторанов</option>
           <option value="analysis">Анализ запасов (остатки + расход)</option>
+          <option value="shelf_life">Остатки (сроки годности)</option>
           <option value="stock_1c" disabled>Остатки 1С (скоро)</option>
         </select>
         <select v-model="newSender.legal_entity" class="aei-select">
@@ -184,6 +185,7 @@ const newSender = ref({ email: '', type: 'restaurant_sales', legal_entity: '', n
 const TYPE_LABEL = {
   restaurant_sales: 'Реализация ресторанов',
   analysis: 'Анализ запасов',
+  shelf_life: 'Остатки (сроки годности)',
   stock_1c: 'Остатки 1С',
   unknown: 'Неизвестный',
 };

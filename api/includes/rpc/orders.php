@@ -356,6 +356,26 @@
                 $pdo->prepare("INSERT INTO `order_items` ($cn) VALUES ($ph)")->execute(array_values($item));
             }
             $pdo->commit();
+            // Автоматически создаём «Заявку на пропуск» под этот заказ.
+            // Тихо игнорирует если не получилось — модуль ТиТ не должен
+            // блокировать сохранение заказа.
+            require_once __DIR__ . '/../tit_helpers.php';
+            $supName = (string)($order['supplier'] ?? '');
+            $supId = titFindSupplierIdByName($pdo, $supName, (string)($order['legal_entity'] ?? ''));
+            $supEmail = '';
+            if ($supId) {
+                try {
+                    $eSt = $pdo->prepare("SELECT email FROM suppliers WHERE id = ?");
+                    $eSt->execute([$supId]);
+                    $supEmail = (string)($eSt->fetchColumn() ?: '');
+                } catch (Throwable $e) {}
+            }
+            titEnsureRequestForOrder(
+                $pdo, (string)$order['id'], $supId, $supName, $supEmail,
+                (string)($order['legal_entity'] ?? ''),
+                (string)($order['delivery_date'] ?? ''),
+                (string)$caller['name']
+            );
             respond(['success' => true, 'id' => $order['id']]);
         } catch (PDOException $e) {
             $pdo->rollBack();
@@ -451,6 +471,29 @@
                 } catch (PDOException $e) {
                     error_log("update_order: payment cleanup failed: " . $e->getMessage());
                 }
+            }
+            // Автоматически обновляем/создаём «Заявку на пропуск» под этот заказ.
+            // Если поставщик или дата поменялись — данные подтянутся в заявку.
+            try {
+                require_once __DIR__ . '/../tit_helpers.php';
+                $titLegal = (string)($orderRow['legal_entity'] ?? '');
+                $titSupName = (string)($order['supplier'] ?? $orderRow['supplier'] ?? '');
+                $titDelivery = (string)($order['delivery_date'] ?? $orderRow['delivery_date'] ?? '');
+                $titSupId = titFindSupplierIdByName($pdo, $titSupName, $titLegal);
+                $titSupEmail = '';
+                if ($titSupId) {
+                    try {
+                        $eSt = $pdo->prepare("SELECT email FROM suppliers WHERE id = ?");
+                        $eSt->execute([$titSupId]);
+                        $titSupEmail = (string)($eSt->fetchColumn() ?: '');
+                    } catch (Throwable $e) {}
+                }
+                titEnsureRequestForOrder(
+                    $pdo, (string)$orderId, $titSupId, $titSupName, $titSupEmail,
+                    $titLegal, $titDelivery, (string)$caller['name']
+                );
+            } catch (Throwable $e) {
+                error_log('[update_order] tit ensure failed: ' . $e->getMessage());
             }
             respond(['success' => true, 'updated_at' => $order['updated_at']]);
         } catch (PDOException $e) {

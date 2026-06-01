@@ -14,7 +14,16 @@ function askAI($question, $context, $chatId = null, array $history = []) {
         }
     };
 
-    // Groq (основной — самый быстрый, 1-3 сек)
+    // DeepSeek (основной — куплен корпоративный план, ~1.7 сек на ответ).
+    $deepseekKey = $GLOBALS['DEEPSEEK_API_KEY'] ?? '';
+    if ($deepseekKey) {
+        $refreshTyping();
+        $result = askDeepSeek($question, $context, $deepseekKey, $history);
+        if ($result) return $result;
+        error_log("Bot: DeepSeek failed, trying Groq");
+    }
+
+    // Groq (запасной — самый быстрый, 1-3 сек, но free-tier с лимитами).
     $groqKey = $GLOBALS['GROQ_API_KEY'] ?? '';
     if ($groqKey) {
         $refreshTyping();
@@ -23,7 +32,7 @@ function askAI($question, $context, $chatId = null, array $history = []) {
         error_log("Bot: Groq failed, trying OpenRouter");
     }
 
-    // OpenRouter (запасной — бесплатные модели, но медленнее)
+    // OpenRouter (запасной №2 — бесплатные модели, но медленнее).
     $openrouterKey = $GLOBALS['OPENROUTER_API_KEY'] ?? '';
     if ($openrouterKey) {
         $refreshTyping();
@@ -36,15 +45,6 @@ function askAI($question, $context, $chatId = null, array $history = []) {
         $refreshTyping();
         error_log("Bot: trying Gemini fallback");
         $result = askGemini($question, $context, $GEMINI_API_KEY, $history);
-        if ($result) return $result;
-    }
-
-    // DeepSeek (если есть баланс)
-    $deepseekKey = $GLOBALS['DEEPSEEK_API_KEY'] ?? '';
-    if ($deepseekKey) {
-        $refreshTyping();
-        error_log("Bot: trying DeepSeek fallback");
-        $result = askDeepSeek($question, $context, $deepseekKey, $history);
         if ($result) return $result;
     }
 
@@ -323,7 +323,7 @@ function askDeepSeek($question, $context, $apiKey, array $history = []) {
     $messages[] = ['role' => 'user', 'content' => "Контекст (данные из системы):\n{$context}\n\nВопрос пользователя: {$question}"];
 
     $payload = json_encode([
-        'model' => 'deepseek-chat',
+        'model' => 'deepseek-v4-flash',
         'messages' => $messages,
         'max_tokens' => 1024,
         'temperature' => 0.1,

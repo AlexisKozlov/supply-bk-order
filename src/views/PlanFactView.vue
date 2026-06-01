@@ -19,6 +19,9 @@
           <button class="pf-tab" :class="{ active: tab === 'received' }" @click="tab = 'received'; loadOrders()">
             Принятые
           </button>
+          <button class="pf-tab" :class="{ active: tab === 'invoices' }" @click="tab = 'invoices'">
+            📷 Накладные
+          </button>
         </div>
         <div class="pf-filter">
           <select v-model="filterSupplier" @change="loadOrders">
@@ -35,8 +38,68 @@
       <button class="btn secondary small" @click="loadOrders">Повторить</button>
     </div>
 
+    <!-- ═══════════ Таб «Накладные» ═══════════ -->
+    <div v-if="tab === 'invoices'" class="pf-invoice-tab">
+      <div class="pf-invoice-head">
+        <h2 class="pf-invoice-title">Распознавание накладных</h2>
+        <p class="pf-invoice-sub">
+          Загрузите фото или скан накладной, AI выдаст таблицу <b>Номенклатура / Кол-во / Цена</b>,
+          которую можно скопировать в форму предзаказа 1С УТ.
+        </p>
+      </div>
+
+      <div class="pf-invoice-upload">
+        <input
+          ref="invoiceFileInput"
+          type="file"
+          accept="image/jpeg,image/png,image/jpg,application/pdf"
+          style="display:none"
+          @change="onInvoiceFile" />
+        <button class="btn primary" :disabled="invoiceLoading" @click="$refs.invoiceFileInput?.click()">
+          📥 {{ invoiceLoading ? 'AI распознаёт…' : 'Загрузить фото / скан / PDF' }}
+        </button>
+        <span v-if="invoiceFileName" class="pf-invoice-fname">{{ invoiceFileName }}</span>
+      </div>
+
+      <div v-if="invoiceError" class="pf-invoice-err">⚠ {{ invoiceError }}</div>
+
+      <div v-if="invoiceRows.length" class="pf-invoice-result">
+        <div class="pf-invoice-actions">
+          <button class="btn" @click="copyInvoiceRows">📋 Скопировать ({{ invoiceRows.length }} строк)</button>
+          <button class="btn ghost" @click="clearInvoice">🗑 Очистить</button>
+          <span v-if="invoiceCopied" class="pf-invoice-copied">✓ скопировано</span>
+        </div>
+
+        <table class="pf-invoice-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Номенклатура</th>
+              <th class="pf-invoice-num">Количество</th>
+              <th class="pf-invoice-num">Цена</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(r, i) in invoiceRows" :key="i">
+              <td class="pf-invoice-i">{{ i + 1 }}</td>
+              <td><input v-model="r.name"  class="pf-invoice-cell" /></td>
+              <td><input v-model.number="r.qty"   type="number" step="0.001" class="pf-invoice-cell pf-invoice-num" /></td>
+              <td><input v-model.number="r.price" type="number" step="0.01"  class="pf-invoice-cell pf-invoice-num" /></td>
+              <td><button class="pf-invoice-del" @click="invoiceRows.splice(i,1)" title="Удалить">✕</button></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="pf-invoice-hint">
+          Каждая ячейка редактируется. Если AI распознал название с опечаткой — поправьте перед копированием.
+          Скопированный блок вставляйте в форму <code>форма предзаказа.xlsx</code> начиная с колонки <b>D</b> (Номенклатура).
+        </div>
+      </div>
+    </div>
+
     <!-- Loading -->
-    <div v-if="loading" class="loading-state" style="text-align:center;padding:40px;">
+    <div v-else-if="loading" class="loading-state" style="text-align:center;padding:40px;">
       <BurgerSpinner text="Загрузка..." />
     </div>
 
@@ -295,7 +358,92 @@ const { confirmModal, confirm, onConfirm, onCancel } = useConfirm()
 
 const canEditPF = computed(() => userStore.hasAccess('plan-fact', 'edit'))
 
-const tab = useTabRoute('pending', ['pending', 'transit', 'received'])
+const tab = useTabRoute('pending', ['pending', 'transit', 'received', 'invoices'])
+
+// ─── Распознавание накладных (tab=invoices) ───
+const invoiceFileInput = ref(null)
+const invoiceFileName  = ref('')
+const invoiceLoading   = ref(false)
+const invoiceError     = ref('')
+const invoiceRows      = ref([]) // [{name, qty, price}, ...]
+const invoiceCopied    = ref(false)
+
+async function onInvoiceFile(e) {
+  const file = e.target?.files?.[0]
+  e.target.value = '' // чтобы можно было выбрать тот же файл снова
+  if (!file) return
+  invoiceError.value = ''
+  invoiceRows.value  = []
+  invoiceFileName.value = file.name
+  if (file.size > 8 * 1024 * 1024) {
+    invoiceError.value = 'Файл слишком большой (>8 МБ). Сожмите или сделайте новое фото.'
+    return
+  }
+  invoiceLoading.value = true
+  try {
+    const b64 = await fileToBase64(file)
+    // AI Vision на больших накладных может думать 30-60 сек — ставим 120 сек.
+    const r = await db.rpc('invoice_recognize', { file_b64: b64, mime: file.type || 'image/jpeg' }, { timeoutMs: 120000, maxRetries: 0 })
+    if (r?.error) throw new Error(r.error)
+    const rows = r?.data?.rows || []
+    if (!rows.length) {
+      invoiceError.value = 'AI не нашёл строк товаров. Возможно, скан размыт.'
+      return
+    }
+    invoiceRows.value = rows
+  } catch (err) {
+    invoiceError.value = err?.message || 'Не удалось распознать накладную'
+  } finally {
+    invoiceLoading.value = false
+  }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result || '')
+      const comma  = result.indexOf(',')
+      resolve(comma >= 0 ? result.slice(comma + 1) : result)
+    }
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function copyInvoiceRows() {
+  // Формат — таб-разделённые значения, удобно для вставки в Excel/Numbers.
+  const tsv = invoiceRows.value
+    .filter(r => (r.name || '').trim() !== '')
+    .map(r => [
+      String(r.name || '').replace(/[\t\r\n]+/g, ' ').trim(),
+      String(r.qty   ?? 0).replace('.', ','),
+      String(r.price ?? 0).replace('.', ','),
+    ].join('\t'))
+    .join('\n')
+  try {
+    await navigator.clipboard.writeText(tsv)
+    invoiceCopied.value = true
+    setTimeout(() => { invoiceCopied.value = false }, 2000)
+  } catch (_) {
+    // Fallback для старых браузеров — textarea+select+copy
+    const ta = document.createElement('textarea')
+    ta.value = tsv
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy'); invoiceCopied.value = true; setTimeout(() => { invoiceCopied.value = false }, 2000) }
+    catch (e) { invoiceError.value = 'Не удалось скопировать. Скопируйте таблицу вручную.' }
+    document.body.removeChild(ta)
+  }
+}
+
+function clearInvoice() {
+  invoiceRows.value = []
+  invoiceFileName.value = ''
+  invoiceError.value = ''
+}
 const loading = ref(false)
 const lastLoadedAt = ref(null)
 const loadError = ref(false)
@@ -1095,4 +1243,54 @@ async function revertToTransit() {
 
 .data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
 .data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
+
+/* ═══ Таб «Накладные» ═══ */
+.pf-invoice-tab {
+  padding: 16px 4px;
+  max-width: 900px;
+}
+.pf-invoice-head { margin-bottom: 18px; }
+.pf-invoice-title { margin: 0 0 4px; font-size: 22px; }
+.pf-invoice-sub { margin: 0; color: var(--text-muted, #777); font-size: 14px; }
+.pf-invoice-upload {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+}
+.pf-invoice-fname { color: var(--text-muted, #777); font-size: 13px; }
+.pf-invoice-err {
+  background: #fee; border: 1px solid #fcc; color: #c63838;
+  padding: 10px 12px; border-radius: 6px; margin-bottom: 12px;
+}
+.pf-invoice-result { margin-top: 8px; }
+.pf-invoice-actions {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 12px;
+}
+.pf-invoice-copied {
+  color: #2c8a30; font-size: 13px; margin-left: 4px;
+}
+.pf-invoice-table {
+  width: 100%; border-collapse: collapse; background: #fff;
+  border: 1px solid #e5e5e5; border-radius: 6px; overflow: hidden;
+}
+.pf-invoice-table th, .pf-invoice-table td {
+  border-bottom: 1px solid #f0f0f0; padding: 6px 8px; font-size: 13px;
+  vertical-align: middle;
+}
+.pf-invoice-table th { background: #fafafa; color: var(--text-muted, #777); font-weight: 500; font-size: 12px; text-align: left; }
+.pf-invoice-num { text-align: right; }
+.pf-invoice-i { color: var(--text-muted, #999); text-align: right; width: 32px; }
+.pf-invoice-cell {
+  width: 100%; border: 1px solid transparent; padding: 4px 6px; font-size: 13px;
+  background: transparent; border-radius: 4px;
+}
+.pf-invoice-cell:focus { border-color: #999; outline: none; background: #fff; }
+input.pf-invoice-cell.pf-invoice-num { text-align: right; }
+.pf-invoice-del {
+  background: none; border: none; color: #c63838; cursor: pointer;
+  font-size: 14px; padding: 0 6px;
+}
+.pf-invoice-del:hover { color: #800; }
+.pf-invoice-hint {
+  margin-top: 12px; color: var(--text-muted, #777); font-size: 12px;
+}
+.pf-invoice-hint code { background: #f4f4f4; padding: 1px 5px; border-radius: 3px; }
 </style>

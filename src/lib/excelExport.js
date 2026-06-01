@@ -1,6 +1,35 @@
-import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes } from './utils.js';
+import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes, applyEntityGroupFilter } from './utils.js';
+import { db } from './apiClient.js';
+
+/**
+ * Подтягивает external_code для тех позиций, у которых его нет (загружены
+ * из старого черновика, добавлены до релиза с новой логикой и т.д.).
+ * Мутирует переданный массив items: добавляет externalCode где не было.
+ */
+async function enrichExternalCodes(items, legalEntity) {
+  const missing = items.filter(it => it && it.sku && !it.externalCode);
+  if (!missing.length) return;
+  const skus = Array.from(new Set(missing.map(it => it.sku)));
+  try {
+    let q = db.from('products').select('sku, external_code').in('sku', skus);
+    q = applyEntityGroupFilter(q, legalEntity);
+    const { data } = await q;
+    if (!data || !data.length) return;
+    const map = Object.fromEntries(data.map(p => [p.sku, p.external_code || '']));
+    for (const it of missing) {
+      if (map[it.sku]) it.externalCode = map[it.sku];
+    }
+  } catch (e) {
+    // Сетевые ошибки не должны мешать формированию Excel — просто отдадим без кодов.
+    console.warn('[excelExport] enrichExternalCodes failed:', e);
+  }
+}
 
 async function buildOrderWorkbook(items, settings, priceMap) {
+  // Сначала добиваем external_code тем позициям, у которых его не было —
+  // безопасно, мутируем только пустые поля.
+  await enrichExternalCodes(items, settings.legalEntity);
+
   const XLSX = await import('xlsx-js-style');
   const nf = new Intl.NumberFormat('ru-RU');
 
@@ -73,59 +102,47 @@ async function buildOrderWorkbook(items, settings, priceMap) {
   setCell(ws, r, 0, `Юр. лицо: ${legalEntity}`, sInfo);
   r += 2;
 
-  // Шапка таблицы
-  const hasPrices = priceMap && Object.keys(priceMap).length > 0;
-  setCell(ws, r, 0, 'Наименование', sHeaderLeft);
-  setCell(ws, r, 1, 'Заказ', sHeader);
-  setCell(ws, r, 2, 'Паллеты', sHeader);
-  if (hasPrices) {
-    setCell(ws, r, 3, 'Сумма, BYN', sHeader);
-  }
+  // Шапка таблицы. Колонки: Внешний код | Наименование | Кор. | Штук | Паллеты.
+  // Цены/Суммы в Excel не выводим — поставщику они не нужны.
+  setCell(ws, r, 0, 'Внешний код', sHeader);
+  setCell(ws, r, 1, 'Наименование', sHeaderLeft);
+  setCell(ws, r, 2, 'Кор.', sHeader);
+  setCell(ws, r, 3, 'Штук', sHeader);
+  setCell(ws, r, 4, 'Паллеты', sHeader);
   r++;
 
   // Данные
   let totalBoxes = 0;
+  let totalPieces = 0;
   let totalPallets = 0;
   let totalBoxesLeft = 0;
   let count = 0;
   items.forEach(item => {
     if (!item.finalOrder || item.finalOrder <= 0) return;
     const qpb  = getQpb(item);
-    // Единые хелперы — раньше Math.round давал расхождение с текстом для
-    // поставщика (Math.ceil) и с расчётом паллет на экране.
     const accountingBoxes = toAccountingBoxes(item, item.finalOrder, settings.unit);
     const physBoxes = toPhysicalBoxes(item, item.finalOrder, settings.unit);
     const pieces = settings.unit === 'pieces' ? item.finalOrder : accountingBoxes * qpb;
-    const unit = item.unitOfMeasure || 'шт';
+    const piecesInt = Math.round(pieces);
     const nameWithSku = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
     const stripe = count % 2 === 1;
     const bpp = item.boxesPerPallet || 0;
     const pallets = bpp > 0 ? Math.floor(physBoxes / bpp) : 0;
     const boxesLeft = bpp > 0 ? physBoxes % bpp : physBoxes;
 
-    setCell(ws, r, 0, nameWithSku, sCell(stripe));
-    setCell(ws, r, 1, `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`, sOrder(stripe));
+    setCell(ws, r, 0, item.externalCode || '', sCell(stripe));
+    setCell(ws, r, 1, nameWithSku, sCell(stripe));
+    setCell(ws, r, 2, physBoxes, sOrder(stripe));
+    setCell(ws, r, 3, piecesInt, sOrder(stripe));
     if (bpp > 0 && pallets > 0) {
-      setCell(ws, r, 2, `${pallets} пал${boxesLeft ? ' + ' + boxesLeft + ' кор' : ''}`, sOrder(stripe));
+      setCell(ws, r, 4, `${pallets} пал${boxesLeft ? ' + ' + boxesLeft + ' кор' : ''}`, sOrder(stripe));
     } else if (bpp > 0) {
-      setCell(ws, r, 2, `${physBoxes} кор`, sOrder(stripe));
+      setCell(ws, r, 4, `${physBoxes} кор`, sOrder(stripe));
     } else {
-      setCell(ws, r, 2, '—', sOrder(stripe));
-    }
-    if (hasPrices) {
-      const pi = priceMap[item.sku];
-      if (pi) {
-        const price = parseFloat(pi.price) || 0;
-        let lineSum = 0;
-        if (pi.unit_type === 'box') lineSum = price * physBoxes;
-        else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
-        else lineSum = price * pieces;
-        setCell(ws, r, 3, lineSum, { ...sOrder(stripe), numFmt: '#,##0.00' });
-      } else {
-        setCell(ws, r, 3, '—', sCell(stripe));
-      }
+      setCell(ws, r, 4, '—', sOrder(stripe));
     }
     totalBoxes += physBoxes;
+    totalPieces += piecesInt;
     totalPallets += pallets;
     totalBoxesLeft += boxesLeft;
     count++;
@@ -134,53 +151,27 @@ async function buildOrderWorkbook(items, settings, priceMap) {
 
   // Строка итого
   if (count > 0) {
-    setCell(ws, r, 0, 'ИТОГО:', sTotalLabel);
-    setCell(ws, r, 1, `${nf.format(totalBoxes)} кор`, sTotalVal);
+    setCell(ws, r, 0, '', sTotalLabel);
+    setCell(ws, r, 1, 'ИТОГО:', sTotalLabel);
+    setCell(ws, r, 2, totalBoxes, sTotalVal);
+    setCell(ws, r, 3, totalPieces, sTotalVal);
     const palletsSummary = totalPallets > 0
       ? `${totalPallets} пал${totalBoxesLeft ? ' + ' + totalBoxesLeft + ' кор' : ''}`
       : `${totalBoxes} кор`;
-    setCell(ws, r, 2, palletsSummary, sTotalVal);
-    if (hasPrices) {
-      // Подсчитаем итого сумму и НДС
-      let totalSum = 0;
-      let totalVat = 0;
-      items.forEach(item => {
-        if (!item.finalOrder || item.finalOrder <= 0) return;
-        const pi = priceMap[item.sku];
-        if (!pi) return;
-        const qpb_ = getQpb(item);
-        const ab = toAccountingBoxes(item, item.finalOrder, settings.unit);
-        const pb = toPhysicalBoxes(item, item.finalOrder, settings.unit);
-        const pc = settings.unit === 'pieces' ? item.finalOrder : ab * qpb_;
-        const pr = parseFloat(pi.price) || 0;
-        let lineSum = 0;
-        if (pi.unit_type === 'box') lineSum = pr * pb;
-        else if (pi.unit_type === 'thousand') lineSum = pr * pc / 1000;
-        else lineSum = pr * pc;
-        totalSum += lineSum;
-        totalVat += lineSum * ((pi.vat_rate ?? 20) / 100);
-      });
-      setCell(ws, r, 3, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
-      r++;
-      // НДС
-      setCell(ws, r, 0, 'НДС:', sTotalLabel);
-      setCell(ws, r, 1, '', sTotalVal);
-      setCell(ws, r, 2, '', sTotalVal);
-      setCell(ws, r, 3, totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
-      r++;
-      // Итого с НДС
-      setCell(ws, r, 0, 'ИТОГО С НДС:', sTotalLabel);
-      setCell(ws, r, 1, '', sTotalVal);
-      setCell(ws, r, 2, '', sTotalVal);
-      setCell(ws, r, 3, totalSum + totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
-    }
+    setCell(ws, r, 4, palletsSummary, sTotalVal);
     r++;
   }
 
   // Диапазон, ширины, мержи
-  const lastCol = hasPrices ? 3 : 2;
+  const lastCol = 4;
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: lastCol } });
-  ws['!cols'] = hasPrices ? [{ wch: 55 }, { wch: 24 }, { wch: 18 }, { wch: 16 }] : [{ wch: 55 }, { wch: 24 }, { wch: 18 }];
+  ws['!cols'] = [
+    { wch: 14 }, // Внешний код
+    { wch: 55 }, // Наименование
+    { wch: 10 }, // Кор.
+    { wch: 10 }, // Штук
+    { wch: 20 }, // Паллеты
+  ];
   ws['!rows'] = [{ hpt: 24 }];
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },

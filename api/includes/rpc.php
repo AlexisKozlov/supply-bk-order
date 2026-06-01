@@ -89,6 +89,9 @@ if ($endpoint === 'rpc') {
     // ═══ График возврата кег ═══
     require __DIR__ . '/rpc/kr_admin.php';
 
+    // ═══ Заявка на пропуск (ТиТ) ═══
+    require __DIR__ . '/rpc/tit.php';
+
 
     require __DIR__ . '/rpc/notifications.php';
     require __DIR__ . '/rpc/online.php';
@@ -135,6 +138,10 @@ if ($endpoint === 'rpc') {
     // Все tg_admin_* — только для роли admin: рассылки, webhook, отвязки, статистика.
 
     require __DIR__ . '/rpc/tg_admin.php';
+
+    // ═══ Распознавание накладных через AI Vision ═══
+
+    require __DIR__ . '/rpc/invoice.php';
 
     // ═══ Корректировки заказов ═══
 

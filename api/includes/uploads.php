@@ -574,7 +574,16 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'marketing' && isset($parts
 // ═══ UPLOAD BUG REPORT SCREENSHOT ═══
 if ($endpoint === 'upload' && $subpoint === 'bug-screenshot') {
     if ($method !== 'POST') respond(['error' => 'Метод не поддерживается'], 405);
-    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    // Разрешаем закупке (X-Session-Token) и ресторану (ro_session cookie).
+    $hasSupplyAuth = checkAuth($pdo);
+    $hasRoAuth = false;
+    if (!$hasSupplyAuth) {
+        if (!function_exists('roGetRestaurantSession')) {
+            require_once __DIR__ . '/restaurant_orders.php';
+        }
+        $hasRoAuth = function_exists('roGetRestaurantSession') && roGetRestaurantSession($pdo) !== null;
+    }
+    if (!$hasSupplyAuth && !$hasRoAuth) respond(['error' => 'Требуется авторизация'], 401);
 
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
         respond(['error' => 'Ошибка загрузки файла'], 400);

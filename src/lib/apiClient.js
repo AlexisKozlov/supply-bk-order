@@ -50,17 +50,17 @@ function handleAuthError() {
   setTimeout(() => { _authErrorFired = false; }, 5000);
 }
 
-async function fetchWithRetry(url, opts, maxRetries = 2) {
+async function fetchWithRetry(url, opts, maxRetries = 2, timeoutMs = 30000) {
   for (let attempt = 0; ; attempt++) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, { ...opts, signal: controller.signal });
       clearTimeout(timer);
       return res;
     } catch (e) {
       clearTimeout(timer);
-      if (e.name === 'AbortError') throw new Error('Сервер не отвечает (таймаут 30 сек)');
+      if (e.name === 'AbortError') throw new Error(`Сервер не отвечает (таймаут ${Math.round(timeoutMs/1000)} сек)`);
       if (attempt >= maxRetries || !(e instanceof TypeError)) throw e;
       await new Promise(r => setTimeout(r, 1000));
     }
@@ -218,9 +218,16 @@ function parseJsonFields(row) {
   return row;
 }
 
-async function rpc(fn, params = {}) {
+async function rpc(fn, params = {}, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 30000;
+  const maxRetries = opts.maxRetries ?? 2;
   try {
-    const r = await fetchWithRetry(`${API_BASE}/rpc/${fn}`, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(params) });
+    const r = await fetchWithRetry(
+      `${API_BASE}/rpc/${fn}`,
+      { method: 'POST', headers: buildHeaders(), body: JSON.stringify(params) },
+      maxRetries,
+      timeoutMs,
+    );
     trackServerStatus(true);
     if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
     if (!r.ok) {
@@ -257,7 +264,7 @@ async function searchProducts(query, opts = {}) {
 
 export const db = {
   from(t) { return new QueryBuilder(t); },
-  rpc(fn, p) { return rpc(fn, p); },
+  rpc(fn, p, opts) { return rpc(fn, p, opts); },
   searchProducts(q, opts) { return searchProducts(q, opts); },
 };
 

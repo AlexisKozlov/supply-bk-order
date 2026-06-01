@@ -194,6 +194,7 @@
           </div>
         </div>
         <button class="btn" @click="exportExcel" v-if="orderStore.items.length" :disabled="!itemsWithOrderCount"><BkIcon name="excel" size="sm"/> Excel</button>
+        <button class="btn" @click="openUtExport" v-if="orderStore.items.length" :disabled="!itemsWithOrderCount" title="Таблица для импорта в 1С УТ">1С УТ</button>
       </div>
       <div v-if="draftStatusText && orderStore.items.length && !orderStore.viewOnlyMode && !orderStore.editingOrderId" class="draft-status">{{ draftStatusText }}</div>
     </div>
@@ -228,6 +229,13 @@
       :sending="emailSending"
       @send="sendSupplierEmailWithCc"
       @cancel="emailPreview.show = false"
+    />
+    <OrderUtExportModal
+      v-if="utExport.show"
+      :rows="utExport.rows"
+      :supplier="utExport.supplier"
+      :delivery-date-text="utExport.deliveryDateText"
+      @close="utExport.show = false"
     />
     <Teleport to="body">
       <div v-if="orderResultModal.show" class="modal">
@@ -296,7 +304,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter, toPhysicalBoxes } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter, toPhysicalBoxes, toAccountingBoxes } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { saveOrder } from '@/lib/saveOrder.js';
 import { recalculateAdu, loadAduData } from '@/lib/aduCalculator.js';
@@ -313,6 +321,7 @@ const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/Conf
 const AnalogMergeModal = defineAsyncComponent(() => import('@/components/modals/AnalogMergeModal.vue'));
 const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
 const SendSupplierEmailModal = defineAsyncComponent(() => import('@/components/modals/SendSupplierEmailModal.vue'));
+const OrderUtExportModal = defineAsyncComponent(() => import('@/components/modals/OrderUtExportModal.vue'));
 
 const route         = useRoute();
 const router        = useRouter();
@@ -1399,6 +1408,7 @@ async function sendSupplierEmailWithCc(cc) {
       delivery_date: p.deliveryDate,
       items_count: p.itemsCount,
       items: p.items,
+      order_id: orderStore.editingOrderId || null,
       cc,
       ...(attachment ? { attachment } : {}),
     });
@@ -1477,6 +1487,52 @@ async function exportExcel() {
   if (!itemsWithOrderCount.value) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
   const { exportToExcel } = await import('@/lib/excelExport.js');
   exportToExcel(orderStore.items, orderStore.settings, priceMap.value);
+}
+
+// ─── Экспорт в 1С УТ ─────────────────────────────────────────────────────────
+const utExport = reactive({ show: false, rows: [], supplier: '', deliveryDateText: '' });
+async function openUtExport() {
+  if (!itemsWithOrderCount.value) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
+  // Подбираем external_code и category для позиций, в которых их нет
+  // (старые черновики, позиции, добавленные до релиза этих полей).
+  const missing = orderStore.items.filter(i => i.finalOrder > 0 && (!i.externalCode || !i.category));
+  if (missing.length) {
+    const skus = Array.from(new Set(missing.map(i => i.sku).filter(Boolean)));
+    if (skus.length) {
+      try {
+        let q = db.from('products').select('sku, external_code, category').in('sku', skus);
+        q = applyEntityGroupFilter(q, orderStore.settings.legalEntity);
+        const { data } = await q;
+        if (Array.isArray(data)) {
+          const map = Object.fromEntries(data.map(p => [p.sku, p]));
+          for (const it of missing) {
+            const p = map[it.sku];
+            if (!p) continue;
+            if (!it.externalCode) it.externalCode = p.external_code || '';
+            if (!it.category) it.category = p.category || '';
+          }
+        }
+      } catch (e) {
+        console.warn('[ut-export] fetch products failed:', e);
+      }
+    }
+  }
+  const rows = orderStore.items
+    .filter(i => i.finalOrder > 0)
+    .map(i => ({
+      sku: i.sku,
+      name: i.name,
+      externalCode: i.externalCode || '',
+      category: i.category || '',
+      accountingBoxes: toAccountingBoxes(i, i.finalOrder, orderStore.settings.unit),
+    }));
+  const dd = orderStore.settings.deliveryDate;
+  utExport.rows = rows;
+  utExport.supplier = orderStore.settings.supplier || '—';
+  utExport.deliveryDateText = dd instanceof Date && !isNaN(dd)
+    ? dd.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '';
+  utExport.show = true;
 }
 
 // ─── Очистить ─────────────────────────────────────────────────────────────────

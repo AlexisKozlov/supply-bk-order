@@ -202,6 +202,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { getEntityGroupCode, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import { applyEntityGroupFilter } from '@/lib/utils.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import PeriodPicker from '@/components/ui/PeriodPicker.vue';
@@ -275,7 +276,12 @@ async function loadData() {
 }
 
 async function loadProducts() {
-  const { data } = await db.from('products').select('sku, name, analog_group, supplier');
+  // Товары — справочник, но фильтруем по группе юрлица: иначе в группе
+  // аналогов БК+ВМ показались бы товары Пицца Стар (и наоборот) при
+  // совпадении названия группы (например «Молоко»).
+  let pq = db.from('products').select('sku, name, analog_group, supplier');
+  pq = applyEntityGroupFilter(pq, orderStore.settings.legalEntity);
+  const { data } = await pq;
   if (!data) return;
   const gs = new Set(), bg = {};
   for (const p of data) {
@@ -529,7 +535,7 @@ watch(periodSel, () => {
   if (periodSel.value.kind === 'custom' && (!periodSel.value.from || !periodSel.value.to)) return;
   loadData();
 }, { deep: true });
-watch(() => orderStore.settings.legalEntity, () => { page.value = 1; expanded.value = null; loadData(); });
+watch(() => orderStore.settings.legalEntity, () => { page.value = 1; expanded.value = null; loadData(); loadProducts(); });
 watch(searchQuery, () => { page.value = 1; });
 watch(sortKey, () => { page.value = 1; });
 watch(supplierFilter, () => { page.value = 1; });

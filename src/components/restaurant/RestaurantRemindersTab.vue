@@ -123,6 +123,9 @@
             </label>
           </header>
 
+          <div v-if="g.temp_period" class="rrt-temp-badge" :title="`Действует временный график с ${formatTempDate(g.temp_period.date_from)} по ${formatTempDate(g.temp_period.date_to)}`">
+            Временный график по {{ formatTempDate(g.temp_period.date_to) }}
+          </div>
           <div class="rrt-schedule">
             <span v-for="d in g.days" :key="d.order_day + '-' + d.delivery_day" class="rrt-day">
               <span class="rrt-day-from">{{ weekdayShort(d.order_day) }} {{ effectiveDeadlineTime(g, d) }}</span>
@@ -178,6 +181,9 @@
             </label>
           </header>
 
+          <div v-if="g.temp_period" class="rrt-temp-badge" :title="`Действует временный график с ${formatTempDate(g.temp_period.date_from)} по ${formatTempDate(g.temp_period.date_to)}`">
+            Временный график по {{ formatTempDate(g.temp_period.date_to) }}
+          </div>
           <div class="rrt-schedule">
             <span v-for="d in g.days" :key="d.order_day + '-' + d.delivery_day" class="rrt-day">
               <span class="rrt-day-from">{{ weekdayShort(d.order_day) }} {{ effectiveDeadlineTime(g, d) }}</span>
@@ -283,6 +289,11 @@ function onTutorialEsc(e) {
 const WEEKDAYS_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 function weekdayShort(d) { return WEEKDAYS_SHORT[d] || ''; }
 function fmtTime(t) { return t ? String(t).slice(0, 5) : ''; }
+function formatTempDate(d) {
+  if (!d) return '';
+  const dt = new Date(d + 'T00:00:00');
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
 
 function effectiveDeadlineTime(group, day) {
   if (day.deadline_override) return fmtTime(day.deadline_override);
@@ -593,6 +604,17 @@ onBeforeUnmount(() => {
 .rrt-toggle input:checked + .rrt-toggle-slider::after { left: 18px; }
 
 /* ─── Расписание: компактные пилюли ─── */
+.rrt-temp-badge {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
 .rrt-schedule { display: flex; flex-wrap: wrap; gap: 6px; }
 .rrt-day {
   display: inline-flex; align-items: center; gap: 5px;

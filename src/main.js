@@ -21,8 +21,14 @@ app.use(pinia);
 app.use(router);
 app.component('BurgerSpinner', BurgerSpinner);
 
-// Автовыход при истёкшей сессии (ответ 401 от сервера)
+// Автовыход при истёкшей сессии (ответ 401 от сервера).
+// Только для закупки — у ресторана собственная сессия (HttpOnly-cookie ro_session)
+// и собственная страница «вход истёк». Иначе 401 от любого supply-RPC (например,
+// bug-report, который раньше требовал supply-сессию) выкидывал ресторан со своей
+// страницы.
 setAuthErrorHandler(() => {
+  const path = (typeof window !== 'undefined' && window.location?.pathname) || '';
+  if (path.startsWith('/restaurant')) return;
   const userStore = useUserStore();
   userStore.logout();
   router.push({ name: 'home', query: { showLogin: 'true', expired: 'true' } });

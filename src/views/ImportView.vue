@@ -11,10 +11,20 @@
           <span v-if="emailImport.fileName">· <strong>{{ emailImport.fileName }}</strong></span>
           <span v-if="emailImport.legalEntity">· юрлицо: {{ emailImport.legalEntity }}</span>
         </div>
+        <div v-if="emailImport.ready" class="imp-email-typerow">
+          <label class="imp-email-typelabel">Что это за данные:</label>
+          <select v-model="emailImport.selectedKey" class="imp-email-typeselect">
+            <option v-for="t in EMAIL_IMPORT_KEYS" :key="t.key" :value="t.key">{{ t.label }}</option>
+          </select>
+        </div>
       </div>
       <div class="imp-email-actions">
-        <span v-if="emailImport.applying" class="imp-email-status">Загружаю…</span>
-        <button v-else class="imp-btn imp-btn-secondary" @click="cancelEmailImport">Отменить</button>
+        <span v-if="emailImport.loading" class="imp-email-status">Загружаю письмо…</span>
+        <span v-else-if="emailImport.applying" class="imp-email-status">Импортирую…</span>
+        <template v-else-if="emailImport.ready">
+          <button class="imp-btn" @click="applyEmailImport">Применить</button>
+          <button class="imp-btn imp-btn-secondary" @click="cancelEmailImport">Отменить</button>
+        </template>
       </div>
     </div>
 
@@ -106,7 +116,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { parseFile } from '@/lib/importStock.js'
-import { parseStockMalling, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js'
+import { parseStockMalling, extractStockReportDateFromName, parseCellStats } from '@/lib/shelfLifeImport.js'
 import { appPrompt, appConfirm } from '@/lib/appDialogs.js'
 import { parseSalesFile } from '@/lib/salesImport.js'
 import { parseCttPreorderXlsx, resolveCttPreorderRows, buildCttPreorderFilename, buildCttPreorderLabel } from '@/lib/cttJsonImport.js'
@@ -125,19 +135,33 @@ const lastUpdates = ref({})
 const cttResult = ref(null)
 const STORAGE_RULES_KEY = 'shelfLifeStorageRules.v1'
 
-// Состояние «импорт из письма»: автоподгрузка файла из email_imports.
-const emailImport = ref({ show: false, id: null, fromEmail: '', subject: '', fileName: '', legalEntity: '', type: '', applying: false })
+// Состояние «импорт из письма»: метаданные подгружаются автоматически,
+// а тип данных закупщик выбирает вручную при открытии (с одного адреса
+// может приходить разное — реализация, остатки, сроки годности).
+function emptyEmailImport() {
+  return { show: false, id: null, fromEmail: '', subject: '', fileName: '', legalEntity: '',
+           type: '', selectedKey: 'sales', loading: false, ready: false, applying: false }
+}
+const emailImport = ref(emptyEmailImport())
+
+// Какие типы можно выбрать при открытии письма (понятные подписи).
+const EMAIL_IMPORT_KEYS = [
+  { key: 'sales',    label: 'Реализация ресторанов' },
+  { key: 'analysis', label: 'Анализ запасов (остатки + расход)' },
+  { key: 'shelf',    label: 'Остатки (сроки годности)' },
+]
 
 const TYPE_TO_IMPORT_KEY = {
   restaurant_sales: 'sales',
   stock_1c: 'analysis',
   analysis: 'analysis',
+  shelf_life: 'shelf',
 }
 
+// Шаг 1: открыли письмо — грузим метаданные и предлагаем выбрать тип.
 async function startEmailImport(id) {
-  emailImport.value = { ...emailImport.value, show: true, id, applying: true }
+  emailImport.value = { ...emptyEmailImport(), show: true, id, loading: true }
   try {
-    // 1) Достаём метаданные из списка (бэк уже умеет фильтровать одним запросом)
     const listRes = await fetch('/api/email-imports?limit=500', {
       headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' }
     })
@@ -152,8 +176,10 @@ async function startEmailImport(id) {
     emailImport.value.fileName    = row.file_name
     emailImport.value.legalEntity = row.legal_entity || ''
     emailImport.value.type        = row.type
+    // Тип из правила отправителя — лишь подсказка по умолчанию, её можно сменить.
+    emailImport.value.selectedKey = TYPE_TO_IMPORT_KEY[row.type] || 'sales'
 
-    // 2) Подставляем юрлицо, если оно есть в правиле
+    // Подставляем юрлицо, если оно есть в правиле
     if (row.legal_entity && !orderStore.settings.legalEntity) {
       orderStore.settings.legalEntity = row.legal_entity
     }
@@ -162,7 +188,30 @@ async function startEmailImport(id) {
       if (ok) orderStore.settings.legalEntity = row.legal_entity
     }
 
-    // 3) Берём download-токен и скачиваем файл
+    emailImport.value.loading = false
+    emailImport.value.ready = true
+  } catch (e) {
+    toast.error('Импорт из письма', e.message || 'Не удалось загрузить')
+    emailImport.value = emptyEmailImport()
+    router.replace({ name: 'import' })
+  }
+}
+
+// Шаг 2: закупщик выбрал тип и нажал «Применить».
+async function applyEmailImport() {
+  const id = emailImport.value.id
+  const importKey = emailImport.value.selectedKey
+  if (!id || !importKey) return
+
+  if ((importKey === 'sales' || importKey === 'analysis') && !orderStore.settings.legalEntity) {
+    toast.error('Не выбрано юрлицо', 'Выберите юр. лицо в боковом меню и попробуйте снова')
+    return
+  }
+
+  emailImport.value.ready = false
+  emailImport.value.applying = true
+  try {
+    // Берём свежий download-токен и качаем файл (токен живёт 15 минут)
     const tokenRes = await fetch(`/api/email-imports/${id}/file-token`, {
       method: 'POST',
       headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '', 'Content-Type': 'application/json' },
@@ -174,17 +223,20 @@ async function startEmailImport(id) {
     const fileRes = await fetch(tokenData.url)
     if (!fileRes.ok) throw new Error('Не удалось скачать файл (' + fileRes.status + ')')
     const blob = await fileRes.blob()
-    const file = new File([blob], row.file_name || ('import_' + id + '.xlsx'), { type: blob.type || 'application/octet-stream' })
+    const file = new File([blob], emailImport.value.fileName || ('import_' + id + '.xlsx'), { type: blob.type || 'application/octet-stream' })
 
-    const importKey = TYPE_TO_IMPORT_KEY[row.type] || 'sales'
-    if ((importKey === 'sales' || importKey === 'analysis') && !orderStore.settings.legalEntity) {
-      throw new Error('Юр. лицо не выбрано — выберите в боковом меню и попробуйте снова')
+    // Запускаем тот же импорт, что и при ручной загрузке
+    const ok = await uploadFile(importKey, file)
+
+    // Импорт не удался (например, нужно уточнить хранение для сроков годности) —
+    // письмо НЕ помечаем применённым, возвращаем выбор типа.
+    if (!ok) {
+      emailImport.value.applying = false
+      emailImport.value.ready = true
+      return
     }
 
-    // 4) Запускаем тот же импорт, что и при ручной загрузке
-    await uploadFile(importKey, file)
-
-    // 5) Помечаем письмо как применённое
+    // Помечаем письмо как применённое
     try {
       await fetch(`/api/email-imports/${id}/applied`, {
         method: 'POST',
@@ -194,18 +246,18 @@ async function startEmailImport(id) {
     } catch (_) { /* лог не критичен */ }
     toast.success('Письмо применено', 'Импорт завершён, статус письма обновлён')
 
-    // Чистим url
     router.replace({ name: 'import' })
-    emailImport.value = { show: false, id: null, fromEmail: '', subject: '', fileName: '', legalEntity: '', type: '', applying: false }
+    emailImport.value = emptyEmailImport()
   } catch (e) {
     toast.error('Импорт из письма', e.message || 'Не удалось загрузить')
     emailImport.value.applying = false
+    emailImport.value.ready = true
   }
 }
 
 function cancelEmailImport() {
   router.replace({ name: 'import' })
-  emailImport.value = { show: false, id: null, fromEmail: '', subject: '', fileName: '', legalEntity: '', type: '', applying: false }
+  emailImport.value = emptyEmailImport()
 }
 
 const imports = computed(() => [
@@ -341,7 +393,7 @@ async function uploadFile(type, file) {
       // Идентично AnalysisView: parseFile → replace_analysis_data
       const le = orderStore.settings.legalEntity
       const parsed = await parseFile(file, le)
-      if (!parsed.length) { toast.error('Не распознано', 'Не найдены артикулы, остатки или расход в файле'); return }
+      if (!parsed.length) { toast.error('Не распознано', 'Не найдены артикулы, остатки или расход в файле'); return false }
       const userName = userStore.currentUser?.name || 'import'
       const now = localNow()
       const items = parsed.filter(r => r.sku).map(r => ({
@@ -354,7 +406,7 @@ async function uploadFile(type, file) {
         updated_by: userName,
         updated_at: now,
       }))
-      if (!items.length) { toast.error('Не распознано', 'Не найдены товары с артикулами'); return }
+      if (!items.length) { toast.error('Не распознано', 'Не найдены товары с артикулами'); return false }
       const { error } = await db.rpc('replace_analysis_data', { legal_entity: le, items })
       if (error) throw new Error(error)
       toast.success('Загружено', `${items.length} позиций для «${le}»`)
@@ -368,35 +420,54 @@ async function uploadFile(type, file) {
       const result = await parseSalesFile(file, skuToGroup)
       const items = result.items || result
       const skuMapped = result.skuMapped || 0
-      if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные'); return }
+      if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные'); return false }
       toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей в «${le}»…`)
       for (let i = 0; i < items.length; i += 10000) {
         const isLast = i + 10000 >= items.length
         const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast, legal_entity: le })
-        if (error) { toast.error('Ошибка', error); return }
+        if (error) { toast.error('Ошибка', error); return false }
       }
       toast.success('Загружено', `${items.length.toLocaleString('ru')} записей реализации в «${le}»` + (skuMapped ? `, ${skuMapped} по артикулу` : ''))
 
     } else if (type === 'shelf') {
       // Идентично ShelfLifeView: parseStockMalling → replace_stock_malling
       const reportDate = await promptReportDate(file)
-      if (!reportDate) return
+      if (!reportDate) return false
       const storageRules = loadStorageRules()
       const productCategories = await loadProductCategories()
       const items = await parseStockMalling(file, { productCategories, manualStorageCategories: storageRules })
-      if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные в файле'); return }
+      if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные в файле'); return false }
       applyStorageRules(items, storageRules)
       const unknownCount = new Set(items.filter(i => i._needs_storage_choice).map(i => i._storage_key || i.product_name)).size
       if (unknownCount) {
         toast.error('Нужно уточнить хранение', `Откройте раздел «Сроки годности» и загрузите файл там: нужно выбрать Холод/Мороз для ${unknownCount} товаров`)
-        return
+        return false
       }
       const userName = userStore.currentUser?.name || ''
       const now = localTimeForDate(reportDate)
       const payload = items.map(item => ({ ...item, uploaded_at: now, uploaded_by: userName }))
       const { data, error } = await db.rpc('replace_stock_malling', { items: payload })
       if (error) throw new Error(error)
-      toast.success('Загружено', `${data?.count || items.length} позиций сроков годности`)
+
+      // Ячейки склада — как при ручной загрузке в разделе «Сроки годности».
+      // Считаем по тому же файлу и сохраняем на ту же дату отчёта.
+      let cellMsg = ''
+      try {
+        const cellResult = await parseCellStats(file, { reportDate, productCategories, manualStorageCategories: storageRules })
+        if (cellResult.cells.length) {
+          const cellItems = cellResult.cells.map(c => ({ ...c, report_date: reportDate }))
+          const cellRes = await db.rpc('save_warehouse_cells', { items: cellItems })
+          if (cellRes.data?.count > 0) {
+            const total = cellResult.cells.reduce((s, c) => s + c.cell_count, 0)
+            cellMsg = `, ${total} ячеек за ${reportDate}`
+          }
+          if (Array.isArray(cellRes.data?.skipped) && cellRes.data.skipped.length) {
+            toast.warning('Ячейки пропущены', `За ${reportDate} есть более свежие данные в БД. Не записаны: ${cellRes.data.skipped.join(', ')}.`)
+          }
+        }
+      } catch (e) { /* ячейки не критичны — позиции уже сохранены */ }
+
+      toast.success('Загружено', `${data?.count || items.length} позиций сроков годности${cellMsg}`)
 
     } else if (type === 'ctt-preorder') {
       const legalEntity = orderStore.settings.legalEntity
@@ -419,7 +490,7 @@ async function uploadFile(type, file) {
 
       if (!result.items.length) {
         toast.error('Не удалось собрать JSON', 'Ни одна строка не была распознана по справочнику')
-        return
+        return false
       }
 
       downloadCttJson()
@@ -436,8 +507,10 @@ async function uploadFile(type, file) {
     }
 
     await loadLastUpdates()
+    return true
   } catch (e) {
     toast.error('Ошибка', e.message || 'Не удалось загрузить')
+    return false
   } finally { uploading.value = null }
 }
 
@@ -485,6 +558,10 @@ onMounted(async () => {
 .imp-email-title { font-weight: 700; font-size: 13px; color: #1f2937; margin-bottom: 4px; }
 .imp-email-meta { font-size: 12px; color: #4b5563; display: flex; flex-wrap: wrap; gap: 6px; }
 .imp-email-status { font-size: 13px; color: #92560f; font-weight: 600; }
+.imp-email-typerow { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.imp-email-typelabel { font-size: 12px; color: #4b5563; font-weight: 600; }
+.imp-email-typeselect { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; background: #fff; color: #1f2937; }
+.imp-email-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .imp-btn-secondary { background: #fff; color: #4b5563; border: 1px solid #d1d5db; }
 
 .imp-grid { display: flex; flex-direction: column; gap: 12px; max-width: 700px; }

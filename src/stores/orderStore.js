@@ -7,7 +7,7 @@ import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 import { useToastStore } from './toastStore.js';
 
-const ORDER_PRODUCT_FIELDS = 'id, sku, name, unit_of_measure, qty_per_box, boxes_per_pallet, multiplicity';
+const ORDER_PRODUCT_FIELDS = 'id, sku, external_code, name, unit_of_measure, qty_per_box, boxes_per_pallet, multiplicity, category';
 
 const _clone = typeof structuredClone === 'function'
   ? structuredClone
@@ -152,6 +152,8 @@ export const useOrderStore = defineStore('order', () => {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       productId: product.id || null,
       sku: product.sku || '',
+      externalCode: product.external_code || '',
+      category: product.category || '',
       name: product.name || '',
       unitOfMeasure: product.unit_of_measure || 'шт',
       qtyPerBox: product.qty_per_box || 1,

@@ -37,6 +37,12 @@ flock -n -x 200 || { echo "[build.sh] another build in progress — skipping"; e
 
 STAGE="dist.staging"
 
+# На сервере 2 ГБ RAM, и node 20 на маленькой машине ставит heap-лимит
+# ~1 ГБ. Vite + PWA-плагин в конце сборки иногда упирается в этот
+# потолок и падает с OOM. Поднимаем потолок до 2 ГБ — недостающее
+# уйдёт в swap, но сборка не сорвётся.
+export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=2048"
+
 # Чистим огрызок прошлой оборванной сборки, если он остался.
 # Живой dist при этом не трогаем.
 rm -rf "$STAGE"

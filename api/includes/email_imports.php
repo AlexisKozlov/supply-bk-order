@@ -105,7 +105,7 @@ if ($method === 'POST' && $first === 'senders' && !$second) {
     $id    = isset($body['id']) ? (int)$body['id'] : 0;
 
     if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['error' => 'Некорректный email'], 400);
-    if (!in_array($type, ['restaurant_sales', 'stock_1c', 'analysis'], true)) respond(['error' => 'Неизвестный тип'], 400);
+    if (!in_array($type, ['restaurant_sales', 'stock_1c', 'analysis', 'shelf_life'], true)) respond(['error' => 'Неизвестный тип'], 400);
 
     if ($id > 0) {
         $upd = $pdo->prepare("UPDATE email_import_senders SET email=?, type=?, legal_entity=?, is_active=?, note=? WHERE id=?");
