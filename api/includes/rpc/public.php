@@ -212,15 +212,62 @@ if ($fn === 'get_stock_skus') {
             respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
     }
-    $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.legal_entity = ? AND a.stock > 0");
+    $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box, p.analog_group FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.legal_entity = ? AND a.stock > 0");
     $s->execute([$le]);
     $rows = $s->fetchAll();
     $result = [];
     foreach ($rows as $r) {
         $qpb = floatval($r['qty_per_box']) ?: 1;
-        $result[$r['sku']] = ['name' => $r['name'], 'stock' => round(floatval($r['stock']) / $qpb, 1)];
+        $result[$r['sku']] = [
+            'name'  => $r['name'],
+            'stock' => round(floatval($r['stock']) / $qpb, 1),
+            'group' => $r['analog_group'] ?? null,
+        ];
     }
     respond($result);
+}
+
+// По артикулу — активные товары с остатком из ТОЙ ЖЕ группы аналогов.
+// Нужно, когда карточки на артикул нет (или он неактивен): поиск всё равно
+// должен показать актуальную позицию из группы. Группу берём по products
+// независимо от активности самого артикула.
+if ($fn === 'get_group_stock_by_sku') {
+    $ctx = $requireCardSearchAuth();
+    $sku = trim((string)($body['sku'] ?? $_GET['sku'] ?? ''));
+    if ($sku === '') respond([]);
+    // Юрлицо — та же логика, что в get_stock_skus.
+    $le = $body['legal_entity'] ?? $_GET['legal_entity'] ?? null;
+    if ($ctx['kind'] === 'restaurant') {
+        $allowedEntities = getEntitiesInGroup($ctx['group']);
+        if (!$le || !in_array($le, $allowedEntities, true)) $le = $allowedEntities[0];
+    } else {
+        if (!$le) $le = 'ООО "Бургер БК"';
+        $valid = array_merge(getEntitiesInGroup('BK_VM'), getEntitiesInGroup('PS'));
+        if (!in_array($le, $valid, true)) $le = 'ООО "Бургер БК"';
+        if (!checkLegalEntityAccess($ctx['user'], $le)) {
+            respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
+    }
+    // Группа аналогов искомого артикула (любая активность).
+    $g = $pdo->prepare("SELECT analog_group FROM products WHERE sku = ? AND legal_entity = ? AND analog_group IS NOT NULL AND analog_group != '' LIMIT 1");
+    $g->execute([$sku, $le]);
+    $group = $g->fetchColumn();
+    if (!$group) respond(['group' => null, 'items' => []]);
+    // Активные товары этой группы с остатком.
+    $q = $pdo->prepare("
+        SELECT p.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) AS qty_per_box
+        FROM products p
+        JOIN analysis_data a ON a.sku = p.sku AND a.legal_entity = p.legal_entity
+        WHERE p.analog_group = ? AND p.legal_entity = ? AND p.is_active = 1 AND a.stock > 0
+        ORDER BY a.stock DESC
+    ");
+    $q->execute([$group, $le]);
+    $items = [];
+    foreach ($q->fetchAll() as $r) {
+        $qpb = floatval($r['qty_per_box']) ?: 1;
+        $items[] = ['sku' => $r['sku'], 'name' => $r['name'], 'stock' => round(floatval($r['stock']) / $qpb, 1)];
+    }
+    respond(['group' => $group, 'items' => $items]);
 }
 
 // ═══ DEFICIT: публичные RPC (форма сбора остатков — legacy) ═══

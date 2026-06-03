@@ -489,11 +489,22 @@ function stemWords(text) {
     .split(/[^а-яa-z0-9]+/i).filter(w => w.length >= 2).map(ruStem)
 }
 
+// Совпадение двух основ слов. Требуем общий префикс ≥ 4 символов и расхождение
+// не более чем в 1 хвостовую букву. Это ловит разные формы (огурцы↔огурец) и
+// при этом НЕ даёт мусора вроде «кор» (короб) внутри «корнишон».
+function stemMatch(a, b) {
+  if (a === b) return true
+  const m = Math.min(a.length, b.length)
+  let i = 0
+  while (i < m && a[i] === b[i]) i++
+  return i >= 4 && i >= m - 1
+}
+
 // Словарь синонимов
 const SYNONYMS = {
   картошка:['картофель','картошк','фри'], картофель:['картошка','картошк','фри'],
   помидор:['томат','томатн'], томат:['помидор','помидорн'],
-  огурец:['огурч','корнишон'], корнишон:['огурец','огурч'],
+  огурец:['огурч','корнишон'], огурцы:['огурец','огурч','корнишон'], огурчик:['огурец','корнишон'], корнишон:['огурец','огурч'],
   лук:['луков','репчат'],
   курица:['куриц','курин','цыпл','наггетс','чикен'], куриный:['курин','курица','цыпл','чикен'],
   чикен:['курица','курин','куриц'], наггетс:['наггетсы','курица','куриц'],
@@ -671,7 +682,7 @@ function closeAutocomplete() {
 }
 
 // --- Основной поиск (повторяет логику оригинала) ---
-function doSearch() {
+async function doSearch() {
   // Выбор из автокомплита
   if (showAC.value && acIndex.value >= 0) {
     selectAC(acItems.value[acIndex.value])
@@ -736,7 +747,33 @@ function doSearch() {
       logSearch(queryRaw, true, 'stock_only', searchedArticle)
       return
     }
-    // Ни карточки, ни остатков. НЕ переходим к текстовому поиску — иначе
+    // Ни карточки, ни остатка по самому артикулу. Пробуем ГРУППУ АНАЛОГОВ:
+    // часто это старый/неактивный SKU, а в группе есть активный товар с остатком.
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/rpc/get_group_stock_by_sku`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: searchedArticle }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.items && data.items.length) {
+          results.value = data.items.map(it => {
+            const s = parseFloat(it.stock) || 0
+            return {
+              id: it.sku, name: it.name, analogs: [],
+              reason: 'из группы аналогов, на остатках',
+              stockSku: it.sku, stockName: it.name,
+              stockQty: s % 1 === 0 ? s.toFixed(0) : s.toFixed(1),
+              isSameSku: it.sku === searchedArticle, noCard: true,
+            }
+          })
+          logSearch(queryRaw, true, 'analog_group', searchedArticle)
+          return
+        }
+      }
+    } catch { /* не критично — покажем «не найдено» */ }
+    // Совсем ничего не нашли. НЕ переходим к текстовому поиску — иначе
     // по словам «коробка/шт» получим мусор из нерелевантных карточек.
     results.value = []
     logSearch(queryRaw, false, 'article', null)
@@ -791,40 +828,68 @@ function doSearch() {
     }
   }
 
-  // 6. Если ничего не найдено — поиск по основам слов (стемминг + синонимы)
-  if (!foundCards.length) {
-    const rawWords = queryRaw.toLowerCase().replace(/ё/g, 'е').split(/[^а-яa-z0-9]+/i).filter(w => w.length >= 2)
-    const expandedWords = expandSynonyms(rawWords)
-    const queryStems = [...new Set(expandedWords.map(ruStem))]
-    if (queryStems.length) {
-      const scored = []
-      for (const c of allCards.value) {
-        const nameStems = stemWords(c.name)
-        if (!nameStems.length) continue
-        let matched = 0
-        for (const qs of queryStems) {
-          for (const ns of nameStems) {
-            if (ns.includes(qs) || qs.includes(ns)) { matched++; break }
-          }
-        }
-        if (matched > 0) {
-          scored.push({ card: c, score: matched / queryStems.length, matched })
-        }
+  // Слова запроса и их допустимые основы (само слово + синонимы) — для шагов 6 и 7.
+  const rawWords = queryRaw.toLowerCase().replace(/ё/g, 'е').split(/[^а-яa-z0-9]+/i).filter(w => w.length >= 2)
+  const expandedWords = expandSynonyms(rawWords)
+  const queryStems = [...new Set(expandedWords.map(ruStem))]
+  // Для каждого слова запроса — набор основ-альтернатив (слово + его синонимы).
+  const wordAlts = rawWords.map(w => [...new Set([w, ...(SYNONYMS[w] || [])].map(ruStem))])
+
+  // 6. Если карточек нет — поиск по основам слов (стемминг + синонимы)
+  if (!foundCards.length && queryStems.length) {
+    const scored = []
+    for (const c of allCards.value) {
+      const nameStems = stemWords(c.name)
+      if (!nameStems.length) continue
+      let matched = 0
+      for (const qs of queryStems) {
+        if (nameStems.some(ns => stemMatch(qs, ns))) matched++
       }
-      scored.sort((a, b) => b.score - a.score || b.matched - a.matched)
-      const added = new Set()
-      for (const s of scored) {
-        if (added.has(s.card.id)) continue
-        foundCards.push({ ...s.card, reason: 'найдено по названию' })
-        added.add(s.card.id)
-        if (!matchType) { matchType = 'stem'; matchedCardId = s.card.id }
-        if (foundCards.length >= 10) break
-      }
+      if (matched > 0) scored.push({ card: c, score: matched / queryStems.length, matched })
+    }
+    scored.sort((a, b) => b.score - a.score || b.matched - a.matched)
+    const added = new Set()
+    for (const s of scored) {
+      if (added.has(s.card.id)) continue
+      foundCards.push({ ...s.card, reason: 'найдено по названию' })
+      added.add(s.card.id)
+      if (!matchType) { matchType = 'stem'; matchedCardId = s.card.id }
+      if (foundCards.length >= 10) break
     }
   }
 
-  results.value = foundCards.map(c => enrichWithStock(c, c.reason))
-  logSearch(queryRaw, foundCards.length > 0, matchType, matchedCardId)
+  // 7. Если карточек так и нет — ищем среди товаров с остатком (поиск универсальный,
+  // не ограничен curated-карточками). Покрывает товары без карточки (напр. «огурцы»).
+  let stockResults = []
+  if (!foundCards.length && (q.length >= 3 || rawWords.length)) {
+    for (const [sku, info] of Object.entries(stockSkus.value)) {
+      const name = info.name || ''
+      const nameN = normalize(name)
+      let hit = (q.length >= 3 && nameN.includes(q)) || sku === q
+      if (!hit && wordAlts.length) {
+        const ns = stemWords(name)
+        // Требуем, чтобы КАЖДОЕ слово запроса (или его синоним) нашлось в названии.
+        hit = wordAlts.every(alts => alts.some(a => ns.some(n => stemMatch(a, n))))
+      }
+      if (hit) {
+        const st = parseFloat(info.stock) || 0
+        stockResults.push({
+          id: sku, name, analogs: [],
+          reason: 'товар на остатках (карточки нет)',
+          stockSku: sku, stockName: name,
+          stockQty: st % 1 === 0 ? st.toFixed(0) : st.toFixed(1),
+          isSameSku: true, noCard: true,
+          _stock: st,
+        })
+      }
+    }
+    stockResults.sort((a, b) => b._stock - a._stock)
+    stockResults = stockResults.slice(0, 15)
+  }
+
+  results.value = [...foundCards.map(c => enrichWithStock(c, c.reason)), ...stockResults]
+  if (stockResults.length && !matchType) matchType = 'stock_text'
+  logSearch(queryRaw, results.value.length > 0, matchType, matchedCardId)
 }
 
 // Добавляет информацию об остатках к карточке
