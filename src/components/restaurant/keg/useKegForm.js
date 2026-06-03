@@ -456,8 +456,15 @@ export function useKegForm(initialIdRef, emit) {
       }
       const blob = await res.blob();
       const cd = res.headers.get('Content-Disposition') || '';
-      const m = cd.match(/filename="?([^"]+)"?/);
-      const filename = m ? m[1] : `TTN_${localId.value}.xlsx`;
+      // Берём кириллическое имя из filename*=UTF-8'' (приоритет), иначе ASCII-запас.
+      let filename = `ТТН ${localId.value}.xlsx`;
+      const mStar = cd.match(/filename\*=UTF-8''([^;]+)/i);
+      const mPlain = cd.match(/filename="?([^";]+)"?/i);
+      if (mStar) {
+        try { filename = decodeURIComponent(mStar[1]); } catch { filename = mPlain ? mPlain[1] : filename; }
+      } else if (mPlain) {
+        filename = mPlain[1];
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = filename;
