@@ -73,10 +73,16 @@ $rows = $pdo->query("
         DATEDIFF(CURDATE(), DATE(c.due_date)) AS overdue_days
     FROM tasks_cards c
     JOIN tasks_boards b ON b.id = c.board_id
+    LEFT JOIN tasks_cards p ON p.id = c.parent_card_id
     WHERE c.is_done = 0
       AND c.is_archived = 0
       AND c.due_date IS NOT NULL
       AND DATE(c.due_date) <= CURDATE() + INTERVAL 1 DAY
+      AND b.is_archived = 0
+      -- Не напоминаем о подзадаче, если её родитель выполнен или в архиве:
+      -- такая подзадача на доске не видна (грузятся только корневые карточки),
+      -- а напоминание о ней выглядит как «призрак».
+      AND (c.parent_card_id IS NULL OR (COALESCE(p.is_done, 0) = 0 AND COALESCE(p.is_archived, 0) = 0))
     ORDER BY c.id
 ")->fetchAll();
 

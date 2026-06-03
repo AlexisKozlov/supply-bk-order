@@ -122,6 +122,27 @@ function tHistory($pdo, $cardId, $userName, $action, $details = null) {
     $s->execute([$cardId, $userName, $action, $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null]);
 }
 
+// Каскадное закрытие подзадач: при выполнении/архивации родителя те же отметки
+// ставятся всем его подзадачам (рекурсивно — на случай вложенных). Иначе открытая
+// подзадача «висит» невидимой и шлёт напоминания (см. cron_tasks_deadlines).
+function tCascadeCloseSubtasks($pdo, $parentId, $markDone, $markArchived) {
+    if (!$markDone && !$markArchived) return;
+    $ch = $pdo->prepare("SELECT id FROM tasks_cards WHERE parent_card_id = ?");
+    $ch->execute([(int)$parentId]);
+    $ids = array_column($ch->fetchAll(), 'id');
+    if (!$ids) return;
+    $now = date('Y-m-d H:i:s');
+    foreach ($ids as $cid) {
+        if ($markDone) {
+            $pdo->prepare("UPDATE tasks_cards SET is_done = 1, completed_at = COALESCE(completed_at, ?) WHERE id = ? AND is_done = 0")->execute([$now, (int)$cid]);
+        }
+        if ($markArchived) {
+            $pdo->prepare("UPDATE tasks_cards SET is_archived = 1 WHERE id = ? AND is_archived = 0")->execute([(int)$cid]);
+        }
+        tCascadeCloseSubtasks($pdo, $cid, $markDone, $markArchived);
+    }
+}
+
 // Зависимости карточки: список того, что она блокирует, и того, чем заблокирована.
 function tCardDependencies($pdo, $cardId) {
     $blocks = $pdo->prepare(
@@ -1543,6 +1564,10 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = ?, is_archived = ?, completed_at = ? WHERE id = ?")
             ->execute([$toColumnId, $newIsDone, $isToArchive, $completedAt, $cardId]);
         tHistory($pdo, $cardId, $tUserName, 'moved', ['from_column' => $fromCol, 'to_column' => $toColumnId]);
+        // Перемещение в колонку «выполнено»/«архив» закрывает и подзадачи родителя.
+        $cascDone = ((int)$card['is_done'] !== 1 && (int)$newIsDone === 1);
+        $cascArch = ((int)$card['is_archived'] !== 1 && (int)$isToArchive === 1);
+        if ($cascDone || $cascArch) tCascadeCloseSubtasks($pdo, $cardId, $cascDone, $cascArch);
 
         // Задача закрыта (попала в done/архив) — останавливаем бегущие таймеры
         // на ней: учёт времени по выполненной задаче продолжаться не должен.
@@ -1758,6 +1783,10 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         $params[] = $cardId;
         $pdo->prepare("UPDATE tasks_cards SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
         if ($changes) tHistory($pdo, $cardId, $tUserName, 'updated', $changes);
+        // Закрыли/заархивировали родителя — закрываем и его подзадачи.
+        $cascDone = isset($body['is_done']) && $body['is_done'] && (int)$card['is_done'] !== 1;
+        $cascArch = isset($body['is_archived']) && $body['is_archived'] && (int)$card['is_archived'] !== 1;
+        if ($cascDone || $cascArch) tCascadeCloseSubtasks($pdo, $cardId, $cascDone, $cascArch);
         // Задача отмечена выполненной — останавливаем бегущие таймеры на ней.
         if (isset($body['is_done']) && $body['is_done'] && (int)$card['is_done'] !== 1) {
             tStopCardTimers($pdo, $cardId, $tUserName);
