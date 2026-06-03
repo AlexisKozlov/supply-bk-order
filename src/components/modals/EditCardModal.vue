@@ -9,6 +9,7 @@
             <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
           </div>
         </div>
+        <div v-if="product && createdAtFmt" style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">Добавлена в базу: <b style="color:var(--text);">{{ createdAtFmt }}</b></div>
 
         <div class="modal-row-2" style="grid-template-columns: 1fr 3fr;">
           <div class="modal-field">
@@ -144,7 +145,7 @@
   </Teleport>
 </template>
 <script setup>
-import { ref, defineAsyncComponent, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, defineAsyncComponent, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
@@ -172,6 +173,13 @@ const showNewSupplier = ref(false);
 const showConfirmClose = ref(false);
 const prevSupplier = ref('');
 const showAuditLog = ref(false);
+const createdAt = ref('');
+const createdAtFmt = computed(() => {
+  if (!createdAt.value) return '';
+  const d = new Date(String(createdAt.value).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+});
 const auditLoading = ref(false);
 const auditEntries = ref([]);
 const originalValues = ref(null);
@@ -191,6 +199,7 @@ onMounted(async () => {
   document.addEventListener('keydown', onKey);
   if (props.product?.id) {
     const { data } = await db.from('products').select('*').eq('id', props.product.id).single();
+    createdAt.value = data?.created_at || props.product?.created_at || '';
     if (data) {
       Object.assign(form.value, {
         sku: data.sku || '', name: data.name || '', supplier: data.supplier || '',

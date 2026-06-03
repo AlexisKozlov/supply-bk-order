@@ -1192,10 +1192,19 @@ const AUDIT_ACTION_LABELS = {
   so_order_submitted: 'Заявка подана', so_order_updated: 'Заявка обновлена',
   so_order_skipped: 'Поставка не нужна', so_order_edited: 'Изменена отделом закупок',
   so_order_deleted: 'Удалена', so_qty_adjusted: 'Правка количества',
+  so_deadline_extended: 'Дедлайн продлён', so_day_closed: 'День закрыт',
+  so_day_reopened: 'День открыт', so_template_saved: 'Шаблон сохранён',
+  // Напоминания о подаче заявок
+  reminder_sub_toggled: 'Напоминания', reminder_main_toggled: 'Напоминания',
   // Сбор остатков
   stock_collection_created: 'Создан', collection_created: 'Создан', collection_closed: 'Закрыт',
+  collection_reopened: 'Переоткрыт', stock_collection_cell_saved: 'Ячейка остатков',
+  // Залоговые цены
+  deposit_price_updated: 'Залоговая цена', deposit_prices_imported: 'Импорт залог. цен',
   // Распределение
   distribution_created: 'Создано',
+  // Корректировки (кабинет ресторана)
+  correction_submit_cabinet: 'Подана из кабинета',
   // Система
   broadcast_sent: 'Рассылка', session_terminated: 'Сессия завершена', maintenance_toggled: 'Тех. работы',
 };

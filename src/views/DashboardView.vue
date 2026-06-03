@@ -159,6 +159,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
+import { activityLabel } from '@/lib/auditActions.js'
 import { useUserStore } from '@/stores/userStore.js'
 
 const userStore = useUserStore()
@@ -226,22 +227,8 @@ function barWidth(v, max) { return max > 0 ? (v / max * 100) + '%' : '0%' }
 function truncateStr(s, len) { return s && s.length > len ? s.slice(0, len) + '…' : (s || '') }
 const todayStr = new Date().toISOString().slice(0, 10)
 
-const ACTION_LABELS = {
-  order_created: 'создал заказ',
-  order_updated: 'обновил заказ',
-  order_deleted: 'удалил заказ',
-  plan_created: 'создал план',
-  plan_updated: 'обновил план',
-  plan_deleted: 'удалил план',
-  order_received: 'принял поставку',
-  login: 'вошёл в систему',
-  import_data: 'импортировал данные',
-  protocol_created: 'создал протокол',
-  protocol_finalized: 'финализировал протокол',
-}
-
 function formatAction(action) {
-  return ACTION_LABELS[action] || action.replace(/_/g, ' ')
+  return activityLabel(action)
 }
 
 function formatDetails(details) {

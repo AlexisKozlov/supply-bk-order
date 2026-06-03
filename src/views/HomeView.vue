@@ -234,6 +234,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { db } from '@/lib/apiClient.js';
+import { activityLabel } from '@/lib/auditActions.js';
 import { useCanvasParticles } from '@/composables/useCanvasParticles.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
@@ -297,35 +298,7 @@ async function loadActivity() {
 }
 
 function actionText(item) {
-  const map = {
-    order_created: 'создал заказ',
-    order_updated: 'изменил заказ',
-    order_deleted: 'удалил заказ',
-    orders_deleted: 'удалил заказ',
-    plan_created: 'создал план',
-    plan_updated: 'изменил план',
-    plan_deleted: 'удалил план',
-    plans_deleted: 'удалил план',
-    received: 'принял поставку',
-    reception_reverted: 'отменил приёмку',
-    delivery_date_changed: 'перенёс доставку',
-    schedule_updated: 'обновил расписание',
-    restaurant_updated: 'обновил ресторан',
-    product_created: 'добавил товар',
-    product_updated: 'изменил товар',
-    products_deleted: 'удалил товар',
-    marketing_created: 'создал активность',
-    marketing_updated: 'изменил активность',
-    tender_created: 'создал тендер',
-    tender_updated: 'изменил тендер',
-    price_agreement_created: 'создал протокол цен',
-    stock_collection_created: 'создал сбор остатков',
-    distribution_created: 'создал распределение',
-    correction_created: 'создал корректировку',
-    correction_approved: 'подтвердил корректировку',
-    correction_rejected: 'отклонил корректировку',
-  };
-  return map[item.action] || item.action;
+  return activityLabel(item.action);
 }
 
 function timeAgo(dateStr) {
