@@ -17,6 +17,10 @@
           <button :class="{ active: period === 14 }" @click="period = 14">14 дней</button>
           <button :class="{ active: period === 30 }" @click="period = 30">30 дней</button>
         </div>
+        <div class="sfv-period-toggle" title="Единица отображения. На расчёт не влияет.">
+          <button :class="{ active: unitMode === 'pieces' }" @click="unitMode = 'pieces'">шт/кг</button>
+          <button :class="{ active: unitMode === 'boxes' }" @click="unitMode = 'boxes'">коробки</button>
+        </div>
         <input v-model="search" class="sfv-input" placeholder="Поиск группы…" />
         <select v-model="filterSupplier" class="sfv-input sfv-select">
           <option value="">Все поставщики</option>
@@ -26,8 +30,18 @@
           <option value="">Все категории</option>
           <option v-for="c in categoryList" :key="c" :value="c">{{ c }}</option>
         </select>
+        <select v-model="filterExpiry" class="sfv-input sfv-select" title="Фильтр по сроку годности на складе">
+          <option value="">Любой срок годности</option>
+          <option value="spoil">Не успеют продать</option>
+          <option value="expired">Есть просрочка</option>
+          <option value="d7">Истекает ≤ 7 дней</option>
+          <option value="d14">Истекает ≤ 14 дней</option>
+          <option value="d30">Истекает ≤ 30 дней</option>
+          <option value="ok">Без риска порчи</option>
+        </select>
         <select v-model="sortKey" class="sfv-input sfv-select">
-          <option value="days-asc">По срочности</option>
+          <option value="days-asc">По срочности (продажи)</option>
+          <option value="expiry-asc">По сроку годности</option>
           <option value="stock-desc">По остатку</option>
           <option value="avg-desc">По продажам</option>
           <option value="trend">По тренду</option>
@@ -48,7 +62,77 @@
           В норме: <b>{{ kpi.ok }}</b>
         </span>
         <span v-if="filterAlert" class="sfv-kpi-clear" @click="filterAlert = ''">✕ сбросить</span>
+
+        <span class="sfv-kpi-divider"></span>
+        <span v-if="expiryKpi.hasSpoil" class="sfv-kpi-item sfv-kpi-exp7" title="Прогноз: не успеют продать до срока годности при текущих продажах" @click="filterExpiry = filterExpiry === 'spoil' ? '' : 'spoil'">
+          Не успеют продать: <b>{{ expiryKpi.spoilText }}</b> <span class="sfv-kpi-sub">в {{ expiryKpi.spoilGroups }} гр.</span>
+        </span>
+        <span v-if="expiryKpi.hasExpired" class="sfv-kpi-item sfv-kpi-expired" title="Уже просроченный / заблокированный товар (состоявшийся убыток)" @click="filterExpiry = filterExpiry === 'expired' ? '' : 'expired'">
+          Просрочено: <b>{{ expiryKpi.expiredText }}</b> <span class="sfv-kpi-sub">в {{ expiryKpi.expiredGroups }} гр.</span>
+        </span>
+        <span v-if="filterExpiry" class="sfv-kpi-clear" @click="filterExpiry = ''">✕ сбросить</span>
+
         <span class="sfv-kpi-period">Данные: {{ periodLabel }}</span>
+      </div>
+
+      <!-- Прогноз порчи: не успеют продать до срока -->
+      <div v-if="spoilReport.length" class="sfv-report">
+        <div class="sfv-report-head" @click="reportOpen = !reportOpen">
+          <span class="sfv-report-chevron" :class="{ open: reportOpen }">&#9656;</span>
+          <span class="sfv-report-title">⚠ Прогноз порчи</span>
+          <span class="sfv-report-sum">
+            не успеют продать до срока ≈ <b>{{ expiryKpi.spoilText }}</b>
+            в {{ spoilReport.length }} {{ spoilReport.length === 1 ? 'группе' : 'группах' }}
+          </span>
+          <span class="sfv-report-toggle">{{ reportOpen ? 'свернуть' : 'показать' }}</span>
+        </div>
+        <div v-if="reportOpen" class="sfv-report-body">
+          <div class="sfv-spoil-row sfv-spoil-head">
+            <span class="sfv-sr-name">Группа</span>
+            <span class="sfv-sr-qty">Сгорит ≈</span>
+            <span class="sfv-sr-date">К дате</span>
+            <span class="sfv-sr-avg">Продажи/день</span>
+            <span class="sfv-sr-stock">Остаток</span>
+          </div>
+          <div v-for="(s, i) in spoilReport" :key="'spoil'+i" class="sfv-spoil-row" @click="toggleExpand(s.group)">
+            <span class="sfv-sr-name" :title="s.group">{{ s.group }}<span v-if="s.supplier" class="sfv-rr-group">{{ s.supplier }}</span></span>
+            <span class="sfv-sr-qty sfv-exp-warn">{{ dispQty(s.qty, s.qpb) }} {{ unitLbl(s.unit, s.qpb) }}</span>
+            <span class="sfv-sr-date">{{ s.date ? shortDate(s.date) : '—' }}</span>
+            <span class="sfv-sr-avg">{{ dispQty(s.avg, s.qpb) }}</span>
+            <span class="sfv-sr-stock">{{ dispQty(s.stock, s.qpb) }}</span>
+          </div>
+          <div class="sfv-report-foot">Оценка по текущему темпу продаж. Без учёта будущих поставок и запасов у ресторанов.</div>
+        </div>
+      </div>
+
+      <!-- Уже просрочено (вынесено отдельно — состоявшийся убыток) -->
+      <div v-if="expiredReport.length" class="sfv-report sfv-report-expired">
+        <div class="sfv-report-head" @click="expiredOpen = !expiredOpen">
+          <span class="sfv-report-chevron" :class="{ open: expiredOpen }">&#9656;</span>
+          <span class="sfv-report-title sfv-title-expired">Просрочено</span>
+          <span class="sfv-report-sum">
+            <b>{{ expiryKpi.expiredText }}</b> уже просрочено
+            в {{ expiredReport.length }} {{ expiredReport.length === 1 ? 'партии' : 'партиях' }}
+          </span>
+          <span class="sfv-report-toggle">{{ expiredOpen ? 'свернуть' : 'показать' }}</span>
+        </div>
+        <div v-if="expiredOpen" class="sfv-report-body">
+          <div class="sfv-report-row sfv-report-row-head">
+            <span class="sfv-rr-name">Товар</span>
+            <span class="sfv-rr-wh">Склад</span>
+            <span class="sfv-rr-date">Годен до</span>
+            <span class="sfv-rr-days">Статус</span>
+            <span class="sfv-rr-qty">Остаток</span>
+          </div>
+          <div v-for="(lot, i) in expiredReport" :key="'exp'+i" class="sfv-report-row">
+            <span class="sfv-rr-name" :title="lot.productName">{{ lot.productName }}<span class="sfv-rr-group">{{ lot.group }}</span></span>
+            <span class="sfv-rr-wh">{{ lot.warehouse || '—' }}</span>
+            <span class="sfv-rr-date">{{ shortDate(lot.date) }}</span>
+            <span class="sfv-rr-days sfv-exp-expired">{{ lot.status || 'просрочено' }}</span>
+            <span class="sfv-rr-qty">{{ dispQty(lot.qty, lot.qpb) }} {{ unitLbl(lot.unit, lot.qpb) }}</span>
+
+          </div>
+        </div>
       </div>
 
       <!-- Table -->
@@ -60,7 +144,7 @@
               <th class="sfv-th-name">Группа аналогов</th>
               <th class="sfv-th-num">Остаток</th>
               <th class="sfv-th-num">Ср/день</th>
-              <th class="sfv-th-days">Дней</th>
+              <th class="sfv-th-days" title="На сколько дней хватит остатка при текущих продажах. Это НЕ срок годности — срок годности в колонке «Годность».">Дней</th>
               <th class="sfv-th-date">Обнуление</th>
               <th class="sfv-th-expiry">Годность</th>
               <th class="sfv-th-trend">Тренд</th>
@@ -78,9 +162,9 @@
                   <span class="sfv-group-name">{{ r.group }}</span>
                   <span class="sfv-group-meta">{{ r.supplier || '' }}{{ r.supplier && r.category ? ' · ' : '' }}{{ r.category || '' }}</span>
                 </td>
-                <td class="sfv-td-num">{{ fmtNum(r.stock) }}</td>
+                <td class="sfv-td-num">{{ dispQty(r.stock, r.qpb) }}</td>
                 <td class="sfv-td-num">
-                  {{ fmtNum(r.avg) }}
+                  {{ dispQty(r.avg, r.qpb) }}
                   <span v-if="r.dataSource === 'analysis'" class="sfv-src-hint" title="По расходу со склада (нет данных реализации)">склад</span>
                 </td>
                 <td class="sfv-td-days">
@@ -88,10 +172,16 @@
                 </td>
                 <td class="sfv-td-date">{{ r.zeroDate || '—' }}</td>
                 <td class="sfv-td-expiry">
-                  <span v-if="r.expiryRisk === 'expired'" class="sfv-expiry-tag sfv-expiry-bad" title="Есть просроченный товар">Просрочка</span>
-                  <span v-else-if="r.expiryRisk === 'week'" class="sfv-expiry-tag sfv-expiry-warn" title="Часть товара истекает в течение 7 дней">До 7 дн</span>
-                  <span v-else-if="r.expiryRisk === 'soon'" class="sfv-expiry-tag sfv-expiry-info" title="Часть товара истекает в течение 14 дней">До 14 дн</span>
-                  <span v-else-if="r.expiry" class="sfv-expiry-ok">ОК</span>
+                  <template v-if="r.expiry">
+                    <div class="sfv-exp-cell">
+                      <span v-if="r.goodNearestDays !== Infinity" class="sfv-exp-date" :class="expiryDaysClass(r.goodNearestDays)" :title="'Ближайший срок годного товара'">
+                        до {{ shortDate(r.goodNearestDate) }}
+                      </span>
+                      <span v-else class="sfv-muted">—</span>
+                      <span v-if="r.projectedSpoil > 0" class="sfv-exp-risk" title="Прогноз: не успеют продать до срока">⚠ сгорит ≈ {{ dispQty(r.projectedSpoil, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</span>
+                      <span v-if="r.expiredQty > 0" class="sfv-exp-expired-tag" title="Уже просрочено">просрочено {{ dispQty(r.expiredQty, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</span>
+                    </div>
+                  </template>
                   <span v-else class="sfv-muted">—</span>
                 </td>
                 <td class="sfv-td-trend">
@@ -117,7 +207,7 @@
                         <!-- Y axis grid + labels -->
                         <template v-for="(tick, ti) in yTicks(r.chartMax)" :key="'yt'+ti">
                           <line :x1="chartPadL" :y1="yPos(tick, r.chartMax)" :x2="chartW" :y2="yPos(tick, r.chartMax)" stroke="var(--border-light)" stroke-width="0.5" />
-                          <text :x="chartPadL - 4" :y="yPos(tick, r.chartMax) + 3" text-anchor="end" class="sfv-chart-label">{{ shortNum(tick) }}</text>
+                          <text :x="chartPadL - 4" :y="yPos(tick, r.chartMax) + 3" text-anchor="end" class="sfv-chart-label">{{ shortNum(cvt(tick, r.qpb)) }}</text>
                         </template>
                         <!-- Sales bars -->
                         <g v-for="(bar, i) in r.chartBars" :key="'b'+i" class="sfv-bar-group">
@@ -126,7 +216,7 @@
                           <!-- Visible bar -->
                           <rect :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h" :fill="bar.color" rx="1.5" />
                           <!-- Hover label -->
-                          <text :x="bar.x + bar.w / 2" :y="bar.y - 3" text-anchor="middle" class="sfv-bar-label">{{ shortNum(bar.value) }}</text>
+                          <text :x="bar.x + bar.w / 2" :y="bar.y - 3" text-anchor="middle" class="sfv-bar-label">{{ shortNum(cvt(bar.value, r.qpb)) }}</text>
                           <title>{{ formatBarDate(bar.date) }}: {{ fmtNum(bar.value) }}</title>
                         </g>
                         <!-- X axis date labels (every ~5th) -->
@@ -142,13 +232,13 @@
                           stroke="#1976D2" stroke-width="1" stroke-dasharray="3 3" opacity="0.5" />
                         <text v-if="r.avg > 0"
                           :x="chartW - 2" :y="yPos(r.avg, r.chartMax) - 3"
-                          text-anchor="end" class="sfv-chart-label" fill="#1976D2">ср {{ shortNum(r.avg) }}</text>
+                          text-anchor="end" class="sfv-chart-label" fill="#1976D2">ср {{ shortNum(cvt(r.avg, r.qpb)) }}</text>
                         <!-- Depletion line -->
                         <path :d="depletionPath(r)" fill="none" stroke="#EF5350" stroke-width="2" stroke-dasharray="4 2" />
                         <!-- Stock label on depletion start -->
                         <text v-if="r.avg > 0 && r.stock > 0"
                           :x="depletionStartX(r) + 2" :y="yPos(r.stock, Math.max(r.chartMax, r.stock)) - 4"
-                          class="sfv-chart-label" fill="#EF5350">{{ shortNum(r.stock) }}</text>
+                          class="sfv-chart-label" fill="#EF5350">{{ shortNum(cvt(r.stock, r.qpb)) }}</text>
                       </svg>
                       <div class="sfv-chart-legend">
                         <span class="sfv-legend-item"><span class="sfv-legend-dot" style="background:#90CAF9"></span>Продажи/день</span>
@@ -160,19 +250,19 @@
                     <div class="sfv-detail-stats">
                       <div class="sfv-stat-card">
                         <div class="sfv-stat-label">Остаток на складе</div>
-                        <div class="sfv-stat-value">{{ fmtNum(r.stock) }}</div>
+                        <div class="sfv-stat-value">{{ dispQty(r.stock, r.qpb) }} <span class="sfv-stat-unit">{{ unitLbl(r.unit, r.qpb) }}</span></div>
                       </div>
                       <div class="sfv-stat-card">
                         <div class="sfv-stat-label">Средние продажи/день</div>
-                        <div class="sfv-stat-value">{{ fmtNum(r.avg) }}</div>
+                        <div class="sfv-stat-value">{{ dispQty(r.avg, r.qpb) }} <span class="sfv-stat-unit">{{ unitLbl(r.unit, r.qpb) }}</span></div>
                       </div>
                       <div class="sfv-stat-card">
                         <div class="sfv-stat-label">Макс. за день</div>
-                        <div class="sfv-stat-value">{{ fmtNum(r.maxDaily) }}</div>
+                        <div class="sfv-stat-value">{{ dispQty(r.maxDaily, r.qpb) }}</div>
                       </div>
                       <div class="sfv-stat-card">
                         <div class="sfv-stat-label">Мин. за день</div>
-                        <div class="sfv-stat-value">{{ fmtNum(r.minDaily) }}</div>
+                        <div class="sfv-stat-value">{{ dispQty(r.minDaily, r.qpb) }}</div>
                       </div>
                       <div class="sfv-stat-card">
                         <div class="sfv-stat-label">Тренд продаж</div>
@@ -182,9 +272,9 @@
                         <div class="sfv-stat-hint">{{ trendHint(r) }}</div>
                       </div>
                       <div class="sfv-stat-card">
-                        <div class="sfv-stat-label">Хватит на</div>
+                        <div class="sfv-stat-label">Хватит на <span class="sfv-stat-sub">(по продажам)</span></div>
                         <div class="sfv-stat-value" :class="badgeClass(r.daysLeft)">{{ fmtDays(r.daysLeft) }} дн</div>
-                        <div v-if="r.zeroDate" class="sfv-stat-hint">до {{ r.zeroDate }}</div>
+                        <div v-if="r.zeroDate" class="sfv-stat-hint">распродадут до {{ r.zeroDate }}</div>
                       </div>
 
                       <!-- Day of week pattern -->
@@ -217,31 +307,53 @@
                           <div class="sfv-expiry-row" v-if="r.expiry.expired > 0">
                             <span class="sfv-expiry-dot" style="background:#C62828"></span>
                             <span>Просрочено</span>
-                            <span class="sfv-expiry-qty sfv-expiry-bad">{{ fmtNum(r.expiry.expired) }}</span>
+                            <span class="sfv-expiry-qty sfv-expiry-bad">{{ dispQty(r.expiry.expired, r.qpb) }}</span>
                           </div>
                           <div class="sfv-expiry-row" v-if="r.expiry.expiring7 > 0">
                             <span class="sfv-expiry-dot" style="background:#E65100"></span>
                             <span>Истекает за 7 дней</span>
-                            <span class="sfv-expiry-qty sfv-expiry-warn">{{ fmtNum(r.expiry.expiring7) }}</span>
+                            <span class="sfv-expiry-qty sfv-expiry-warn">{{ dispQty(r.expiry.expiring7, r.qpb) }}</span>
                           </div>
                           <div class="sfv-expiry-row" v-if="r.expiry.expiring14 > 0">
                             <span class="sfv-expiry-dot" style="background:#FFA726"></span>
                             <span>Истекает за 14 дней</span>
-                            <span class="sfv-expiry-qty">{{ fmtNum(r.expiry.expiring14) }}</span>
+                            <span class="sfv-expiry-qty">{{ dispQty(r.expiry.expiring14, r.qpb) }}</span>
                           </div>
                           <div class="sfv-expiry-row" v-if="r.expiry.expiring30 > 0">
                             <span class="sfv-expiry-dot" style="background:#66BB6A"></span>
                             <span>Истекает за 30 дней</span>
-                            <span class="sfv-expiry-qty">{{ fmtNum(r.expiry.expiring30) }}</span>
+                            <span class="sfv-expiry-qty">{{ dispQty(r.expiry.expiring30, r.qpb) }}</span>
                           </div>
                           <div class="sfv-expiry-row">
                             <span class="sfv-expiry-dot" style="background:#2E7D32"></span>
                             <span>Годный остаток (30+ дн)</span>
-                            <span class="sfv-expiry-qty" style="font-weight:700">{{ fmtNum(r.expiry.total - r.expiry.expired - r.expiry.expiring7 - r.expiry.expiring14 - r.expiry.expiring30) }}</span>
+                            <span class="sfv-expiry-qty" style="font-weight:700">{{ dispQty(r.expiry.total - r.expiry.expired - r.expiry.expiring7 - r.expiry.expiring14 - r.expiry.expiring30, r.qpb) }}</span>
                           </div>
                         </div>
                         <div v-if="r.effectiveStock < r.stock" class="sfv-expiry-note">
-                          Реальный годный остаток: <b>{{ fmtNum(r.effectiveStock) }}</b> (хватит на <b>{{ fmtDays(r.effectiveDaysLeft) }}</b> дн)
+                          Реальный годный остаток: <b>{{ dispQty(r.effectiveStock, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</b> (хватит на <b>{{ fmtDays(r.effectiveDaysLeft) }}</b> дн по продажам)
+                        </div>
+                        <div v-if="r.projectedSpoil > 0" class="sfv-spoil-note">
+                          ⚠ Прогноз порчи: при текущих продажах <b>{{ dispQty(r.projectedSpoil, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</b> не успеют продать до срока<span v-if="r.spoilDate"> (к {{ shortDate(r.spoilDate) }})</span>.
+                        </div>
+
+                        <!-- Партии по сроку годности -->
+                        <div v-if="r.expiryLots.length" class="sfv-lots">
+                          <div class="sfv-lots-title">Партии на складе ({{ r.expiryLots.length }})</div>
+                          <div class="sfv-lots-row sfv-lots-head">
+                            <span class="sfv-lot-name">Товар</span>
+                            <span class="sfv-lot-wh">Склад</span>
+                            <span class="sfv-lot-date">Годен до</span>
+                            <span class="sfv-lot-days">Срок</span>
+                            <span class="sfv-lot-qty">Остаток</span>
+                          </div>
+                          <div v-for="(lot, i) in r.expiryLots" :key="'lot'+i" class="sfv-lots-row">
+                            <span class="sfv-lot-name" :title="lot.productName">{{ lot.productName }}</span>
+                            <span class="sfv-lot-wh" :title="lot.warehouse">{{ lot.warehouse || '—' }}</span>
+                            <span class="sfv-lot-date">{{ shortDate(lot.date) }}</span>
+                            <span class="sfv-lot-days" :class="expiryDaysClass(lot.daysToExpiry)">{{ expiryDaysLabel(lot.daysToExpiry) }}</span>
+                            <span class="sfv-lot-qty">{{ dispQty(lot.qty, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</span>
+                          </div>
                         </div>
                       </div>
 
@@ -259,7 +371,7 @@
                         <div class="sfv-sku-list">
                           <div v-for="sku in r.skuBreakdown" :key="sku.sku" class="sfv-sku-row">
                             <span class="sfv-sku-name">{{ sku.name }}</span>
-                            <span class="sfv-sku-stock">{{ fmtNum(sku.stock) }}</span>
+                            <span class="sfv-sku-stock">{{ dispQty(sku.stock, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</span>
                           </div>
                         </div>
                       </div>
@@ -296,9 +408,14 @@ const search = ref('')
 const filterSupplier = ref('')
 const filterCategory = ref('')
 const filterAlert = ref('')
+const filterExpiry = ref('')      // '', 'expired', 'd7', 'd14', 'd30', 'ok'
+const reportOpen = ref(false)     // развёрнута ли сводка «Прогноз порчи»
+const expiredOpen = ref(false)    // развёрнута ли секция «Просрочено»
 const sortKey = ref('days-asc')
 const period = ref(7)
 const expanded = ref(null)
+const unitMode = ref('pieces')    // 'pieces' | 'boxes' — только отображение, расчёт не меняется
+const isBoxes = computed(() => unitMode.value === 'boxes')
 
 const chartW = 440
 const chartH = 120
@@ -321,7 +438,7 @@ async function loadData() {
   try {
     const entity = orderStore.settings.legalEntity
 
-    let pq = db.from('products').select('sku, name, analog_group, supplier, category')
+    let pq = db.from('products').select('sku, name, analog_group, supplier, category, unit_of_measure, qty_per_box')
     pq = applyEntityGroupFilter(pq, entity)
     const { data: products } = await pq
     productsData.value = products || []
@@ -369,7 +486,7 @@ async function loadData() {
     // 4. Shelf life data (stock_malling) — сроки годности
     const { data: expiry } = await db
       .from('stock_malling')
-      .select('product_name, quantity, expiry_date, customer')
+      .select('product_name, quantity, expiry_date, customer, warehouse, expiry_status')
       .limit(5000)
     expiryData.value = expiry || []
   } catch (e) {
@@ -397,6 +514,8 @@ const forecastRows = computed(() => {
   const groupSkus = {}     // group → [{ sku, name, stock }]
   const groupSupplier = {}
   const groupCategory = {}
+  const groupUnit = {}     // group → { 'кг': count, 'шт': count } (берём преобладающую)
+  const groupQpb = {}      // group → { '48': count } (штук в коробке, преобладающее)
   const groupConsumption = {} // group → daily consumption from analysis_data (fallback)
 
   for (const a of analysisData.value) {
@@ -412,6 +531,16 @@ const forecastRows = computed(() => {
     if (!groupSkus[g]) groupSkus[g] = []
     groupSkus[g].push({ sku: a.sku, name: p.name || a.sku, stock: st })
 
+    if (p.unit_of_measure) {
+      if (!groupUnit[g]) groupUnit[g] = {}
+      groupUnit[g][p.unit_of_measure] = (groupUnit[g][p.unit_of_measure] || 0) + 1
+    }
+    const qpb = parseFloat(p.qty_per_box) || 0
+    if (qpb > 1) {
+      if (!groupQpb[g]) groupQpb[g] = {}
+      groupQpb[g][qpb] = (groupQpb[g][qpb] || 0) + 1
+    }
+
     if (p.supplier) {
       if (!groupSupplier[g]) groupSupplier[g] = {}
       groupSupplier[g][p.supplier] = (groupSupplier[g][p.supplier] || 0) + 1
@@ -425,24 +554,42 @@ const forecastRows = computed(() => {
   // Expiry by analog group: extract SKU from product_name, map to group
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  const groupExpiry = {} // group → { total, expiring30, expiring14, expiring7, expired, lots: [{qty, daysLeft}] }
+  const curGroupCode = getEntityGroupCode(orderStore.settings.legalEntity)
+  const groupExpiry = {} // group → { total, expiring30, ..., lots: [{...}], nearestDays }
 
   for (const e of expiryData.value) {
     if (!e.product_name || !e.expiry_date) continue
+    // Не подмешивать партии чужой группы юрлиц (ПС в БК+ВМ и наоборот)
+    const cg = customerGroupCode(e.customer)
+    if (cg && cg !== curGroupCode) continue
     const sku = e.product_name.split(/\s+/)[0] // артикул в начале названия
     const p = skuProduct.get(sku)
     if (!p || !p.analog_group) continue
     const g = p.analog_group
-    if (!groupExpiry[g]) groupExpiry[g] = { total: 0, expired: 0, expiring7: 0, expiring14: 0, expiring30: 0, lots: [] }
+    if (!groupExpiry[g]) groupExpiry[g] = { total: 0, expired: 0, expiring7: 0, expiring14: 0, expiring30: 0, lots: [], nearestDays: Infinity, nearestDate: '' }
     const qty = parseFloat(e.quantity) || 0
     const exp = new Date(e.expiry_date + 'T00:00:00')
     const daysToExpiry = Math.floor((exp - today) / 86400000)
     groupExpiry[g].total += qty
-    groupExpiry[g].lots.push({ qty, daysToExpiry })
+    groupExpiry[g].lots.push({
+      qty, daysToExpiry,
+      date: e.expiry_date,
+      warehouse: e.warehouse || '',
+      productName: p.name || e.product_name,
+      status: e.expiry_status || '',
+    })
+    if (daysToExpiry < groupExpiry[g].nearestDays) {
+      groupExpiry[g].nearestDays = daysToExpiry
+      groupExpiry[g].nearestDate = e.expiry_date
+    }
     if (daysToExpiry < 0) groupExpiry[g].expired += qty
     else if (daysToExpiry <= 7) groupExpiry[g].expiring7 += qty
     else if (daysToExpiry <= 14) groupExpiry[g].expiring14 += qty
     else if (daysToExpiry <= 30) groupExpiry[g].expiring30 += qty
+  }
+  // Партии в каждой группе — по сроку, ближайший сверху
+  for (const g in groupExpiry) {
+    groupExpiry[g].lots.sort((a, b) => a.daysToExpiry - b.daysToExpiry)
   }
 
   // Sales by group, by date
@@ -562,17 +709,41 @@ const forecastRows = computed(() => {
 
     const supplier = topKey(groupSupplier[g])
     const category = topKey(groupCategory[g])
+    const unit = topKey(groupUnit[g]) || ''
+    const qpb = parseFloat(topKey(groupQpb[g])) || 1
 
     // Expiry info
     const exp = groupExpiry[g] || null
     let expiryRisk = ''
     let effectiveStock = stock
+    let expiredQty = 0          // уже просрочено / заблокировано — отдельный, уже состоявшийся убыток
+    let projectedSpoil = 0      // прогноз: НЕ успеют продать до срока годности (FEFO по текущим продажам)
+    let spoilDate = ''          // ближайшая дата, к которой начинается прогнозируемая порча
+    let goodNearestDays = Infinity
+    let goodNearestDate = ''
     if (exp) {
+      expiredQty = exp.expired
       const unusable = exp.expired + exp.expiring7
       effectiveStock = Math.max(0, stock - unusable)
       if (exp.expired > 0) expiryRisk = 'expired'
       else if (exp.expiring7 > 0) expiryRisk = 'week'
       else if (exp.expiring14 > 0) expiryRisk = 'soon'
+
+      // FEFO-прогноз порчи: продаём avg/день, сначала партии с ближайшим сроком.
+      // Что не успеет продаться к своей дате «годен до» — прогнозируемая порча.
+      let prevCum = 0
+      for (const l of exp.lots) {
+        if (l.daysToExpiry < 0) continue   // уже просрочено — отдельной строкой
+        if (l.daysToExpiry < goodNearestDays) { goodNearestDays = l.daysToExpiry; goodNearestDate = l.date }
+        const cumI = prevCum + l.qty
+        const cap = avg * l.daysToExpiry   // сколько всего можно продать к дате этого лота
+        const soldThisLot = Math.min(cap, cumI) - Math.min(cap, prevCum)
+        const spoil = Math.max(0, l.qty - soldThisLot)
+        if (spoil > 0.05 && !spoilDate) spoilDate = l.date
+        projectedSpoil += spoil
+        prevCum = cumI
+      }
+      projectedSpoil = Math.round(projectedSpoil * 10) / 10
     }
     const effectiveDaysLeft = avg > 0 ? effectiveStock / avg : (effectiveStock > 0 ? Infinity : 0)
 
@@ -580,15 +751,29 @@ const forecastRows = computed(() => {
       group: g, stock, avg, maxDaily, minDaily,
       daysLeft, zeroDate, trendPct, dataSource,
       depletionData, chartBars, chartDates, chartValues, chartMax,
-      skuBreakdown, supplier, category,
+      skuBreakdown, supplier, category, unit, qpb,
       periodDates, periodValues,
       expiry: exp, expiryRisk, effectiveStock, effectiveDaysLeft,
+      expiredQty, projectedSpoil, spoilDate,
+      nearestExpiryDays: exp ? exp.nearestDays : Infinity,
+      nearestExpiryDate: exp ? exp.nearestDate : '',
+      goodNearestDays, goodNearestDate,
+      expiryLots: exp ? exp.lots : [],
       dowAvg, dowMax, peakDay, lowDay,
     })
   }
 
   return rows
 })
+
+// Группа юрлица по полю customer из stock_malling: 'BK_VM' | 'PS' | null (неизвестно)
+function customerGroupCode(customer) {
+  if (!customer) return null
+  const c = customer.toLowerCase()
+  if (c.includes('пицца') || c.includes('додо') || c.includes('сбарро')) return 'PS'
+  if (c.includes('бургер') || c.includes('воглия')) return 'BK_VM'
+  return null
+}
 
 function topKey(obj) {
   if (!obj) return ''
@@ -694,9 +879,17 @@ const filteredRows = computed(() => {
   else if (filterAlert.value === 'yellow') list = list.filter(r => r.daysLeft >= 3 && r.daysLeft < 7)
   else if (filterAlert.value === 'ok') list = list.filter(r => r.daysLeft >= 7)
 
+  if (filterExpiry.value === 'spoil') list = list.filter(r => r.projectedSpoil > 0)
+  else if (filterExpiry.value === 'expired') list = list.filter(r => r.expiredQty > 0)
+  else if (filterExpiry.value === 'd7') list = list.filter(r => r.expiry && (r.expiry.expired > 0 || r.expiry.expiring7 > 0))
+  else if (filterExpiry.value === 'd14') list = list.filter(r => r.expiry && (r.expiry.expired > 0 || r.expiry.expiring7 > 0 || r.expiry.expiring14 > 0))
+  else if (filterExpiry.value === 'd30') list = list.filter(r => r.expiry && r.nearestExpiryDays <= 30)
+  else if (filterExpiry.value === 'ok') list = list.filter(r => !r.expiry || (r.expiry.expired === 0 && r.expiry.expiring7 === 0))
+
   list = [...list]
   const s = sortKey.value
   if (s === 'days-asc') list.sort((a, b) => a.daysLeft - b.daysLeft)
+  else if (s === 'expiry-asc') list.sort((a, b) => a.nearestExpiryDays - b.nearestExpiryDays)
   else if (s === 'stock-desc') list.sort((a, b) => b.stock - a.stock)
   else if (s === 'avg-desc') list.sort((a, b) => b.avg - a.avg)
   else if (s === 'trend') list.sort((a, b) => b.trendPct - a.trendPct)
@@ -713,6 +906,69 @@ const kpi = computed(() => {
     else ok++
   }
   return { red, yellow, ok }
+})
+
+// Сводка по риску порчи. Суммы разбиваем по единицам измерения —
+// штуки и килограммы складывать нельзя.
+const expiryKpi = computed(() => {
+  const spoilByUnit = {}, expiredByUnit = {}
+  let expiredGroups = 0, spoilGroups = 0
+  let spoilBoxes = 0, expiredBoxes = 0   // суммы в коробках (через qpb группы)
+  for (const r of forecastRows.value) {
+    const u = r.unit || 'ед.'
+    if (r.expiredQty > 0) {
+      expiredByUnit[u] = (expiredByUnit[u] || 0) + r.expiredQty
+      expiredBoxes += cvt(r.expiredQty, r.qpb)
+      expiredGroups++
+    }
+    if (r.projectedSpoil > 0) {
+      spoilByUnit[u] = (spoilByUnit[u] || 0) + r.projectedSpoil
+      spoilBoxes += cvt(r.projectedSpoil, r.qpb)
+      spoilGroups++
+    }
+  }
+  return {
+    spoilText: isBoxes.value ? (fmtNum(spoilBoxes) + ' кор.') : fmtByUnit(spoilByUnit),
+    expiredText: isBoxes.value ? (fmtNum(expiredBoxes) + ' кор.') : fmtByUnit(expiredByUnit),
+    expiredGroups, spoilGroups,
+    hasSpoil: spoilGroups > 0,
+    hasExpired: expiredGroups > 0,
+  }
+})
+
+// «88 шт, 122 кг» из { шт: 88, кг: 122 }
+function fmtByUnit(map) {
+  const parts = Object.entries(map).map(([u, v]) => fmtNum(Math.round(v * 10) / 10) + ' ' + u)
+  return parts.join(', ')
+}
+
+// Прогноз порчи: какие группы НЕ успеют распродать до срока и сколько ≈
+const spoilReport = computed(() => {
+  const out = []
+  for (const r of forecastRows.value) {
+    if (r.projectedSpoil > 0) {
+      out.push({
+        group: r.group, supplier: r.supplier, unit: r.unit, qpb: r.qpb,
+        qty: r.projectedSpoil, date: r.spoilDate || r.goodNearestDate,
+        avg: r.avg, stock: r.stock,
+        daysToExpiry: r.goodNearestDays,
+      })
+    }
+  }
+  out.sort((a, b) => b.qty - a.qty)
+  return out
+})
+
+// Уже просроченные партии (вынесены отдельно — это состоявшийся убыток)
+const expiredReport = computed(() => {
+  const out = []
+  for (const r of forecastRows.value) {
+    for (const lot of (r.expiryLots || [])) {
+      if (lot.daysToExpiry < 0) out.push({ ...lot, group: r.group, unit: r.unit, qpb: r.qpb })
+    }
+  }
+  out.sort((a, b) => b.qty - a.qty)
+  return out
 })
 
 const periodLabel = computed(() => {
@@ -739,11 +995,44 @@ function fmtDays(d) {
   return Math.round(d)
 }
 
+// Перевод величины в выбранную единицу (шт↔коробки). Расчёт не трогаем — только показ.
+function cvt(val, qpb) {
+  if (isBoxes.value && qpb > 1) return val / qpb
+  return val
+}
+// Отформатированное количество в выбранной единице
+function dispQty(val, qpb) {
+  return fmtNum(cvt(val, qpb))
+}
+// Подпись единицы для строки: «кор.» в режиме коробок, иначе родная единица товара
+function unitLbl(unit, qpb) {
+  if (isBoxes.value && qpb > 1) return 'кор.'
+  return unit || ''
+}
+
 function badgeClass(days) {
   if (days === Infinity) return 'sfv-badge-inf'
   if (days < 3) return 'sfv-badge-red'
   if (days < 7) return 'sfv-badge-yellow'
   return 'sfv-badge-ok'
+}
+
+// Текст «срок» для партии: просрочено / сегодня / N дн
+function expiryDaysLabel(days) {
+  if (days == null || days === Infinity) return ''
+  if (days < 0) return 'просрочено'
+  if (days === 0) return 'сегодня'
+  if (days === 1) return '1 дн'
+  return days + ' дн'
+}
+
+// Цвет по близости срока годности
+function expiryDaysClass(days) {
+  if (days == null || days === Infinity) return 'sfv-muted'
+  if (days < 0) return 'sfv-exp-expired'
+  if (days <= 7) return 'sfv-exp-warn'
+  if (days <= 14) return 'sfv-exp-soon'
+  return 'sfv-exp-ok'
 }
 
 function rowClass(r) {
@@ -821,6 +1110,71 @@ function sparkColor(r) {
 .sfv-kpi-clear { color: var(--text-muted); cursor: pointer; font-size: 11px; }
 .sfv-kpi-clear:hover { color: var(--text); }
 .sfv-kpi-period { margin-left: auto; font-style: italic; }
+.sfv-kpi-divider { width: 1px; align-self: stretch; min-height: 16px; background: var(--border); }
+.sfv-kpi-sub { font-size: 11px; opacity: 0.7; font-weight: 400; }
+.sfv-kpi-expired { color: #C62828; }
+.sfv-kpi-exp7 { color: #E65100; }
+.sfv-kpi-exp14 { color: #F9A825; }
+
+/* Сводка «Риск порчи» */
+.sfv-report { border: 1.5px solid #F0C5C5; border-radius: 10px; background: #FFF8F6; overflow: hidden; }
+.sfv-report-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+.sfv-report-head:hover { background: #FFF0EC; }
+.sfv-report-chevron { color: #C62828; transition: transform 0.15s; display: inline-block; }
+.sfv-report-chevron.open { transform: rotate(90deg); }
+.sfv-report-title { font-weight: 700; color: #C62828; }
+.sfv-report-sum { color: var(--text); }
+.sfv-report-toggle { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.sfv-report-body { padding: 4px 12px 10px; max-height: 320px; overflow: auto; }
+.sfv-report-row { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(0, 1.4fr) 64px 80px 70px; gap: 8px; align-items: center; padding: 4px 0; font-size: 12px; border-bottom: 1px solid #F2DEDE; }
+.sfv-report-row-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); font-weight: 700; }
+.sfv-rr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfv-rr-group { color: var(--text-muted); font-size: 11px; margin-left: 6px; }
+.sfv-rr-wh { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.sfv-rr-date { text-align: center; }
+.sfv-rr-days { text-align: center; font-weight: 600; }
+.sfv-rr-qty { text-align: right; font-weight: 600; }
+
+/* Прогноз порчи (группы) */
+.sfv-spoil-row { display: grid; grid-template-columns: minmax(0, 2.4fr) 80px 64px 96px 70px; gap: 8px; align-items: center; padding: 4px 0; font-size: 12px; border-bottom: 1px solid #F2DEDE; cursor: pointer; }
+.sfv-spoil-row:hover:not(.sfv-spoil-head) { background: #FFF0EC; }
+.sfv-spoil-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); font-weight: 700; cursor: default; }
+.sfv-sr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfv-sr-qty { text-align: right; font-weight: 700; }
+.sfv-sr-date { text-align: center; }
+.sfv-sr-avg { text-align: right; color: var(--text-muted); }
+.sfv-sr-stock { text-align: right; color: var(--text-muted); }
+.sfv-report-foot { margin-top: 6px; font-size: 10px; color: var(--text-muted); font-style: italic; }
+
+/* Секция «Просрочено» — нейтральный серый, чтобы не путать с прогнозом */
+.sfv-report-expired { border-color: var(--border); background: var(--card); }
+.sfv-title-expired { color: #8A6D3B; }
+
+.sfv-spoil-note { margin-top: 8px; padding: 6px 10px; background: #FFF3E0; border-radius: 6px; font-size: 12px; color: #E65100; }
+
+/* Срок в колонке «Годность» */
+.sfv-exp-cell { display: flex; flex-direction: column; gap: 1px; }
+.sfv-exp-expired-tag { font-size: 10px; color: #8A6D3B; white-space: nowrap; }
+.sfv-exp-date { font-size: 12px; font-weight: 600; }
+.sfv-exp-risk { font-size: 10px; color: #C62828; white-space: nowrap; }
+.sfv-exp-expired { color: #C62828; }
+.sfv-exp-warn { color: #E65100; }
+.sfv-exp-soon { color: #F9A825; }
+.sfv-exp-ok { color: #2E7D32; }
+
+.sfv-stat-sub { font-size: 9px; text-transform: none; opacity: 0.8; letter-spacing: 0; }
+.sfv-stat-unit { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+
+/* Партии в детали группы */
+.sfv-lots { margin-top: 10px; }
+.sfv-lots-title { font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; }
+.sfv-lots-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.3fr) 60px 72px 64px; gap: 6px; align-items: center; padding: 3px 0; font-size: 12px; border-bottom: 1px solid var(--border-light); }
+.sfv-lots-head { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); font-weight: 700; }
+.sfv-lot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfv-lot-wh { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.sfv-lot-date { text-align: center; }
+.sfv-lot-days { text-align: center; font-weight: 600; }
+.sfv-lot-qty { text-align: right; font-weight: 600; }
 
 /* Table */
 .sfv-table-wrap { flex: 1; overflow: auto; min-height: 0; }
