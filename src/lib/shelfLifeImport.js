@@ -264,7 +264,7 @@ export async function parseStockMalling(file, options = {}) {
   const headers = rows[headerIdx].map(h => String(h ?? '').toLowerCase().trim());
 
   const colMap = {
-    customer: findCol(headers, ['заказчик', 'наименования заказчика', 'покупатель', 'клиент']),
+    customer: findCol(headers, ['короткое наименован', 'владелец товара', 'заказчик', 'наименования заказчика', 'покупатель', 'клиент']),
     warehouse: findCol(headers, ['название склада', 'склад хранения', 'склад']),
     product_name: findCol(headers, ['наименование товара', 'наименование номенклатуры', 'наименование продукт', 'номенклатура']),
     production_date: findCol(headers, ['дата производства', 'дата выработки', 'дата изготовления']),
@@ -335,7 +335,7 @@ function parseCellStatsFromModernStock(rows, sheetName, counts, options = {}) {
   for (let i = 0; i < Math.min(rows.length, 15); i++) {
     const cells = rows[i].map(c => String(c ?? '').toLowerCase().trim());
     const ci = findCol(cells, ['ячейка']);
-    const ui = findCol(cells, ['владелец товара', 'владелец', 'заказчик']);
+    const ui = findCol(cells, ['владелец товара', 'владелец', 'заказчик', 'короткое наименован']);
     const pi = findCol(cells, ['товар']);
     if (ci >= 0 && ui >= 0) {
       headerIdx = i; colCell = ci; colCustomer = ui; colProduct = pi;
@@ -357,8 +357,8 @@ function parseCellStatsFromModernStock(rows, sheetName, counts, options = {}) {
     }
     if (!rowStockType) continue;
     const key = entity + '||' + rowStockType;
-    if (!counts[key]) counts[key] = new Set();
-    counts[key].add(cellNum);
+    // Одна строка = одна ячейка (ячейка может делиться, номер повторяться).
+    counts[key] = (counts[key] || 0) + 1;
   }
 
   return true;
@@ -394,9 +394,9 @@ export async function parseCellStats(file, options = {}) {
   }
 
   if (usedModernFormat) {
-    const result = Object.entries(counts).map(([key, set]) => {
+    const result = Object.entries(counts).map(([key, cnt]) => {
       const [legal_entity, stock_type] = key.split('||');
-      return { legal_entity, stock_type, cell_count: set.size };
+      return { legal_entity, stock_type, cell_count: cnt };
     });
     return { cells: result, reportDate };
   }
@@ -411,7 +411,7 @@ export async function parseCellStats(file, options = {}) {
     const cells = rows[i].map(c => String(c ?? '').toLowerCase().trim());
     const ci = cells.findIndex(h => h.includes('ячейк'));
     const wi = cells.findIndex(h => h.includes('склад'));
-    const ui = cells.findIndex(h => h.includes('заказчик'));
+    const ui = cells.findIndex(h => h.includes('заказчик') || h.includes('короткое наимен') || h.includes('владелец'));
     if (ci >= 0 && wi >= 0) {
       headerIdx = i; colCell = ci; colWarehouse = wi; colCustomer = ui;
       break;
@@ -431,13 +431,13 @@ export async function parseCellStats(file, options = {}) {
     const entity = normalizeCustomer(rawCustomer);
     if (!entity) continue;
     const key = entity + '||' + stockType;
-    if (!counts[key]) counts[key] = new Set();
-    counts[key].add(cellNum);
+    // Одна строка = одна ячейка (ячейка может делиться, номер повторяться).
+    counts[key] = (counts[key] || 0) + 1;
   }
 
-  const result = Object.entries(counts).map(([key, set]) => {
+  const result = Object.entries(counts).map(([key, cnt]) => {
     const [legal_entity, stock_type] = key.split('||');
-    return { legal_entity, stock_type, cell_count: set.size };
+    return { legal_entity, stock_type, cell_count: cnt };
   });
 
   return { cells: result, reportDate };
