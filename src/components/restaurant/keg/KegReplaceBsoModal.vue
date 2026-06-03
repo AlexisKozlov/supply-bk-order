@@ -1,7 +1,7 @@
 <template>
   <div v-if="show" class="krt-confirm-overlay" @click.self="onClose">
     <div class="krt-confirm krt-bso-modal">
-      <h3>Заменить БСО</h3>
+      <h3>Заменить бланк</h3>
       <p class="krt-bso-modal-current">
         Текущий: <b>{{ currentSeries }} {{ currentNumber }}</b>
       </p>
@@ -116,10 +116,10 @@ function onClose() {
 function onSubmit() {
   const s = newSeries.value.trim();
   const n = newNumber.value.trim();
-  if (!/^[А-ЯЁ]{2}$/u.test(s)) { toast.error('Серия БСО', 'Две заглавные кириллические буквы.'); return; }
-  if (!/^\d{7}$/.test(n))      { toast.error('Номер БСО', 'Ровно 7 цифр.'); return; }
+  if (!/^[А-ЯЁ]{2}$/u.test(s)) { toast.error('Серия ТТН', 'Две заглавные кириллические буквы.'); return; }
+  if (!/^\d{7}$/.test(n))      { toast.error('Номер ТТН', 'Ровно 7 цифр.'); return; }
   if (s === props.currentSeries && n === props.currentNumber) {
-    toast.error('Тот же БСО', 'Новый номер совпадает с текущим.');
+    toast.error('Тот же бланк', 'Новый номер совпадает с текущим.');
     return;
   }
   const reasonDef = BSO_REASONS.find(r => r.key === reasonKey.value);

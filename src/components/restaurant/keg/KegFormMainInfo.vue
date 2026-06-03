@@ -41,7 +41,7 @@
 
       <div class="krt-fld krt-fld-bso-series">
         <label class="krt-fld-label">
-          Серия БСО
+          Серия ТТН
           <span class="krt-tip">
             <span class="krt-tip-icon" tabindex="0">?</span>
             <span class="krt-tip-bubble">Две заглавные кириллические буквы (например, АА).</span>
@@ -63,7 +63,7 @@
 
       <div class="krt-fld krt-fld-bso-number">
         <label class="krt-fld-label">
-          Номер БСО
+          Номер ТТН
           <span class="krt-tip">
             <span class="krt-tip-icon" tabindex="0">?</span>
             <span class="krt-tip-bubble">Ровно 7 цифр.</span>

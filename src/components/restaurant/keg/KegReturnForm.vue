@@ -52,9 +52,9 @@
         <div v-if="form.status === 'SUBMITTED' && !deadlinePassed" class="krt-print-reminder">
           <div class="krt-print-reminder-icon">🖨</div>
           <div class="krt-print-reminder-text">
-            <div class="krt-print-reminder-title">Не забудьте распечатать ТТН на бланке БСО до дедлайна</div>
+            <div class="krt-print-reminder-title">Не забудьте распечатать ТТН на бланке до дедлайна</div>
             <div class="krt-print-reminder-sub">
-              Это нужно, чтобы убедиться, что бланк не испорчен и номер БСО на нём совпадает с фактическим.
+              Это нужно, чтобы убедиться, что бланк не испорчен и номер на нём совпадает с фактическим.
               <template v-if="deadlineFormatted"> Срок: <b>{{ deadlineFormatted }}</b>.</template>
             </div>
           </div>

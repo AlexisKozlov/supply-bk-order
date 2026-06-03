@@ -14,12 +14,46 @@
       </button>
     </div>
 
+    <!-- Как это работает + график этого ресторана -->
+    <div class="krt-help">
+      <button type="button" class="krt-help-head" @click="helpOpen = !helpOpen">
+        <span class="krt-help-icon">❓</span>
+        <span class="krt-help-title">Как это работает</span>
+        <span class="krt-help-toggle">{{ helpOpen ? 'свернуть' : 'подробнее' }}</span>
+      </button>
+
+      <div class="krt-help-schedule">
+        <span class="krt-help-sched-item">
+          <b>День приёма:</b>
+          <template v-if="myReturnDays.length">{{ myReturnDays.join(', ') }}</template>
+          <span v-else class="krt-help-muted">не задан — уточните в отделе закупок</span>
+        </span>
+        <span v-if="pickupAddress" class="krt-help-sched-item"><b>Погрузка:</b> {{ pickupAddress }}</span>
+      </div>
+
+      <div v-if="helpOpen" class="krt-help-body">
+        <ol class="krt-help-steps">
+          <li>Нажмите <b>«Новая заявка»</b>.</li>
+          <li>Укажите <b>серию и номер ТТН</b> (2 буквы + 7 цифр) и ФИО управляющего.</li>
+          <li>Выберите <b>дату возврата</b> (из дней приёма вашего ресторана) и укажите <b>кеги</b> с количеством.</li>
+          <li>Нажмите <b>«Сформировать заявку»</b> и <b>распечатайте ТТН на бланке</b> до дедлайна — проверьте, что бланк не испорчен и номер совпадает.</li>
+          <li>Дождитесь уведомления о маршрутизации в Telegram-боте <b>@supplyportal_bot</b> — там будут водитель и машина.</li>
+          <li>Впишите <b>от руки</b> в распечатанный бланк водителя, машину и «товар принял к перевозке», передайте бланк водителю.</li>
+        </ol>
+        <div class="krt-help-deadline">
+          <b>Сроки:</b> править заявку можно до <b>10:00 предыдущего рабочего дня</b> перед возвратом.
+          С 10:00 до 15:00 — только замена испорченного бланка. После 15:00 изменения невозможны.
+        </div>
+        <a class="krt-help-pdf" href="/keg-returns-memo.pdf" target="_blank" rel="noopener">📄 Скачать памятку (PDF)</a>
+      </div>
+    </div>
+
     <div v-if="loading" class="krt-empty">Загрузка...</div>
     <template v-else>
       <div v-if="!rows.length" class="krt-empty-card">
         <div class="krt-empty-illu" v-html="iconKeg"></div>
         <h3>Заявок пока нет</h3>
-        <p>Сформируйте заявку и сразу распечатайте ТТН на бланке БСО (до дедлайна) — чтобы убедиться, что бланк не испорчен и номер совпадает с фактическим. Дождитесь уведомления о маршрутизации в Telegram, впишите ОТ РУКИ водителя и машину в распечатанный бланк, возьмите подпись водителя — и передайте ему вместе с кегами.</p>
+        <p>Сформируйте заявку и сразу распечатайте ТТН на бланке (до дедлайна) — чтобы убедиться, что бланк не испорчен и номер совпадает с фактическим. Дождитесь уведомления о маршрутизации в Telegram, впишите ОТ РУКИ водителя и машину в распечатанный бланк, возьмите подпись водителя — и передайте ему вместе с кегами.</p>
         <button class="krt-btn primary" @click="$emit('new')">+ Новая заявка</button>
       </div>
       <template v-else>
@@ -56,7 +90,7 @@
                   <span class="krt-card-pill-num">{{ row.total_kegs }}</span> кег
                 </span>
                 <span v-if="row.bso_series || row.bso_number" class="krt-card-meta">
-                  БСО {{ row.bso_series }} {{ row.bso_number }}
+                  ТТН {{ row.bso_series }} {{ row.bso_number }}
                 </span>
                 <span v-if="row.driver" class="krt-card-meta">· {{ row.driver }}</span>
               </div>
@@ -71,13 +105,25 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import { iconKeg, iconKegReturn, fmtDate, statusLabel } from './kegHelpers.js';
+import { iconKeg, iconKegReturn, fmtDate, statusLabel, WEEKDAY_NAMES } from './kegHelpers.js';
 
 const props = defineProps({
   rows: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  pickupWeekdays: { type: Number, default: 0 },
+  pickupAddress: { type: String, default: '' },
 });
 defineEmits(['new', 'open']);
+
+const helpOpen = ref(false);
+
+// Дни приёма этого ресторана из битовой маски pickup_weekdays (бит 0 = Пн … 6 = Вс)
+const myReturnDays = computed(() => {
+  const mask = parseInt(props.pickupWeekdays || 0, 10);
+  const days = [];
+  for (let i = 0; i < 7; i++) if (mask & (1 << i)) days.push(WEEKDAY_NAMES[i]);
+  return days;
+});
 
 const statusFilter = ref('all');
 const STATUS_FILTER_DEFS = [

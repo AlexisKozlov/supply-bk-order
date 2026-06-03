@@ -2,7 +2,7 @@
   <section class="krt-section krt-bso-section">
     <div class="krt-section-head">
       <h3>
-        Бланк БСО
+        Бланк
         <span v-if="(form.bso_history || []).length" class="krt-bso-replaced-tag">
           заменён {{ form.bso_history.length }}×
         </span>
@@ -12,19 +12,19 @@
     <!-- Активный CTA замены: окно 10:00–15:00 -->
     <div v-if="form.can_replace_bso" class="krt-bso-replace-cta">
       <div class="krt-bso-replace-text">
-        <div class="krt-bso-replace-title">Испортили БСО при печати?</div>
+        <div class="krt-bso-replace-title">Испортили бланк при печати?</div>
         <div class="krt-bso-replace-sub">
           Окно замены до <b>{{ cutoffFormatted }}</b>. Потом изменить нельзя — заявки уйдут лог-провайдеру финально.
         </div>
       </div>
       <button class="krt-btn primary" @click="$emit('replace')" :disabled="saving">
-        Заменить БСО
+        Заменить бланк
       </button>
     </div>
 
     <!-- Окно закрылось -->
     <div v-else-if="cutoffPassed && (form.status === 'SUBMITTED' || form.status === 'ROUTED')" class="krt-bso-cutoff-msg">
-      Окно замены БСО закрыто (после 15:00). Если бланк испорчен — свяжитесь с отделом закупок.
+      Окно замены бланка закрыто (после 15:00). Если бланк испорчен — свяжитесь с отделом закупок.
     </div>
 
     <!-- История замен -->

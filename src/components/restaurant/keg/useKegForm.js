@@ -149,9 +149,9 @@ export function useKegForm(initialIdRef, emit) {
       });
       bsoModal.show = false;
       await loadFormData(localId.value);
-      toast.success('БСО заменён', `Новый номер: ${payload.new_series} ${payload.new_number}`);
+      toast.success('Бланк заменён', `Новый номер: ${payload.new_series} ${payload.new_number}`);
     } catch (e) {
-      toast.error('Не удалось заменить БСО', e.message || '');
+      toast.error('Не удалось заменить бланк', e.message || '');
     } finally {
       bsoModal.saving = false;
     }
@@ -186,12 +186,12 @@ export function useKegForm(initialIdRef, emit) {
     if (!s && !n) { fieldErr.bso = false; return true; }
     if (!/^[А-ЯЁ]{2}$/u.test(s)) {
       fieldErr.bso = true;
-      toast.error('Серия БСО', 'Две заглавные кириллические буквы, например «АА».');
+      toast.error('Серия ТТН', 'Две заглавные кириллические буквы, например «АА».');
       return false;
     }
     if (!/^\d{7}$/.test(n)) {
       fieldErr.bso = true;
-      toast.error('Номер БСО', 'Ровно 7 цифр.');
+      toast.error('Номер ТТН', 'Ровно 7 цифр.');
       return false;
     }
     fieldErr.bso = false;
@@ -231,7 +231,7 @@ export function useKegForm(initialIdRef, emit) {
     if (!form.return_date) missing.push('дату возврата');
     const s = (form.bso_series || '').trim();
     const n = (form.bso_number || '').trim();
-    if (!/^[А-ЯЁ]{2}$/u.test(s) || !/^\d{7}$/.test(n)) missing.push('серию и номер БСО');
+    if (!/^[А-ЯЁ]{2}$/u.test(s) || !/^\d{7}$/.test(n)) missing.push('серию и номер ТТН');
     if (!(form.sender_position_name || '').trim()) missing.push('кто сдал');
     if (totalKegsCount.value === 0) missing.push('количество кег');
     if (!missing.length) return '';
@@ -429,8 +429,8 @@ export function useKegForm(initialIdRef, emit) {
     // и машину впишем от руки на этом же бланке.
     if (status === 'SUBMITTED') {
       return await askConfirm({
-        title: 'Распечатать ТТН на бланке БСО',
-        message: 'Печатайте сейчас, до дедлайна — чтобы убедиться, что бланк не испорчен и номер БСО совпадает с фактом. После маршрутизации водителя и машину впишите ОТ РУКИ на этот же бланк (заново не печатаем).',
+        title: 'Распечатать ТТН на бланке',
+        message: 'Печатайте сейчас, до дедлайна — чтобы убедиться, что бланк не испорчен и номер совпадает с фактом. После маршрутизации водителя и машину впишите ОТ РУКИ на этот же бланк (заново не печатаем).',
         okText: 'Распечатать',
         cancelText: 'Отмена',
       });

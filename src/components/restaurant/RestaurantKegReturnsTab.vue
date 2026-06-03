@@ -4,6 +4,8 @@
       v-if="!formMode"
       :rows="rows"
       :loading="listLoading"
+      :pickup-weekdays="restaurantInfo.pickup_weekdays"
+      :pickup-address="restaurantInfo.pickup_address"
       @new="openNew"
       @open="openEdit"
     />
@@ -31,6 +33,17 @@ const rows = ref([]);
 const listLoading = ref(false);
 const formMode = ref(false);
 const editingId = ref(null);
+const restaurantInfo = ref({ pickup_weekdays: 0, pickup_address: '' });
+
+async function loadRestaurantInfo() {
+  try {
+    const data = await roFetch('/api/keg-returns/restaurant-info');
+    restaurantInfo.value = {
+      pickup_weekdays: parseInt(data.pickup_weekdays || 0, 10),
+      pickup_address: data.pickup_address || '',
+    };
+  } catch (e) { /* не критично — памятка покажется без графика */ }
+}
 
 async function loadList() {
   listLoading.value = true;
@@ -61,6 +74,7 @@ function backToList() {
 }
 
 onMounted(async () => {
+  loadRestaurantInfo();
   await loadList();
   const qId = route.query.id;
   if (qId) {
@@ -85,6 +99,54 @@ onMounted(async () => {
   margin: 0 auto;
   color: #2C1A12;
 }
+
+/* ═══ Памятка «Как это работает» ═══ */
+.krt-help {
+  border: 1px solid #F0DCC8;
+  background: #FFFaf4;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+.krt-help-head {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 12px 16px;
+  background: none; border: none; cursor: pointer;
+  font-size: 15px; color: #2C1A12; text-align: left;
+}
+.krt-help-head:hover { background: #FFF1E0; }
+.krt-help-icon { font-size: 16px; }
+.krt-help-title { font-weight: 700; }
+.krt-help-toggle { margin-left: auto; font-size: 12px; color: #B08968; }
+.krt-help-schedule {
+  display: flex; flex-wrap: wrap; gap: 6px 18px;
+  padding: 0 16px 12px; font-size: 13px; color: #5A4636;
+}
+.krt-help-sched-item b { color: #2C1A12; }
+.krt-help-muted { color: #B08968; }
+.krt-help-body {
+  padding: 4px 16px 16px;
+  border-top: 1px dashed #F0DCC8;
+}
+.krt-help-steps {
+  margin: 10px 0; padding-left: 20px;
+  font-size: 13px; line-height: 1.55; color: #3A2A1E;
+}
+.krt-help-steps li { margin-bottom: 5px; }
+.krt-help-steps b { color: #2C1A12; }
+.krt-help-deadline {
+  margin-top: 8px; padding: 10px 12px;
+  background: #FFF3E0; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.5; color: #8A5A2B;
+}
+.krt-help-deadline b { color: #6B4416; }
+.krt-help-pdf {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 12px; padding: 8px 14px;
+  background: #fff; border: 1px solid #E0C6AC; border-radius: 8px;
+  font-size: 13px; font-weight: 600; color: #B5651D; text-decoration: none;
+}
+.krt-help-pdf:hover { background: #FFF1E0; border-color: #D0A87C; }
 
 /* ═══ Хедер списка ═══ */
 .krt-header {
@@ -518,6 +580,9 @@ onMounted(async () => {
   background: #fff; border-radius: 18px;
   padding: 28px 26px 24px; max-width: 460px; width: 100%;
   box-shadow: 0 18px 50px rgba(0,0,0,.22);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }
 .krt-submitted-icon {
   width: 64px; height: 64px; margin: 0 auto 14px;
@@ -565,6 +630,8 @@ onMounted(async () => {
 .krt-step-key .krt-step-title { color: #C16B4D; }
 .krt-submitted-actions {
   display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+  position: sticky; bottom: 0;
+  background: #fff; padding-top: 12px;
 }
 
 /* Напоминание о печати */

@@ -262,7 +262,7 @@ function krNotifyRouted(PDO $pdo, array $row): void {
         if (!$chatIds) return;
         $pdfContent = krGeneratePdf($row);
         if ($pdfContent === false) return;
-        $pdfName = 'TTN_' . ($row['bso_series'] ?: 'X') . '_' . ($row['bso_number'] ?: '0') . '.pdf';
+        $pdfName = 'ТТН ' . ($row['bso_series'] ?: 'X') . ' ' . ($row['bso_number'] ?: '0') . '.pdf';
         foreach ($chatIds as $chatId) {
             sendTelegramDocument($botToken, $chatId, $pdfName, $pdfContent, 'ТТН №' . $bsoStr);
         }
@@ -1522,7 +1522,10 @@ function krRmDirRec($dir) {
  * Генерирует PDF из заявки через LibreOffice.
  * Возвращает содержимое PDF-файла в виде строки, или false при ошибке.
  */
-function krGeneratePdf(array $row) {
+// $copies — сколько одинаковых ТТН вернуть в одном PDF (для печати на нескольких
+// бланках БСО). По умолчанию 1; при печати ресторан получает 4 одинаковые ТТН.
+function krGeneratePdf(array $row, int $copies = 1) {
+    $copies = max(1, $copies);
     $spreadsheet = krFillTemplate($row);
     $tmpDir  = sys_get_temp_dir() . '/kegprint_' . uniqid();
     @mkdir($tmpDir);
@@ -1540,6 +1543,17 @@ function krGeneratePdf(array $row) {
 
         if (!file_exists($pdfPath)) {
             error_log('krGeneratePdf failed: ' . $out);
+        } elseif ($copies > 1) {
+            // Склеиваем N одинаковых копий в один PDF (pdfunite из poppler-utils).
+            $mergedPath = $tmpDir . '/ttn_x' . $copies . '.pdf';
+            $args = str_repeat(escapeshellarg($pdfPath) . ' ', $copies);
+            $mout = shell_exec('pdfunite ' . $args . escapeshellarg($mergedPath) . ' 2>&1');
+            if (file_exists($mergedPath)) {
+                $content = file_get_contents($mergedPath);
+            } else {
+                error_log('krGeneratePdf pdfunite failed: ' . $mout);
+                $content = file_get_contents($pdfPath); // запас: хотя бы 1 копия
+            }
         } else {
             $content = file_get_contents($pdfPath);
         }
@@ -1547,6 +1561,40 @@ function krGeneratePdf(array $row) {
         krRmDirRec($tmpDir);
     }
     return $content;
+}
+
+// Транслитерация кириллицы в латиницу для ASCII-имени файла (серия ТТН — кириллица).
+function krTranslit(string $s): string {
+    $map = [
+        'А'=>'A','Б'=>'B','В'=>'V','Г'=>'G','Д'=>'D','Е'=>'E','Ё'=>'E','Ж'=>'Zh','З'=>'Z',
+        'И'=>'I','Й'=>'Y','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O','П'=>'P','Р'=>'R',
+        'С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'H','Ц'=>'C','Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Sch',
+        'Ъ'=>'','Ы'=>'Y','Ь'=>'','Э'=>'E','Ю'=>'Yu','Я'=>'Ya',
+        'а'=>'a','б'=>'b','в'=>'v','г'=>'g','д'=>'d','е'=>'e','ё'=>'e','ж'=>'zh','з'=>'z',
+        'и'=>'i','й'=>'y','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o','п'=>'p','р'=>'r',
+        'с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'h','ц'=>'c','ч'=>'ch','ш'=>'sh','щ'=>'sch',
+        'ъ'=>'','ы'=>'y','ь'=>'','э'=>'e','ю'=>'yu','я'=>'ya',
+    ];
+    return strtr($s, $map);
+}
+
+// Дата ГГГГ-ММ-ДД → «ДД.ММ.ГГГГ» для читаемого имени файла; '' если даты нет.
+function krNiceDate(?string $d): string {
+    if (!$d) return '';
+    $p = explode('-', $d);
+    return count($p) === 3 ? ($p[2] . '.' . $p[1] . '.' . $p[0]) : $d;
+}
+
+// Заголовок Content-Disposition с именем файла на русском:
+// ASCII-фолбэк (транслит) для старых клиентов + RFC 5987 filename* в UTF-8,
+// который современные браузеры показывают кириллицей.
+function krCDHeader(string $disposition, string $filename): string {
+    $ascii = preg_replace('/[^\x20-\x7E]/', '', krTranslit($filename));
+    $ascii = str_replace('"', '', $ascii);
+    if (trim($ascii) === '') $ascii = 'file';
+    return 'Content-Disposition: ' . $disposition
+        . '; filename="' . $ascii . '"'
+        . "; filename*=UTF-8''" . rawurlencode($filename);
 }
 
 // ── GET /keg-returns/{id}/excel ──
@@ -1565,14 +1613,15 @@ if ($method === 'GET' && $krId && $krAction === 'excel') {
 
     $bsoSeries = $row['bso_series'] ?? '';
     $bsoNumber = $row['bso_number'] ?? '';
-    $safeDate  = str_replace('-', '', $row['return_date']);
-    $filename  = 'TTN_' . ($bsoSeries ?: 'X') . '_' . ($bsoNumber ?: '0') . '_' . $safeDate . '.xlsx';
+    $niceDate  = krNiceDate($row['return_date']);
+    $filename  = 'ТТН ' . ($bsoSeries ?: 'X') . ' ' . ($bsoNumber ?: '0') . ($niceDate ? ' от ' . $niceDate : '') . '.xlsx';
+    $cdHeader  = krCDHeader('attachment', $filename);
 
     $spreadsheet = krFillTemplate($row);
 
     header_remove('Content-Type');
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header($cdHeader);
     header('Cache-Control: no-cache, no-store, must-revalidate');
     header('Pragma: no-cache');
     header('Expires: 0');
@@ -1597,17 +1646,18 @@ if ($method === 'GET' && $krId && $krAction === 'print') {
 
     $bsoSeries = $row['bso_series'] ?? '';
     $bsoNumber = $row['bso_number'] ?? '';
-    $safeDate  = str_replace('-', '', $row['return_date']);
-    $filename  = 'TTN_' . ($bsoSeries ?: 'X') . '_' . ($bsoNumber ?: '0') . '_' . $safeDate . '.pdf';
+    $niceDate  = krNiceDate($row['return_date']);
+    $filename  = 'ТТН ' . ($bsoSeries ?: 'X') . ' ' . ($bsoNumber ?: '0') . ($niceDate ? ' от ' . $niceDate : '') . '.pdf';
 
-    $pdfContent = krGeneratePdf($row);
+    // 4 одинаковые ТТН — по числу бланков БСО, используемых на один возврат.
+    $pdfContent = krGeneratePdf($row, 4);
     if ($pdfContent === false) {
         krRespond(['error' => 'Не удалось сгенерировать PDF'], 500);
     }
 
     header_remove('Content-Type');
     header('Content-Type: application/pdf');
-    header('Content-Disposition: inline; filename="' . $filename . '"');
+    header(krCDHeader('inline', $filename));
     header('Cache-Control: no-cache, no-store, must-revalidate');
     echo $pdfContent;
     exit;
