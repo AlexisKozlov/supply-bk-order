@@ -138,7 +138,7 @@
         }
 
         $sup = $pdo->prepare("
-            SELECT id, short_name, so_enabled, legal_entity_group
+            SELECT id, short_name, so_enabled, legal_entity_group, order_url
             FROM suppliers
             WHERE is_active = 1 AND legal_entity_group = ?
             ORDER BY short_name

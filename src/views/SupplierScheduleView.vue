@@ -45,6 +45,11 @@
         <span class="ssv-tag" :class="activeSupplier.so_enabled ? 'ssv-tag-so' : 'ssv-tag-local'">
           {{ activeSupplier.so_enabled ? 'через портал' : 'локальный' }}
         </span>
+        <label class="ssv-order-url" title="Если задана — попадёт ссылкой «Оформить заявку» в Telegram-напоминание о подаче заявки">
+          🔗 Ссылка на заявку:
+          <input v-model="orderUrlDraft" type="url" placeholder="https://… (необязательно)"
+                 @blur="saveOrderUrl" @keydown.enter="$event.target.blur()" />
+        </label>
       </div>
 
       <table class="ssv-table">
@@ -326,6 +331,21 @@ const activeSupplier = computed(() => {
   const s = suppliers.value.find(x => x.id === selectedSupplierId.value);
   return s || null;
 });
+
+// Опциональная ссылка на оформление заявки (для Telegram-напоминаний).
+const orderUrlDraft = ref('');
+watch(activeSupplier, (s) => { orderUrlDraft.value = s?.order_url || ''; }, { immediate: true });
+async function saveOrderUrl() {
+  const s = activeSupplier.value;
+  if (!s) return;
+  const val = orderUrlDraft.value.trim();
+  if (val === (s.order_url || '')) return; // без изменений
+  if (val && !/^https?:\/\//i.test(val)) { toast.error('Ссылка должна начинаться с http:// или https://', ''); return; }
+  const { error } = await db.from('suppliers').update({ order_url: val || null }).eq('id', s.id);
+  if (error) { toast.error('Не удалось сохранить ссылку', error.message || ''); return; }
+  s.order_url = val || null; // локально, чтобы computed/watch были согласованы
+  toast.success(val ? 'Ссылка сохранена' : 'Ссылка убрана', '');
+}
 
 // Все рестораны юр.лица (даже без расписания у выбранного поставщика).
 // Расписание прикрепляется в days[].
@@ -693,6 +713,10 @@ onMounted(loadData);
 .ssv-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .ssv-tag-so { background: #e3f2fd; color: #1565c0; }
 .ssv-tag-local { background: #fff4e0; color: #b35900; }
+.ssv-order-url { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #7a6a5f; }
+.ssv-order-url input { width: 280px; max-width: 40vw; padding: 4px 8px; border: 1px solid #e0c6ac; border-radius: 6px; font-size: 12px; }
+.ssv-order-url input:focus { outline: none; border-color: #d0a87c; }
+@media (max-width: 640px) { .ssv-order-url { margin-left: 0; flex-basis: 100%; } .ssv-order-url input { flex: 1; max-width: none; } }
 
 .ssv-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 /* Перебиваем глобальные стили проекта (thead на коричневом фоне с белым текстом) */

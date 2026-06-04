@@ -276,7 +276,7 @@ $stmt = $pdo->prepare("
     SELECT
         ss.order_day, ss.delivery_day,
         sub.id AS subscription_id, sub.portal_enabled, sub.telegram_enabled,
-        s.id AS supplier_id, s.short_name AS supplier_name,
+        s.id AS supplier_id, s.short_name AS supplier_name, s.order_url AS supplier_order_url,
         r.id AS restaurant_pk, r.number AS restaurant_number, r.legal_entity_group,
         sd.deadline_time AS deadline_override,
         sd.reminder_times AS reminder_times_override
@@ -309,7 +309,7 @@ if ($tempPeriods) {
         SELECT
             ssi.order_day, ssi.delivery_day,
             sub.id AS subscription_id, sub.portal_enabled, sub.telegram_enabled,
-            s.id AS supplier_id, s.short_name AS supplier_name,
+            s.id AS supplier_id, s.short_name AS supplier_name, s.order_url AS supplier_order_url,
             r.id AS restaurant_pk, r.number AS restaurant_number, r.legal_entity_group,
             sd.deadline_time AS deadline_override,
             sd.reminder_times AS reminder_times_override
@@ -437,6 +437,11 @@ foreach ($rowsToProcess as $row) {
                       . ucfirst($whenLabel) . " до <b>{$deadlineShort}</b> подайте заявку поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>.\n"
                       . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
                       . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
+            }
+            // Опциональная ссылка на оформление заявки (если задана у поставщика).
+            $orderUrl = trim((string)($row['supplier_order_url'] ?? ''));
+            if ($orderUrl !== '' && preg_match('~^https?://~i', $orderUrl)) {
+                $text .= "\n\n🔗 <a href=\"" . htmlspecialchars($orderUrl, ENT_QUOTES, 'UTF-8') . "\">Оформить заявку</a>";
             }
             $callback = "rrack:{$supplierId}:{$orderDay}:" . $slot['order_date'];
             $markup = [
