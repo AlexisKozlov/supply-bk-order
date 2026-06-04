@@ -356,6 +356,7 @@ require_once __DIR__ . '/includes/bot_rest.php';
 require_once __DIR__ . '/includes/bot_surveys.php';
 require_once __DIR__ . '/includes/bot_chat.php';
 require_once __DIR__ . '/includes/bot_import.php';
+require_once __DIR__ . '/includes/bot_faq.php';
 
 // ═══ Получить пользователя по chat_id ═══
 
@@ -2951,6 +2952,17 @@ $msg = $input['message'] ?? $input['edited_message'] ?? null;
 if (!$msg) exit;
 
 $chatId = $msg['chat']['id'];
+
+// ── Сообщения из рабочих групп ──────────────────────────────────────────
+// В группе/супергруппе бот работает в безопасном FAQ-режиме: отвечает
+// только когда к нему обратились (@упоминание или ответ на его сообщение).
+// Отдаёт инструкции по порталу и справочные данные (остатки, номенклатура,
+// аналоги), но НЕ цены/поставщиков/заказы. Всё остальное игнорирует.
+$chatType = $msg['chat']['type'] ?? 'private';
+if ($chatType === 'group' || $chatType === 'supergroup') {
+    handleGroupMessage($chatId, $msg);
+    exit;
+}
 
 // Режим чата с отделом закупок — обрабатывает и текст, и фото.
 // TTL 1 час задан в самом tg_state.expires_at (см. chatStart в bot_chat.php).
