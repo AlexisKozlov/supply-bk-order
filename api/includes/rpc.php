@@ -95,6 +95,9 @@ if ($endpoint === 'rpc') {
 
     require __DIR__ . '/rpc/notifications.php';
     require __DIR__ . '/rpc/online.php';
+
+    // ═══ ИИ-ассистент закупок (DeepSeek + инструменты бота) ═══
+    require __DIR__ . '/rpc/ai_assistant.php';
     // (batch_update_received_qty ушёл в rpc/orders.php)
 
 

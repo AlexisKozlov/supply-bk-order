@@ -1059,3 +1059,98 @@ function askGroqWithTools($question, $entity, $userName, $user = null) {
 
     return null;
 }
+
+// ═══ DeepSeek с tool use (платный API, OpenAI-совместимый) ═══
+// Используется веб-ассистентом закупок (RPC ai_assistant). Поддерживает историю
+// для многоходового чата. Ответ — с HTML-тегами <b>/<a> (как задаёт системный
+// промпт инструментов); на фронте рендерится с санитизацией.
+function askDeepSeekWithTools($question, $entity, $userName, $user = null, array $history = []) {
+    $apiKey = $GLOBALS['DEEPSEEK_API_KEY'] ?? ($_ENV['DEEPSEEK_API_KEY'] ?? '');
+    if (!$apiKey) return null;
+
+    $systemPrompt = getToolsSystemPrompt();
+    $systemPrompt .= "\n\nТы работаешь в веб-портале закупок (не в Telegram). Можно использовать <b>жирный</b> и списки.";
+    $systemPrompt .= "\nПользователь: {$userName}";
+    if ($entity) $systemPrompt .= "\nТекущее юрлицо: {$entity}";
+    $systemPrompt .= "\nСегодня: " . date('d.m.Y, l');
+
+    // Все инструменты (DeepSeek платный — без жёсткого лимита токенов Groq)
+    $tools = [];
+    foreach (getToolDefinitions() as $tool) {
+        $params = $tool['input_schema'];
+        if (isset($params['required']) && empty($params['required'])) unset($params['required']);
+        $tools[] = ['type' => 'function', 'function' => [
+            'name' => $tool['name'],
+            'description' => $tool['description'],
+            'parameters' => $params,
+        ]];
+    }
+
+    $messages = [['role' => 'system', 'content' => $systemPrompt]];
+    // История чата (только role/content, обрезаем длину)
+    foreach ($history as $h) {
+        $role = (($h['role'] ?? '') === 'assistant') ? 'assistant' : 'user';
+        $content = trim((string)($h['content'] ?? ''));
+        if ($content !== '') $messages[] = ['role' => $role, 'content' => mb_substr($content, 0, 4000)];
+    }
+    $messages[] = ['role' => 'user', 'content' => "<user_message>\n{$question}\n</user_message>"];
+
+    // Цикл tool use (до 6 итераций)
+    for ($i = 0; $i < 6; $i++) {
+        $payload = [
+            'model' => 'deepseek-chat',
+            'messages' => $messages,
+            'tools' => $tools,
+            'max_tokens' => 2048,
+            'temperature' => 0.1,
+        ];
+        $ch = curl_init('https://api.deepseek.com/chat/completions');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey],
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if (!$response || $httpCode !== 200) {
+            error_log("DeepSeek Tools API error: HTTP {$httpCode}, err={$err}, resp=" . ($response ? mb_substr($response, 0, 400) : '(empty)'));
+            return null;
+        }
+        $data = json_decode($response, true);
+        $choice = $data['choices'][0] ?? null;
+        if (!$choice) return null;
+        $msg = $choice['message'];
+        $finishReason = $choice['finish_reason'] ?? '';
+
+        if ($finishReason === 'tool_calls' && !empty($msg['tool_calls'])) {
+            $messages[] = $msg;
+            $seen = [];
+            foreach ($msg['tool_calls'] as $tc) {
+                $toolName = $tc['function']['name'];
+                $toolArgs = json_decode($tc['function']['arguments'] ?? '{}', true) ?: [];
+                $key = $toolName . json_encode($toolArgs);
+                if (isset($seen[$key])) {
+                    $messages[] = ['role' => 'tool', 'tool_call_id' => $tc['id'], 'content' => $seen[$key]];
+                    continue;
+                }
+                $toolResult = executeTool($toolName, $toolArgs, $entity, $user);
+                if (mb_strlen($toolResult) > 6000) $toolResult = mb_substr($toolResult, 0, 5800) . "\n…(показаны основные данные)";
+                $seen[$key] = $toolResult;
+                $messages[] = ['role' => 'tool', 'tool_call_id' => $tc['id'], 'content' => $toolResult];
+                error_log("DeepSeek tool: {$toolName}(" . json_encode($toolArgs, JSON_UNESCAPED_UNICODE) . ") => " . mb_strlen($toolResult) . " bytes");
+            }
+            continue;
+        }
+
+        $answer = $msg['content'] ?? '';
+        $answer = preg_replace('/<think>[\s\S]*?<\/think>/u', '', $answer);
+        return trim($answer) ?: null;
+    }
+    return null;
+}
