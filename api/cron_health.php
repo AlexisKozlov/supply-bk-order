@@ -46,11 +46,14 @@ if ($memInfo && preg_match('/MemAvailable:\s+(\d+)/', $memInfo, $m)) {
 }
 
 // 3. Проверка диска
-$diskFree = @disk_free_space('/');
+$diskFree  = @disk_free_space('/');
+$diskTotal = @disk_total_space('/');
+$diskUsedPct = ($diskTotal && $diskFree !== false) ? (int)round(($diskTotal - $diskFree) / $diskTotal * 100) : 0;
+$diskFreeGb  = $diskFree !== false ? round($diskFree / 1073741824, 1) : null;
 if ($diskFree !== false) {
     $diskFreeMb = $diskFree / 1024 / 1024;
     if ($diskFreeMb < 500) {
-        $problems[] = "⚠️ Мало места на диске: " . round($diskFreeMb) . " МБ";
+        $problems[] = "⚠️ Критически мало места на диске: " . round($diskFreeMb) . " МБ";
     }
 }
 
@@ -93,7 +96,28 @@ if ($isDown && !$wasDown) {
     file_put_contents($stateFile, json_encode(['down' => false]));
 }
 
-echo "[{$now}] " . ($isDown ? "ПРОБЛЕМЫ: " . implode('; ', $problems) : "OK") . "\n";
+// Раннее предупреждение о заполнении диска (отдельно от «сервер упал»):
+// предупреждаем заранее на 85% и 92%, чтобы успеть почистить до того, как
+// диск переполнится и уронит БД (уже было 2026-06-04). Алёртим только при
+// переходе в более высокую зону — без спама каждые 2 минуты.
+$diskStateFile = __DIR__ . '/disk_state.json';
+$prevBand = file_exists($diskStateFile) ? (int)(json_decode(file_get_contents($diskStateFile), true)['band'] ?? 0) : 0;
+$band = $diskUsedPct >= 92 ? 92 : ($diskUsedPct >= 85 ? 85 : 0);
+if ($band > $prevBand) {
+    $icon = $band >= 92 ? '🚨' : '⚠️';
+    $tail = $band >= 92
+        ? "Это критично — при переполнении упадёт база. Срочно освободите место."
+        : "Стоит почистить, пока не дошло до критичного (журналы, логи nginx, старые сборки).";
+    sendAlert($BOT_TOKEN, $pdo,
+        "{$icon} <b>Диск заполняется</b>\n─────────────────────\n"
+        . "Занято <b>{$diskUsedPct}%</b> (свободно {$diskFreeGb} ГБ).\n{$tail}\n🕐 {$now}");
+} elseif ($band === 0 && $prevBand > 0) {
+    sendAlert($BOT_TOKEN, $pdo,
+        "✅ <b>Диск разгружен</b>\nЗанято {$diskUsedPct}% (свободно {$diskFreeGb} ГБ).\n🕐 {$now}");
+}
+if ($band !== $prevBand) file_put_contents($diskStateFile, json_encode(['band' => $band]));
+
+echo "[{$now}] " . ($isDown ? "ПРОБЛЕМЫ: " . implode('; ', $problems) : "OK") . " | диск {$diskUsedPct}%\n";
 
 function sendAlert($botToken, $pdo, $text) {
     if (!$botToken) return;
