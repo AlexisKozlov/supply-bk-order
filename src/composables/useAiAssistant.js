@@ -18,7 +18,16 @@ const state = reactive({
 const ALLOWED = /^(b|strong|i|em|br|ul|ol|li|p|code)$/i;
 export function renderAnswer(html) {
   if (!html) return '';
-  let s = String(html).replace(/<(script|style)[\s\S]*?<\/\1>/gi, '');
+  let s = String(html);
+  // Модель иногда отвечает markdown — переводим в безопасные теги.
+  s = s.replace(/```([\s\S]*?)```/g, (m, c) => `<code>${c.replace(/[<>]/g, '')}</code>`);
+  s = s.replace(/`([^`\n]+)`/g, (m, c) => `<code>${c.replace(/[<>]/g, '')}</code>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/__([^_]+)__/g, '<b>$1</b>');
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
+  s = s.replace(/^#{1,6}\s*(.+)$/gm, '<b>$1</b>');
+  // Удаляем опасные блоки и санитизируем теги.
+  s = s.replace(/<(script|style)[\s\S]*?<\/\1>/gi, '');
   s = s.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s[^>]*)?)\/?>/g, (m, tag, attrs) => {
     tag = tag.toLowerCase();
     const closing = m.startsWith('</');

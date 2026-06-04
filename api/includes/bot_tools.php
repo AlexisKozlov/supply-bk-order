@@ -1070,6 +1070,11 @@ function askDeepSeekWithTools($question, $entity, $userName, $user = null, array
 
     $systemPrompt = getToolsSystemPrompt();
     $systemPrompt .= "\n\nТы работаешь в веб-портале закупок (не в Telegram). Можно использовать <b>жирный</b> и списки.";
+    $systemPrompt .= "\n\n== ВАЖНО ПРО СКОРОСТЬ И ДАННЫЕ ==";
+    $systemPrompt .= "\n- База данных — MySQL/MariaDB. НЕ запрашивай схему БД, information_schema, SHOW TABLES, схему «public» (это не Postgres).";
+    $systemPrompt .= "\n- Предпочитай готовые инструменты (get_stock_critical, get_summary, get_orders, get_deliveries, get_prices, get_shelf_life, get_sales, search_product) вместо run_sql. run_sql — только для редких нестандартных запросов.";
+    $systemPrompt .= "\n- Делай минимум вызовов (в идеале 1–3). Не перебирай таблицы наугад. Нет данных — так и скажи, не угадывай.";
+    $systemPrompt .= "\n- Сверка остатков/документов между 1С и 1С УТ по выгрузкам — это ОТДЕЛЬНЫЙ модуль «Сверка 1С/УТ» в разделе «Аналитика» (загрузка файлов). У тебя нет доступа к тем файлам. Если просят сверить 1С и УТ — направь в этот модуль. Ты отвечаешь по данным портала (остатки, расход, заказы, цены и т.п.).";
     $systemPrompt .= "\nПользователь: {$userName}";
     if ($entity) $systemPrompt .= "\nТекущее юрлицо: {$entity}";
     $systemPrompt .= "\nСегодня: " . date('d.m.Y, l');
@@ -1095,22 +1100,24 @@ function askDeepSeekWithTools($question, $entity, $userName, $user = null, array
     }
     $messages[] = ['role' => 'user', 'content' => "<user_message>\n{$question}\n</user_message>"];
 
-    // Цикл tool use (до 6 итераций)
-    for ($i = 0; $i < 6; $i++) {
+    // Цикл tool use. На последней итерации инструменты НЕ даём — модель обязана
+    // дать текстовый ответ (иначе вернули бы null → пользователь видит 503).
+    $maxIter = 5;
+    for ($i = 0; $i < $maxIter; $i++) {
         $payload = [
             'model' => 'deepseek-chat',
             'messages' => $messages,
-            'tools' => $tools,
             'max_tokens' => 2048,
             'temperature' => 0.1,
         ];
+        if ($i < $maxIter - 1) $payload['tools'] = $tools;
         $ch = curl_init('https://api.deepseek.com/chat/completions');
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey],
-            CURLOPT_TIMEOUT => 45,
+            CURLOPT_TIMEOUT => 30,
             CURLOPT_CONNECTTIMEOUT => 5,
         ]);
         $response = curl_exec($ch);
