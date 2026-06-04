@@ -52,6 +52,28 @@ function handleGroupMessage($chatId, array $msg): void
     $text = trim($msg['text'] ?? $msg['caption'] ?? '');
     if ($text === '') return;
 
+    // Кто написал: сотрудник отдела закупок или гость (ресторан).
+    $sender = faqIdentifyGroupSender($msg['from'] ?? []);
+
+    // Контекст обсуждения ДО текущего сообщения (чтобы понимать ветку).
+    $threadBefore = faqThreadText($chatId);
+    // Текущее сообщение записываем в скользящий буфер — ВСЕГДА, даже если к
+    // боту не обращались (бот «видит» весь чат для контекста).
+    faqThreadAppend($chatId, $sender['name'], $text);
+
+    // Обучение: если СОТРУДНИК закупок ответил (reply) на чьё-то сообщение —
+    // запоминаем пару «вопрос → ответ» и переиспользуем в похожих вопросах.
+    // Доверяем только сотрудникам (определяются по users.telegram_chat_id).
+    $reply = $msg['reply_to_message'] ?? null;
+    if ($sender['is_staff'] && $reply) {
+        $replyFromId  = (int)($reply['from']['id'] ?? 0);
+        $repliedText  = trim($reply['text'] ?? $reply['caption'] ?? '');
+        // Не учимся на ответах самого бота (в reply там его ответ, не вопрос).
+        if ($replyFromId !== $botId && mb_strlen($repliedText) >= 5 && mb_strlen($text) >= 3) {
+            faqLearnCapture($chatId, $repliedText, $text, $sender['name'], $sender['role']);
+        }
+    }
+
     // ── Обращаются ли к боту? ───────────────────────────────────────────
     $addressed = false;
 
@@ -113,28 +135,26 @@ function handleGroupMessage($chatId, array $msg): void
 
     sendTyping($chatId);
 
-    // История диалога группы — последние пары вопрос/ответ, чтобы понимать
-    // уточнения. Ключ — chat_id группы, у неё своя ветка.
-    $history = function_exists('aiHistoryGet') ? aiHistoryGet($chatId) : [];
+    // Накопленные ответы отдела закупок по похожим вопросам.
+    $learnedText = faqLearnSearch($chatId, $question);
 
     // Юрлицо определяем из вопроса (по умолчанию Бургер БК; «по ВМ»/«по ПС» —
     // переключают). Остатки у юрлиц разные, поэтому это важно.
     $ent = faqDetectEntity($question);
 
-    // Сначала режим с данными (остатки/номенклатура/аналоги). Если не вышло —
-    // обычный FAQ по инструкциям.
-    $answer = askRestaurantFaqWithTools($question, $history, $ent['entity'], $ent['label']);
+    // Режим с данными (остатки/номенклатура/аналоги) + контекст ветки и
+    // накопленные знания. Если не вышло — обычный FAQ по инструкциям.
+    $answer = askRestaurantFaqWithTools($question, $ent['entity'], $ent['label'], $threadBefore, $learnedText);
     if (!$answer) {
-        $answer = askRestaurantFaq($question, $history, $DEEPSEEK_API_KEY ?? '', $GROQ_API_KEY ?? '');
+        $answer = askRestaurantFaq($question, [], $DEEPSEEK_API_KEY ?? '', $GROQ_API_KEY ?? '');
     }
 
     if (!$answer) {
         $answer = "Не получилось сейчас ответить. Подробная инструкция по возврату кег есть в кабинете ресторана (раздел «Возврат кег» → «Как это работает»). По остальным вопросам обратитесь в отдел закупок.";
     }
 
-    if (function_exists('aiHistoryAppend')) {
-        aiHistoryAppend($chatId, $question, $answer);
-    }
+    // Ответ бота тоже кладём в буфер обсуждения — для контекста следующих.
+    faqThreadAppend($chatId, 'Бот', strip_tags($answer));
 
     $res = tgClientSend($chatId, $answer, [
         'reply_to_message_id' => $msg['message_id'] ?? null,
@@ -275,10 +295,20 @@ function getRestaurantFaqKB(): string
 Вход в кабинет:
 • В поле входа вводят НОМЕР ресторана или EMAIL и пароль. Система сама понимает
   по символу @, что введён email.
-• Забыли пароль — на странице входа есть «Забыли пароль?»: сброс по email или
-  через Telegram.
 • Можно входить с нескольких устройств. При входе с нового устройства приходит
   уведомление в Telegram.
+
+Забыли пароль (точная инструкция):
+• На странице входа, под формой и справа, есть небольшая ТЕКСТОВАЯ ССЫЛКА
+  (не кнопка!) «Забыли пароль?». Если не видите — это серая ссылка прямо под
+  полем пароля, в правом углу.
+• Нажмите её — откроется страница «Сброс пароля» с двумя вкладками:
+  — Вкладка «По email»: введите email кабинета и нажмите «Отправить ссылку».
+    На почту придёт ссылка для сброса пароля. Работает, только если email был
+    заранее указан и подтверждён в кабинете.
+  — Вкладка «По Telegram»: введите номер ресторана (например, 24 или PS01) и
+    нажмите «Отправить код в Telegram». Код придёт в бот, к которому привязан
+    ресторан. Если бот не подключён — используйте email или обратитесь к закупщику.
 
 Привязка Telegram:
 • В кабинете: Профиль → Telegram → «Получить код». Бот — @supplyportal_bot.
@@ -524,7 +554,7 @@ function faqToolAnalogs(string $query, string $entity): string
  * Юрлицо для остатков уже определено ($entity). При неудаче возвращает null
  * (вызывающий откатится на обычный FAQ по инструкциям).
  */
-function askRestaurantFaqWithTools(string $question, array $history, string $entity, string $entityLabel): ?string
+function askRestaurantFaqWithTools(string $question, string $entity, string $entityLabel, string $threadText = '', string $learnedText = ''): ?string
 {
     $apiKey = $GLOBALS['DEEPSEEK_API_KEY'] ?? ($_ENV['DEEPSEEK_API_KEY'] ?? '');
     if (!$apiKey) return null;
@@ -566,20 +596,36 @@ function askRestaurantFaqWithTools(string $question, array $history, string $ent
   Markdown (**, ##, таблицы, ```). Не повторяй вопрос, отвечай сразу по существу.
 - Минимум вызовов инструментов (1–2). База данных — MySQL, схему БД не запрашивай.
 
+== НАКОПЛЕННЫЕ ЗНАНИЯ ==
+Если ниже придёт блок «РАНЕЕ ОТДЕЛ ЗАКУПОК ОТВЕЧАЛ» — это проверенные ответы
+сотрудников на похожие вопросы. Если такой ответ подходит — опирайся на него и
+передавай его суть, НЕ добавляя домыслов сверх того, что написал сотрудник.
+Если ответ не подходит к вопросу — игнорируй его. Блок «НЕДАВНИЕ СООБЩЕНИЯ В
+ГРУППЕ» — контекст обсуждения, отвечай на ПОСЛЕДНИЙ вопрос с учётом контекста.
+
 Сегодня: {$today}
 
 == БАЗА ЗНАНИЙ ==
 {$kb}
 P;
 
-    $tools = faqToolDefinitions();
-    $messages = [['role' => 'system', 'content' => $sys]];
-    foreach ($history as $h) {
-        $role = (($h['role'] ?? '') === 'assistant') ? 'assistant' : 'user';
-        $content = trim((string)($h['content'] ?? ''));
-        if ($content !== '') $messages[] = ['role' => $role, 'content' => mb_substr($content, 0, 3000)];
+    // Собираем пользовательское сообщение: контекст ветки + накопленные знания
+    // + сам вопрос. Группа многоучастниковая, поэтому контекст — текстом, а не
+    // ролями (нельзя пометить каждого участника как user/assistant).
+    $userMsg = '';
+    if (trim($threadText) !== '') {
+        $userMsg .= "НЕДАВНИЕ СООБЩЕНИЯ В ГРУППЕ (контекст):\n" . mb_substr($threadText, 0, 2500) . "\n\n";
     }
-    $messages[] = ['role' => 'user', 'content' => $question];
+    if (trim($learnedText) !== '') {
+        $userMsg .= "РАНЕЕ ОТДЕЛ ЗАКУПОК ОТВЕЧАЛ НА ПОХОЖЕЕ:\n" . mb_substr($learnedText, 0, 2000) . "\n\n";
+    }
+    $userMsg .= "Вопрос: {$question}";
+
+    $tools = faqToolDefinitions();
+    $messages = [
+        ['role' => 'system', 'content' => $sys],
+        ['role' => 'user', 'content' => $userMsg],
+    ];
 
     // Цикл вызова инструментов. На последней итерации инструменты не даём —
     // модель обязана дать текстовый ответ.
@@ -642,4 +688,112 @@ P;
         return $answer !== '' ? botMdToHtml($answer) : null;
     }
     return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Контекст группы (бот читает весь чат) и обучение на ответах закупки.
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Кто написал в группе: сотрудник отдела закупок (есть в users по
+ * telegram_chat_id) или гость (ресторан/посторонний).
+ */
+function faqIdentifyGroupSender(array $from): array
+{
+    global $pdo;
+    $fid  = (int)($from['id'] ?? 0);
+    $name = trim(($from['first_name'] ?? '') . ' ' . ($from['last_name'] ?? ''));
+    if ($name === '') $name = (string)($from['username'] ?? 'Гость');
+    if ($fid > 0) {
+        try {
+            $st = $pdo->prepare("SELECT name, role FROM users WHERE telegram_chat_id = ? LIMIT 1");
+            $st->execute([(string)$fid]);
+            $u = $st->fetch();
+            if ($u) return ['name' => $u['name'], 'role' => $u['role'], 'is_staff' => true];
+        } catch (Throwable $e) { /* нет таблицы/связи — считаем гостем */ }
+    }
+    return ['name' => mb_substr($name, 0, 64), 'role' => 'guest', 'is_staff' => false];
+}
+
+/** Добавляет сообщение в скользящий буфер обсуждения группы (последние 14). */
+function faqThreadAppend($chatId, string $label, string $text): void
+{
+    if (!function_exists('tgStateGet') || !function_exists('tgStateSet')) return;
+    $text = trim(mb_substr($text, 0, 400));
+    if ($text === '') return;
+    $st = tgStateGet($chatId, 'group_thread');
+    $msgs = (is_array($st) && !empty($st['msgs']) && is_array($st['msgs'])) ? $st['msgs'] : [];
+    $msgs[] = ['w' => mb_substr($label, 0, 40), 't' => $text];
+    if (count($msgs) > 14) $msgs = array_slice($msgs, -14);
+    tgStateSet($chatId, 'group_thread', ['msgs' => $msgs], 6 * 3600);
+}
+
+/** Текст последних сообщений обсуждения группы (для контекста). */
+function faqThreadText($chatId): string
+{
+    if (!function_exists('tgStateGet')) return '';
+    $st = tgStateGet($chatId, 'group_thread');
+    if (!is_array($st) || empty($st['msgs']) || !is_array($st['msgs'])) return '';
+    $lines = [];
+    foreach ($st['msgs'] as $m) {
+        $w = $m['w'] ?? '?';
+        $t = $m['t'] ?? '';
+        if ($t !== '') $lines[] = "[{$w}]: {$t}";
+    }
+    return implode("\n", $lines);
+}
+
+/** Запоминает пару «вопрос → ответ сотрудника» (с защитой от дублей). */
+function faqLearnCapture($groupId, string $question, string $answer, ?string $name, ?string $role): void
+{
+    global $pdo;
+    try {
+        $q = mb_substr($question, 0, 2000);
+        $a = mb_substr($answer, 0, 4000);
+        $chk = $pdo->prepare("SELECT id FROM bot_learned_qa WHERE group_id = ? AND question = ? AND answer = ? LIMIT 1");
+        $chk->execute([(int)$groupId, $q, $a]);
+        if ($chk->fetchColumn()) return;
+        $pdo->prepare("INSERT INTO bot_learned_qa (group_id, question, answer, author_name, author_role) VALUES (?, ?, ?, ?, ?)")
+            ->execute([(int)$groupId, $q, $a, $name, $role]);
+        error_log("FAQ learn: запомнен ответ от {$name} (группа {$groupId})");
+    } catch (Throwable $e) {
+        error_log("FAQ learn capture failed: " . $e->getMessage());
+    }
+}
+
+/** Ищет накопленные ответы закупки по ключевым словам вопроса (топ-3). */
+function faqLearnSearch($groupId, string $question): string
+{
+    global $pdo;
+    try {
+        $words = preg_split('/[\s,.;:!?()"]+/u', mb_strtolower($question, 'UTF-8'));
+        $stop = ['как','что','где','когда','почему','можно','нужно','надо','это','для','при','или',
+                 'есть','нет','мне','вам','наш','этот','такой','быть','чтобы','какой','какая','какие'];
+        $conds = []; $params = [(int)$groupId];
+        foreach ($words as $w) {
+            $w = trim($w);
+            if (mb_strlen($w) >= 4 && !in_array($w, $stop, true)) {
+                $conds[] = "question LIKE ?";
+                $params[] = "%{$w}%";
+                if (count($conds) >= 6) break;
+            }
+        }
+        if (!$conds) return '';
+        $sql = "SELECT question, answer FROM bot_learned_qa
+                WHERE group_id = ? AND (" . implode(' OR ', $conds) . ")
+                ORDER BY created_at DESC LIMIT 3";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $rows = $st->fetchAll();
+        if (!$rows) return '';
+        $out = '';
+        foreach ($rows as $r) {
+            $q = mb_substr(trim($r['question']), 0, 200);
+            $a = mb_substr(trim($r['answer']), 0, 600);
+            $out .= "Вопрос: {$q}\nОтвет: {$a}\n\n";
+        }
+        return trim($out);
+    } catch (Throwable $e) {
+        return '';
+    }
 }
