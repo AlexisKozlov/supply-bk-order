@@ -2091,11 +2091,16 @@ if (isset($input['callback_query'])) {
                 source = VALUES(source)
         ")->execute([$restaurantId, $reminderKind, $dbSupplierId, $targetDate, $orderDay, $by, $minskNow]);
 
-        // Убираем inline-кнопку (текст не трогаем, чтобы не сломать HTML)
-        editMessageReplyMarkup($chatId, $msgId, null);
-        // Шлём короткое подтверждение отдельным сообщением (время в Europe/Minsk)
+        // Дописываем отметку прямо в исходное сообщение и убираем кнопку — одним
+        // редактированием, без отдельного сообщения. Текст берём из callback (Telegram
+        // отдаёт его без HTML-тегов), экранируем и заново шлём с parse_mode=HTML.
         $minskTime = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H:i');
-        sendMessage($chatId, "✅ Отмечено как сделано в {$minskTime}");
+        $origText = $cb['message']['text'] ?? '';
+        $newText = htmlspecialchars($origText, ENT_QUOTES, 'UTF-8') . "\n\n✅ <b>Отмечено как сделано в {$minskTime}</b>";
+        $edited = editMessage($chatId, $msgId, $newText, null);
+        // Если отредактировать не вышло (например, сообщение слишком старое) — хотя бы
+        // убираем кнопку, факт отметки уже сохранён в БД выше.
+        if (!$edited) editMessageReplyMarkup($chatId, $msgId, null);
         answerCallback($cb['id'], '✓ Отмечено');
         exit;
     }
@@ -3001,8 +3006,8 @@ if ($importState !== null && isset($msg['document'])) {
         // отправить .pdf/.docx/что-угодно — и бот разошлёт мусор всем
         // ресторанам, они попытаются открыть и сломаются.
         $fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-        if ($fileId && !in_array($fileExt, ['xlsx', 'xls'], true)) {
-            sendMessage($chatId, "❌ Поддерживаются только файлы <b>.xlsx</b> или <b>.xls</b>. Получено: <code>" . htmlspecialchars($fileExt ?: 'без расширения', ENT_QUOTES, 'UTF-8') . "</code>.\nЗагрузите Excel-файл заказа.");
+        if ($fileId && !in_array($fileExt, ['xlsx', 'xlsm', 'xls'], true)) {
+            sendMessage($chatId, "❌ Поддерживаются только файлы <b>.xlsx</b>, <b>.xlsm</b> или <b>.xls</b>. Получено: <code>" . htmlspecialchars($fileExt ?: 'без расширения', ENT_QUOTES, 'UTF-8') . "</code>.\nЗагрузите Excel-файл заказа.");
             exit;
         }
         if ($fileId) {

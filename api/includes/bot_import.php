@@ -38,7 +38,8 @@ function botDownloadFile($fileId) {
 // Прочитать Excel в массив строк
 function botReadExcel($filePath) {
     $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-    if ($ext === 'xlsx') {
+    // xlsm — тот же OOXML-контейнер, что и xlsx (только с макросами), читается так же.
+    if ($ext === 'xlsx' || $ext === 'xlsm') {
         $xlsx = \Shuchkin\SimpleXLSX::parse($filePath);
         if (!$xlsx) return null;
         return $xlsx->rows(0);
@@ -268,7 +269,7 @@ function botHandleImport($chatId, $fileId, $importType, $user) {
     $rows = botReadExcel($filePath);
     @unlink($filePath);
     if (!$rows) {
-        sendMessage($chatId, "❌ Не удалось прочитать файл. Поддерживаются форматы .xlsx и .xls");
+        sendMessage($chatId, "❌ Не удалось прочитать файл. Поддерживаются форматы .xlsx, .xlsm и .xls");
         return;
     }
 
