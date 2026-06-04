@@ -470,6 +470,7 @@ const toolsGroups = [
     { module: 'dashboard', route: 'dashboard', icon: 'home', label: 'Дашборд' },
     { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
     { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
+    { module: 'analysis', route: 'reconciliation', icon: 'arrowLeftRight', label: 'Сверка 1С/УТ' },
     { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
     { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
   ]},
@@ -1177,7 +1178,7 @@ function confirmLogout() {
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.6px;
-  color: rgba(255,255,255,0.38);
+  color: rgba(255,255,255,0.88);
   flex-shrink: 0;
   text-transform: none;
 }
