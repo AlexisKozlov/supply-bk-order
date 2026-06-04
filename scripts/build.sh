@@ -72,7 +72,11 @@ cp -r api/*.php api/includes api/migrations "$STAGE/api/"
 # версии могли дотянуть с лениво подгружаемыми чанками.
 if [ -d dist/assets ]; then
     before=$(find "$STAGE/assets" -maxdepth 1 -type f | wc -l)
-    cp -nR dist/assets/. "$STAGE/assets/" 2>/dev/null || true
+    # -p сохраняет реальные mtime переносимых чанков, чтобы старые потом
+    # отсеялись по возрасту (см. чистку после подмены). Без -p все чанки
+    # получали бы свежую дату и копились бы бесконечно (была причина
+    # переполнения диска и падения MariaDB).
+    cp -pnR dist/assets/. "$STAGE/assets/" 2>/dev/null || true
     after=$(find "$STAGE/assets" -maxdepth 1 -type f | wc -l)
     echo "[build.sh] preserved $((after - before)) old chunks from current dist"
 else
@@ -86,6 +90,12 @@ fi
 rm -rf dist.prev
 [ -d dist ] && mv dist dist.prev
 mv "$STAGE" dist
+
+# Ограничиваем накопление старых чанков: удаляем ассеты старше 14 дней.
+# Свежая сборка их не использует; пользователи на старых версиях за 2 недели
+# уже обновляются. Не даёт dist/assets расти бесконечно (иначе переполняется
+# диск — это уже роняло MariaDB). Текущие чанки имеют свежую дату и остаются.
+find dist/assets -maxdepth 1 -type f -mtime +14 -delete 2>/dev/null || true
 
 # Сборка успешно подменена — staging больше нет, чистить нечего.
 trap - EXIT
