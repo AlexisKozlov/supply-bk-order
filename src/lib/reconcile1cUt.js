@@ -454,15 +454,16 @@ export async function exportReconcileExcel(productName, compareResult) {
 
   // ── Лист 2: Перемещения ──
   const comm = r => (r.dateDiff ? 'дата 1С/УТ отличается' : '');
+  const dCell = (v, dd) => cell(v, dd ? ST.warn : null);
   const perem = [
-    [cell('Номер перемещения', ST.head), cell('Статус', ST.head), cell('Приход 1С', ST.head), cell('Расход 1С', ST.head), cell('Приход УТ', ST.head), cell('Расход УТ', ST.head), cell('Разница расхода', ST.head), cell('Дата 1С', ST.head), cell('Дата УТ', ST.head), cell('Комментарий', ST.head)],
+    [cell('Номер перемещения', ST.head), cell('Дата 1С', ST.head), cell('Дата УТ', ST.head), cell('Статус', ST.head), cell('Приход 1С', ST.head), cell('Расход 1С', ST.head), cell('Приход УТ', ST.head), cell('Расход УТ', ST.head), cell('Разница расхода', ST.head), cell('Комментарий', ST.head)],
   ];
-  for (const r of moves.matched)  perem.push([r.number, 'совпало', r.prihod, r.rashod, r.prihod, r.rashod, 0, cell(r.date1c, r.dateDiff ? ST.warn : null), cell(r.dateUt, r.dateDiff ? ST.warn : null), cell(comm(r), r.dateDiff ? ST.warn : null)]);
-  for (const r of moves.qtyDiff)  perem.push([cell(r.number, ST.warn), cell('разное количество', ST.warn), r.prihod1c, r.rashod1c, r.prihodUt, r.rashodUt, cell(r.diffRashod, ST.warn), r.date1c, r.dateUt, comm(r)]);
-  for (const r of moves.onlyIn1c) perem.push([cell(r.number, ST.bad), cell(r.likelySame ? 'только в 1С (вероятно тот же, другой №)' : 'только в 1С', ST.bad), r.prihod, r.rashod, '', '', cell(r.rashod, ST.bad), r.date, '', '']);
-  for (const r of moves.onlyInUt) perem.push([cell(r.number, ST.bad), cell(r.likelySame ? 'только в УТ (вероятно тот же, другой №)' : 'только в УТ', ST.bad), '', '', r.prihod, r.rashod, cell(-r.rashod, ST.bad), '', r.date, '']);
+  for (const r of moves.matched)  perem.push([r.number, dCell(r.date1c, r.dateDiff), dCell(r.dateUt, r.dateDiff), 'совпало', r.prihod, r.rashod, r.prihod, r.rashod, 0, dCell(comm(r), r.dateDiff)]);
+  for (const r of moves.qtyDiff)  perem.push([cell(r.number, ST.warn), r.date1c, r.dateUt, cell('разное количество', ST.warn), r.prihod1c, r.rashod1c, r.prihodUt, r.rashodUt, cell(r.diffRashod, ST.warn), comm(r)]);
+  for (const r of moves.onlyIn1c) perem.push([cell(r.number, ST.bad), r.date, '', cell(r.likelySame ? 'только в 1С (вероятно тот же, другой №)' : 'только в 1С', ST.bad), r.prihod, r.rashod, '', '', cell(r.rashod, ST.bad), '']);
+  for (const r of moves.onlyInUt) perem.push([cell(r.number, ST.bad), '', r.date, cell(r.likelySame ? 'только в УТ (вероятно тот же, другой №)' : 'только в УТ', ST.bad), '', '', r.prihod, r.rashod, cell(-r.rashod, ST.bad), '']);
   const wsPerem = XLSX.utils.aoa_to_sheet(perem);
-  wsPerem['!cols'] = [{ wch: 30 }, { wch: 34 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 22 }];
+  wsPerem['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 34 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 22 }];
   XLSX.utils.book_append_sheet(wb, wsPerem, 'Перемещения');
 
   // ── Лист 3: Прочие документы (детально) ──

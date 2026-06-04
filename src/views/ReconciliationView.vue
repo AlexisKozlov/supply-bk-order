@@ -1,5 +1,12 @@
 <template>
   <div class="rc">
+    <!-- Восстановлено из кэша браузера -->
+    <div v-if="restoredFromCache" class="rc-restored">
+      <BkIcon name="success" size="sm" />
+      <span>Показана прошлая сверка (сохранена в браузере). Загружать файлы заново не нужно.</span>
+      <button class="rc-restored-btn" @click="startOver">Начать заново</button>
+    </div>
+
     <!-- ═══════════════════════════════════════════════════════════
          ЭКРАН 1: список расхождений
          ═══════════════════════════════════════════════════════════ -->
@@ -17,10 +24,10 @@
         <label class="rc-upload-label">
           <input type="file" accept=".xlsx,.xls,.xlsm" class="rc-file-input" @change="onPickRashozh" ref="inputRashozh" />
           <BkIcon name="import" size="md" />
-          <span v-if="!rashozhFile">Загрузить файл расхождений (.xlsx / .xls)</span>
-          <span v-else class="rc-upload-label--loaded">{{ rashozhFile.name }}</span>
+          <span v-if="!rashozhFileName">Загрузить файл расхождений (.xlsx / .xls)</span>
+          <span v-else class="rc-upload-label--loaded">{{ rashozhFileName }}</span>
         </label>
-        <button v-if="rashozhFile" class="rc-upload-clear" @click.stop="clearRashozh" title="Очистить">
+        <button v-if="rashozhFileName" class="rc-upload-clear" @click.stop="clearRashozh" title="Очистить">
           <BkIcon name="close" size="sm" />
         </button>
       </div>
@@ -117,7 +124,7 @@
       <!-- Два слота загрузки -->
       <div class="rc-files-row">
         <!-- Файл 1С -->
-        <div class="rc-file-slot" :class="{ 'rc-file-slot--loaded': file1c, 'rc-file-slot--error': error1c }">
+        <div class="rc-file-slot" :class="{ 'rc-file-slot--loaded': file1cName, 'rc-file-slot--error': error1c }">
           <div class="rc-file-slot-header">
             <BkIcon name="oneC" size="sm" />
             <span class="rc-file-slot-label">Перемещения из 1С</span>
@@ -125,10 +132,10 @@
           <label class="rc-upload-label rc-upload-label--compact">
             <input type="file" accept=".xlsx,.xls,.xlsm" class="rc-file-input" @change="onPick1c" ref="input1c" />
             <BkIcon name="import" size="sm" />
-            <span v-if="!file1c">Выбрать файл</span>
-            <span v-else class="rc-upload-label--loaded">{{ file1c.name }}</span>
+            <span v-if="!file1cName">Выбрать файл</span>
+            <span v-else class="rc-upload-label--loaded">{{ file1cName }}</span>
           </label>
-          <button v-if="file1c" class="rc-upload-clear rc-upload-clear--sm" @click.stop="clear1c" title="Удалить">
+          <button v-if="file1cName" class="rc-upload-clear rc-upload-clear--sm" @click.stop="clear1c" title="Удалить">
             <BkIcon name="close" size="sm" />
           </button>
           <div v-if="loading1c" class="rc-file-slot-status">
@@ -143,7 +150,7 @@
         </div>
 
         <!-- Файл УТ -->
-        <div class="rc-file-slot" :class="{ 'rc-file-slot--loaded': fileUt, 'rc-file-slot--error': errorUt }">
+        <div class="rc-file-slot" :class="{ 'rc-file-slot--loaded': fileUtName, 'rc-file-slot--error': errorUt }">
           <div class="rc-file-slot-header">
             <BkIcon name="database" size="sm" />
             <span class="rc-file-slot-label">Перемещения из УТ</span>
@@ -151,10 +158,10 @@
           <label class="rc-upload-label rc-upload-label--compact">
             <input type="file" accept=".xlsx,.xls,.xlsm" class="rc-file-input" @change="onPickUt" ref="inputUt" />
             <BkIcon name="import" size="sm" />
-            <span v-if="!fileUt">Выбрать файл</span>
-            <span v-else class="rc-upload-label--loaded">{{ fileUt.name }}</span>
+            <span v-if="!fileUtName">Выбрать файл</span>
+            <span v-else class="rc-upload-label--loaded">{{ fileUtName }}</span>
           </label>
-          <button v-if="fileUt" class="rc-upload-clear rc-upload-clear--sm" @click.stop="clearUt" title="Удалить">
+          <button v-if="fileUtName" class="rc-upload-clear rc-upload-clear--sm" @click.stop="clearUt" title="Удалить">
             <BkIcon name="close" size="sm" />
           </button>
           <div v-if="loadingUt" class="rc-file-slot-status">
@@ -165,7 +172,7 @@
       </div>
 
       <!-- Пустое состояние — ещё нет обоих файлов -->
-      <UiEmptyState v-if="!compareResult && !loading1c && !loadingUt && !(file1c && fileUt)"
+      <UiEmptyState v-if="!compareResult && !loading1c && !loadingUt && !(file1cName && fileUtName)"
                     title="Загрузите оба файла для сверки"
                     description="Нужны два файла: перемещения из 1С и перемещения из УТ по этому товару. Как только оба загружены — сверка появится автоматически.">
         <template #icon>
@@ -490,7 +497,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, computed, watch, onMounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import {
@@ -517,6 +524,7 @@ function goBack() {
 // ─── Экран 1: файл расхождений ────────────────────────────────────────────────
 const inputRashozh = ref(null);
 const rashozhFile  = ref(null);
+const rashozhFileName = ref('');
 const rashozhItems = ref([]);
 const rashozhLoading = ref(false);
 const rashozhError   = ref('');
@@ -524,6 +532,7 @@ const dragOver1      = ref(false);
 
 async function loadRashozh(file) {
   rashozhFile.value  = file;
+  rashozhFileName.value = file?.name || '';
   rashozhError.value = '';
   rashozhItems.value = [];
   rashozhLoading.value = true;
@@ -554,9 +563,11 @@ function onDropRashozh(e) {
 
 function clearRashozh() {
   rashozhFile.value = null;
+  rashozhFileName.value = '';
   rashozhItems.value = [];
   rashozhError.value = '';
   if (inputRashozh.value) inputRashozh.value.value = '';
+  saveCache();
 }
 
 // ─── Экран 2: файлы перемещений ───────────────────────────────────────────────
@@ -564,6 +575,8 @@ const input1c   = ref(null);
 const inputUt   = ref(null);
 const file1c    = ref(null);
 const fileUt    = ref(null);
+const file1cName = ref('');
+const fileUtName = ref('');
 const loading1c = ref(false);
 const loadingUt = ref(false);
 const error1c   = ref('');
@@ -590,10 +603,71 @@ watch([map1c, mapUt], ([m1, mU]) => {
   }
 });
 
+// ─── Кэш: разбор сохраняется в localStorage и восстанавливается после обновления ─
+const CACHE_KEY = 'reconcile1cut_v1';
+const CACHE_TTL = 7 * 24 * 3600 * 1000; // 7 дней
+const restoredFromCache = ref(false);
+
+const serializeParse   = p => (p ? { ...p, peremescheniya: [...p.peremescheniya.entries()] } : null);
+const deserializeParse = p => (p ? { ...p, peremescheniya: new Map(p.peremescheniya) } : null);
+
+function saveCache() {
+  try {
+    const snap = {
+      v: 1, savedAt: Date.now(),
+      screen: screen.value,
+      rashozhItems: rashozhItems.value,
+      rashozhFileName: rashozhFileName.value,
+      currentItem: currentItem.value,
+      file1cName: file1cName.value,
+      fileUtName: fileUtName.value,
+      parse1c: serializeParse(map1c.value),
+      parseUt: serializeParse(mapUt.value),
+    };
+    if (!snap.rashozhItems.length && !snap.parse1c && !snap.parseUt) {
+      localStorage.removeItem(CACHE_KEY);
+      return;
+    }
+    localStorage.setItem(CACHE_KEY, JSON.stringify(snap));
+  } catch (e) { /* приватный режим / квота — молча */ }
+}
+
+function startOver() {
+  try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
+  rashozhFile.value = null; rashozhFileName.value = ''; rashozhItems.value = []; rashozhError.value = '';
+  file1c.value = null; file1cName.value = ''; map1c.value = null; error1c.value = '';
+  fileUt.value = null; fileUtName.value = ''; mapUt.value = null; errorUt.value = '';
+  currentItem.value = null; compareResult.value = null; searchQuery.value = '';
+  restoredFromCache.value = false;
+  screen.value = 'list';
+}
+
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (!s || (s.savedAt && Date.now() - s.savedAt > CACHE_TTL)) { localStorage.removeItem(CACHE_KEY); return; }
+    rashozhItems.value    = s.rashozhItems || [];
+    rashozhFileName.value = s.rashozhFileName || '';
+    currentItem.value     = s.currentItem || null;
+    file1cName.value      = s.file1cName || '';
+    fileUtName.value      = s.fileUtName || '';
+    if (s.parse1c) map1c.value = deserializeParse(s.parse1c); // watch пересчитает сверку
+    if (s.parseUt) mapUt.value = deserializeParse(s.parseUt);
+    screen.value = s.screen === 'detail' ? 'detail' : 'list';
+    restoredFromCache.value = !!(rashozhItems.value.length || s.parse1c || s.parseUt);
+  } catch (e) { /* битый кэш — игнорируем */ }
+});
+
+// Автосохранение при изменении ключевого состояния
+watch([screen, rashozhItems, currentItem, map1c, mapUt], saveCache);
+
 async function onPick1c(e) {
   const f = e.target.files[0];
   if (!f) return;
   file1c.value  = f;
+  file1cName.value = f.name;
   error1c.value = '';
   map1c.value   = null;
   loading1c.value = true;
@@ -615,6 +689,7 @@ async function onPickUt(e) {
   const f = e.target.files[0];
   if (!f) return;
   fileUt.value  = f;
+  fileUtName.value = f.name;
   errorUt.value = '';
   mapUt.value   = null;
   loadingUt.value = true;
@@ -634,16 +709,20 @@ async function onPickUt(e) {
 
 function clear1c() {
   file1c.value = null;
+  file1cName.value = '';
   map1c.value  = null;
   error1c.value = '';
   if (input1c.value) input1c.value.value = '';
+  saveCache();
 }
 
 function clearUt() {
   fileUt.value = null;
+  fileUtName.value = '';
   mapUt.value  = null;
   errorUt.value = '';
   if (inputUt.value) inputUt.value.value = '';
+  saveCache();
 }
 
 // ─── Поиск ────────────────────────────────────────────────────────────────────
@@ -1268,6 +1347,30 @@ function diffClass(v) {
 .rc-others-empty { color: var(--tk-text-muted); text-align: center; }
 
 .rc-direct-btn { margin: var(--tk-s-3) 0 var(--tk-s-2); }
+
+.rc-restored {
+  display: flex;
+  align-items: center;
+  gap: var(--tk-s-2);
+  margin-bottom: var(--tk-s-4);
+  padding: var(--tk-s-3) var(--tk-s-4);
+  background: var(--tk-success-soft);
+  color: var(--tk-text);
+  border-radius: var(--tk-r-md);
+  font-size: var(--tk-fz-sm);
+}
+.rc-restored-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: var(--tk-s-1) var(--tk-s-3);
+  background: var(--tk-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--tk-r-sm);
+  font-size: var(--tk-fz-sm);
+  cursor: pointer;
+}
+.rc-restored-btn:hover { background: var(--tk-accent-hover); }
 
 .rc-hint {
   display: block;
