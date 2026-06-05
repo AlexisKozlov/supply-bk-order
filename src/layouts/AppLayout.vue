@@ -390,9 +390,6 @@
          с доступом к модулю tasks. -->
     <TaskQuickDropWidget v-if="userStore.hasAccess('tasks', 'view')"/>
 
-    <!-- Плавающий ИИ-помощник закупок (доступен всем сотрудникам) -->
-    <AiAssistantWidget />
-
   </div>
 </template>
 
@@ -414,7 +411,6 @@ import AppDialogHost from '@/components/modals/AppDialogHost.vue';
 // Виджет лениво грузится отдельным чанком, чтобы пользователи без доступа
 // к модулю tasks не тащили его в основной bundle.
 const TaskQuickDropWidget = defineAsyncComponent(() => import('@/components/tasks/TaskQuickDropWidget.vue'));
-const AiAssistantWidget = defineAsyncComponent(() => import('@/components/ai/AiAssistantWidget.vue'));
 
 
 const router = useRouter();
