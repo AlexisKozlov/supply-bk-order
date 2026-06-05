@@ -343,11 +343,6 @@
 
     <!-- Футер -->
     <footer class="page-footer">
-      <div v-if="guestCount > 0" class="footer-item footer-guests">
-        <span class="guest-dot"></span>
-        {{ guestCount }} {{ guestCount === 1 ? 'гость' : guestCount < 5 ? 'гостя' : 'гостей' }}
-      </div>
-      <span v-if="guestCount > 0 && lastUpdate" class="footer-dot">·</span>
       <div v-if="lastUpdate" class="footer-item">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
         Обновлено: {{ lastUpdate }}
@@ -401,8 +396,6 @@ const loading = ref(true)
 const loadError = ref('')
 const lastUpdate = ref('')
 const copiedId = ref(null)
-const guestCount = ref(0)
-
 // Тех. работы
 const maintenanceMode = ref(false)
 const maintenanceMessage = ref('')
@@ -413,17 +406,6 @@ const toastVisible = ref(false)
 const toastMessage = ref('')
 const toastType = ref('info')
 let toastTimer = null
-let heartbeatInterval = null
-
-// Гостевая сессия
-const guestSessionId = (() => {
-  let id = sessionStorage.getItem('bk_guest_sid')
-  if (!id) {
-    id = Math.random().toString(36).slice(2) + Date.now().toString(36)
-    sessionStorage.setItem('bk_guest_sid', id)
-  }
-  return id
-})()
 
 // Автокомплит
 const showAC = ref(false)
@@ -608,29 +590,6 @@ async function logSearch(queryStr, found, matchType, matchedCardId) {
   }
 }
 
-// --- Гостевой heartbeat ---
-async function sendGuestHeartbeat() {
-  // Не считаем гостя онлайн, если показана страница техработ
-  // Поиск карточек доступен всегда, даже при тех. работах
-  try {
-    await fetchWithTimeout(`${API_BASE}/rpc/guest_heartbeat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: guestSessionId, page: 'search-cards' })
-    })
-    const res = await fetchWithTimeout(`${API_BASE}/rpc/get_guest_count`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}'
-    })
-    if (res.ok) {
-      const data = await res.json()
-      guestCount.value = data.cnt || 0
-    }
-  } catch {
-    // Не критично
-  }
-}
 
 // --- Автокомплит ---
 const acItems = ref([])
@@ -1324,8 +1283,6 @@ onMounted(() => {
   loadLastUpdate()
   loadStockSkus()
   tryAutoLogin()
-  sendGuestHeartbeat()
-  heartbeatInterval = setInterval(sendGuestHeartbeat, 30000)
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleKeydown)
 })
@@ -1334,7 +1291,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleKeydown)
   if (toastTimer) clearTimeout(toastTimer)
-  if (heartbeatInterval) clearInterval(heartbeatInterval)
   if (maintenanceTimer) clearInterval(maintenanceTimer)
 })
 </script>
@@ -2438,23 +2394,6 @@ select.field-input {
 .footer-link:hover {
   color: #E76F51;
 }
-.footer-guests {
-  color: #6B8E6B;
-}
-.guest-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  background: #4CAF50;
-  border-radius: 50%;
-  box-shadow: 0 0 6px rgba(76,175,80,0.5);
-  animation: guest-pulse 2s ease-in-out infinite;
-}
-@keyframes guest-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 /* ═══ TOAST ═══ */
 .toast {
   position: fixed;

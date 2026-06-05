@@ -129,23 +129,6 @@ $requireCardSearchAuth = function() use ($resolveCardSearchAuth) {
     return $ctx;
 };
 
-if ($fn === 'guest_heartbeat') {
-    $requireCardSearchAuth();
-    $sid = $body['session_id'] ?? '';
-    $page = $body['page'] ?? 'search-cards';
-    if ($sid && preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $sid)) {
-        $s = $pdo->prepare("INSERT INTO guest_presence (session_id, page, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW()");
-        $s->execute([$sid, substr($page, 0, 100)]);
-    }
-    respond(['success' => true]);
-}
-if ($fn === 'get_guest_count') {
-    $requireCardSearchAuth();
-    // Чистим старые записи (старше 5 минут)
-    $pdo->exec("DELETE FROM guest_presence WHERE last_seen < NOW() - INTERVAL 5 MINUTE");
-    $s = $pdo->query("SELECT COUNT(*) as cnt FROM guest_presence WHERE last_seen > NOW() - INTERVAL 1 MINUTE");
-    respond($s->fetch());
-}
 if ($fn === 'log_card_search') {
     $ctx = $requireCardSearchAuth();
     if (!checkRateLimit($pdo, $clientIp, 30, 1)) respond(['success' => true]); // Тихий rate-limit: макс 30 поисков/мин
