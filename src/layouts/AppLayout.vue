@@ -835,7 +835,9 @@ function sendHeartbeat() {
   if (isOffline.value || serverDown.value) return;
   const name = userStore.currentUser?.name;
   if (!name) return;
-  const page = pageNames[route.name] || route.name || '';
+  // Русское название страницы: сначала из карты, иначе из meta.title маршрута
+  // (он на русском у всех страниц), и только в крайнем случае — имя маршрута.
+  const page = pageNames[route.name] || route.meta?.title || route.name || '';
   const editingOrderId = (route.name === 'order' && route.query.orderId && route.query.mode === 'edit') ? route.query.orderId : null;
   db.rpc('heartbeat', { page, editing_order_id: editingOrderId }).catch(() => {});
 }
