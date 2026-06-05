@@ -1387,6 +1387,7 @@ async function sendSupplierEmailWithCc(cc) {
   const p = emailPreview.value.payload;
   if (!p || emailSending.value) return;
   emailSending.value = true;
+  let sent = false;
   try {
     // Excel-вложение с табличной заявкой
     let attachment = null;
@@ -1418,10 +1419,17 @@ async function sendSupplierEmailWithCc(cc) {
     const ccCount = Array.isArray(data?.cc) ? data.cc.length : 0;
     toast.success('Письмо отправлено', `На ${recipients}${ccCount ? ` (+${ccCount} в копии)` : ''}`);
     emailPreview.value.show = false;
+    sent = true;
   } catch (e) {
     toast.error('Не удалось отправить', e?.message || 'Ошибка соединения');
   } finally {
     emailSending.value = false;
+  }
+
+  // После успешной отправки заявки по email с портала — предлагаем сохранить заказ.
+  if (sent) {
+    const saveNow = await confirmAction('Сохранить заказ?', 'Заявка отправлена поставщику по email. Сохранить этот заказ?');
+    if (saveNow) openSaveModal();
   }
 }
 
