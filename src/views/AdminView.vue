@@ -605,7 +605,7 @@
                 {{ u.user_name }}
                 <span v-if="u.user_name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
               </div>
-              <div class="adm-user-meta">{{ u.page || '—' }}</div>
+              <div class="adm-user-meta">{{ pageLabel(u.page) }}</div>
             </div>
             <div class="adm-online-time">{{ formatOnlineTime(u.last_seen) }}</div>
           </div>
@@ -633,7 +633,7 @@
                 {{ r.city || '—' }}<span v-if="r.address"> · {{ r.address }}</span>
               </div>
               <div class="adm-user-meta">
-                {{ r.last_page || '—' }}
+                {{ pageLabel(r.last_page) }}
                 <span style="opacity:.6;"> · {{ shortLegalEntityAdm(r.legal_entity) }}</span>
               </div>
             </div>
@@ -995,6 +995,18 @@ import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, formatRestaurantNumber } from '@/li
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const router = useRouter();
+
+// Перевод названия страницы в онлайне на русский. Старые бандлы клиентов шлют
+// английское имя маршрута (reconciliation, assistant…), пока не обновятся —
+// переводим на стороне отображения по meta.title маршрута. Русские значения
+// (из новых бандлов) остаются как есть.
+const _routeTitles = {};
+router.getRoutes().forEach(r => { if (r.name && r.meta?.title) _routeTitles[r.name] = r.meta.title; });
+function pageLabel(page) {
+  if (!page) return '—';
+  return _routeTitles[page] || page;
+}
+
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import AdminRestaurantAccountsTab from '@/components/admin/AdminRestaurantAccountsTab.vue';
 import AdminEmailImportsTab from '@/components/admin/AdminEmailImportsTab.vue';
