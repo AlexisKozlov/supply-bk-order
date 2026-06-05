@@ -24,14 +24,26 @@
 
       <div class="krt-help-schedule">
         <span class="krt-help-sched-item">
-          <b>День приёма:</b>
-          <template v-if="myReturnDays.length">{{ myReturnDays.join(', ') }}</template>
+          <span class="krt-sched-ico">📅</span>
+          <span class="krt-sched-label">День приёма</span>
+          <span v-if="myReturnDays.length" class="krt-day-chips">
+            <span v-for="d in myReturnDays" :key="d" class="krt-day-chip">{{ d }}</span>
+          </span>
           <span v-else class="krt-help-muted">не задан — уточните в отделе закупок</span>
         </span>
-        <span v-if="pickupAddress" class="krt-help-sched-item"><b>Погрузка:</b> {{ pickupAddress }}</span>
+        <span v-if="pickupAddress" class="krt-help-sched-item">
+          <span class="krt-sched-ico">📍</span>
+          <span class="krt-sched-label">Погрузка</span>
+          <span class="krt-sched-val">{{ pickupAddress }}</span>
+        </span>
       </div>
 
       <div v-if="helpOpen" class="krt-help-body">
+        <div style="border:2px solid #C0392B; background:#FDEDEC; border-radius:8px; padding:10px 14px; margin-bottom:12px; line-height:1.5;">
+          <div style="font-weight:800; color:#C0392B; font-size:15px; margin-bottom:2px;">⚠️ Экземпляры ТТН</div>
+          Экземпляры <b>№ 1, 3 и 4 — отдаются водителю</b>, экземпляр <b>№ 2 — остаётся ресторану</b>.
+          Не забудьте взять <b>подписи водителя</b>.
+        </div>
         <ol class="krt-help-steps">
           <li>Нажмите <b>«Новая заявка»</b>.</li>
           <li>Укажите <b>серию и номер ТТН</b> (2 буквы + 7 цифр) и ФИО управляющего.</li>

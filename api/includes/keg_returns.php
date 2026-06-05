@@ -611,6 +611,10 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     $filterRestaurantId = isset($_GET['restaurant_id']) && $_GET['restaurant_id'] !== '' ? (int)$_GET['restaurant_id'] : 0;
     $filterFrom = isset($_GET['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['from']) ? $_GET['from'] : '';
     $filterTo   = isset($_GET['to'])   && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['to'])   ? $_GET['to']   : '';
+    // Юрлицо внутри группы BK_VM: BK = все рестораны кроме №3, VM = ресторан №3
+    // (см. krLegalCodeForRestaurant). Для группы PS не применяется.
+    $filterEntity = isset($_GET['legal_entity']) ? trim($_GET['legal_entity']) : '';
+    if ($filterGroup !== 'BK_VM' || !in_array($filterEntity, ['BK', 'VM'], true)) $filterEntity = '';
 
     $where = ["kr.legal_entity_group = ?", "kr.status != 'DRAFT'"];
     $params = [$filterGroup];
@@ -618,6 +622,8 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     if ($filterRestaurantId > 0)     { $where[] = "kr.restaurant_id = ?"; $params[] = $filterRestaurantId; }
     if ($filterFrom !== '')          { $where[] = "kr.return_date >= ?"; $params[] = $filterFrom; }
     if ($filterTo !== '')            { $where[] = "kr.return_date <= ?"; $params[] = $filterTo; }
+    if ($filterEntity === 'VM')      { $where[] = "r.number = 3"; }
+    elseif ($filterEntity === 'BK')  { $where[] = "r.number <> 3"; }
 
     // Одна строка = одна позиция кеги в заявке. Заявка с N разными кегами
     // даст N строк. Так видны количества каждой кеги, а не только сумма.
@@ -656,8 +662,6 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     $statusLabels = ['DRAFT'=>'Черновик','SUBMITTED'=>'Отправлена','ROUTED'=>'Маршрутизирована','CANCELLED'=>'Отменена'];
 
     $ss = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
-    $sh = $ss->getActiveSheet();
-    $sh->setTitle('Возврат кег');
 
     $headers = [
         'Дата возврата (ТТН)', 'Ресторан', 'Адрес погрузки',
@@ -666,58 +670,71 @@ if ($method === 'GET' && $krSubSlug === 'export') {
         'Водитель', 'Машина', 'Сдал грузоотправитель',
         'Создана', 'Маршрутизирована',
     ];
-    foreach ($headers as $i => $h) {
-        $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1);
-        $sh->setCellValue($col . '1', $h);
-    }
-    $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
-    $headerRange = 'A1:' . $lastCol . '1';
-    $sh->getStyle($headerRange)->getFont()->setBold(true)->setSize(11);
-    $sh->getStyle($headerRange)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB('F4A261');
-    $sh->getStyle($headerRange)->getFont()->getColor()->setRGB('FFFFFF');
-    $sh->getStyle($headerRange)->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER)->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER)->setWrapText(true);
-    $sh->getRowDimension(1)->setRowHeight(34);
 
-    $r = 2;
-    foreach ($list as $row) {
-        $restName = '№' . (int)$row['restaurant_number'] . ' ' . trim(($row['restaurant_city'] ?? '') . ($row['restaurant_address'] ? ', ' . $row['restaurant_address'] : ''));
-        $sh->setCellValue('A' . $r, $row['return_date'] ? date('d.m.Y', strtotime($row['return_date'])) : '');
-        $sh->setCellValue('B' . $r, $restName);
-        $sh->setCellValue('C' . $r, $row['pickup_address'] ?? '');
-        $sh->setCellValue('D' . $r, $row['bso_series'] ?? '');
-        $sh->setCellValue('E' . $r, $row['bso_number'] ?? '');
-        $sh->setCellValue('F' . $r, $statusLabels[$row['status']] ?? $row['status']);
-        // Артикул + Наименование одной строкой (если кеги нет — оставляем пустым)
-        $sku = trim((string)($row['sku'] ?? ''));
-        $kegName = trim((string)($row['keg_name'] ?? ''));
-        $skuName = $sku !== '' && $kegName !== '' ? ($sku . ' ' . $kegName) : ($sku !== '' ? $sku : $kegName);
-        $sh->setCellValue('G' . $r, $skuName);
-        $sh->setCellValue('H' . $r, $row['external_code'] ?? '');
-        $sh->setCellValue('I' . $r, $row['quantity'] !== null ? (int)$row['quantity'] : '');
-        $sh->setCellValue('J' . $r, $row['driver'] ?? '');
-        $sh->setCellValue('K' . $r, $row['vehicle'] ?? '');
-        $sh->setCellValue('L' . $r, $row['sender_position_name'] ?? '');
-        $sh->setCellValue('M' . $r, $row['created_at'] ? date('d.m.Y H:i', strtotime($row['created_at'])) : '');
-        $sh->setCellValue('N' . $r, $row['routed_at'] ? date('d.m.Y H:i', strtotime($row['routed_at'])) : '');
-        // Заливка по статусу
-        $color = ['SUBMITTED' => 'FFF3E0', 'ROUTED' => 'E8F5E9', 'CANCELLED' => 'FCE4EC'][$row['status']] ?? 'FFFFFF';
-        $sh->getStyle('A' . $r . ':' . $lastCol . $r)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB($color);
-        // Внешний код кеги — текстовый формат, чтобы Excel не превращал «900000123» в число с потерей ведущих нулей.
-        $sh->getStyle('H' . $r)->getNumberFormat()->setFormatCode('@');
-        $r++;
-    }
-    // Автоширина колонок
-    $colsRange = range('A', $lastCol);
-    foreach ($colsRange as $col) {
-        $sh->getColumnDimension($col)->setAutoSize(true);
-    }
-    // Границы по всему диапазону
-    if ($r > 2) {
-        $sh->getStyle('A1:' . $lastCol . ($r - 1))->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN)->getColor()->setRGB('CCCCCC');
-    }
-    $sh->freezePane('A2');
+    // Заполняет один лист заголовками, строками и оформлением.
+    $fillSheet = function ($sh, array $list) use ($headers, $statusLabels) {
+        foreach ($headers as $i => $h) {
+            $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1);
+            $sh->setCellValue($col . '1', $h);
+        }
+        $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
+        $headerRange = 'A1:' . $lastCol . '1';
+        $sh->getStyle($headerRange)->getFont()->setBold(true)->setSize(11);
+        $sh->getStyle($headerRange)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB('F4A261');
+        $sh->getStyle($headerRange)->getFont()->getColor()->setRGB('FFFFFF');
+        $sh->getStyle($headerRange)->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER)->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER)->setWrapText(true);
+        $sh->getRowDimension(1)->setRowHeight(34);
 
-    $fname = 'keg-returns_' . date('Ymd_Hi') . '.xlsx';
+        $r = 2;
+        foreach ($list as $row) {
+            $restName = '№' . (int)$row['restaurant_number'] . ' ' . trim(($row['restaurant_city'] ?? '') . ($row['restaurant_address'] ? ', ' . $row['restaurant_address'] : ''));
+            $sh->setCellValue('A' . $r, $row['return_date'] ? date('d.m.Y', strtotime($row['return_date'])) : '');
+            $sh->setCellValue('B' . $r, $restName);
+            $sh->setCellValue('C' . $r, $row['pickup_address'] ?? '');
+            $sh->setCellValue('D' . $r, $row['bso_series'] ?? '');
+            $sh->setCellValue('E' . $r, $row['bso_number'] ?? '');
+            $sh->setCellValue('F' . $r, $statusLabels[$row['status']] ?? $row['status']);
+            // Артикул + Наименование одной строкой (если кеги нет — оставляем пустым)
+            $sku = trim((string)($row['sku'] ?? ''));
+            $kegName = trim((string)($row['keg_name'] ?? ''));
+            $skuName = $sku !== '' && $kegName !== '' ? ($sku . ' ' . $kegName) : ($sku !== '' ? $sku : $kegName);
+            $sh->setCellValue('G' . $r, $skuName);
+            $sh->setCellValue('H' . $r, $row['external_code'] ?? '');
+            $sh->setCellValue('I' . $r, $row['quantity'] !== null ? (int)$row['quantity'] : '');
+            $sh->setCellValue('J' . $r, $row['driver'] ?? '');
+            $sh->setCellValue('K' . $r, $row['vehicle'] ?? '');
+            $sh->setCellValue('L' . $r, $row['sender_position_name'] ?? '');
+            $sh->setCellValue('M' . $r, $row['created_at'] ? date('d.m.Y H:i', strtotime($row['created_at'])) : '');
+            $sh->setCellValue('N' . $r, $row['routed_at'] ? date('d.m.Y H:i', strtotime($row['routed_at'])) : '');
+            // Заливка по статусу
+            $color = ['SUBMITTED' => 'FFF3E0', 'ROUTED' => 'E8F5E9', 'CANCELLED' => 'FCE4EC'][$row['status']] ?? 'FFFFFF';
+            $sh->getStyle('A' . $r . ':' . $lastCol . $r)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB($color);
+            // Внешний код кеги — текстовый формат, чтобы Excel не превращал «900000123» в число с потерей ведущих нулей.
+            $sh->getStyle('H' . $r)->getNumberFormat()->setFormatCode('@');
+            $r++;
+        }
+        // Автоширина колонок
+        foreach (range('A', $lastCol) as $col) {
+            $sh->getColumnDimension($col)->setAutoSize(true);
+        }
+        // Границы по всему диапазону
+        if ($r > 2) {
+            $sh->getStyle('A1:' . $lastCol . ($r - 1))->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN)->getColor()->setRGB('CCCCCC');
+        }
+        $sh->freezePane('A2');
+    };
+
+    // Один лист. Юрлицо выбирается на портале (БК или ВМ) и приходит отдельным
+    // параметром — выгрузка получается отдельным файлом под каждое юрлицо.
+    $entityName = $filterEntity === 'VM' ? 'Воглия Матта'
+        : ($filterEntity === 'BK' ? 'Бургер БК'
+        : ($filterGroup === 'PS' ? 'Пицца Стар' : 'Возврат кег'));
+    $sh = $ss->getActiveSheet();
+    $sh->setTitle(mb_substr($entityName, 0, 31));
+    $fillSheet($sh, $list);
+
+    $fnameTag = $filterEntity !== '' ? $filterEntity : $filterGroup;
+    $fname = 'keg-returns_' . $fnameTag . '_' . date('Ymd_Hi') . '.xlsx';
     header_remove('Content-Type');
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment; filename="' . $fname . '"');
@@ -1038,11 +1055,14 @@ if ($method === 'POST' && $krId && $krAction === 'submit') {
         krRespond(['error' => 'Отправить можно только черновик'], 422);
     }
 
-    // Проверка дедлайна
-    $submitDeadline = kegCalcDeadline($row['return_date']);
-    $submitNow = new DateTime('now', new DateTimeZone('Europe/Minsk'));
-    if ($submitNow >= $submitDeadline) {
-        krRespond(['error' => 'Дедлайн прошёл, отправка недоступна'], 422);
+    // Проверка дедлайна — только для ресторана. Закупщик (портал) может
+    // отправлять заявку и после дедлайна (предупреждение показывается на фронте).
+    if ($isRestaurant) {
+        $submitDeadline = kegCalcDeadline($row['return_date']);
+        $submitNow = new DateTime('now', new DateTimeZone('Europe/Minsk'));
+        if ($submitNow >= $submitDeadline) {
+            krRespond(['error' => 'Дедлайн прошёл, отправка недоступна'], 422);
+        }
     }
 
     // Валидация обязательных полей при submit

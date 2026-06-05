@@ -51,7 +51,11 @@ export function calcDeadlineMs(isoDate) {
 
 // Список доступных дат возврата (по битмаске разрешённых дней недели).
 // Если редактируется заявка с уже сохранённой датой, не попадающей в маску, она добавляется первой.
-export function buildAvailableDates(weekdayMask, currentDate) {
+// opts.includePastDeadline = true: даты с уже прошедшим дедлайном не отбрасываются,
+//   а возвращаются с флагом deadlinePassed (для портала закупок — там разрешено
+//   создавать заявку и после дедлайна, с предупреждением).
+export function buildAvailableDates(weekdayMask, currentDate, opts = {}) {
+  const includePastDeadline = !!opts.includePastDeadline;
   const mask = parseInt(weekdayMask || 0, 10);
   const out = [];
   if (mask) {
@@ -65,9 +69,11 @@ export function buildAvailableDates(weekdayMask, currentDate) {
       const bit = jsDay === 0 ? 6 : jsDay - 1;
       if (!(mask & (1 << bit))) continue;
       const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-      if (calcDeadlineMs(iso) <= now) continue;
-      const label = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear() + ' (' + WEEKDAY_NAMES[bit] + ')';
-      out.push({ iso, label });
+      const deadlinePassed = calcDeadlineMs(iso) <= now;
+      if (deadlinePassed && !includePastDeadline) continue;
+      let label = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear() + ' (' + WEEKDAY_NAMES[bit] + ')';
+      if (deadlinePassed) label += ' — дедлайн прошёл';
+      out.push({ iso, label, deadlinePassed });
     }
   }
   if (currentDate && !out.some(d => d.iso === currentDate)) {

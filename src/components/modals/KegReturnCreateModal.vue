@@ -53,6 +53,10 @@
             <div v-else class="kr-cm-hint kr-cm-hint-warn">
               У ресторана не настроен график возврата — будет введена произвольная дата.
             </div>
+            <div v-if="selectedDeadlinePassed" class="kr-cm-hint kr-cm-hint-warn">
+              ⚠️ Дедлайн по этой дате уже прошёл. Ресторану отправка была бы недоступна,
+              но вы как закупщик можете создать и отправить заявку.
+            </div>
           </div>
 
           <!-- БСО -->
@@ -197,7 +201,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
-import { buildAvailableDates, maskBsoSeries, maskBsoNumber } from '@/components/restaurant/keg/kegHelpers.js';
+import { buildAvailableDates, calcDeadlineMs, maskBsoSeries, maskBsoNumber } from '@/components/restaurant/keg/kegHelpers.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 
 const props = defineProps({
@@ -249,7 +253,16 @@ const selectedRestaurant = computed(
 const availableDates = computed(() => {
   if (!selectedRestaurant.value) return [];
   if (useCustomDate.value) return [];
-  return buildAvailableDates(selectedRestaurant.value.pickup_weekdays || 0, '');
+  // Портал закупок: показываем и даты с прошедшим дедлайном (с пометкой) —
+  // закупщику разрешено создавать заявку после дедлайна.
+  return buildAvailableDates(selectedRestaurant.value.pickup_weekdays || 0, '', { includePastDeadline: true });
+});
+
+// Дедлайн по выбранной дате уже прошёл? Тогда показываем предупреждение,
+// но создание/отправку не блокируем (это право закупщика).
+const selectedDeadlinePassed = computed(() => {
+  if (!form.return_date || form.return_date === '__custom__') return false;
+  return calcDeadlineMs(form.return_date) <= Date.now();
 });
 
 const totalKegs = computed(() =>

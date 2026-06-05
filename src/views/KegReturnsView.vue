@@ -11,6 +11,11 @@
     </div>
 
     <div class="kr-toolbar">
+      <select v-model="filters.legal_entity" title="Юрлицо — для отдельной выгрузки по БК и ВМ">
+        <option value="">Все юрлица</option>
+        <option value="BK">Бургер БК</option>
+        <option value="VM">Воглия Матта</option>
+      </select>
       <select v-model="filters.status">
         <option value="">Все статусы</option>
         <option value="SUBMITTED">Отправлена</option>
@@ -239,7 +244,7 @@ const error = ref('');
 const editId = ref(null);
 const createOpen = ref(false);
 
-const filters = ref({ status: '', restaurant_id: '', from: '', to: '' });
+const filters = ref({ status: '', restaurant_id: '', from: '', to: '', legal_entity: '' });
 
 // Импорт маршрутизации
 const importOpen = ref(false);
@@ -365,6 +370,9 @@ const filteredRows = computed(() => {
     if (filters.value.restaurant_id && String(r.restaurant_id) !== String(filters.value.restaurant_id)) return false;
     if (filters.value.from && r.return_date < filters.value.from) return false;
     if (filters.value.to && r.return_date > filters.value.to) return false;
+    // Юрлицо: ресторан №3 — Воглия Матта, остальные — Бургер БК
+    if (filters.value.legal_entity === 'VM' && Number(r.restaurant_number) !== 3) return false;
+    if (filters.value.legal_entity === 'BK' && Number(r.restaurant_number) === 3) return false;
     return true;
   });
 });
@@ -390,6 +398,7 @@ async function exportExcel() {
     const qp = new URLSearchParams();
     if (filters.value.status) qp.set('status', filters.value.status);
     if (filters.value.restaurant_id) qp.set('restaurant_id', filters.value.restaurant_id);
+    if (filters.value.legal_entity) qp.set('legal_entity', filters.value.legal_entity);
     if (filters.value.from) qp.set('from', filters.value.from);
     if (filters.value.to) qp.set('to', filters.value.to);
     const url0 = '/api/keg-returns/export' + (qp.toString() ? ('?' + qp.toString()) : '');

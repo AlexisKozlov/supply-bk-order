@@ -119,10 +119,27 @@ onMounted(async () => {
 .krt-help-title { font-weight: 700; }
 .krt-help-toggle { margin-left: auto; font-size: 12px; color: #B08968; }
 .krt-help-schedule {
-  display: flex; flex-wrap: wrap; gap: 6px 18px;
-  padding: 0 16px 12px; font-size: 13px; color: #5A4636;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px;
+  padding: 11px 16px 12px; font-size: 13px; color: #5A4636;
+  border-top: 1px solid #F4E4D2;
+  background: #FFF6EC;
 }
+.krt-help-sched-item { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .krt-help-sched-item b { color: #2C1A12; }
+.krt-sched-ico { font-size: 14px; line-height: 1; }
+.krt-sched-label {
+  font-weight: 700; color: #946A3E;
+  text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px;
+}
+.krt-sched-val { color: #3A2A1E; font-weight: 500; }
+.krt-day-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.krt-day-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 30px; padding: 2px 9px;
+  background: #fff; border: 1px solid #E6CFB6; border-radius: 999px;
+  font-size: 12px; font-weight: 700; color: #B5651D;
+  box-shadow: 0 1px 1px rgba(140, 90, 40, 0.06);
+}
 .krt-help-muted { color: #B08968; }
 .krt-help-body {
   padding: 4px 16px 16px;
