@@ -125,6 +125,13 @@ if ($saAction === 'products' && $method === 'GET') {
     if (!$rest) saRespond(['error' => 'Не авторизован'], 401);
 
     $le = $rest['legal_entity'];
+    // Справочник products ОБЩИЙ для группы юрлиц (хранится под главным юрлицом
+    // группы). Поэтому JOIN к products — по ГРУППЕ, а не по одному $le: иначе у
+    // Воглии Матты (своих products почти нет) внешний код / кейсовка / группа
+    // аналогов приходили пустыми, и товар «не метчился» с остатками.
+    $group = $rest['legal_entity_group'] ?? getEntityGroup($le);
+    $groupEntities = getEntitiesInGroup($group);
+    $grpPh = implode(',', array_fill(0, count($groupEntities), '?'));
 
     // Шаблон с JOIN к products для external_code, analog_group, qty_per_box.
     // is_active намеренно не фильтруем — у скрытых товаров справочные параметры тоже нужны.
@@ -141,11 +148,11 @@ if ($saAction === 'products' && $method === 'GET') {
             p.weight_brutto,
             p.boxes_per_pallet
         FROM ro_templates t
-        LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ?
+        LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity IN ($grpPh)
         WHERE t.legal_entity = ? AND t.is_active = 1
         ORDER BY t.sort_order, t.product_name
     ");
-    $tplStmt->execute([$le, $le]);
+    $tplStmt->execute(array_merge($groupEntities, [$le]));
     $templateRows = $tplStmt->fetchAll();
 
     if (empty($templateRows)) {
@@ -328,26 +335,32 @@ if ($saAction === 'search-products' && $method === 'GET') {
 
     $le      = $rest['legal_entity'];
     $pattern = '%' . $q . '%';
+    // Каталог products ОБЩИЙ для группы юрлиц — ищем по ГРУППЕ, не по одному $le
+    // (иначе у Воглии Матты каталог почти пуст). DISTINCT по sku от дублей.
+    $group = $rest['legal_entity_group'] ?? getEntityGroup($le);
+    $groupEntities = getEntitiesInGroup($group);
+    $grpPh = implode(',', array_fill(0, count($groupEntities), '?'));
 
     $stmt = $pdo->prepare("
         SELECT
             sku,
-            name,
-            category,
-            COALESCE(NULLIF(multiplicity, 0), 1) AS multiplicity,
-            external_code,
-            analog_group,
-            qty_per_box,
-            weight_brutto,
-            boxes_per_pallet
+            MIN(name) AS name,
+            MIN(category) AS category,
+            COALESCE(NULLIF(MIN(multiplicity), 0), 1) AS multiplicity,
+            MIN(external_code) AS external_code,
+            MIN(analog_group) AS analog_group,
+            MIN(qty_per_box) AS qty_per_box,
+            MIN(weight_brutto) AS weight_brutto,
+            MIN(boxes_per_pallet) AS boxes_per_pallet
         FROM products
-        WHERE legal_entity = ?
+        WHERE legal_entity IN ($grpPh)
           AND is_active = 1
           AND (name LIKE ? OR sku LIKE ?)
+        GROUP BY sku
         ORDER BY name
         LIMIT 50
     ");
-    $stmt->execute([$le, $pattern, $pattern]);
+    $stmt->execute(array_merge($groupEntities, [$pattern, $pattern]));
     $rows = $stmt->fetchAll();
 
     $products = [];
