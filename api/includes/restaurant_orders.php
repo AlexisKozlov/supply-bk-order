@@ -30,7 +30,7 @@
  *   GET    ro/admin/users          — список учёток
  */
 
-if ($endpoint !== 'ro') return;
+if (($endpoint ?? '') !== 'ro') return;
 
 // ═══ Хелперы ═══
 
