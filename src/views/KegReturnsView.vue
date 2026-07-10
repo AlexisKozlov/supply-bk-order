@@ -90,9 +90,9 @@
     <!-- Адреса бухгалтерии для писем «Не сдана» -->
     <Teleport v-if="notifyOpen" to="body">
       <div class="modal" @click.self="notifyOpen = false">
-        <div class="modal-content kr-notify-modal">
+        <div class="modal-box kr-notify-modal">
           <div class="modal-header">
-            <h3>Письма бухгалтерии</h3>
+            <h2>Письма бухгалтерии</h2>
             <button class="modal-close" @click="notifyOpen = false">✕</button>
           </div>
           <div class="kr-notify-body">
@@ -107,7 +107,7 @@
               <div v-if="notifyError" class="kr-error">{{ notifyError }}</div>
             </template>
           </div>
-          <div class="modal-actions">
+          <div class="modal-actions" style="justify-content:flex-end;gap:8px">
             <button class="btn" @click="notifyOpen = false" :disabled="notifySaving">Отмена</button>
             <button class="btn primary" @click="saveNotify" :disabled="notifySaving || notifyLoading">
               {{ notifySaving ? 'Сохранение...' : 'Сохранить' }}
