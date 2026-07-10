@@ -636,8 +636,212 @@ foreach ($mainStmt->fetchAll() as $row) {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Проход 3: возврат кег
+// ──────────────────────────────────────────────────────────────────────────
+// Два напоминания на подписку (одна на ресторан, opt-in):
+//   A. keg_return  — «подайте заявку на возврат кег» перед дедлайном 10:00.
+//      Дедлайн = 10:00 последнего рабочего дня перед днём вывоза (kegCalcDeadline).
+//      Слоты: 17:00 накануне дня дедлайна и 08:00 в сам день дедлайна.
+//      Не шлём, если заявка на эту дату уже подана (SUBMITTED/ROUTED).
+//   B. keg_invoice — «передайте накладные бухгалтерии» на следующий рабочий
+//      день после вывоза в 09:00. Только если в этот день был реальный возврат.
+// График вывоза — битмаска restaurants.pickup_weekdays (бит 0 = Пн … 6 = Вс).
+
+// Дедлайн подачи: 10:00 последнего рабочего дня перед датой вывоза.
+$krCronDeadline = function (string $returnDate) use ($tz): DateTime {
+    $d = new DateTime($returnDate, $tz);
+    $d->setTime(10, 0, 0);
+    do { $d->modify('-1 day'); } while (in_array((int)$d->format('N'), [6, 7], true));
+    return $d;
+};
+// Первый рабочий день строго после даты (пропускаем сб/вс).
+$krCronFirstWorkingDayAfter = function (string $dateStr) use ($tz): DateTime {
+    $d = new DateTime($dateStr, $tz);
+    do { $d->modify('+1 day'); } while (in_array((int)$d->format('N'), [6, 7], true));
+    return $d;
+};
+$krReturnLabel = function (string $dateStr) use ($tz): string {
+    $d = DateTime::createFromFormat('Y-m-d', $dateStr, $tz);
+    if (!$d) return $dateStr;
+    return (DAY_NAMES_SHORT_RU[(int)$d->format('N')] ?? '') . ' ' . $d->format('d.m');
+};
+$krDeadlineWhen = function (string $deadlineDayStr) use ($today, $tz): string {
+    $tomorrow = (new DateTime($today, $tz))->modify('+1 day')->format('Y-m-d');
+    if ($deadlineDayStr === $today) return 'сегодня';
+    if ($deadlineDayStr === $tomorrow) return 'завтра';
+    $d = DateTime::createFromFormat('Y-m-d', $deadlineDayStr, $tz);
+    return $d ? ('в ' . (DAY_NAMES_ACC[(int)$d->format('N')] ?? '')) : '';
+};
+
+$kegSubs = $pdo->prepare("
+    SELECT sub.id AS subscription_id, sub.portal_enabled, sub.telegram_enabled,
+           r.id AS restaurant_pk, r.number AS restaurant_number,
+           r.legal_entity_group, r.pickup_weekdays
+    FROM restaurant_keg_return_subscriptions sub
+    JOIN restaurants r ON r.id = sub.restaurant_id
+    WHERE sub.is_enabled = 1 AND r.active = 1 AND r.pickup_weekdays > 0
+");
+$kegSubs->execute();
+$kegRows = $kegSubs->fetchAll();
+
+$kegTgList = $pdo->prepare("
+    SELECT rts.chat_id
+    FROM restaurant_keg_return_tg_subscribers krts
+    JOIN ro_telegram_subs rts ON rts.id = krts.ro_tg_sub_id
+    WHERE krts.subscription_id = ? AND krts.is_active = 1
+      AND rts.verified_at IS NOT NULL AND rts.chat_id IS NOT NULL
+      AND (rts.tg_blocked_at IS NULL OR rts.tg_blocked_at < NOW() - INTERVAL 30 DAY)
+");
+$kegHasReturn = $pdo->prepare("
+    SELECT 1 FROM keg_returns WHERE restaurant_id = ? AND return_date = ? AND status IN ('SUBMITTED','ROUTED') LIMIT 1
+");
+
+$sentKeg = 0; $skippedKeg = 0;
+
+// helper: разослать одно keg-напоминание по каналам с дедупом
+$krSend = function ($subscriptionId, $kind, $targetDate, $orderDay, $runHour, $portalEnabled, $telegramEnabled,
+                    $restNumber, $legGroup, $text, $pushTitle, $pushBody) use (
+    &$sentKeg, $portalIns, $tgRunCheck, $tgRunIns, $pushRunCheck, $pushRunIns,
+    $kegTgList, $BOT_TOKEN, $pdo
+) {
+    // PORTAL (для статистики/дедупа; баннер строится в /today отдельно)
+    if ((int)$portalEnabled === 1) {
+        try { $portalIns->execute([$subscriptionId, $kind, $targetDate, $orderDay, $runHour]); $sentKeg++; } catch (Exception $e) { /* ignore */ }
+    }
+    // TELEGRAM
+    if ((int)$telegramEnabled === 1 && $BOT_TOKEN) {
+        $kegTgList->execute([$subscriptionId]);
+        foreach ($kegTgList->fetchAll() as $tg) {
+            $chatId = (string)$tg['chat_id'];
+            $tgRunCheck->execute([$subscriptionId, $kind, $targetDate, $orderDay, $runHour, $chatId]);
+            if ($tgRunCheck->fetchColumn()) continue;
+            $ok = rtgSend($BOT_TOKEN, (int)$chatId, $text, null);
+            if ($ok) {
+                try { $tgRunIns->execute([$subscriptionId, $kind, $targetDate, $orderDay, $runHour, $chatId]); } catch (Exception $e) { /* ignore */ }
+            }
+        }
+    }
+    // WEB PUSH
+    if (function_exists('pushSendToRestaurant')) {
+        $pushRunCheck->execute([$subscriptionId, $kind, $targetDate, $orderDay, $runHour]);
+        if (!$pushRunCheck->fetchColumn()) {
+            $sent = pushSendToRestaurant($pdo, (int)$restNumber, $legGroup ?: 'BK_VM', [
+                'title' => $pushTitle,
+                'body'  => $pushBody,
+                'url'   => '/restaurant/keg-returns',
+                'tag'   => "keg-{$kind}-{$targetDate}",
+            ]);
+            if ($sent > 0) {
+                try { $pushRunIns->execute([$subscriptionId, $kind, $targetDate, $orderDay, $runHour]); } catch (Exception $e) { /* ignore */ }
+            }
+        }
+    }
+};
+
+// A. Напоминание подать заявку на возврат кег
+foreach ($kegRows as $row) {
+    $mask   = (int)$row['pickup_weekdays'];
+    $restPk = (int)$row['restaurant_pk'];
+    $subId  = (int)$row['subscription_id'];
+
+    for ($i = 0; $i < 7; $i++) {
+        if (!($mask & (1 << $i))) continue;
+        $returnDow = $i + 1; // ISO 1..7
+        $diff = ($returnDow - $todayDow + 7) % 7;
+        $returnDate = clone $now;
+        $returnDate->modify("+{$diff} days");
+        $returnDate->setTime(0, 0, 0);
+        $returnDateStr = $returnDate->format('Y-m-d');
+
+        $deadline       = $krCronDeadline($returnDateStr);
+        $deadlineDayStr = $deadline->format('Y-m-d');
+        $deadlineShort  = $deadline->format('H:i');
+        $eve            = (clone $deadline)->modify('-1 day');
+
+        // Слоты: 08:00 в день дедлайна (480) и 17:00 накануне (1020)
+        $a1 = DateTime::createFromFormat('Y-m-d H:i', $deadlineDayStr . ' 08:00', $tz);
+        $a2 = DateTime::createFromFormat('Y-m-d H:i', $eve->format('Y-m-d') . ' 17:00', $tz);
+        $fireSlots = [];
+        foreach ([[480, $a1], [1020, $a2]] as $pair) {
+            [$slotHour, $fireAt] = $pair;
+            if (!$fireAt) continue;
+            $d = $now->getTimestamp() - $fireAt->getTimestamp();
+            if ($d < 0 || $d >= 300) continue;
+            $fireSlots[] = $slotHour;
+        }
+        if (!$fireSlots) continue;
+
+        // Уже подана заявка на эту дату — не напоминаем
+        $kegHasReturn->execute([$restPk, $returnDateStr]);
+        if ($kegHasReturn->fetchColumn()) { $skippedKeg++; continue; }
+
+        $returnLabel = $krReturnLabel($returnDateStr);
+        $whenLabel   = $krDeadlineWhen($deadlineDayStr);
+        $num = htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8');
+        $text = "♻️ <b>Возврат кег</b>\n"
+              . "Подайте заявку на возврат кег — вывоз <b>{$returnLabel}</b>.\n"
+              . "Крайний срок подачи: <b>{$whenLabel} до {$deadlineShort}</b>.\n"
+              . "Ресторан №{$num}.";
+        $pushBody = "Подайте заявку на возврат кег до {$whenLabel} {$deadlineShort} (вывоз {$returnLabel})";
+
+        foreach ($fireSlots as $slotHour) {
+            $krSend($subId, 'keg_return', $returnDateStr, $returnDow, $slotHour,
+                $row['portal_enabled'], $row['telegram_enabled'],
+                $row['restaurant_number'], $row['legal_entity_group'],
+                $text, '♻️ Возврат кег', $pushBody);
+        }
+    }
+}
+
+// B. Напоминание передать накладные бухгалтерии (09:00 рабочего дня после вывоза)
+if ($todayDow <= 5) {
+    $b09 = DateTime::createFromFormat('Y-m-d H:i', $today . ' 09:00', $tz);
+    $bDiff = $b09 ? ($now->getTimestamp() - $b09->getTimestamp()) : -1;
+    if ($b09 && $bDiff >= 0 && $bDiff < 300) {
+        // Даты вывоза, для которых сегодня — первый рабочий день после (Пн ловит пт/сб/вс)
+        $candidates = [];
+        for ($back = 1; $back <= 3; $back++) {
+            $d = (clone $now)->modify("-{$back} days");
+            $ds = $d->format('Y-m-d');
+            if ($krCronFirstWorkingDayAfter($ds)->format('Y-m-d') === $today) $candidates[] = $ds;
+        }
+        if ($candidates) {
+            $ph = implode(',', array_fill(0, count($candidates), '?'));
+            $bStmt = $pdo->prepare("
+                SELECT sub.id AS subscription_id, sub.portal_enabled, sub.telegram_enabled,
+                       r.number AS restaurant_number, r.legal_entity_group, kr.return_date
+                FROM keg_returns kr
+                JOIN restaurants r ON r.id = kr.restaurant_id
+                JOIN restaurant_keg_return_subscriptions sub ON sub.restaurant_id = r.id
+                WHERE kr.return_date IN ($ph)
+                  AND kr.status IN ('SUBMITTED','ROUTED')
+                  AND sub.is_enabled = 1
+                  AND r.active = 1
+                GROUP BY sub.id, r.number, r.legal_entity_group, kr.return_date
+            ");
+            $bStmt->execute($candidates);
+            foreach ($bStmt->fetchAll() as $br) {
+                $returnDateStr = $br['return_date'];
+                $returnDow = (int)(new DateTime($returnDateStr, $tz))->format('N');
+                $returnLabel = $krReturnLabel($returnDateStr);
+                $num = htmlspecialchars((string)$br['restaurant_number'], ENT_QUOTES, 'UTF-8');
+                $text = "📄 <b>Возврат кег — накладные</b>\n"
+                      . "Передайте накладные (ТТН) по возврату кег от <b>{$returnLabel}</b> бухгалтерии в офис.\n"
+                      . "Ресторан №{$num}.";
+                $pushBody = "Передайте накладные по возврату кег от {$returnLabel} бухгалтерии в офис";
+                $krSend((int)$br['subscription_id'], 'keg_invoice', $returnDateStr, $returnDow, 540,
+                    $br['portal_enabled'], $br['telegram_enabled'],
+                    $br['restaurant_number'], $br['legal_entity_group'],
+                    $text, '📄 Возврат кег — накладные', $pushBody);
+            }
+        }
+    }
+}
+
 echo "delivery-reminders: portal={$sentPortal}, tg={$sentTg}, skipped={$skipped}, hour={$nowHour}\n";
 echo "main-delivery-reminders: portal={$sentMainPortal}, tg={$sentMainTg}, skipped={$skippedMain}\n";
+echo "keg-return-reminders: sent={$sentKeg}, skipped={$skippedKeg}\n";
 
 $cronStats['sup_portal']  = $sentPortal;
 $cronStats['sup_tg']      = $sentTg;

@@ -14,32 +14,60 @@
           <div class="rtr-supplier">
             {{ it.supplier_name }}
             <span v-if="it.is_main_delivery" class="rtr-tag-main">склад</span>
+            <span v-if="it.is_keg" class="rtr-tag-keg">кеги</span>
             <span v-if="it.is_advance" class="rtr-tag-advance">{{ advanceLabel(it) }}</span>
           </div>
-          <div v-if="deliveryLabel(it)" class="rtr-delivery-info">{{ deliveryLabel(it) }}</div>
-          <div class="rtr-deadline">
-            <template v-if="it.is_acknowledged">
-              <span class="rtr-status-done">✓ Заявка подана</span>
-              <span v-if="it.acknowledged_at" class="rtr-meta">{{ formatAckTime(it.acknowledged_at) }}{{ it.acknowledged_by ? ' · ' + cleanActor(it.acknowledged_by) : '' }}</span>
-            </template>
-            <template v-else-if="it.is_expired">
-              <span class="rtr-status-expired">🚨 Дедлайн истёк — заявка не подана</span>
-              <span v-if="it.deadline_time" class="rtr-meta">было до {{ fmtTime(it.deadline_time) }}</span>
-            </template>
-            <template v-else>
-              <span class="rtr-deadline-label">{{ it.is_advance ? whenLabel(it) + ' до' : 'До' }}</span>
-              <span class="rtr-deadline-time">{{ fmtTime(it.deadline_time) || '—' }}</span>
-              <span v-if="!it.is_advance && timeLeft(it)" class="rtr-meta">{{ timeLeft(it) }}</span>
-            </template>
-          </div>
+
+          <!-- Возврат кег -->
+          <template v-if="it.is_keg">
+            <div v-if="it.return_label" class="rtr-delivery-info">
+              {{ it.keg_kind === 'invoice' ? 'Возврат: ' : 'Вывоз: ' }}{{ it.return_label }}
+            </div>
+            <div class="rtr-deadline">
+              <template v-if="it.keg_kind === 'invoice'">
+                <span class="rtr-deadline-label">Передайте накладные бухгалтерии в офис</span>
+              </template>
+              <template v-else-if="it.is_expired">
+                <span class="rtr-status-expired">🚨 Срок подачи истёк</span>
+                <span v-if="it.deadline_time" class="rtr-meta">было до {{ fmtTime(it.deadline_time) }}</span>
+              </template>
+              <template v-else>
+                <span class="rtr-deadline-label">Подать заявку — {{ it.when_label }} до</span>
+                <span class="rtr-deadline-time">{{ fmtTime(it.deadline_time) }}</span>
+              </template>
+            </div>
+          </template>
+
+          <!-- Заявки поставщикам / основная поставка -->
+          <template v-else>
+            <div v-if="deliveryLabel(it)" class="rtr-delivery-info">{{ deliveryLabel(it) }}</div>
+            <div class="rtr-deadline">
+              <template v-if="it.is_acknowledged">
+                <span class="rtr-status-done">✓ Заявка подана</span>
+                <span v-if="it.acknowledged_at" class="rtr-meta">{{ formatAckTime(it.acknowledged_at) }}{{ it.acknowledged_by ? ' · ' + cleanActor(it.acknowledged_by) : '' }}</span>
+              </template>
+              <template v-else-if="it.is_expired">
+                <span class="rtr-status-expired">🚨 Дедлайн истёк — заявка не подана</span>
+                <span v-if="it.deadline_time" class="rtr-meta">было до {{ fmtTime(it.deadline_time) }}</span>
+              </template>
+              <template v-else>
+                <span class="rtr-deadline-label">{{ it.is_advance ? whenLabel(it) + ' до' : 'До' }}</span>
+                <span class="rtr-deadline-time">{{ fmtTime(it.deadline_time) || '—' }}</span>
+                <span v-if="!it.is_advance && timeLeft(it)" class="rtr-meta">{{ timeLeft(it) }}</span>
+              </template>
+            </div>
+          </template>
         </div>
         <div class="rtr-actions">
-          <button v-if="!it.is_acknowledged" class="rtr-btn-done" :class="{ 'is-late': it.is_expired, 'is-advance': it.is_advance }" :disabled="busy[itemKey(it)]" @click="onAck(it)">
-            ✓ {{ it.is_expired ? 'Подал постфактум' : (it.is_advance ? 'Уже подал' : 'Сделал') }}
-          </button>
-          <button v-else class="rtr-btn-undo" :disabled="busy[itemKey(it)]" @click="onUnack(it)" title="Отменить отметку">
-            Откатить
-          </button>
+          <a v-if="it.is_keg" class="rtr-btn-link" href="/restaurant/keg-returns">Открыть</a>
+          <template v-else>
+            <button v-if="!it.is_acknowledged" class="rtr-btn-done" :class="{ 'is-late': it.is_expired, 'is-advance': it.is_advance }" :disabled="busy[itemKey(it)]" @click="onAck(it)">
+              ✓ {{ it.is_expired ? 'Подал постфактум' : (it.is_advance ? 'Уже подал' : 'Сделал') }}
+            </button>
+            <button v-else class="rtr-btn-undo" :disabled="busy[itemKey(it)]" @click="onUnack(it)" title="Отменить отметку">
+              Откатить
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -61,7 +89,10 @@ const busy = reactive({});
 let pollTimer = null;
 const allDone = computed(() => items.value.length > 0 && items.value.every(it => it.is_acknowledged));
 
-function itemKey(it) { return it.supplier_id + '-' + it.order_day + '-' + (it.order_date || ''); }
+function itemKey(it) {
+  if (it.is_keg) return 'keg-' + it.keg_kind + '-' + (it.return_label || '');
+  return it.supplier_id + '-' + it.order_day + '-' + (it.order_date || '');
+}
 function fmtTime(t) { return t ? String(t).slice(0, 5) : ''; }
 
 const DAY_NAMES_RU = ['', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
@@ -94,6 +125,10 @@ function deliveryLabel(it) {
 }
 
 function itemClass(it) {
+  if (it.is_keg) {
+    if (it.keg_kind === 'return' && it.is_expired) return 'is-expired';
+    return 'is-keg';
+  }
   if (it.is_acknowledged) return 'is-done';
   if (it.is_expired) return 'is-expired';
   if (it.is_advance) return 'is-advance';
@@ -137,8 +172,9 @@ function formatAckTime(iso) {
 async function load() {
   try {
     const data = await roFetch('/api/restaurant-reminders/today');
-    // Показываем только подписанные позиции (включён мастер-тумблер)
-    items.value = (data.items || []).filter(it => it.is_subscribed);
+    // Показываем только подписанные позиции (включён мастер-тумблер).
+    // Кег-напоминания сервер отдаёт уже только при включённой подписке.
+    items.value = (data.items || []).filter(it => it.is_keg || it.is_subscribed);
   } catch (e) {
     items.value = [];
   }
@@ -202,6 +238,10 @@ defineExpose({ load });
 .rtr-item.is-expired { background: #fde2e2; border: 2px solid #c62828; }
 .rtr-item.is-expired .rtr-status-expired { color: #b71c1c; font-weight: 700; }
 .rtr-item.is-expired .rtr-supplier { color: #b71c1c; }
+.rtr-item.is-keg { background: #eef4fb; border-color: #cdd9e8; }
+.rtr-tag-keg { font-size: 11px; font-weight: 700; color: #2b6cb0; background: #dbe8f7; border-radius: 4px; padding: 1px 6px; margin-left: 4px; vertical-align: middle; }
+.rtr-btn-link { display: inline-flex; align-items: center; padding: 7px 12px; font-size: 13px; font-weight: 600; color: #2b6cb0; background: #dbe8f7; border: 1px solid #b9cfe8; border-radius: 7px; text-decoration: none; white-space: nowrap; }
+.rtr-btn-link:hover { background: #cfe0f4; }
 .rtr-item.is-advance { background: #f4f8fc; border-color: #cdd9e8; }
 .rtr-tag-main { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: #e8f5e9; color: #2e7d32; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .rtr-tag-advance { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: #e3f2fd; color: #1565c0; font-weight: 600; }

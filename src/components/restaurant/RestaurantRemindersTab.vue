@@ -109,6 +109,60 @@
           </div>
         </article>
 
+        <!-- Возврат кег -->
+        <article v-if="hasKegDays" class="rrt-card rrt-card-main rrt-card-wide">
+          <header class="rrt-head">
+            <div class="rrt-head-info">
+              <h4 class="rrt-name">Возврат кег</h4>
+              <span class="rrt-tag rrt-tag-keg">кеги</span>
+            </div>
+            <label class="rrt-toggle" :title="isKegEnabled ? 'Выключить напоминания' : 'Включить напоминания'">
+              <input type="checkbox" :checked="isKegEnabled" :disabled="savingKeg" @change="onToggleKegEnabled($event.target.checked)" />
+              <span class="rrt-toggle-slider"></span>
+            </label>
+          </header>
+
+          <div class="rrt-schedule">
+            <span v-for="d in kegReturn.days" :key="'keg-' + d.return_day" class="rrt-day">
+              <span class="rrt-day-to">{{ weekdayShort(d.return_day) }}</span>
+            </span>
+            <span class="rrt-keg-note">вывоз · заявка до 10:00 накануне</span>
+          </div>
+
+          <div v-if="isKegEnabled" class="rrt-body">
+            <p class="rrt-keg-desc">Напомним подать заявку перед дедлайном и передать накладные бухгалтерии после вывоза.</p>
+            <label class="rrt-checkbox" :class="{ 'is-disabled': !availableTg.length }">
+              <input type="checkbox" :checked="kegReturn.subscription?.telegram_enabled" :disabled="!availableTg.length" @change="onKegChannelChange('telegram', $event.target.checked)" />
+              <span>Дублировать в Telegram</span>
+            </label>
+
+            <button v-if="kegReturn.subscription?.telegram_enabled && availableTg.length"
+                    type="button"
+                    class="rrt-tg-chip"
+                    :class="{ 'is-empty': !(kegReturn.selected_tg_ids || []).length, 'is-open': kegTgOpen }"
+                    @click="kegTgOpen = !kegTgOpen">
+              <span>{{ recipientsLabel(kegReturn.selected_tg_ids) }}</span>
+              <span class="rrt-tg-chip-arrow">▾</span>
+            </button>
+          </div>
+
+          <div v-if="isKegEnabled && kegReturn.subscription?.telegram_enabled && availableTg.length && kegTgOpen" class="rrt-tg">
+            <div class="rrt-tg-list">
+              <label v-for="u in availableTg" :key="'keg-tg-' + u.id" class="rrt-tg-item" :class="{ 'is-selected': isKegTgSelected(u.id) }">
+                <input type="checkbox"
+                       :checked="isKegTgSelected(u.id)"
+                       :disabled="savingKegTg"
+                       @change="toggleKegTg(u.id, $event.target.checked)" />
+                <div class="rrt-tg-info">
+                  <span class="rrt-tg-name">{{ u.name }}</span>
+                  <span v-if="u.username" class="rrt-tg-username">{{ u.username }}</span>
+                </div>
+              </label>
+            </div>
+            <p class="rrt-tg-hint">Если никого не отметить — сообщения в Telegram не уйдут.</p>
+          </div>
+        </article>
+
         <!-- Поставщики через портал -->
         <h3 v-if="portalGroups.length" class="rrt-group-title">Через портал</h3>
         <article v-for="g in portalGroups" :key="'p-' + g.supplier_id" class="rrt-card">
@@ -255,6 +309,14 @@ const hasMainDeliveryDays = computed(() => mainDelivery.value?.days?.length > 0)
 const isMainEnabled = computed(() => !!mainDelivery.value?.subscription?.is_enabled);
 function isMainTgSelected(tgId) { return (mainDelivery.value?.selected_tg_ids || []).includes(tgId); }
 
+const kegReturn = ref({ days: [], subscription: null, selected_tg_ids: [] });
+const savingKeg = ref(false);
+const savingKegTg = ref(false);
+const kegTgOpen = ref(false);
+const hasKegDays = computed(() => kegReturn.value?.days?.length > 0);
+const isKegEnabled = computed(() => !!kegReturn.value?.subscription?.is_enabled);
+function isKegTgSelected(tgId) { return (kegReturn.value?.selected_tg_ids || []).includes(tgId); }
+
 const showTutorial = ref(false);
 const tutorialVideo = ref(null);
 
@@ -376,11 +438,14 @@ async function loadGroups() {
     availableTg.value = data.available_tg || [];
     mainDelivery.value = data.main_delivery || { days: [], subscription: null, selected_tg_ids: [] };
     if (!mainDelivery.value.selected_tg_ids) mainDelivery.value.selected_tg_ids = [];
+    kegReturn.value = data.keg_return || { days: [], subscription: null, selected_tg_ids: [] };
+    if (!kegReturn.value.selected_tg_ids) kegReturn.value.selected_tg_ids = [];
   } catch (e) {
     toast.error(e.message || 'Не удалось загрузить напоминания');
     groups.value = [];
     availableTg.value = [];
     mainDelivery.value = { days: [], subscription: null, selected_tg_ids: [] };
+    kegReturn.value = { days: [], subscription: null, selected_tg_ids: [] };
   } finally {
     loading.value = false;
   }
@@ -440,6 +505,63 @@ async function toggleMainTg(tgId, checked) {
     toast.error(e.message || 'Ошибка');
   } finally {
     savingMainTg.value = false;
+  }
+}
+
+async function saveKegSubscription(patch) {
+  savingKeg.value = true;
+  try {
+    const sub = kegReturn.value.subscription || { is_enabled: false, portal_enabled: true, telegram_enabled: false };
+    const payload = {
+      is_enabled: sub.is_enabled ? 1 : 0,
+      telegram_enabled: sub.telegram_enabled ? 1 : 0,
+      ...patch,
+    };
+    await roFetch('/api/restaurant-reminders/keg-set', { method: 'POST', body: payload });
+    kegReturn.value.subscription = {
+      ...(kegReturn.value.subscription || {}),
+      is_enabled: !!payload.is_enabled,
+      portal_enabled: !!payload.is_enabled,
+      telegram_enabled: !!payload.telegram_enabled,
+    };
+    return true;
+  } catch (e) {
+    toast.error(e.message || 'Ошибка');
+    return false;
+  } finally {
+    savingKeg.value = false;
+  }
+}
+
+function onToggleKegEnabled(checked) {
+  saveKegSubscription({ is_enabled: checked ? 1 : 0 });
+}
+
+function onKegChannelChange(channel, checked) {
+  const patch = {};
+  if (channel === 'telegram') patch.telegram_enabled = checked ? 1 : 0;
+  saveKegSubscription(patch);
+}
+
+async function toggleKegTg(tgId, checked) {
+  const current = new Set(kegReturn.value.selected_tg_ids || []);
+  if (checked) current.add(tgId); else current.delete(tgId);
+  const newIds = Array.from(current);
+  savingKegTg.value = true;
+  try {
+    await roFetch('/api/restaurant-reminders/keg-tg-set', {
+      method: 'POST',
+      body: { ro_tg_sub_ids: newIds },
+    });
+    kegReturn.value.selected_tg_ids = newIds;
+    if (newIds.length && !kegReturn.value.subscription?.telegram_enabled) {
+      if (!kegReturn.value.subscription) kegReturn.value.subscription = { is_enabled: true, portal_enabled: true, telegram_enabled: true };
+      kegReturn.value.subscription.telegram_enabled = true;
+    }
+  } catch (e) {
+    toast.error(e.message || 'Ошибка');
+  } finally {
+    savingKegTg.value = false;
   }
 }
 
@@ -595,6 +717,9 @@ onBeforeUnmount(() => {
 .rrt-tag-so { background: #e3f2fd; color: #1565c0; }
 .rrt-tag-local { background: #fff4e0; color: #b35900; }
 .rrt-tag-main { background: #e8f5e9; color: #2e7d32; }
+.rrt-tag-keg { background: #e3ecfa; color: #2b6cb0; }
+.rrt-keg-note { font-size: 12px; color: #7a6a58; align-self: center; }
+.rrt-keg-desc { font-size: 12.5px; color: #6b5b4a; margin: 0 0 8px; line-height: 1.4; }
 
 .rrt-toggle { flex: none; display: inline-flex; align-items: center; cursor: pointer; user-select: none; }
 .rrt-toggle input { display: none; }

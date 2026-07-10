@@ -261,6 +261,43 @@ if ($subpoint === 'list' && $method === 'GET') {
         }
     }
 
+    // Возврат кег — одна подписка на ресторан. График вывоза берём из
+    // restaurants.pickup_weekdays (битмаска: бит 0 = Пн … 6 = Вс).
+    $kegDays = [];
+    $kegMaskStmt = $pdo->prepare("SELECT pickup_weekdays FROM restaurants WHERE id = ?");
+    $kegMaskStmt->execute([$rrRestPk]);
+    $kegMask = (int)$kegMaskStmt->fetchColumn();
+    for ($i = 0; $i < 7; $i++) {
+        if ($kegMask & (1 << $i)) $kegDays[] = ['return_day' => $i + 1];
+    }
+
+    $kegSub = null;
+    $kegSelectedTg = [];
+    $kegSubRow = $pdo->prepare("
+        SELECT id, is_enabled, portal_enabled, telegram_enabled
+        FROM restaurant_keg_return_subscriptions
+        WHERE restaurant_id = ?
+    ");
+    $kegSubRow->execute([$rrRestPk]);
+    $kegSubData = $kegSubRow->fetch();
+    if ($kegSubData) {
+        $kegSub = [
+            'id'               => (int)$kegSubData['id'],
+            'is_enabled'       => (int)$kegSubData['is_enabled'] === 1,
+            'portal_enabled'   => (int)$kegSubData['portal_enabled'] === 1,
+            'telegram_enabled' => (int)$kegSubData['telegram_enabled'] === 1,
+        ];
+        $ktg = $pdo->prepare("
+            SELECT ro_tg_sub_id
+            FROM restaurant_keg_return_tg_subscribers
+            WHERE subscription_id = ? AND is_active = 1
+        ");
+        $ktg->execute([(int)$kegSubData['id']]);
+        foreach ($ktg->fetchAll() as $r) {
+            $kegSelectedTg[] = (int)$r['ro_tg_sub_id'];
+        }
+    }
+
     rrRespond([
         'restaurant' => [
             'id'     => $rrRestPk,
@@ -273,6 +310,11 @@ if ($subpoint === 'list' && $method === 'GET') {
             'days'            => $mainDays,
             'subscription'    => $mainSub,
             'selected_tg_ids' => $mainSelectedTg,
+        ],
+        'keg_return' => [
+            'days'            => $kegDays,
+            'subscription'    => $kegSub,
+            'selected_tg_ids' => $kegSelectedTg,
         ],
     ]);
 }
@@ -469,6 +511,100 @@ if ($subpoint === 'main-tg-set' && $method === 'POST') {
         if ($ids) {
             $ins = $pdo->prepare("
                 INSERT INTO restaurant_main_delivery_tg_subscribers (subscription_id, ro_tg_sub_id, is_active)
+                VALUES (?, ?, 1)
+            ");
+            foreach ($ids as $id) $ins->execute([$subId, $id]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        rrRespond(['error' => 'Ошибка сохранения: ' . $e->getMessage()], 500);
+    }
+    rrRespond(['success' => true]);
+}
+
+if ($subpoint === 'keg-set' && $method === 'POST') {
+    // Подписка на напоминания о возврате кег (одна на ресторан).
+    // Принимает: { is_enabled, telegram_enabled }
+    $isEnabled       = isset($body['is_enabled'])       ? (!empty($body['is_enabled'])       ? 1 : 0) : 1;
+    $portalEnabled   = $isEnabled;
+    $telegramEnabled = isset($body['telegram_enabled']) ? (!empty($body['telegram_enabled']) ? 1 : 0) : 0;
+    $updatedBy = 'ro:' . $rrUser['restaurant_number'];
+
+    $prevKeg = $pdo->prepare("SELECT is_enabled, telegram_enabled FROM restaurant_keg_return_subscriptions WHERE restaurant_id = ?");
+    $prevKeg->execute([$rrRestPk]);
+    $prevKegState = $prevKeg->fetch();
+
+    $pdo->prepare("
+        INSERT INTO restaurant_keg_return_subscriptions
+            (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_at, updated_by)
+        VALUES (?, ?, ?, ?, NOW(), ?)
+        ON DUPLICATE KEY UPDATE
+            is_enabled = VALUES(is_enabled),
+            portal_enabled = VALUES(portal_enabled),
+            telegram_enabled = VALUES(telegram_enabled),
+            updated_at = NOW(),
+            updated_by = VALUES(updated_by)
+    ")->execute([$rrRestPk, $isEnabled, $portalEnabled, $telegramEnabled, $updatedBy]);
+
+    auditLog($pdo, 'reminder_keg_toggled', 'restaurant_keg_return_subscriptions', $rrRestPk, $updatedBy,
+        ['restaurant_number' => $rrUser['restaurant_number']],
+        [
+            'is_enabled'       => ['from' => (int)($prevKegState['is_enabled'] ?? 0), 'to' => $isEnabled],
+            'telegram_enabled' => ['from' => (int)($prevKegState['telegram_enabled'] ?? 0), 'to' => $telegramEnabled],
+        ]
+    );
+
+    rrRespond(['success' => true]);
+}
+
+if ($subpoint === 'keg-tg-set' && $method === 'POST') {
+    // Выбрать получателей TG-уведомлений для возврата кег.
+    // Принимает: { ro_tg_sub_ids: [int, ...] } — полный новый список.
+    $ids = $body['ro_tg_sub_ids'] ?? [];
+    if (!is_array($ids)) $ids = [];
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+
+    if ($ids) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $own = $pdo->prepare("
+            SELECT COUNT(*) FROM ro_telegram_subs
+            WHERE id IN ($ph)
+              AND restaurant_number = ?
+              AND legal_entity_group = ?
+              AND verified_at IS NOT NULL
+        ");
+        $own->execute(array_merge($ids, [$rrUser['restaurant_number'], $rrUser['legal_entity_group'] ?? 'BK_VM']));
+        if ((int)$own->fetchColumn() !== count($ids)) {
+            rrRespond(['error' => 'Один из подписчиков не принадлежит ресторану'], 403);
+        }
+    }
+
+    $sub = $pdo->prepare("SELECT id FROM restaurant_keg_return_subscriptions WHERE restaurant_id = ?");
+    $sub->execute([$rrRestPk]);
+    $subId = $sub->fetchColumn();
+    if (!$subId) {
+        $pdo->prepare("
+            INSERT INTO restaurant_keg_return_subscriptions
+                (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_by)
+            VALUES (?, 1, 1, ?, ?)
+        ")->execute([$rrRestPk, $ids ? 1 : 0, 'ro:' . $rrUser['restaurant_number']]);
+        $subId = (int)$pdo->lastInsertId();
+    } else if ($ids) {
+        $pdo->prepare("
+            UPDATE restaurant_keg_return_subscriptions
+            SET telegram_enabled = 1, updated_at = NOW()
+            WHERE id = ?
+        ")->execute([$subId]);
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("DELETE FROM restaurant_keg_return_tg_subscribers WHERE subscription_id = ?")
+            ->execute([$subId]);
+        if ($ids) {
+            $ins = $pdo->prepare("
+                INSERT INTO restaurant_keg_return_tg_subscribers (subscription_id, ro_tg_sub_id, is_active)
                 VALUES (?, ?, 1)
             ");
             foreach ($ids as $id) $ins->execute([$subId, $id]);
@@ -778,6 +914,80 @@ if ($subpoint === 'today' && $method === 'GET') {
             'acknowledged_by'  => $ack['acknowledged_by'] ?? null,
             'is_expired'       => $isExpired,
         ];
+    }
+
+    // ── Возврат кег ─────────────────────────────────────────────────────
+    // Показываем в баннере, если подписка включена и портал-канал активен.
+    $kegDeadline = function ($returnDateStr) use ($tz) {
+        $d = new DateTime($returnDateStr, $tz);
+        $d->setTime(10, 0, 0);
+        do { $d->modify('-1 day'); } while (in_array((int)$d->format('N'), [6, 7], true));
+        return $d;
+    };
+    $kegFwa = function ($dateStr) use ($tz) {
+        $d = new DateTime($dateStr, $tz);
+        do { $d->modify('+1 day'); } while (in_array((int)$d->format('N'), [6, 7], true));
+        return $d;
+    };
+
+    $kegSubStmt = $pdo->prepare("SELECT is_enabled, portal_enabled FROM restaurant_keg_return_subscriptions WHERE restaurant_id = ?");
+    $kegSubStmt->execute([$rrRestPk]);
+    $kegSubData = $kegSubStmt->fetch();
+    if ($kegSubData && (int)$kegSubData['is_enabled'] === 1 && (int)$kegSubData['portal_enabled'] === 1) {
+        $maskStmt = $pdo->prepare("SELECT pickup_weekdays FROM restaurants WHERE id = ?");
+        $maskStmt->execute([$rrRestPk]);
+        $kegMaskT = (int)$maskStmt->fetchColumn();
+        $kegHasRet = $pdo->prepare("SELECT 1 FROM keg_returns WHERE restaurant_id = ? AND return_date = ? AND status IN ('SUBMITTED','ROUTED') LIMIT 1");
+        $wdShort = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+        $tomorrow = (new DateTime($today, $tz))->modify('+1 day')->format('Y-m-d');
+
+        // A. Подать заявку — в канун и в день дедлайна, если ещё не подана.
+        for ($i = 0; $i < 7; $i++) {
+            if (!($kegMaskT & (1 << $i))) continue;
+            $returnDow = $i + 1;
+            $diff = ($returnDow - $todayDow + 7) % 7;
+            $rd = (new DateTime($today, $tz))->modify("+{$diff} days");
+            $rdStr = $rd->format('Y-m-d');
+            $deadline = $kegDeadline($rdStr);
+            $deadlineDayStr = $deadline->format('Y-m-d');
+            if ($deadlineDayStr !== $today && $deadlineDayStr !== $tomorrow) continue;
+            $kegHasRet->execute([$rrRestPk, $rdStr]);
+            if ($kegHasRet->fetchColumn()) continue;
+            $items[] = [
+                'is_keg'        => true,
+                'keg_kind'      => 'return',
+                'supplier_name' => 'Возврат кег',
+                'return_label'  => ($wdShort[$returnDow] ?? '') . ' ' . $rd->format('d.m'),
+                'deadline_time' => $deadline->format('H:i'),
+                'when_label'    => ($deadlineDayStr === $today) ? 'сегодня' : 'завтра',
+                'is_expired'    => ($deadlineDayStr === $today) && ($now > $deadline),
+            ];
+        }
+
+        // B. Передать накладные — если сегодня рабочий день после реального возврата.
+        if ($todayDow <= 5) {
+            $cands = [];
+            for ($back = 1; $back <= 3; $back++) {
+                $d = (new DateTime($today, $tz))->modify("-{$back} days")->format('Y-m-d');
+                if ($kegFwa($d)->format('Y-m-d') === $today) $cands[] = $d;
+            }
+            if ($cands) {
+                $ph = implode(',', array_fill(0, count($cands), '?'));
+                $bq = $pdo->prepare("SELECT DISTINCT return_date FROM keg_returns WHERE restaurant_id = ? AND status IN ('SUBMITTED','ROUTED') AND return_date IN ($ph)");
+                $bq->execute(array_merge([$rrRestPk], $cands));
+                foreach ($bq->fetchAll() as $bqr) {
+                    $rdStr = $bqr['return_date'];
+                    $rdow = (int)(new DateTime($rdStr, $tz))->format('N');
+                    $rd = new DateTime($rdStr, $tz);
+                    $items[] = [
+                        'is_keg'        => true,
+                        'keg_kind'      => 'invoice',
+                        'supplier_name' => 'Возврат кег — накладные',
+                        'return_label'  => ($wdShort[$rdow] ?? '') . ' ' . $rd->format('d.m'),
+                    ];
+                }
+            }
+        }
     }
 
     rrRespond([
