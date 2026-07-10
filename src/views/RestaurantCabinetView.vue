@@ -57,7 +57,6 @@
         @click="switchTab('orders', 'corrections')">
         <span class="sb-icon" v-html="cabIconSvg.corrections"></span>
         Корректировки
-        <span class="sb-beta">BETA</span>
       </button>
       <!-- Сбор заказа основной поставки (помощник). Для Пицца Стар не применяется — у них нет 1С УТ. -->
       <button v-if="!isPizzaStarCabinet" class="sb-item"
@@ -65,7 +64,6 @@
         @click="switchTab('orders', 'assistant')">
         <span class="sb-icon" v-html="cabIconSvg.orders"></span>
         Сбор заказа
-        <span class="sb-beta">BETA</span>
       </button>
       <!-- История заказов -->
       <button class="sb-item"
@@ -282,7 +280,7 @@
               <button class="dash-tile dash-tile--corrections" @click="switchTab('orders', 'corrections')">
                 <span class="dash-tile-icon" v-html="tileIconSvg.corrections"></span>
                 <div class="dash-tile-text">
-                  <div class="dash-tile-title">Корректировки <span class="dash-tile-beta">BETA</span></div>
+                  <div class="dash-tile-title">Корректировки</div>
                   <div class="dash-tile-sub">Изменить заказ основной поставки</div>
                 </div>
                 <span class="dash-tile-arrow">›</span>
@@ -404,12 +402,10 @@
         <button class="ord-tab" :class="{ active: orderSubTab === 'corrections' }" @click="switchTab('orders', 'corrections')">
           <span class="ord-tab-icon" v-html="cabIconSvg.corrections"></span>
           Корректировки
-          <span class="ord-tab-beta">BETA</span>
         </button>
         <button v-if="!isPizzaStarCabinet" class="ord-tab" :class="{ active: orderSubTab === 'assistant' }" @click="switchTab('orders', 'assistant')">
           <span class="ord-tab-icon" v-html="cabIconSvg.orders"></span>
           Сбор заказа
-          <span class="ord-tab-beta">BETA</span>
         </button>
         <button class="ord-tab" :class="{ active: orderSubTab === 'reminders' }" @click="switchTab('orders', 'reminders')">
           <span class="ord-tab-icon" v-html="cabIconSvg.reminders"></span>
