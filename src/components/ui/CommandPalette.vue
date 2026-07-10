@@ -69,48 +69,55 @@ const loading = ref(false)
 const searchResults = ref([])
 let searchTimer = null
 
-// Модули — актуальный список, синхронизирован с сайдбаром и роутером
+// Модули — актуальный список, синхронизирован с сайдбаром (AppLayout.vue) и роутером.
+// При добавлении/переименовании раздела в сайдбаре — обновить и здесь.
 const modules = [
   // Заказы
   { title: 'Новый заказ', icon: '📦', route: 'order', module: 'order', keywords: 'заказ new' },
   { title: 'Планирование', icon: '📋', route: 'planning', module: 'planning' },
   { title: 'Поставки', icon: '🚚', route: 'plan-fact', module: 'plan-fact', keywords: 'план факт' },
-  { title: 'История заказов', icon: '📜', route: 'history', module: 'history' },
-  { title: 'Корректировки заказов', icon: '✏️', route: 'corrections', module: 'corrections' },
-  // Данные / справочники
-  { title: 'База товаров (база данных)', icon: '🗄', route: 'database', module: 'database', keywords: 'товары поставщики рестораны справочник' },
+  { title: 'История', icon: '📜', route: 'history', module: 'history', keywords: 'история заказов' },
+  { title: 'Задачи', icon: '🗒', route: 'tasks', module: 'tasks', keywords: 'таск доска канбан' },
+  // Данные
+  { title: 'База данных', icon: '🗄', route: 'database', module: 'database', keywords: 'товары поставщики рестораны справочник база товаров' },
   { title: 'Цены и ПСЦ', icon: '💰', route: 'pricing', module: 'pricing', keywords: 'прайс протокол' },
   { title: 'Календарь', icon: '📅', route: 'calendar', module: 'calendar' },
-  { title: 'Поиск карточек', icon: '🔍', route: 'search-cards', keywords: 'карточка sku' },
   // Аналитика
-  { title: 'Дашборд', icon: '📊', route: 'dashboard', module: 'analytics' },
+  { title: 'Дашборд', icon: '📊', route: 'dashboard', module: 'dashboard' },
   { title: 'Аналитика', icon: '📈', route: 'analytics', module: 'analytics' },
   { title: 'Анализ запасов', icon: '📉', route: 'analysis', module: 'analysis' },
-  { title: 'Сроки годности', icon: '⏰', route: 'shelf-life', module: 'shelf-life', keywords: 'срок просрочка' },
-  // Логистика / склад
+  { title: 'Сверка 1С/УТ', icon: '🔁', route: 'reconciliation', module: 'analysis', keywords: 'сверка ут 1с расхождения' },
+  { title: 'ИИ-помощник', icon: '💡', route: 'assistant', module: 'analysis', keywords: 'ai ассистент нейросеть' },
+  { title: 'Маркетинг', icon: '🎯', route: 'marketing', module: 'marketing', keywords: 'акция промо' },
+  { title: 'Протоколы совещаний', icon: '📄', route: 'protocols', module: 'protocols', keywords: 'совещание протокол' },
+  // Склад и логистика
+  { title: 'Сроки годности', icon: '⏰', route: 'shelf-life', module: 'shelf-life', keywords: 'срок просрочка ячейки' },
   { title: 'График доставки', icon: '🗓', route: 'delivery-schedule', module: 'delivery-schedule' },
+  { title: 'Распределение дефицита', icon: '⚠️', route: 'deficit', module: 'deficit' },
+  { title: 'Распределение', icon: '📦', route: 'distribution', module: 'distribution' },
   { title: 'Загрузка машин', icon: '🚛', route: 'truck-loading', module: 'truck-loading', keywords: 'фура грузовик паллеты' },
+  { title: 'Заявка на пропуск', icon: '🎫', route: 'tit-requests', module: 'order', keywords: 'пропуск тит въезд машина' },
   { title: 'Калькулятор паллет', icon: '🧮', route: 'pallet-calc', module: 'pallet-calc' },
   { title: 'Паллетовка склада', icon: '🏭', route: 'pallet-storage', module: 'pallet-storage' },
-  // Остатки
-  { title: 'Сбор остатков', icon: '📝', route: 'stock-collection', module: 'stock-collection' },
-  // Рестораны
-  { title: 'Кабинеты ресторанов', icon: 'ℹ️', route: 'restaurant-cabinet-manager', module: 'restaurant-orders', keywords: 'управление ресторанами важная информация кабинет' },
-  { title: 'Заказы ресторанов', icon: '🍔', route: 'restaurant-orders', module: 'restaurant-orders', keywords: 'рестораны ро' },
-  { title: 'Отчёт по заказам ресторанов', icon: '📄', route: 'restaurant-report', module: 'restaurant-orders' },
-  { title: 'Опросы', icon: '📋', route: 'surveys', module: 'surveys', keywords: 'анкета опросник ответы рестораны' },
-  { title: 'Реализация ресторанов', icon: '💹', route: 'restaurant-sales', module: 'restaurant-sales', keywords: 'продажи выручка' },
-  { title: 'Чат с ресторанами', icon: '💬', route: 'chat', module: 'chat' },
   // Поставщики
+  { title: 'Тендеры', icon: '📑', route: 'tenders', module: 'tenders' },
+  { title: 'График поставок', icon: '🚚', route: 'supplier-schedule', module: 'supplier-schedule', keywords: 'расписание поставщиков дедлайн' },
   { title: 'Заявки поставщикам', icon: '🏭', route: 'supplier-orders', module: 'supplier-orders', keywords: 'камако овощи so планета' },
   { title: 'Оплаты поставщиков', icon: '💳', route: 'payments', module: 'plan-fact' },
-  // Спец
-  { title: 'Тендеры', icon: '📑', route: 'tenders', module: 'tenders' },
-  { title: 'Маркетинг', icon: '🎯', route: 'marketing', module: 'marketing', keywords: 'акция промо' },
-  { title: 'Распределение', icon: '📦', route: 'distribution', module: 'distribution' },
-  { title: 'Распределение дефицита', icon: '⚠️', route: 'deficit', module: 'deficit' },
-  { title: 'Протоколы совещаний', icon: '📋', route: 'protocols', module: 'protocols' },
-  // Администрирование
+  // Управление ресторанами
+  { title: 'Кабинеты ресторанов', icon: 'ℹ️', route: 'restaurant-cabinet-manager', module: 'restaurant-orders', keywords: 'управление ресторанами важная информация кабинет' },
+  { title: 'Заказы ресторанов', icon: '🍔', route: 'restaurant-orders', module: 'restaurant-orders', keywords: 'рестораны ро' },
+  { title: 'Сбор заказа осн. поставки', icon: '🧺', route: 'supply-assistant', module: 'supply-assistant', keywords: 'помощник основная поставка sa' },
+  { title: 'Штрихкоды', icon: '🏷', route: 'restaurant-unknown-barcodes', module: 'restaurant-orders', keywords: 'сканер неизвестные штрихкод barcode' },
+  { title: 'Возврат кег', icon: '🛢', route: 'keg-returns', module: 'restaurant-orders', keywords: 'кеги ттн бсо' },
+  { title: 'Сбор остатков', icon: '📝', route: 'stock-collection', module: 'stock-collection' },
+  { title: 'Опросы', icon: '📋', route: 'surveys', module: 'surveys', keywords: 'анкета опросник ответы рестораны' },
+  { title: 'Чат с ресторанами', icon: '💬', route: 'chat', module: 'chat' },
+  { title: 'Корректировки', icon: '✏️', route: 'corrections', module: 'corrections', keywords: 'корректировки заказов' },
+  // Прочие страницы
+  { title: 'Реализация ресторанов', icon: '💹', route: 'restaurant-sales', module: 'restaurant-sales', keywords: 'продажи выручка' },
+  { title: 'Отчёт по заказам ресторанов', icon: '📄', route: 'restaurant-report', module: 'restaurant-orders' },
+  { title: 'Поиск карточек', icon: '🔍', route: 'search-cards', keywords: 'карточка sku' },
   { title: 'Импорт данных', icon: '⬆️', route: 'import', module: 'analysis' },
   { title: 'Telegram-бот', icon: '🤖', route: 'telegram-admin', module: 'telegram' },
   { title: 'Админ-панель', icon: '🛠', route: 'admin', requiresAdmin: true },
