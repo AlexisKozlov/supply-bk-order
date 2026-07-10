@@ -51,9 +51,9 @@
       </button>
     </div>
     <!-- «Кеги не сдал» — по маршрутизированной заявке со след. дня после возврата -->
-    <div v-if="editingId && status === 'ROUTED' && canMarkNotReturned" class="krt-actions-bar-extra">
-      <button class="krt-link danger" @click="$emit('not-returned')" :disabled="saving">
-        Кеги не сдал
+    <div v-if="editingId && status === 'ROUTED' && canMarkNotReturned" class="krt-notreturned-bar">
+      <button class="krt-btn danger lg krt-notreturned-btn" @click="$emit('not-returned')" :disabled="saving">
+        <span class="krt-notreturned-icon">⚠️</span> Кеги не сдал
       </button>
     </div>
   </div>

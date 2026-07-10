@@ -481,6 +481,10 @@ onMounted(async () => {
 .krt-actions-bar-extra {
   display: flex; justify-content: flex-end; padding: 6px 6px 0;
 }
+/* Кнопка «Кеги не сдал» — заметная, во всю ширину */
+.krt-notreturned-bar { padding: 12px 6px 2px; }
+.krt-notreturned-btn { width: 100%; box-shadow: 0 4px 12px rgba(229,57,53,.28); }
+.krt-notreturned-icon { margin-right: 4px; }
 
 /* ═══ Просмотр фото ═══ */
 .krt-photo-overlay {

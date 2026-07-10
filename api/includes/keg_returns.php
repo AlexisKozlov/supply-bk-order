@@ -344,7 +344,8 @@ function krNotifyAccountingNotReturned(PDO $pdo, ?array $row, string $by): void 
     if (!$to) return;
 
     require_once __DIR__ . '/mail_send.php';
-    if (!function_exists('sendEmail')) return;
+    require_once __DIR__ . '/mail_templates.php';
+    if (!function_exists('sendEmail') || !function_exists('renderMailHtml')) return;
 
     $num  = (string)($row['restaurant_number'] ?? '');
     $date = !empty($row['return_date']) ? date('d.m.Y', strtotime($row['return_date'])) : '';
@@ -354,13 +355,37 @@ function krNotifyAccountingNotReturned(PDO $pdo, ?array $row, string $by): void 
     foreach (($row['items'] ?? []) as $it) $kegs += (int)($it['quantity'] ?? 0);
 
     $esc = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+
+    // Строки таблицы с реквизитами заявки
+    $rowsHtml = '';
+    $addRow = function ($label, $val) use (&$rowsHtml, $esc) {
+        if ($val === '' || $val === null) return;
+        $rowsHtml .= '<tr>'
+            . '<td style="padding:7px 16px 7px 0;color:#8B7355;font-size:14px;white-space:nowrap;vertical-align:top;">' . $esc($label) . '</td>'
+            . '<td style="padding:7px 0;color:#2C1A12;font-size:14px;font-weight:600;">' . $esc($val) . '</td>'
+            . '</tr>';
+    };
+    $addRow('Ресторан', '№' . $num . ($city ? ' · ' . $city : ''));
+    $addRow('Дата возврата', $date);
+    $addRow('ТТН', $bso);
+    $addRow('Кег в заявке', $kegs ? (string)$kegs : '');
+    $addRow('Отметил', $by);
+
+    $body = '<p style="margin:0 0 18px;font-size:15px;color:#2C1A12;line-height:1.55;">'
+          . 'Ресторан <b>№' . $esc($num) . '</b> не сдал кеги по маршрутизированной заявке на возврат. '
+          . 'Заявка переведена в статус «Не сдана».</p>'
+          . '<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;background:#FBF7F0;border:1px solid #ECE3D6;border-radius:12px;">'
+          . '<tr><td style="padding:6px 18px;">'
+          . '<table role="presentation" cellspacing="0" cellpadding="0" border="0">' . $rowsHtml . '</table>'
+          . '</td></tr></table>';
+
     $subject = "Кеги не сданы — ресторан №{$num}" . ($date ? " ({$date})" : '');
-    $html = "<p>Ресторан <b>№" . $esc($num) . "</b>" . ($city ? ' (' . $esc($city) . ')' : '')
-          . " не сдал кеги по маршрутизированной заявке.</p><ul>"
-          . ($date ? "<li>Дата возврата: <b>{$date}</b></li>" : '')
-          . ($bso  ? "<li>ТТН: <b>" . $esc($bso) . "</b></li>" : '')
-          . ($kegs ? "<li>Кег в заявке: <b>{$kegs}</b></li>" : '')
-          . "<li>Отметил: " . $esc($by) . "</li></ul>";
+    $html = renderMailHtml([
+        'title'   => 'Кеги не сданы',
+        'preview' => 'Ресторан №' . $num . ' не сдал кеги' . ($date ? " ({$date})" : ''),
+        'body'    => $body,
+        'footer'  => 'Письмо сформировано автоматически порталом отдела закупок.',
+    ]);
     try { sendEmail($to, $subject, $html, true, ['account' => 'default']); }
     catch (Throwable $e) { error_log('krNotifyAccountingNotReturned: ' . $e->getMessage()); }
 }
