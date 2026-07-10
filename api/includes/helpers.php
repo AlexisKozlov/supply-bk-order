@@ -705,6 +705,22 @@ $ROLE_TEMPLATES = [
     'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','supplier-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','pallet-storage'=>'none','cards'=>'view','corrections'=>'edit','chat'=>'edit','marketing'=>'edit','protocols'=>'edit','restaurant-orders'=>'full','supplier-orders'=>'full','truck-loading'=>'none','surveys'=>'edit','tasks'=>'full','dashboard'=>'none','supply-assistant'=>'full'],
     'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','supplier-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','pallet-storage'=>'none','cards'=>'view','corrections'=>'view','chat'=>'view','marketing'=>'view','protocols'=>'view','restaurant-orders'=>'view','supplier-orders'=>'view','truck-loading'=>'none','surveys'=>'view','tasks'=>'full','dashboard'=>'none','supply-assistant'=>'view'],
 ];
+// Дочерние модули, выделенные из родителей (2026-07): в шаблонах ролей
+// наследуют уровень родителя, но назначаются админом отдельно. Индивидуальные
+// переопределения пользователей перенесены миграцией 20260710_split_rbac_modules.
+foreach ([
+    'keg-returns'    => 'restaurant-orders',
+    'reconciliation' => 'analysis',
+    'tit-requests'   => 'order',
+] as $__child => $__parent) {
+    foreach ($ROLE_TEMPLATES as $__role => &$__perms) {
+        if (!isset($__perms[$__child])) {
+            $__perms[$__child] = $__perms[$__parent] ?? 'none';
+        }
+    }
+    unset($__perms);
+}
+
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
     'orders'=>'order','order_items'=>'order',

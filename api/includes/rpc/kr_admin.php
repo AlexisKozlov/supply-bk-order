@@ -11,7 +11,7 @@
  */
 
 if ($fn === 'kr_get_schedule') {
-    requireModuleAccess($authUser, 'restaurant-orders', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+    requireModuleAccess($authUser, 'keg-returns', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
     // Глобальный флаг по юрлицу (по умолчанию для группы BK_VM используем
     // запись «ООО Бургер БК», т.к. ВМ и БК делят одну настройку модуля).
     $legalEntity = 'ООО "Бургер БК"';
@@ -38,7 +38,7 @@ if ($fn === 'kr_get_schedule') {
 }
 
 if ($fn === 'kr_save_schedule_row') {
-    requireModuleAccess($authUser, 'restaurant-orders', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+    requireModuleAccess($authUser, 'keg-returns', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
     $id = (int)($body['id'] ?? 0);
     if ($id <= 0) respond(['error' => 'Не указан ресторан'], 400);
     $pickupAddress = isset($body['pickup_address']) ? trim((string)$body['pickup_address']) : null;
@@ -64,7 +64,7 @@ if ($fn === 'kr_save_schedule_row') {
 }
 
 if ($fn === 'kr_set_module_enabled') {
-    requireModuleAccess($authUser, 'restaurant-orders', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+    requireModuleAccess($authUser, 'keg-returns', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
     $enabled = !empty($body['enabled']) ? 1 : 0;
     $legalEntity = 'ООО "Бургер БК"';
     try {

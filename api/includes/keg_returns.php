@@ -64,7 +64,7 @@ function krRequirePortalAccess(?array $portalUser, string $minLevel = 'view'): v
     global $ROLE_TEMPLATES, $ACCESS_LEVELS;
     if (!$portalUser) krRespond(['error' => 'Требуется авторизация портала'], 401);
     $perms = resolvePermissions($portalUser['role'] ?? 'user', $portalUser['permissions'] ?? null, $ROLE_TEMPLATES);
-    $actual = $ACCESS_LEVELS[$perms['restaurant-orders'] ?? 'none'] ?? 0;
+    $actual = $ACCESS_LEVELS[$perms['keg-returns'] ?? 'none'] ?? 0;
     $required = $ACCESS_LEVELS[$minLevel] ?? 0;
     if ($actual < $required) krRespond(['error' => 'Недостаточно прав'], 403);
 }

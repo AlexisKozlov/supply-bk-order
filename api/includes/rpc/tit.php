@@ -10,10 +10,13 @@
 require_once __DIR__ . '/../tit_normalize.php';
 require_once __DIR__ . '/../tit_helpers.php';
 
-/**
- * Доступ к модулю — пока что любой аутентифицированный сотрудник.
- * Точечный RBAC заведём отдельной задачей в шаге 9.
- */
+// Доступ к модулю «Заявка на пропуск» — отдельный RBAC-модуль tit-requests.
+// Проверяем только для tit_*-функций (файл подключается в общий RPC-конвейер,
+// его верхний код выполняется при любом $fn).
+if (isset($fn) && strncmp((string)$fn, 'tit_', 4) === 0) {
+    requireModuleAccess($authUser, 'tit-requests', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+}
+
 $titRequireStaff = function () use ($authUser) {
     if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
 };
