@@ -369,6 +369,7 @@ function krNotifyAccountingNotReturned(PDO $pdo, ?array $row, string $by): void 
     $addRow('Дата возврата', $date);
     $addRow('ТТН', $bso);
     $addRow('Кег в заявке', $kegs ? (string)$kegs : '');
+    $addRow('Причина', trim((string)($row['not_returned_reason'] ?? '')));
     $addRow('Отметил', $by);
 
     $body = '<p style="margin:0 0 18px;font-size:15px;color:#2C1A12;line-height:1.55;">'
@@ -1269,6 +1270,9 @@ if ($method === 'POST' && $krId && $krAction === 'not-returned') {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
 
+    $reason = trim((string)($body['reason'] ?? ''));
+    if (mb_strlen($reason) > 500) $reason = mb_substr($reason, 0, 500);
+
     if ($isRestaurant) {
         if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
             krRespond(['error' => 'Нет доступа'], 403);
@@ -1280,6 +1284,10 @@ if ($method === 'POST' && $krId && $krAction === 'not-returned') {
         if (empty($row['return_date']) || $today <= $row['return_date']) {
             krRespond(['error' => 'Отметить «не сдана» можно только со следующего дня после даты возврата'], 422);
         }
+        // Ресторан обязан указать причину.
+        if ($reason === '') {
+            krRespond(['error' => 'Укажите причину, почему кеги не сданы'], 422);
+        }
         $by = 'ro:' . ($krRestSession['restaurant_number'] ?? '');
     } else {
         krRequirePortalAccess($krPortalUser, 'edit');
@@ -1290,8 +1298,8 @@ if ($method === 'POST' && $krId && $krAction === 'not-returned') {
         $by = $krPortalUser['name'] ?? 'закупка';
     }
 
-    $stmt = $pdo->prepare("UPDATE keg_returns SET status = 'NOT_RETURNED', not_returned_at = NOW(), not_returned_by = ? WHERE id = ? AND status = 'ROUTED'");
-    $stmt->execute([$by, $krId]);
+    $stmt = $pdo->prepare("UPDATE keg_returns SET status = 'NOT_RETURNED', not_returned_at = NOW(), not_returned_by = ?, not_returned_reason = ? WHERE id = ? AND status = 'ROUTED'");
+    $stmt->execute([$by, ($reason !== '' ? $reason : null), $krId]);
     if ($stmt->rowCount() === 0) {
         krRespond(['error' => 'Статус заявки уже изменился, обновите страницу'], 409);
     }
@@ -1311,7 +1319,7 @@ if ($method === 'POST' && $krId && $krAction === 'revert-not-returned') {
     if ($row['status'] !== 'NOT_RETURNED') {
         krRespond(['error' => 'Вернуть можно только заявку в статусе «Не сдана»'], 422);
     }
-    $stmt = $pdo->prepare("UPDATE keg_returns SET status = 'ROUTED', not_returned_at = NULL, not_returned_by = NULL WHERE id = ? AND status = 'NOT_RETURNED'");
+    $stmt = $pdo->prepare("UPDATE keg_returns SET status = 'ROUTED', not_returned_at = NULL, not_returned_by = NULL, not_returned_reason = NULL WHERE id = ? AND status = 'NOT_RETURNED'");
     $stmt->execute([$krId]);
     if ($stmt->rowCount() === 0) {
         krRespond(['error' => 'Статус заявки уже изменился, обновите страницу'], 409);

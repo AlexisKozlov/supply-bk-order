@@ -12,6 +12,9 @@
               <span v-else class="krt-deadline-passed">Дедлайн прошёл</span>
             </span>
           </div>
+          <div v-if="form.status === 'NOT_RETURNED' && form.not_returned_reason" class="krt-nr-reason-note">
+            Причина: {{ form.not_returned_reason }}
+          </div>
         </div>
       </div>
 
@@ -114,6 +117,11 @@
       @close="closeSubmitted"
       @print="onSubmittedPrint"
     />
+    <KegNotReturnedModal
+      :show="notReturnedModal.show"
+      @confirm="notReturnedConfirm"
+      @cancel="notReturnedCancel"
+    />
   </div>
 </template>
 
@@ -129,6 +137,7 @@ import KegPhotoModal from './KegPhotoModal.vue';
 import KegConfirmModal from './KegConfirmModal.vue';
 import KegReplaceBsoModal from './KegReplaceBsoModal.vue';
 import KegSubmittedModal from './KegSubmittedModal.vue';
+import KegNotReturnedModal from './KegNotReturnedModal.vue';
 
 const props = defineProps({
   // null/0 — новая заявка; число — открыть существующую
@@ -155,5 +164,6 @@ const {
   saveDraft, submit, cancelReturn, deleteDraft,
   downloadExcel, printTtn,
   canMarkNotReturned, markNotReturned,
+  notReturnedModal, notReturnedConfirm, notReturnedCancel,
 } = useKegForm(initialIdRef, emit);
 </script>

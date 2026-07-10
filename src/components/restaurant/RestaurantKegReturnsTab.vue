@@ -481,6 +481,7 @@ onMounted(async () => {
 .krt-actions-bar-extra {
   display: flex; justify-content: flex-end; padding: 6px 6px 0;
 }
+.krt-nr-reason-note { margin-top: 6px; font-size: 13px; color: #B71C1C; background: #FDE0DC; border-radius: 8px; padding: 6px 10px; }
 /* Кнопка «Кеги не сдал» — заметная, во всю ширину */
 .krt-notreturned-bar { padding: 12px 6px 2px; }
 .krt-notreturned-btn { width: 100%; box-shadow: 0 4px 12px rgba(229,57,53,.28); }

@@ -8,6 +8,15 @@ export const iconKegReturn = '<svg viewBox="0 0 24 24" fill="none" stroke="curre
 
 export const WEEKDAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
+// Пресеты причин для статуса «Не сдана» (список + опц. комментарий).
+// Последний вариант «Другое» требует обязательного комментария.
+export const KEG_NOT_RETURNED_REASONS = [
+  'Машина не приехала',
+  'Кеги не успели подготовить',
+  'Не было пустых кег на возврат',
+  'Другое',
+];
+
 // Короткая дата в локали ru.
 export function fmtDate(d) {
   if (!d) return '—';

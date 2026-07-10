@@ -412,18 +412,28 @@ export function useKegForm(initialIdRef, emit) {
     return today.getTime() > rd.getTime();
   });
 
+  // Модалка причины «Не сдана» (обязательна для ресторана).
+  const notReturnedModal = reactive({ show: false, resolve: null });
+  function notReturnedConfirm(reason) {
+    notReturnedModal.show = false;
+    notReturnedModal.resolve?.(reason);
+    notReturnedModal.resolve = null;
+  }
+  function notReturnedCancel() {
+    notReturnedModal.show = false;
+    notReturnedModal.resolve?.(null);
+    notReturnedModal.resolve = null;
+  }
+
   async function markNotReturned() {
-    const ok = await askConfirm({
-      title: 'Отметить «Кеги не сдал»?',
-      message: 'Заявка перейдёт в статус «Не сдана». Об этом узнают отдел закупок и бухгалтерия.',
-      okText: 'Да, не сдал',
-      cancelText: 'Отмена',
-      danger: true,
+    const reason = await new Promise(resolve => {
+      notReturnedModal.resolve = resolve;
+      notReturnedModal.show = true;
     });
-    if (!ok) return;
+    if (reason === null) return; // отмена
     saving.value = true;
     try {
-      await roFetch(`/api/keg-returns/${localId.value}/not-returned`, { method: 'POST' });
+      await roFetch(`/api/keg-returns/${localId.value}/not-returned`, { method: 'POST', body: { reason } });
       await loadFormData(localId.value);
       toast.success('Отмечено «Не сдана»', '');
     } catch (e) {
@@ -559,5 +569,6 @@ export function useKegForm(initialIdRef, emit) {
     saveDraft, submit, cancelReturn, deleteDraft,
     downloadExcel, printTtn,
     canMarkNotReturned, markNotReturned,
+    notReturnedModal, notReturnedConfirm, notReturnedCancel,
   };
 }

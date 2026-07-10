@@ -58,6 +58,11 @@
               <span :class="'kr-badge kr-badge-' + form.status">{{ statusLabel(form.status) }}</span>
             </div>
 
+            <div v-if="form.status === 'NOT_RETURNED' && form.not_returned_reason" class="kr-em-field">
+              <span class="kr-em-label">Причина</span>
+              <span class="kr-nr-reason-val">{{ form.not_returned_reason }}</span>
+            </div>
+
             <div class="kr-em-field">
               <span class="kr-em-label">Машина</span>
               <input v-model="form.vehicle" type="text" :disabled="readonly" class="kr-em-input" />
@@ -149,12 +154,38 @@
       </div>
     </div>
   </Teleport>
+
+  <!-- Причина «Не сдана» (для закупки — необязательно) -->
+  <Teleport v-if="nrModalOpen" to="body">
+    <div class="modal" @click.self="nrModalOpen = false">
+      <div class="modal-box kr-nr-modal">
+        <div class="modal-header">
+          <h2>Кеги не сданы</h2>
+          <button class="modal-close" @click="nrModalOpen = false">✕</button>
+        </div>
+        <div class="kr-nr-body">
+          <p class="kr-nr-hint">Причина (необязательно) — попадёт в письмо бухгалтерии и будет видна ресторану.</p>
+          <select v-model="nrPreset" class="kr-em-input">
+            <option value="">— причина не выбрана —</option>
+            <option v-for="r in nrReasons" :key="r" :value="r">{{ r }}</option>
+          </select>
+          <textarea v-model="nrComment" rows="2" class="kr-nr-textarea"
+            :placeholder="nrPreset === 'Другое' ? 'Опишите причину' : 'Комментарий (необязательно)'"></textarea>
+        </div>
+        <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+          <button class="btn" @click="nrModalOpen = false" :disabled="saving">Отмена</button>
+          <button class="btn btn-danger" @click="confirmNotReturned" :disabled="saving">Отметить «Не сдана»</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { appConfirm } from '@/lib/appDialogs.js';
+import { KEG_NOT_RETURNED_REASONS } from '@/components/restaurant/keg/kegHelpers.js';
 
 function authHeaders(extra = {}) {
   const t = localStorage.getItem('bk_session_token') || '';
@@ -174,6 +205,12 @@ const loadError = ref('');
 const saving = ref(false);
 const routing = ref(false);
 const saveError = ref('');
+
+// Модалка причины «Не сдана» (для закупки причина необязательна)
+const nrModalOpen = ref(false);
+const nrPreset = ref('');
+const nrComment = ref('');
+const nrReasons = KEG_NOT_RETURNED_REASONS;
 const kegQties = ref({});
 const bsoError = ref('');
 const photoUrl = ref('');
@@ -361,15 +398,29 @@ async function unroute() {
   }
 }
 
-async function markNotReturned() {
-  if (!(await appConfirm('Отметить, что ресторан не сдал кеги? Заявка перейдёт в статус «Не сдана», бухгалтерия получит письмо (если указаны адреса).', { title: 'Кеги не сданы', okText: 'Не сдана', danger: true }))) return;
+// Причина «Не сдана» — для закупки необязательна.
+function markNotReturned() {
+  nrPreset.value = '';
+  nrComment.value = '';
+  nrModalOpen.value = true;
+}
+function buildNrReason() {
+  const c = nrComment.value.trim();
+  if (!nrPreset.value) return c;                 // без пресета — что написали
+  if (nrPreset.value === 'Другое') return c;     // «Другое» — только текст
+  return c ? `${nrPreset.value} — ${c}` : nrPreset.value;
+}
+async function confirmNotReturned() {
+  const reason = buildNrReason();
+  nrModalOpen.value = false;
   saving.value = true;
   saveError.value = '';
   try {
     const res = await fetch(`/api/keg-returns/${props.id}/not-returned`, {
       method: 'POST',
       credentials: 'include',
-      headers: authHeaders(),
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Ошибка');
@@ -525,6 +576,11 @@ onMounted(() => {
 .kr-badge-ROUTED { background: #e8f5e9; color: #2e7d32; }
 .kr-badge-CANCELLED { background: #fce4ec; color: #c62828; }
 .kr-badge-NOT_RETURNED { background: #fde0dc; color: #b71c1c; }
+.kr-nr-reason-val { color: #b71c1c; font-weight: 600; }
+.kr-nr-modal { max-width: 440px; width: 100%; }
+.kr-nr-body { padding: 4px 0 12px; display: flex; flex-direction: column; gap: 10px; }
+.kr-nr-hint { margin: 0; font-size: 13px; color: #6b5b4a; line-height: 1.45; }
+.kr-nr-textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9cfc0; border-radius: 6px; font: inherit; resize: vertical; }
 .btn-danger { background: #fce4ec; color: #c62828; }
 .btn-danger:hover { background: #f8bbd0; }
 .btn-warn { background: #FFF3E0; color: #C16B4D; }
