@@ -2375,6 +2375,13 @@ if ($soAction === 'admin') {
                        ON DUPLICATE KEY UPDATE deadline_date = VALUES(deadline_date), deadline_time = VALUES(deadline_time), is_closed = 0, created_by = VALUES(created_by)")
             ->execute([$supplierId, $deliveryDate, $deadlineDate, $deadlineTime, $createdBy]);
 
+        // Приём на эту дату снова открыт — снимаем авто-блокировку с заявок,
+        // которые заблокировались после прошедшего дедлайна (только 'locked' → 'submitted';
+        // отредактированные закупщиком 'edited' не трогаем).
+        $pdo->prepare("UPDATE so_orders SET status = 'submitted', updated_at = NOW()
+                       WHERE supplier_id = ? AND delivery_date = ? AND status = 'locked'")
+            ->execute([$supplierId, $deliveryDate]);
+
         try {
             auditLog($pdo, 'so_deadline_extended', 'supplier', $supplierId, $createdBy, [
                 'delivery_date' => $deliveryDate,
