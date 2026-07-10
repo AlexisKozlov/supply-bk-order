@@ -1160,12 +1160,18 @@ try {
                     $newOrderId = (int)$pdo->lastInsertId();
                 }
 
-                // Копируем позиции (берём финальные значения: admin_qty если было, иначе quantity)
+                // Копируем позиции (берём финальные значения: admin_qty если было, иначе quantity).
+                // Только те, чей товар есть в АКТУАЛЬНОМ активном шаблоне поставщика —
+                // иначе снятый из ассортимента товар продолжал бы авто-переноситься
+                // (вручную ресторан его заказать уже не может, см. проверку в submit-order).
                 $pdo->prepare("
                     INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity)
-                    SELECT ?, product_id, sku, product_name, COALESCE(admin_qty, quantity)
-                    FROM so_order_items WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0
-                ")->execute([$newOrderId, $prevOrderId]);
+                    SELECT ?, soi.product_id, soi.sku, soi.product_name, COALESCE(soi.admin_qty, soi.quantity)
+                    FROM so_order_items soi
+                    JOIN so_templates t
+                      ON t.sku = soi.sku AND t.supplier_id = ? AND t.legal_entity = ? AND t.is_active = 1
+                    WHERE soi.order_id = ? AND COALESCE(soi.admin_qty, soi.quantity) > 0
+                ")->execute([$newOrderId, $supId, $le, $prevOrderId]);
 
                 // Дополняем запись лога новым order_id (сама запись уже вставлена lock-шагом выше).
                 $pdo->prepare("UPDATE so_auto_submit_log SET new_order_id = ? WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?")
