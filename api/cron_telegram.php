@@ -1083,52 +1083,38 @@ try {
         $supName = $sup['short_name'];
         $defaultDl = $sup['default_deadline_time'];
 
-        // Расписания поставщика
-        $schStmt = $pdo->prepare("
-            SELECT ss.restaurant_id, ss.delivery_day,
-                   r.number AS restaurant_number, r.legal_entity_group
-            FROM supplier_schedules ss
-            JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
-            WHERE ss.supplier_id = ? AND ss.is_active = 1
-        ");
-        $schStmt->execute([$supId]);
-        $schRows = $schStmt->fetchAll();
-
-        // Собираем кандидатов: {restaurant_number, delivery_date, legal_entity_group}
+        // Собираем кандидатов по датам (2 недели вперёд) с учётом ЭФФЕКТИВНОГО графика:
+        // внутри активного временного периода — временные дни/рестораны, иначе основные.
         $candidates = [];
-        foreach ($schRows as $s) {
-            $deliveryDow = (int)$s['delivery_day'];
-            $weekStart = clone $now;
-            $weekStart->setTime(0, 0, 0);
-            $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
+        for ($iDay = 0; $iDay < 15; $iDay++) {
+            $dObj = (clone $now)->setTime(0, 0, 0)->modify("+{$iDay} days");
+            $deliveryDate = $dObj->format('Y-m-d');
+            $deliveryDow = (int)$dObj->format('N');
 
-            for ($w = 0; $w < 2; $w++) {
-                $deliveryDateObj = dateFromWeekStartByDow($weekStart, $deliveryDow, $w);
-                if ($deliveryDateObj < (clone $now)->setTime(0, 0, 0)) continue;
-                $deliveryDate = $deliveryDateObj->format('Y-m-d');
+            // Дедлайн через ядро: override → rule → default, forced_closed — пропускаем
+            $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+            $ovStmt->execute([$supId, $deliveryDate]);
+            $ov = $ovStmt->fetch() ?: null;
 
-                // Дедлайн через ядро: override → rule → default, forced_closed — пропускаем
-                $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
-                $ovStmt->execute([$supId, $deliveryDate]);
-                $ov = $ovStmt->fetch() ?: null;
+            $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
+            $rlStmt->execute([$supId, $deliveryDow]);
+            $rule = $rlStmt->fetch() ?: null;
 
-                $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
-                $rlStmt->execute([$supId, $deliveryDow]);
-                $rule = $rlStmt->fetch() ?: null;
+            $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz);
+            if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
+            $deadline = $r['deadline_dt'];
+            $minutesSinceDeadline = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
 
-                $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz);
-                if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
-                $deadline = $r['deadline_dt'];
-                $minutesSinceDeadline = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
+            // Окно срабатывания: дедлайн прошёл от 0 до 15 минут назад
+            if ($minutesSinceDeadline < -1 || $minutesSinceDeadline > 15) continue;
 
-                // Окно срабатывания: дедлайн прошёл от 0 до 15 минут назад
-                if ($minutesSinceDeadline >= -1 && $minutesSinceDeadline <= 15) {
-                    $candidates[] = [
-                        'restaurant_number' => (int)$s['restaurant_number'],
-                        'delivery_date' => $deliveryDate,
-                        'group' => $s['legal_entity_group'] ?: 'BK_VM',
-                    ];
-                }
+            foreach (soGetEffectiveScheduleRows($pdo, $supId, $deliveryDate, null, true) as $er) {
+                if ((int)$er['delivery_day'] !== $deliveryDow) continue;
+                $candidates[] = [
+                    'restaurant_number' => (int)$er['restaurant_number'],
+                    'delivery_date' => $deliveryDate,
+                    'group' => $er['legal_entity_group'] ?: 'BK_VM',
+                ];
             }
         }
 
@@ -1315,33 +1301,34 @@ try {
             $supplierEntities = getEntitiesInGroup($supplierGroup);
             $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
 
-            // Уникальные дни доставки у этого поставщика
-            $dowStmt = $pdo->prepare("SELECT DISTINCT delivery_day FROM supplier_schedules WHERE supplier_id = ? AND is_active = 1");
-            $dowStmt->execute([$supId]);
-            $deliveryDows = array_map('intval', $dowStmt->fetchAll(PDO::FETCH_COLUMN));
+            // Ближайшие даты поставки (2 недели вперёд) с учётом ЭФФЕКТИВНОГО графика:
+            // внутри активного временного периода — временные дни/рестораны, иначе основные.
+            for ($iDay = 0; $iDay < 15; $iDay++) {
+                $deliveryDateObj = (clone $now)->setTime(0, 0, 0)->modify("+{$iDay} days");
+                $deliveryDate = $deliveryDateObj->format('Y-m-d');
+                $deliveryDow = (int)$deliveryDateObj->format('N');
 
-            // Формируем список ближайших дат поставки (текущая и следующая неделя)
-            $datesSet = [];
-            foreach ($deliveryDows as $dow) {
-                $weekStart = clone $now;
-                $weekStart->setTime(0, 0, 0);
-                $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
-                for ($w = 0; $w < 2; $w++) {
-                    $dd = dateFromWeekStartByDow($weekStart, $dow, $w)->format('Y-m-d');
-                    $datesSet[$dd] = $dow;
+                // Ожидаемые рестораны на эту дату по эффективному графику (группа поставщика)
+                $expectedRests = [];
+                $seenNums = [];
+                foreach (soGetEffectiveScheduleRows($pdo, $supId, $deliveryDate, null, true) as $er) {
+                    if ((int)$er['delivery_day'] !== $deliveryDow) continue;
+                    if (($er['legal_entity_group'] ?? '') !== $supplierGroup) continue;
+                    $num = (string)$er['restaurant_number'];
+                    if (isset($seenNums[$num])) continue;
+                    $seenNums[$num] = true;
+                    $expectedRests[] = [
+                        'number'  => $er['restaurant_number'],
+                        'region'  => $er['region'] ?? '',
+                        'address' => $er['address'] ?? '',
+                        'city'    => $er['city'] ?? '',
+                    ];
                 }
-            }
-
-            foreach ($datesSet as $deliveryDate => $deliveryDow) {
-                $deliveryDateObj = new DateTime($deliveryDate, $tz);
-                if ($deliveryDateObj->format('Y-m-d') < $now->format('Y-m-d')) {
-                    continue;
-                }
-                $actualDeliveryDow = (int)$deliveryDateObj->format('N');
-                if ($actualDeliveryDow !== (int)$deliveryDow) {
-                    error_log('[cron_telegram] so summary skipped: delivery date weekday mismatch for ' . $supId . ' ' . $deliveryDate . ' expected_dow=' . $deliveryDow . ' actual_dow=' . $actualDeliveryDow);
-                    continue;
-                }
+                if (!$expectedRests) continue;
+                usort($expectedRests, function ($a, $b) {
+                    $rc = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));
+                    return $rc !== 0 ? $rc : ((int)$a['number'] <=> (int)$b['number']);
+                });
 
                 // Дедлайн через ядро: override → rule → default. Закрытые дни пропускаем.
                 $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
@@ -1366,20 +1353,6 @@ try {
                 $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary' AND notification_key = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
                 $dup->execute([$dedupKey]);
                 if ($dup->fetch()) continue;
-
-                // Ожидаемые рестораны (по графику на этот день поставки)
-                $expStmt = $pdo->prepare("
-                    SELECT DISTINCT r.number, r.region, r.address, r.city
-                    FROM supplier_schedules ss
-                    JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
-                    WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
-                      AND r.legal_entity_group = ?
-                    ORDER BY r.region, CAST(r.number AS UNSIGNED)
-                ");
-                $expStmt->execute([$supId, $deliveryDow, $supplierGroup]);
-                $expectedRests = $expStmt->fetchAll();
-
-                if (!$expectedRests) continue;
 
                 $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'number'))));
                 $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
