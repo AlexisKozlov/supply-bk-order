@@ -378,7 +378,7 @@ function normalizeCategory(raw) {
     lower.includes('freeze') ||
     lower.includes('frozen')
   ) return 'Мороз';
-  if (lower.includes('холод') || lower.includes('охлажд')) return 'Холод';
+  if (lower.includes('холод') || lower.includes('охлажд') || lower.includes('кулер') || lower.includes('cooler')) return 'Холод';
   if (lower.includes('сух')) return 'Сухой';
   return value;
 }
@@ -600,7 +600,7 @@ async function parseExcel(file) {
     if (!sku && !name) continue;
 
     const supplier = colIdx.supplier !== undefined ? String(r[colIdx.supplier] || '').trim() : '';
-    const qtyPerBox = colIdx.qty_per_box !== undefined ? parseNumberCell(r[colIdx.qty_per_box], { round: true }) : null;
+    const qtyPerBox = colIdx.qty_per_box !== undefined ? parseNumberCell(r[colIdx.qty_per_box]) : null;
     const boxesPerPallet = colIdx.boxes_per_pallet !== undefined ? parseNumberCell(r[colIdx.boxes_per_pallet], { round: true }) : null;
     const unitOfMeasure = (colIdx.unit_of_measure !== undefined && hasCellValue(r[colIdx.unit_of_measure]))
       ? normalizeUnit(String(r[colIdx.unit_of_measure]))
