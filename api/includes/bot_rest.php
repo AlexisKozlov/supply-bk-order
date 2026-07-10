@@ -294,64 +294,57 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
     $tz = new DateTimeZone('Europe/Minsk');
     $today = new DateTime('now', $tz);
     $today->setTime(0, 0, 0);
-    $weekStart = clone $today;
-    $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
     $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
 
+    // Идём по датам доставки на 15 дней вперёд; для каждой берём ЭФФЕКТИВНЫЙ график
+    // (учитывает временный период поставщика), чтобы для дат внутри периода
+    // использовались временные дни, а не основные.
     $availableDates = [];
-    foreach ($schedule as $sc) {
-        $orderDow = (int)$sc['order_day'];
-        $deliveryDow = (int)$sc['delivery_day'];
+    $orderStmt = $pdo->prepare("
+        SELECT o.id, o.status, o.submitted_at,
+               (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
+        FROM so_orders o
+        WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ?
+        LIMIT 1
+    ");
+    for ($i = 0; $i < 15; $i++) {
+        $dObj = (clone $today)->modify("+{$i} days");
+        $deliveryDate = $dObj->format('Y-m-d');
+        $deliveryDow = (int)$dObj->format('N');
 
-        for ($w = 0; $w < 2; $w++) {
-            $orderDateObj = (clone $weekStart)->modify('+' . ($orderDow - 1 + $w * 7) . ' days');
-            $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
-            if ($deliveryDow <= $orderDow) {
-                $deliveryDateObj->modify('+7 days');
-            }
-            if ($deliveryDateObj < $today) {
-                continue;
-            }
-
-            $deliveryDate = $deliveryDateObj->format('Y-m-d');
-            $deadlineInfo = soBotCheckDeadline($pdo, $supplierId, $deliveryDate);
-
-            $os = $pdo->prepare("
-                SELECT o.id, o.status, o.submitted_at,
-                       (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
-                FROM so_orders o
-                WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ?
-                LIMIT 1
-            ");
-            $os->execute([$supplierId, $restNum, $deliveryDate]);
-            $order = $os->fetch();
-
-            $availableDates[] = [
-                'order_date' => $orderDateObj->format('Y-m-d'),
-                'order_day_name' => $dayNamesFull[$orderDow] ?? '',
-                'delivery_date' => $deliveryDate,
-                'delivery_day_name' => $dayNamesFull[$deliveryDow] ?? '',
-                'deadline' => $deadlineInfo['deadline'],
-                'deadline_status' => $deadlineInfo['status'],
-                'order' => $order ? [
-                    'id' => (int)$order['id'],
-                    'status' => $order['status'],
-                    'submitted_at' => $order['submitted_at'],
-                    'item_count' => (int)$order['item_count'],
-                    'is_skip' => ((int)$order['item_count']) === 0,
-                ] : null,
-            ];
+        $rows = soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, (int)$rest['id']);
+        $orderDow = null;
+        foreach ($rows as $r) {
+            if ((int)$r['delivery_day'] === $deliveryDow) { $orderDow = (int)$r['order_day']; break; }
         }
+        if ($orderDow === null) continue;
+
+        // Дата подачи: ближайший день заказа не позже даты доставки в той же неделе доставки.
+        $gap = $deliveryDow - $orderDow;
+        if ($gap <= 0) $gap += 7;
+        $orderDateObj = (clone $dObj)->modify("-{$gap} days");
+
+        $deadlineInfo = soBotCheckDeadline($pdo, $supplierId, $deliveryDate);
+
+        $orderStmt->execute([$supplierId, $restNum, $deliveryDate]);
+        $order = $orderStmt->fetch();
+
+        $availableDates[] = [
+            'order_date' => $orderDateObj->format('Y-m-d'),
+            'order_day_name' => $dayNamesFull[$orderDow] ?? '',
+            'delivery_date' => $deliveryDate,
+            'delivery_day_name' => $dayNamesFull[$deliveryDow] ?? '',
+            'deadline' => $deadlineInfo['deadline'],
+            'deadline_status' => $deadlineInfo['status'],
+            'order' => $order ? [
+                'id' => (int)$order['id'],
+                'status' => $order['status'],
+                'submitted_at' => $order['submitted_at'],
+                'item_count' => (int)$order['item_count'],
+                'is_skip' => ((int)$order['item_count']) === 0,
+            ] : null,
+        ];
     }
-
-    $seen = [];
-    $availableDates = array_values(array_filter($availableDates, function ($dateInfo) use (&$seen) {
-        if (isset($seen[$dateInfo['delivery_date']])) {
-            return false;
-        }
-        $seen[$dateInfo['delivery_date']] = true;
-        return true;
-    }));
 
     usort($availableDates, function ($a, $b) {
         return strcmp($a['delivery_date'], $b['delivery_date']);
@@ -382,37 +375,14 @@ function soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDa
         return false;
     }
 
-    $sch = $pdo->prepare("
-        SELECT order_day, delivery_day
-        FROM supplier_schedules
-        WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
-    ");
-    $sch->execute([$supplierId, $rest['id']]);
-    $schedule = $sch->fetchAll();
-    if (!$schedule) {
-        return false;
-    }
-
-    $tz = new DateTimeZone('Europe/Minsk');
-    $today = new DateTime('now', $tz);
-    $today->setTime(0, 0, 0);
-    $weekStart = clone $today;
-    $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
-
-    foreach ($schedule as $sc) {
-        $orderDow = (int)$sc['order_day'];
-        $deliveryDow = (int)$sc['delivery_day'];
-        for ($w = 0; $w < 2; $w++) {
-            $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
-            if ($deliveryDow <= $orderDow) {
-                $deliveryDateObj->modify('+7 days');
-            }
-            if ($deliveryDateObj < $today) {
-                continue;
-            }
-            if ($deliveryDateObj->format('Y-m-d') === $deliveryDate) {
-                return true;
-            }
+    // Эффективный график на конкретную дату: внутри временного периода — временные
+    // строки, иначе основные. Дата валидна, если её день недели совпадает с одним
+    // из дней доставки эффективного графика.
+    $deliveryDow = (int)(new DateTime($deliveryDate, new DateTimeZone('Europe/Minsk')))->format('N');
+    $rows = soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, (int)$rest['id']);
+    foreach ($rows as $r) {
+        if ((int)$r['delivery_day'] === $deliveryDow) {
+            return true;
         }
     }
     return false;

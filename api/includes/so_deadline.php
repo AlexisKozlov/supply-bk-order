@@ -137,3 +137,85 @@ function soCalculateDeadline($pdo, $supplierId, $deliveryDate) {
 }
 
 } // if (!function_exists)
+
+// Эффективный график поставщика с учётом временного периода.
+// Здесь (а не в supplier_orders.php), потому что so_deadline.php грузится всеми
+// точками входа (web/api, telegram-бот, cron), а supplier_orders.php рано
+// return-ит при endpoint != 'so' — и для бота его функции недоступны.
+if (!function_exists('soGetEffectiveScheduleRows')) {
+
+/**
+ * Активный временный период графика поставщика, покрывающий дату (или любой, если
+ * дата не задана). Возвращает строку so_supplier_temp_schedule_periods или null.
+ */
+function soGetTempSchedulePeriod($pdo, $supplierId, $deliveryDate = null) {
+    if (!$supplierId) return null;
+
+    if ($deliveryDate) {
+        $s = $pdo->prepare("
+            SELECT id, supplier_id, date_from, date_to, updated_at, updated_by
+            FROM so_supplier_temp_schedule_periods
+            WHERE supplier_id = ? AND date_from <= ? AND date_to >= ?
+            LIMIT 1
+        ");
+        $s->execute([$supplierId, $deliveryDate, $deliveryDate]);
+        return $s->fetch() ?: null;
+    }
+
+    $s = $pdo->prepare("
+        SELECT id, supplier_id, date_from, date_to, updated_at, updated_by
+        FROM so_supplier_temp_schedule_periods
+        WHERE supplier_id = ?
+        LIMIT 1
+    ");
+    $s->execute([$supplierId]);
+    return $s->fetch() ?: null;
+}
+
+/**
+ * Строки расписания поставщика, действующие на дату $deliveryDate: если дата
+ * попадает в активный временный период — строки so_supplier_temp_schedule_items,
+ * иначе — основной supplier_schedules.
+ */
+function soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate = null, $restaurantId = null, $withRestaurantMeta = false) {
+    if (!$supplierId) return [];
+
+    $period = $deliveryDate ? soGetTempSchedulePeriod($pdo, $supplierId, $deliveryDate) : null;
+    if ($period) {
+        $fields = "ssi.restaurant_id, ssi.order_day, ssi.delivery_day, ssi.is_active";
+        $joins = '';
+        if ($withRestaurantMeta) {
+            $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
+            $joins = " JOIN restaurants r ON r.id = ssi.restaurant_id AND r.active = 1";
+        }
+        $sql = "SELECT {$fields} FROM so_supplier_temp_schedule_items ssi{$joins} WHERE ssi.period_id = ? AND ssi.is_active = 1";
+        $params = [(int)$period['id']];
+        if ($restaurantId) {
+            $sql .= " AND ssi.restaurant_id = ?";
+            $params[] = (int)$restaurantId;
+        }
+        $sql .= " ORDER BY ssi.delivery_day, ssi.order_day";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        return $s->fetchAll();
+    }
+
+    $fields = "ss.restaurant_id, ss.order_day, ss.delivery_day, ss.is_active";
+    $joins = '';
+    if ($withRestaurantMeta) {
+        $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
+        $joins = " JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1";
+    }
+    $sql = "SELECT {$fields} FROM supplier_schedules ss{$joins} WHERE ss.supplier_id = ? AND ss.is_active = 1";
+    $params = [$supplierId];
+    if ($restaurantId) {
+        $sql .= " AND ss.restaurant_id = ?";
+        $params[] = (int)$restaurantId;
+    }
+    $sql .= " ORDER BY ss.delivery_day, ss.order_day";
+    $s = $pdo->prepare($sql);
+    $s->execute($params);
+    return $s->fetchAll();
+}
+
+} // if (!function_exists soGetEffectiveScheduleRows)

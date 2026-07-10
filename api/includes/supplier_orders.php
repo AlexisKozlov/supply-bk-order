@@ -304,70 +304,8 @@ function soNotifyTempScheduleChanged($pdo, $supplierId, $dateFrom, $dateTo, $tem
     return $stats;
 }
 
-function soGetTempSchedulePeriod($pdo, $supplierId, $deliveryDate = null) {
-    if (!$supplierId) return null;
-
-    if ($deliveryDate) {
-        $s = $pdo->prepare("
-            SELECT id, supplier_id, date_from, date_to, updated_at, updated_by
-            FROM so_supplier_temp_schedule_periods
-            WHERE supplier_id = ? AND date_from <= ? AND date_to >= ?
-            LIMIT 1
-        ");
-        $s->execute([$supplierId, $deliveryDate, $deliveryDate]);
-        return $s->fetch() ?: null;
-    }
-
-    $s = $pdo->prepare("
-        SELECT id, supplier_id, date_from, date_to, updated_at, updated_by
-        FROM so_supplier_temp_schedule_periods
-        WHERE supplier_id = ?
-        LIMIT 1
-    ");
-    $s->execute([$supplierId]);
-    return $s->fetch() ?: null;
-}
-
-function soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate = null, $restaurantId = null, $withRestaurantMeta = false) {
-    if (!$supplierId) return [];
-
-    $period = $deliveryDate ? soGetTempSchedulePeriod($pdo, $supplierId, $deliveryDate) : null;
-    if ($period) {
-        $fields = "ssi.restaurant_id, ssi.order_day, ssi.delivery_day, ssi.is_active";
-        $joins = '';
-        if ($withRestaurantMeta) {
-            $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
-            $joins = " JOIN restaurants r ON r.id = ssi.restaurant_id AND r.active = 1";
-        }
-        $sql = "SELECT {$fields} FROM so_supplier_temp_schedule_items ssi{$joins} WHERE ssi.period_id = ? AND ssi.is_active = 1";
-        $params = [(int)$period['id']];
-        if ($restaurantId) {
-            $sql .= " AND ssi.restaurant_id = ?";
-            $params[] = (int)$restaurantId;
-        }
-        $sql .= " ORDER BY ssi.delivery_day, ssi.order_day";
-        $s = $pdo->prepare($sql);
-        $s->execute($params);
-        return $s->fetchAll();
-    }
-
-    $fields = "ss.restaurant_id, ss.order_day, ss.delivery_day, ss.is_active";
-    $joins = '';
-    if ($withRestaurantMeta) {
-        $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
-        $joins = " JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1";
-    }
-    $sql = "SELECT {$fields} FROM supplier_schedules ss{$joins} WHERE ss.supplier_id = ? AND ss.is_active = 1";
-    $params = [$supplierId];
-    if ($restaurantId) {
-        $sql .= " AND ss.restaurant_id = ?";
-        $params[] = (int)$restaurantId;
-    }
-    $sql .= " ORDER BY ss.delivery_day, ss.order_day";
-    $s = $pdo->prepare($sql);
-    $s->execute($params);
-    return $s->fetchAll();
-}
+// soGetTempSchedulePeriod / soGetEffectiveScheduleRows перенесены в so_deadline.php
+// (общий файл, загружаемый всеми точками входа, включая telegram-бота).
 
 function soGetScheduleDatesInRange($pdo, $supplierId, $dateFrom, $dateTo, $restaurantId = null) {
     if (!$supplierId || !$dateFrom || !$dateTo) return [];
