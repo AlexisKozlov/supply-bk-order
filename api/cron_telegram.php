@@ -822,6 +822,20 @@ try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
 
+    // Активные временные периоды графиков (на сегодня и вперёд). Для дат внутри
+    // периода напоминания должны идти по ВРЕМЕННОМУ графику, а не основному
+    // (та же логика, что в cron_delivery_reminders.php для локальных поставщиков).
+    $soTempPeriods = []; // supplier_id => [['date_from','date_to'], ...]
+    foreach ($pdo->query("SELECT supplier_id, date_from, date_to FROM so_supplier_temp_schedule_periods WHERE date_to >= CURDATE()") as $p) {
+        $soTempPeriods[$p['supplier_id']][] = ['date_from' => $p['date_from'], 'date_to' => $p['date_to']];
+    }
+    $soDateInTempPeriod = function ($supId, $dateStr) use ($soTempPeriods) {
+        foreach ($soTempPeriods[$supId] ?? [] as $p) {
+            if ($dateStr >= $p['date_from'] && $dateStr <= $p['date_to']) return true;
+        }
+        return false;
+    };
+
     // Все активные so_*-поставщики (подключённые через портал) с графиком,
     // принимающие заявки. Локальных не трогаем — их обрабатывает отдельный
     // модуль cron_delivery_reminders.php с гибкими временами и ack-кнопкой.
@@ -849,6 +863,27 @@ try {
         ");
         $schStmt->execute([$supId]);
         $schRows = $schStmt->fetchAll();
+        foreach ($schRows as &$sr) { $sr['source'] = 'main'; }
+        unset($sr);
+
+        // Если у поставщика есть активный временный период — добавляем его строки.
+        // В цикле подбора дат: основные дни, попавшие в период, подавляются, а
+        // временные — учитываются только внутри периода.
+        if (isset($soTempPeriods[$supId])) {
+            $tmpStmt = $pdo->prepare("
+                SELECT ssi.restaurant_id, ssi.order_day, ssi.delivery_day,
+                       r.number AS restaurant_number, r.legal_entity_group
+                FROM so_supplier_temp_schedule_items ssi
+                JOIN so_supplier_temp_schedule_periods sp ON sp.id = ssi.period_id
+                JOIN restaurants r ON r.id = ssi.restaurant_id AND r.active = 1
+                WHERE sp.supplier_id = ? AND ssi.is_active = 1 AND sp.date_to >= CURDATE()
+            ");
+            $tmpStmt->execute([$supId]);
+            foreach ($tmpStmt->fetchAll() as $tr) {
+                $tr['source'] = 'temp';
+                $schRows[] = $tr;
+            }
+        }
 
         // Группируем по ресторану. Источник получателей — видимые подписки бота:
         // чтобы человек получал напоминания только по тем ресторанам, которые видит в меню бота.
@@ -873,6 +908,7 @@ try {
             $byRest[$rn]['schedule'][] = [
                 'order_day' => (int)$s['order_day'],
                 'delivery_day' => (int)$s['delivery_day'],
+                'source' => $s['source'] ?? 'main',
             ];
         }
 
@@ -894,6 +930,13 @@ try {
                     if ($deliveryDateObj < (clone $now)->setTime(0,0,0)) continue;
 
                     $deliveryDate = $deliveryDateObj->format('Y-m-d');
+
+                    // Временный график: основной день, попавший в активный период,
+                    // подавляется; временный день — только внутри периода.
+                    $src = $sc['source'] ?? 'main';
+                    $inTemp = $soDateInTempPeriod($supId, $deliveryDate);
+                    if ($src === 'main' && $inTemp) continue;
+                    if ($src === 'temp' && !$inTemp) continue;
 
                     // Дедлайн через ядро: override → rule → default. is_closed здесь не учитываем
                     // (для совместимости с прежней логикой напоминаний — она тоже не различала закрытые дни).
