@@ -143,6 +143,7 @@ const STATUS_FILTER_DEFS = [
   { key: 'DRAFT', label: 'Черновики', match: r => r.status === 'DRAFT' },
   { key: 'SUBMITTED', label: 'Отправлены', match: r => r.status === 'SUBMITTED' },
   { key: 'ROUTED', label: 'Маршрутизированы', match: r => r.status === 'ROUTED' },
+  { key: 'NOT_RETURNED', label: 'Не сданы', match: r => r.status === 'NOT_RETURNED' },
   { key: 'CANCELLED', label: 'Отменены', match: r => r.status === 'CANCELLED' },
 ];
 const statusFilters = computed(() => STATUS_FILTER_DEFS.map(f => ({

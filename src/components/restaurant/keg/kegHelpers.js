@@ -37,7 +37,7 @@ export function fmtIsoLocal(iso) {
 }
 
 export function statusLabel(s) {
-  const map = { DRAFT: 'Черновик', SUBMITTED: 'Отправлена', ROUTED: 'Маршрутизирована', CANCELLED: 'Отменена' };
+  const map = { DRAFT: 'Черновик', SUBMITTED: 'Отправлена', ROUTED: 'Маршрутизирована', CANCELLED: 'Отменена', NOT_RETURNED: 'Не сдана' };
   return map[s] || s;
 }
 

@@ -71,12 +71,14 @@
       :saving="saving"
       :submit-ready="submitReady"
       :submit-missing-hint="submitMissingHint"
+      :can-mark-not-returned="canMarkNotReturned"
       @save-draft="saveDraft"
       @submit="submit"
       @download-excel="downloadExcel"
       @print="printTtn"
       @cancel="cancelReturn"
       @delete="deleteDraft"
+      @not-returned="markNotReturned"
     />
 
     <!-- Модалки формы -->
@@ -152,5 +154,6 @@ const {
   openBsoReplace, closeBsoReplace, replaceBsoSubmit,
   saveDraft, submit, cancelReturn, deleteDraft,
   downloadExcel, printTtn,
+  canMarkNotReturned, markNotReturned,
 } = useKegForm(initialIdRef, emit);
 </script>

@@ -333,6 +333,39 @@ function krNotifyRestaurant(PDO $pdo, int $restaurantId, string $text) {
 }
 
 /**
+ * Письмо бухгалтерии при переводе заявки в статус «Не сдана».
+ * Адреса берём из settings (key='keg_not_returned_emails', через запятую).
+ * Если адреса не заданы — тихо ничего не делаем.
+ */
+function krNotifyAccountingNotReturned(PDO $pdo, ?array $row, string $by): void {
+    if (!$row) return;
+    $emails = (string)($pdo->query("SELECT value FROM settings WHERE `key` = 'keg_not_returned_emails'")->fetchColumn() ?: '');
+    $to = preg_split('/[\s,;]+/', trim($emails), -1, PREG_SPLIT_NO_EMPTY);
+    if (!$to) return;
+
+    require_once __DIR__ . '/mail_send.php';
+    if (!function_exists('sendEmail')) return;
+
+    $num  = (string)($row['restaurant_number'] ?? '');
+    $date = !empty($row['return_date']) ? date('d.m.Y', strtotime($row['return_date'])) : '';
+    $bso  = trim(($row['bso_series'] ?? '') . ' ' . ($row['bso_number'] ?? ''));
+    $city = trim((string)($row['restaurant_city'] ?? ''));
+    $kegs = 0;
+    foreach (($row['items'] ?? []) as $it) $kegs += (int)($it['quantity'] ?? 0);
+
+    $esc = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+    $subject = "Кеги не сданы — ресторан №{$num}" . ($date ? " ({$date})" : '');
+    $html = "<p>Ресторан <b>№" . $esc($num) . "</b>" . ($city ? ' (' . $esc($city) . ')' : '')
+          . " не сдал кеги по маршрутизированной заявке.</p><ul>"
+          . ($date ? "<li>Дата возврата: <b>{$date}</b></li>" : '')
+          . ($bso  ? "<li>ТТН: <b>" . $esc($bso) . "</b></li>" : '')
+          . ($kegs ? "<li>Кег в заявке: <b>{$kegs}</b></li>" : '')
+          . "<li>Отметил: " . $esc($by) . "</li></ul>";
+    try { sendEmail($to, $subject, $html, true, ['account' => 'default']); }
+    catch (Throwable $e) { error_log('krNotifyAccountingNotReturned: ' . $e->getMessage()); }
+}
+
+/**
  * Валидация серии и номера БСО.
  * Серия: ровно 2 заглавные кириллические буквы.
  * Номер: ровно 7 цифр.
@@ -373,10 +406,11 @@ function krGetReturnsEnabledStatus(PDO $pdo, int $restaurantId, string $legalEnt
 
 function krStatusLabel(?string $status): string {
     return [
-        'DRAFT'     => 'Черновик',
-        'SUBMITTED' => 'Отправлена',
-        'ROUTED'    => 'Маршрутизирована',
-        'CANCELLED' => 'Отменена',
+        'DRAFT'        => 'Черновик',
+        'SUBMITTED'    => 'Отправлена',
+        'ROUTED'       => 'Маршрутизирована',
+        'CANCELLED'    => 'Отменена',
+        'NOT_RETURNED' => 'Не сдана',
     ][(string)$status] ?? 'неизвестно';
 }
 
@@ -607,7 +641,7 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     // Доп. фильтры из query-параметров — повторяют фильтры списка на странице,
     // чтобы экспортилось ровно то, что пользователь видит.
     $filterStatus = isset($_GET['status']) ? trim($_GET['status']) : '';
-    if ($filterStatus !== '' && !in_array($filterStatus, ['SUBMITTED', 'ROUTED', 'CANCELLED'], true)) $filterStatus = '';
+    if ($filterStatus !== '' && !in_array($filterStatus, ['SUBMITTED', 'ROUTED', 'CANCELLED', 'NOT_RETURNED'], true)) $filterStatus = '';
     $filterRestaurantId = isset($_GET['restaurant_id']) && $_GET['restaurant_id'] !== '' ? (int)$_GET['restaurant_id'] : 0;
     $filterFrom = isset($_GET['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['from']) ? $_GET['from'] : '';
     $filterTo   = isset($_GET['to'])   && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['to'])   ? $_GET['to']   : '';
@@ -659,7 +693,7 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     $rows->execute($params);
     $list = $rows->fetchAll();
 
-    $statusLabels = ['DRAFT'=>'Черновик','SUBMITTED'=>'Отправлена','ROUTED'=>'Маршрутизирована','CANCELLED'=>'Отменена'];
+    $statusLabels = ['DRAFT'=>'Черновик','SUBMITTED'=>'Отправлена','ROUTED'=>'Маршрутизирована','CANCELLED'=>'Отменена','NOT_RETURNED'=>'Не сдана'];
 
     $ss = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
 
@@ -707,7 +741,7 @@ if ($method === 'GET' && $krSubSlug === 'export') {
             $sh->setCellValue('M' . $r, $row['created_at'] ? date('d.m.Y H:i', strtotime($row['created_at'])) : '');
             $sh->setCellValue('N' . $r, $row['routed_at'] ? date('d.m.Y H:i', strtotime($row['routed_at'])) : '');
             // Заливка по статусу
-            $color = ['SUBMITTED' => 'FFF3E0', 'ROUTED' => 'E8F5E9', 'CANCELLED' => 'FCE4EC'][$row['status']] ?? 'FFFFFF';
+            $color = ['SUBMITTED' => 'FFF3E0', 'ROUTED' => 'E8F5E9', 'CANCELLED' => 'FCE4EC', 'NOT_RETURNED' => 'FDE0DC'][$row['status']] ?? 'FFFFFF';
             $sh->getStyle('A' . $r . ':' . $lastCol . $r)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB($color);
             // Внешний код кеги — текстовый формат, чтобы Excel не превращал «900000123» в число с потерей ведущих нулей.
             $sh->getStyle('H' . $r)->getNumberFormat()->setFormatCode('@');
@@ -1177,6 +1211,87 @@ if ($method === 'POST' && $krId && $krAction === 'unroute') {
     $rowAfter = krGetReturnWithItems($pdo, $krId);
     if ($rowAfter) krNotifyUnrouted($pdo, $rowAfter);
     krRespond($rowAfter);
+}
+
+// ── GET/POST /keg-returns/not-returned-emails ── адреса бухгалтерии для писем «Не сдана»
+if ($krSubSlug === 'not-returned-emails' && $method === 'GET') {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    krRequirePortalAccess($krPortalUser, 'view');
+    $v = $pdo->query("SELECT value FROM settings WHERE `key` = 'keg_not_returned_emails'")->fetchColumn();
+    krRespond(['emails' => (string)($v ?: '')]);
+}
+if ($krSubSlug === 'not-returned-emails' && $method === 'POST') {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    krRequirePortalAccess($krPortalUser, 'full');
+    $raw = trim((string)($body['emails'] ?? ''));
+    $parts = preg_split('/[\s,;]+/', $raw, -1, PREG_SPLIT_NO_EMPTY);
+    $valid = [];
+    foreach ($parts as $e) {
+        if (!filter_var($e, FILTER_VALIDATE_EMAIL)) krRespond(['error' => 'Неверный email: ' . $e], 422);
+        $valid[] = $e;
+    }
+    $joined = implode(', ', $valid);
+    $pdo->prepare("INSERT INTO settings (`key`, value) VALUES ('keg_not_returned_emails', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)")
+        ->execute([$joined]);
+    krRespond(['emails' => $joined]);
+}
+
+// ── POST /keg-returns/{id}/not-returned ── ресторан/закупка отмечают «Не сдана»
+// Ресторан: свою маршрутизированную заявку, только со следующего дня после даты
+// возврата. Закупка: любую маршрутизированную в своей группе. При переводе шлём
+// письмо бухгалтерии (settings key='keg_not_returned_emails').
+if ($method === 'POST' && $krId && $krAction === 'not-returned') {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+        if ($row['status'] !== 'ROUTED') {
+            krRespond(['error' => 'Отметить «не сдана» можно только по маршрутизированной заявке'], 422);
+        }
+        $today = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('Y-m-d');
+        if (empty($row['return_date']) || $today <= $row['return_date']) {
+            krRespond(['error' => 'Отметить «не сдана» можно только со следующего дня после даты возврата'], 422);
+        }
+        $by = 'ro:' . ($krRestSession['restaurant_number'] ?? '');
+    } else {
+        krRequirePortalAccess($krPortalUser, 'edit');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
+        if ($row['status'] !== 'ROUTED') {
+            krRespond(['error' => 'Поставить статус «не сдана» можно только по маршрутизированной заявке'], 422);
+        }
+        $by = $krPortalUser['name'] ?? 'закупка';
+    }
+
+    $stmt = $pdo->prepare("UPDATE keg_returns SET status = 'NOT_RETURNED', not_returned_at = NOW(), not_returned_by = ? WHERE id = ? AND status = 'ROUTED'");
+    $stmt->execute([$by, $krId]);
+    if ($stmt->rowCount() === 0) {
+        krRespond(['error' => 'Статус заявки уже изменился, обновите страницу'], 409);
+    }
+
+    $rowAfter = krGetReturnWithItems($pdo, $krId);
+    krNotifyAccountingNotReturned($pdo, $rowAfter, $by);
+    krRespond($rowAfter);
+}
+
+// ── POST /keg-returns/{id}/revert-not-returned ── откат «Не сдана» → ROUTED (только закупка)
+if ($method === 'POST' && $krId && $krAction === 'revert-not-returned') {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+    krRequirePortalAccess($krPortalUser, 'edit');
+    krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
+    if ($row['status'] !== 'NOT_RETURNED') {
+        krRespond(['error' => 'Вернуть можно только заявку в статусе «Не сдана»'], 422);
+    }
+    $stmt = $pdo->prepare("UPDATE keg_returns SET status = 'ROUTED', not_returned_at = NULL, not_returned_by = NULL WHERE id = ? AND status = 'NOT_RETURNED'");
+    $stmt->execute([$krId]);
+    if ($stmt->rowCount() === 0) {
+        krRespond(['error' => 'Статус заявки уже изменился, обновите страницу'], 409);
+    }
+    krRespond(krGetReturnWithItems($pdo, $krId));
 }
 
 // ── POST /keg-returns/{id}/replace-bso ──

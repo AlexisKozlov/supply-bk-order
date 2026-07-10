@@ -6,6 +6,7 @@
         <router-link :to="{ name: 'keg-returns-schedule' }" class="btn">График</router-link>
         <button class="btn" @click="exportExcel" :disabled="!filteredRows.length">📥 Экспорт в Excel</button>
         <button class="btn" @click="openImport">Импорт маршрутизации</button>
+        <button class="btn" @click="openNotify" title="Адреса бухгалтерии для писем «Не сдана»">✉️ Письма бухгалтерии</button>
         <button class="btn primary" @click="createOpen = true">+ Создать заявку</button>
       </div>
     </div>
@@ -20,6 +21,7 @@
         <option value="">Все статусы</option>
         <option value="SUBMITTED">Отправлена</option>
         <option value="ROUTED">Маршрутизирована</option>
+        <option value="NOT_RETURNED">Не сдана</option>
         <option value="CANCELLED">Отменена</option>
       </select>
       <select v-model="filters.restaurant_id">
@@ -84,6 +86,36 @@
       @close="createOpen = false"
       @created="createOpen = false; loadList()"
     />
+
+    <!-- Адреса бухгалтерии для писем «Не сдана» -->
+    <Teleport v-if="notifyOpen" to="body">
+      <div class="modal" @click.self="notifyOpen = false">
+        <div class="modal-content kr-notify-modal">
+          <div class="modal-header">
+            <h3>Письма бухгалтерии</h3>
+            <button class="modal-close" @click="notifyOpen = false">✕</button>
+          </div>
+          <div class="kr-notify-body">
+            <p class="kr-notify-hint">
+              На эти адреса уйдёт письмо, когда заявку отметят «Не сдана» (ресторан или закупка).
+              Несколько адресов — через запятую. Пусто — письма не отправляются.
+            </p>
+            <div v-if="notifyLoading" class="kr-loading">Загрузка...</div>
+            <template v-else>
+              <textarea v-model="notifyEmails" rows="3" class="kr-notify-input"
+                placeholder="buh1@company.by, buh2@company.by"></textarea>
+              <div v-if="notifyError" class="kr-error">{{ notifyError }}</div>
+            </template>
+          </div>
+          <div class="modal-actions">
+            <button class="btn" @click="notifyOpen = false" :disabled="notifySaving">Отмена</button>
+            <button class="btn primary" @click="saveNotify" :disabled="notifySaving || notifyLoading">
+              {{ notifySaving ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Модалка импорта маршрутизации -->
     <Teleport v-if="importOpen" to="body">
@@ -245,6 +277,49 @@ const editId = ref(null);
 const createOpen = ref(false);
 
 const filters = ref({ status: '', restaurant_id: '', from: '', to: '', legal_entity: '' });
+
+// Адреса бухгалтерии для писем при статусе «Не сдана»
+const notifyOpen = ref(false);
+const notifyEmails = ref('');
+const notifyLoading = ref(false);
+const notifySaving = ref(false);
+const notifyError = ref('');
+
+async function openNotify() {
+  notifyOpen.value = true;
+  notifyError.value = '';
+  notifyLoading.value = true;
+  try {
+    const res = await fetch('/api/keg-returns/not-returned-emails', { credentials: 'include', headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    notifyEmails.value = data.emails || '';
+  } catch (e) {
+    notifyError.value = e.message;
+  } finally {
+    notifyLoading.value = false;
+  }
+}
+async function saveNotify() {
+  notifySaving.value = true;
+  notifyError.value = '';
+  try {
+    const res = await fetch('/api/keg-returns/not-returned-emails', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emails: notifyEmails.value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    notifyEmails.value = data.emails || '';
+    notifyOpen.value = false;
+  } catch (e) {
+    notifyError.value = e.message;
+  } finally {
+    notifySaving.value = false;
+  }
+}
 
 // Импорт маршрутизации
 const importOpen = ref(false);
@@ -554,7 +629,7 @@ function fmtDateTime(d) {
 }
 
 function statusLabel(s) {
-  const map = { DRAFT: 'Черновик', SUBMITTED: 'Отправлена', ROUTED: 'Маршрутизирована', CANCELLED: 'Отменена' };
+  const map = { DRAFT: 'Черновик', SUBMITTED: 'Отправлена', ROUTED: 'Маршрутизирована', CANCELLED: 'Отменена', NOT_RETURNED: 'Не сдана' };
   return map[s] || s;
 }
 
@@ -593,6 +668,11 @@ onMounted(() => {
 .kr-badge-SUBMITTED { background: #fff3e0; color: #e65100; }
 .kr-badge-ROUTED { background: #e8f5e9; color: #2e7d32; }
 .kr-badge-CANCELLED { background: #fce4ec; color: #c62828; }
+.kr-badge-NOT_RETURNED { background: #fde0dc; color: #b71c1c; }
+.kr-notify-modal { max-width: 460px; width: 100%; }
+.kr-notify-body { padding: 4px 0 12px; }
+.kr-notify-hint { margin: 0 0 10px; font-size: 13px; color: #6b5b4a; line-height: 1.45; }
+.kr-notify-input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9cfc0; border-radius: 6px; font: inherit; resize: vertical; }
 .kr-bso-replaced {
   display: inline-block; margin-left: 6px;
   padding: 1px 7px; border-radius: 999px;

@@ -401,6 +401,38 @@ export function useKegForm(initialIdRef, emit) {
     }
   }
 
+  // Кнопка «Кеги не сдал» — только по маршрутизированной заявке и только
+  // со следующего дня после даты возврата (кеги уже должны были забрать).
+  const canMarkNotReturned = computed(() => {
+    if (form.status !== 'ROUTED' || !form.return_date) return false;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const [Y, M, D] = String(form.return_date).split('-').map(Number);
+    if (!Y || !M || !D) return false;
+    const rd = new Date(Y, M - 1, D); rd.setHours(0, 0, 0, 0);
+    return today.getTime() > rd.getTime();
+  });
+
+  async function markNotReturned() {
+    const ok = await askConfirm({
+      title: 'Отметить «Кеги не сдал»?',
+      message: 'Заявка перейдёт в статус «Не сдана». Об этом узнают отдел закупок и бухгалтерия.',
+      okText: 'Да, не сдал',
+      cancelText: 'Отмена',
+      danger: true,
+    });
+    if (!ok) return;
+    saving.value = true;
+    try {
+      await roFetch(`/api/keg-returns/${localId.value}/not-returned`, { method: 'POST' });
+      await loadFormData(localId.value);
+      toast.success('Отмечено «Не сдана»', '');
+    } catch (e) {
+      toast.error('Не удалось отметить', e.message || '');
+    } finally {
+      saving.value = false;
+    }
+  }
+
   async function deleteDraft() {
     const ok = await askConfirm({
       title: 'Удалить черновик?',
@@ -526,5 +558,6 @@ export function useKegForm(initialIdRef, emit) {
     // actions
     saveDraft, submit, cancelReturn, deleteDraft,
     downloadExcel, printTtn,
+    canMarkNotReturned, markNotReturned,
   };
 }

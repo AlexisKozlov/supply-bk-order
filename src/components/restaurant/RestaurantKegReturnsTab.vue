@@ -230,6 +230,7 @@ onMounted(async () => {
 .krt-card--SUBMITTED .krt-card-stripe { background: #F4A261; }
 .krt-card--ROUTED .krt-card-stripe { background: #43A047; }
 .krt-card--CANCELLED .krt-card-stripe { background: #E57373; }
+.krt-card--NOT_RETURNED .krt-card-stripe { background: #C62828; }
 .krt-card-body { flex: 1; padding: 14px 16px; min-width: 0; }
 .krt-card-row1 { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .krt-card-date { font-weight: 700; font-size: 16px; color: #2C1A12; }
@@ -288,6 +289,7 @@ onMounted(async () => {
 .krt-badge-SUBMITTED { background: #FFF1E0; color: #C16B4D; }
 .krt-badge-ROUTED { background: #E5F3E5; color: #2E7D32; }
 .krt-badge-CANCELLED { background: #FCE4EC; color: #C62828; }
+.krt-badge-NOT_RETURNED { background: #FDE0DC; color: #B71C1C; }
 
 /* ═══ Форма ═══ */
 .krt-form-wrap { display: flex; flex-direction: column; gap: 14px; }

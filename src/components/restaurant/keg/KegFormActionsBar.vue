@@ -50,6 +50,12 @@
         Удалить черновик
       </button>
     </div>
+    <!-- «Кеги не сдал» — по маршрутизированной заявке со след. дня после возврата -->
+    <div v-if="editingId && status === 'ROUTED' && canMarkNotReturned" class="krt-actions-bar-extra">
+      <button class="krt-link danger" @click="$emit('not-returned')" :disabled="saving">
+        Кеги не сдал
+      </button>
+    </div>
   </div>
 </template>
 
@@ -61,6 +67,7 @@ defineProps({
   saving: { type: Boolean, default: false },
   submitReady: { type: Boolean, default: false },
   submitMissingHint: { type: String, default: '' },
+  canMarkNotReturned: { type: Boolean, default: false },
 });
-defineEmits(['save-draft', 'submit', 'download-excel', 'print', 'cancel', 'delete']);
+defineEmits(['save-draft', 'submit', 'download-excel', 'print', 'cancel', 'delete', 'not-returned']);
 </script>

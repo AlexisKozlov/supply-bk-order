@@ -118,6 +118,8 @@
             <button class="btn kr-em-icon-btn" @click="printTtn" :disabled="saving" title="Печать" aria-label="Печать">🖨️</button>
             <button v-if="!readonly" class="btn btn-danger" @click="cancelReturn" :disabled="saving">Отменить</button>
             <button v-if="form && form.status === 'ROUTED'" class="btn btn-warn" @click="unroute" :disabled="saving" title="Откатить статус в «Отправлена» и уведомить ресторан">Отменить маршрутизацию</button>
+            <button v-if="form && form.status === 'ROUTED'" class="btn btn-danger" @click="markNotReturned" :disabled="saving" title="Ресторан не сдал кеги — уведомить бухгалтерию">Не сдана</button>
+            <button v-if="form && form.status === 'NOT_RETURNED'" class="btn btn-warn" @click="revertNotReturned" :disabled="saving" title="Вернуть в «Маршрутизирована»">Вернуть «Не сдана»</button>
             <button class="btn btn-danger" @click="deleteRequest" :disabled="saving">Удалить</button>
             <button v-if="!readonly" class="btn" @click="save(false)" :disabled="saving">
               {{ saving && !routing ? 'Сохранение...' : 'Сохранить' }}
@@ -200,7 +202,7 @@ function validateBso() {
   return true;
 }
 
-const readonly = computed(() => form.value && (form.value.status === 'ROUTED' || form.value.status === 'CANCELLED'));
+const readonly = computed(() => form.value && (form.value.status === 'ROUTED' || form.value.status === 'CANCELLED' || form.value.status === 'NOT_RETURNED'));
 
 async function checkRoutedWarning() {
   const status = form.value?.status;
@@ -359,6 +361,46 @@ async function unroute() {
   }
 }
 
+async function markNotReturned() {
+  if (!(await appConfirm('Отметить, что ресторан не сдал кеги? Заявка перейдёт в статус «Не сдана», бухгалтерия получит письмо (если указаны адреса).', { title: 'Кеги не сданы', okText: 'Не сдана', danger: true }))) return;
+  saving.value = true;
+  saveError.value = '';
+  try {
+    const res = await fetch(`/api/keg-returns/${props.id}/not-returned`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    emit('close');
+  } catch (e) {
+    saveError.value = e.message;
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function revertNotReturned() {
+  if (!(await appConfirm('Вернуть заявку в «Маршрутизирована»?', { title: 'Вернуть статус', okText: 'Вернуть', danger: false }))) return;
+  saving.value = true;
+  saveError.value = '';
+  try {
+    const res = await fetch(`/api/keg-returns/${props.id}/revert-not-returned`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    emit('close');
+  } catch (e) {
+    saveError.value = e.message;
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function cancelReturn() {
   if (!(await appConfirm('Отменить заявку?', { okText: 'Отменить заявку', danger: true }))) return;
   saving.value = true;
@@ -380,7 +422,7 @@ async function cancelReturn() {
 }
 
 function statusLabel(s) {
-  const map = { DRAFT: 'Черновик', SUBMITTED: 'Отправлена', ROUTED: 'Маршрутизирована', CANCELLED: 'Отменена' };
+  const map = { DRAFT: 'Черновик', SUBMITTED: 'Отправлена', ROUTED: 'Маршрутизирована', CANCELLED: 'Отменена', NOT_RETURNED: 'Не сдана' };
   return map[s] || s;
 }
 
@@ -482,6 +524,7 @@ onMounted(() => {
 .kr-badge-SUBMITTED { background: #fff3e0; color: #e65100; }
 .kr-badge-ROUTED { background: #e8f5e9; color: #2e7d32; }
 .kr-badge-CANCELLED { background: #fce4ec; color: #c62828; }
+.kr-badge-NOT_RETURNED { background: #fde0dc; color: #b71c1c; }
 .btn-danger { background: #fce4ec; color: #c62828; }
 .btn-danger:hover { background: #f8bbd0; }
 .btn-warn { background: #FFF3E0; color: #C16B4D; }
