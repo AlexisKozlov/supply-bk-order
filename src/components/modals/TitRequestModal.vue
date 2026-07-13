@@ -153,14 +153,55 @@
                 <span class="trm-sent-label">Копия:</span>
                 <code class="trm-sent-addr">{{ s.cc_email }}</code>
               </div>
-              <div class="trm-sent-row">
-                <span class="trm-sent-label">Машин в заявке:</span>
-                <span>{{ activeVehicles.length }}</span>
+              <div v-if="s.file_name" class="trm-sent-row">
+                <span class="trm-sent-label">Вложение:</span>
+                <code class="trm-sent-addr">{{ s.file_name }}</code>
               </div>
-              <div v-if="s.smtp_error" class="trm-sent-row trm-sent-error">
+              <div v-if="s.smtp_error && s.smtp_error !== 'manual'" class="trm-sent-row trm-sent-error">
                 <span class="trm-sent-label">Ошибка SMTP:</span>
                 <span>{{ s.smtp_error }}</span>
               </div>
+
+              <!-- Что именно ушло охране: снимок строк на момент отправки.
+                   У отправок до появления снимка (старые записи) показываем
+                   текущий состав машин заявки и честно об этом пишем. -->
+              <div class="trm-sent-data">
+                <div class="trm-sent-data-head">
+                  Данные, отправленные охране
+                  <span v-if="!s.rows_sent?.length" class="trm-sent-note">снимок не сохранялся — показан текущий состав заявки</span>
+                </div>
+                <div class="trm-sent-table-wrap">
+                  <table class="trm-sent-table">
+                    <thead>
+                      <tr>
+                        <th>Машина</th>
+                        <th>Телефон</th>
+                        <th>Подача с</th>
+                        <th>по</th>
+                        <th>Склад</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(r, ri) in sentRows(s)" :key="ri">
+                        <td><code>{{ r.plate || '—' }}</code></td>
+                        <td><code>{{ r.phone || '—' }}</code></td>
+                        <td>{{ r.start || '—' }}</td>
+                        <td>{{ r.end || '—' }}</td>
+                        <td>{{ r.warehouse }}</td>
+                      </tr>
+                      <tr v-if="!sentRows(s).length">
+                        <td colspan="5" class="trm-sent-empty">Машин нет</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <details v-if="s.subject || s.body_text" class="trm-sent-mail">
+                <summary>Письмо: {{ s.subject || '(без темы)' }}</summary>
+                <pre class="trm-sent-mail-body">{{ s.body_text || '—' }}</pre>
+              </details>
+
               <div v-if="si === 0" class="trm-sent-actions">
                 <button class="trm-btn ghost" @click="downloadXlsx">Скачать xlsx ещё раз</button>
               </div>
@@ -324,6 +365,40 @@ const formatDateTime = (dt) => {
 };
 
 const autoUpper = (s) => (s || '').toUpperCase();
+
+const warehouseLabel = (w) => (Number(w) === 1 ? 'Прилесье 1 (холод/мороз)' : 'Прилесье 6 (сухой)');
+
+// В снимке отправки время лежит в формате Excel (число дней от 30.12.1899) —
+// так оно попадает в xlsx для охраны. Переводим обратно в человеческий вид.
+const excelDateToText = (serial) => {
+  if (typeof serial !== 'number') return '';
+  const date = new Date(Date.UTC(1899, 11, 30) + serial * 86400000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getUTCDate())}.${pad(date.getUTCMonth() + 1)}.${date.getUTCFullYear()} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+};
+
+// Строки для блока «Данные, отправленные охране». Приоритет — снимок из лога
+// отправки. Если его нет (заявки, отправленные до появления снимка), показываем
+// текущий состав машин заявки — в шаблоне это помечено отдельной подписью.
+function sentRows(logEntry) {
+  const snapshot = Array.isArray(logEntry?.rows_sent) ? logEntry.rows_sent : [];
+  if (snapshot.length) {
+    return snapshot.map(r => ({
+      plate: r.plate_number,
+      phone: r.sms_number,
+      start: excelDateToText(r.start_time),
+      end: excelDateToText(r.end_time),
+      warehouse: warehouseLabel(r.warehause),
+    }));
+  }
+  return activeVehicles.value.map(v => ({
+    plate: v.plate,
+    phone: v.phone,
+    start: formatDateTime(v.start_time),
+    end: formatDateTime(v.end_time),
+    warehouse: warehouseLabel(v.warehouse),
+  }));
+}
 
 async function reload() {
   error.value = '';
@@ -584,6 +659,20 @@ onMounted(reload);
 .trm-sent-empty { color: #8C7B6E; }
 .trm-sent-actions { margin-top: 6px; display: flex; gap: 8px; }
 .trm-sent-manual { background: #fff; border: 1px dashed #C5E1A5; padding: 12px; border-radius: 8px; font-size: 13px; color: #33691E; text-align: center; }
+
+.trm-sent-data { margin-top: 8px; border-top: 1px solid #E8F0DC; padding-top: 10px; }
+.trm-sent-data-head { font-size: 13px; font-weight: 700; color: #33691E; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.trm-sent-note { font-weight: 500; font-size: 12px; color: #8C7B6E; }
+.trm-sent-table-wrap { overflow-x: auto; border: 1px solid #E8F0DC; border-radius: 8px; }
+.trm-sent-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.trm-sent-table thead th { background: #F1F8E9; color: #33691E; text-align: left; padding: 7px 10px; font-weight: 600; white-space: nowrap; }
+.trm-sent-table tbody td { padding: 7px 10px; border-top: 1px solid #EDF3E3; color: #33691E; white-space: nowrap; }
+.trm-sent-table code { font-family: ui-monospace, Menlo, monospace; }
+.trm-sent-table .trm-sent-empty { text-align: center; color: #8C7B6E; }
+
+.trm-sent-mail { margin-top: 8px; }
+.trm-sent-mail summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #33691E; }
+.trm-sent-mail-body { margin: 8px 0 0; padding: 10px 12px; background: #F1F8E9; border-radius: 8px; font-size: 12px; color: #33691E; white-space: pre-wrap; font-family: inherit; }
 
 .trm-loading, .trm-error { padding: 60px 20px; text-align: center; color: #8C7B6E; }
 .trm-error { color: #B91C1C; }

@@ -206,7 +206,8 @@ if ($fn === 'tit_get') {
 
     // Лог отправок охране — для блока «Отправлено» в карточке (история, ошибки SMTP)
     $sStmt = $pdo->prepare("
-        SELECT id, sent_at, sent_by, recipients, cc_email, smtp_error, smtp_message_id
+        SELECT id, sent_at, sent_by, recipients, cc_email, smtp_error, smtp_message_id,
+               file_path, subject, body_text, payload_json
         FROM tit_send_log
         WHERE request_id = ?
         ORDER BY sent_at DESC, id DESC
@@ -217,6 +218,14 @@ if ($fn === 'tit_get') {
     foreach ($sStmt->fetchAll() as $row) {
         $rec = json_decode((string)$row['recipients'], true);
         $row['recipients'] = is_array($rec) ? $rec : [];
+        // Снимок строк, ушедших охране в xlsx. У старых отправок его нет —
+        // фронт в этом случае покажет текущий состав машин с пометкой.
+        $payload = json_decode((string)($row['payload_json'] ?? ''), true);
+        $row['rows_sent'] = is_array($payload) ? $payload : [];
+        unset($row['payload_json']);
+        // Наружу отдаём только имя файла: полный путь на диске светить незачем.
+        $row['file_name'] = $row['file_path'] ? basename((string)$row['file_path']) : '';
+        unset($row['file_path']);
         $sendLog[] = $row;
     }
 
@@ -748,12 +757,18 @@ if ($fn === 'tit_send_to_security') {
     // запускает Spamc → он даёт «ham decisive» → переопределяет NiceBayes.
     $send = sendEmail($candidates, $subject, $bodyHtml, true, $opts);
 
+    // Пишем снимок отправки: тему, текст и сами строки xlsx. Заявка после SENT
+    // не редактируется, но письма от поставщика могут добавить машины позже —
+    // снимок гарантирует, что в карточке видно ровно то, что ушло охране.
     $pdo->prepare("
         INSERT INTO tit_send_log
-            (request_id, file_path, recipients, cc_email, test_mode, sent_by, smtp_message_id, smtp_error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (request_id, file_path, subject, body_text, payload_json,
+             recipients, cc_email, test_mode, sent_by, smtp_message_id, smtp_error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ")->execute([
-        $id, $diskPath, json_encode($candidates, JSON_UNESCAPED_UNICODE),
+        $id, $diskPath, mb_substr($subject, 0, 500), $bodyText,
+        json_encode($rows, JSON_UNESCAPED_UNICODE),
+        json_encode($candidates, JSON_UNESCAPED_UNICODE),
         $senderEmail ?: '', 0, $authUserName,
         $send['message_id'] ?? null,
         $send['success'] ? null : mb_substr((string)($send['error'] ?? ''), 0, 500),
@@ -795,11 +810,15 @@ if ($fn === 'tit_mark_sent') {
         respond(['error' => 'Сначала подтвердите все машины в заявке'], 400);
     }
 
+    // Письмо ушло мимо портала, поэтому темы и текста у нас нет — но состав машин
+    // сохраняем: именно он был в скачанном xlsx, который закупщик приложил сам.
+    $manualRows = $titBuildXlsxRows($id);
+
     $pdo->prepare("
         INSERT INTO tit_send_log
-            (request_id, file_path, recipients, cc_email, test_mode, sent_by, smtp_message_id, smtp_error)
-        VALUES (?, '', '[]', '', 0, ?, NULL, 'manual')
-    ")->execute([$id, $authUserName]);
+            (request_id, file_path, payload_json, recipients, cc_email, test_mode, sent_by, smtp_message_id, smtp_error)
+        VALUES (?, '', ?, '[]', '', 0, ?, NULL, 'manual')
+    ")->execute([$id, json_encode($manualRows, JSON_UNESCAPED_UNICODE), $authUserName]);
 
     $pdo->prepare("UPDATE tit_requests SET status = 'SENT', updated_at = NOW() WHERE id = ?")->execute([$id]);
 
