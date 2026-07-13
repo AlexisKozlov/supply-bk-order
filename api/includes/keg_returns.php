@@ -531,7 +531,7 @@ function krAddressTokens(string $addr): array {
     $stop = [
         'г','город','гор',
         'ул','улица',
-        'пр','прт','проспект',
+        'пр','прт','просп','проспект',
         'пл','площадь',
         'пер','переулок',
         'тр','тракт',
@@ -542,7 +542,9 @@ function krAddressTokens(string $addr): array {
     ];
     return array_values(array_filter($tokens, function($t) use ($stop) {
         if (in_array($t, $stop, true)) return false;
-        if (mb_strlen($t, 'UTF-8') <= 1) return false; // одиночные буквы — шум
+        // Одиночные буквы — шум («т.о.», «дом 15 В /Г»). А вот одиночную цифру
+        // выкидывать нельзя: это номер дома («Кирова, 2», «Привокзальная, 7»).
+        if (mb_strlen($t, 'UTF-8') <= 1 && !preg_match('/\d/u', $t)) return false;
         return true;
     }));
 }
@@ -557,6 +559,60 @@ function krAddressTokens(string $addr): array {
  *  — у обеих сторон есть номер дома (токен с цифрой), и номера разные.
  * Это защищает от ложных матчей по совпадению только улицы.
  */
+function krKnownCities(): array {
+    return ['минск','гродно','брест','витебск','гомель','могилев',
+        'бобруйск','лида','мозырь','пинск','полоцк','солигорск','барановичи',
+        'жлобин','жодино','молодечно'];
+}
+
+/**
+ * Номера домов в адресе: числовая часть каждого токена с цифрой.
+ * «Дом 56\1 Г» → ['56','1'], «19-1, 6 сектор» → ['19','1','6'].
+ */
+function krAddressHouses(string $addr): array {
+    $out = [];
+    foreach (krAddressTokens($addr) as $t) {
+        if (preg_match('/\d+/u', $t, $m)) $out[] = $m[0];
+    }
+    return array_values(array_unique($out));
+}
+
+/**
+ * Название улицы: значимые слова без цифр и без городов.
+ * «г. Минск, ул. П. Мстиславца, Дом 11 ресторан» → ['мстиславца'].
+ */
+function krAddressStreet(string $addr): array {
+    $tok = array_filter(krAddressTokens($addr), fn($t) => !preg_match('/\d/u', $t));
+    return array_values(array_diff($tok, krKnownCities()));
+}
+
+/**
+ * Строгое совпадение адресов. Нужно для импорта маршрутизации: файл логистов
+ * содержит точки всех юрлиц (в том числе Пиццы Стар), и «похожего» адреса мало —
+ * чужую точку нельзя навесить на наш ресторан. Раньше хватало половины общих
+ * слов, из-за чего «ул. Притыцкого, 19А» цеплялось к ресторану №57
+ * «Аэровокзальная, 19-1»: совпадала только цифра 19.
+ *
+ * Совпадением считаем только: тот же номер дома И та же улица, при этом города
+ * (если известны с обеих сторон) не должны различаться.
+ */
+function krAddressStrictMatch(string $a, string $b): bool {
+    $cities = krKnownCities();
+    $aCity = array_intersect(krAddressTokens($a), $cities);
+    $bCity = array_intersect(krAddressTokens($b), $cities);
+    if (!empty($aCity) && !empty($bCity) && empty(array_intersect($aCity, $bCity))) return false;
+
+    $aHouse = krAddressHouses($a);
+    $bHouse = krAddressHouses($b);
+    if (empty($aHouse) || empty($bHouse)) return false;
+    if (empty(array_intersect($aHouse, $bHouse))) return false;
+
+    $aStreet = krAddressStreet($a);
+    $bStreet = krAddressStreet($b);
+    if (empty($aStreet) || empty($bStreet)) return false;
+    return !empty(array_intersect($aStreet, $bStreet));
+}
+
 function krAddressMatchScore(string $a, string $b): float {
     $aTok = krAddressTokens($a);
     $bTok = krAddressTokens($b);
@@ -566,8 +622,7 @@ function krAddressMatchScore(string $a, string $b): float {
 
     // Города из active BK_VM рестораны. Если у обеих сторон город есть и
     // они разные — это разные адреса, что бы там по словам не пересекалось.
-    static $cities = ['минск','гродно','брест','витебск','гомель','могилев',
-        'бобруйск','лида','мозырь','пинск','полоцк','солигорск','барановичи'];
+    $cities = krKnownCities();
     $aCities = array_intersect($aSet, $cities);
     $bCities = array_intersect($bSet, $cities);
     if (!empty($aCities) && !empty($bCities) && empty(array_intersect($aCities, $bCities))) {
@@ -2003,14 +2058,18 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
     // заявки брутто, кг», а гос. номер сидит под подписью «Гос. номер
     // транспортного средства». Поэтому ищем колонки по тексту заголовка.
     $headerIdx = -1;
-    $colDriver = null; $colCustomer = null; $colAddress = null; $colVehicle = null;
+    $colDriver = null; $colCustomer = null; $colAddress = null; $colVehicle = null; $colWarehouse = null;
     foreach ($sheetData as $idx => $row2) {
-        $tmpDriver = null; $tmpCustomer = null; $tmpAddress = null; $tmpVehicle = null;
+        $tmpDriver = null; $tmpCustomer = null; $tmpAddress = null; $tmpVehicle = null; $tmpWarehouse = null;
         foreach ($row2 as $colIdx => $cell) {
             $c = mb_strtolower(trim((string)$cell), 'UTF-8');
             if ($c === '') continue;
             if ($tmpDriver === null && ($c === 'водитель' || strpos($c, 'фио водителя') !== false)) {
                 $tmpDriver = $colIdx;
+            } elseif ($tmpWarehouse === null && strpos($c, 'склад') !== false) {
+                // «Физический склад отгрузки» — по нему отличаем Прилесье 6 (сухое,
+                // кеги) от Прилесья 1 (холод/мороз, другие водители).
+                $tmpWarehouse = $colIdx;
             } elseif ($tmpCustomer === null && (strpos($c, 'заказчик') !== false || strpos($c, 'клиент') !== false)) {
                 $tmpCustomer = $colIdx;
             } elseif ($tmpAddress === null && strpos($c, 'адрес') !== false) {
@@ -2034,6 +2093,7 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
             $colCustomer = $tmpCustomer;
             $colAddress = $tmpAddress;
             $colVehicle = $tmpVehicle;
+            $colWarehouse = $tmpWarehouse;
             break;
         }
     }
@@ -2047,61 +2107,70 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
     }
 
     // Парсим строки данных с поддержкой объединённых ячеек (значение только в первой строке группы)
-    $currentDriver   = null;
-    $currentCustomer = null;
-    $currentVehicle  = null;
+    $currentDriver    = null;
+    $currentCustomer  = null;
+    $currentVehicle   = null;
+    $currentWarehouse = null;
     $parsed = [];
 
     foreach ($sheetData as $idx => $row2) {
         if ($idx <= $headerIdx) continue;
-        $driver   = trim((string)($row2[$colDriver] ?? ''));
-        $customer = $colCustomer !== null ? trim((string)($row2[$colCustomer] ?? '')) : '';
-        $address  = trim((string)($row2[$colAddress] ?? ''));
-        $vehicle  = trim((string)($row2[$colVehicle] ?? ''));
+        $driver    = trim((string)($row2[$colDriver] ?? ''));
+        $customer  = $colCustomer !== null ? trim((string)($row2[$colCustomer] ?? '')) : '';
+        $warehouse = $colWarehouse !== null ? trim((string)($row2[$colWarehouse] ?? '')) : '';
+        $address   = trim((string)($row2[$colAddress] ?? ''));
+        $vehicle   = trim((string)($row2[$colVehicle] ?? ''));
 
-        if ($driver !== '')   $currentDriver   = $driver;
-        if ($customer !== '') $currentCustomer = $customer;
-        if ($vehicle !== '')  $currentVehicle  = $vehicle;
+        if ($driver !== '')    $currentDriver    = $driver;
+        if ($customer !== '')  $currentCustomer  = $customer;
+        if ($vehicle !== '')   $currentVehicle   = $vehicle;
+        if ($warehouse !== '') $currentWarehouse = $warehouse;
         if ($address === '') continue; // продолжение мержа — без адреса
 
         $parsed[] = [
-            'driver'   => $currentDriver,
-            'customer' => $currentCustomer,
-            'address'  => $address,
-            'vehicle'  => $currentVehicle,
+            'driver'    => $currentDriver,
+            'customer'  => $currentCustomer,
+            'address'   => $address,
+            'vehicle'   => $currentVehicle,
+            'warehouse' => $currentWarehouse,
         ];
     }
 
-    // Файл логистов на ОДИН день обычно содержит строки и со склада «Прилесье 6»
+    // Файл логистов на ОДИН день содержит строки и со склада «Прилесье 6»
     // (сухое — оттуда забирают кеги), и со склада «Прилесье 1» (холод/мороз —
-    // другие водители, кег вообще нет). Для одного и того же адреса ресторана
-    // в файле могут оказаться две строки с разными водителями. Для возврата
-    // кег нас интересует только Прилесье 6: если в группе по адресу есть хотя
-    // бы одна такая строка — оставляем ровно её и выкидываем 1-ку. Если же
-    // ни одна строка не помечена «Прилесье» — оставляем как было (на случай
-    // файла без явного указания склада, чтобы не сломать обратную совместимость).
-    $byAddr = [];
-    foreach ($parsed as $p) {
-        $key = krNormalizeAddress($p['address']);
-        $byAddr[$key][] = $p;
-    }
-    $isPrilesye6 = function($row) {
-        $c = mb_strtolower((string)($row['customer'] ?? ''), 'UTF-8');
+    // другие водители, кег вообще нет). По одному адресу в файле легко оказаться
+    // двум строкам с разными водителями (Витебск, Чкалова 35: Прилесье 1 везёт
+    // Бибик, Прилесье 6 — Климовец), поэтому для возврата кег берём ТОЛЬКО
+    // строки Прилесье 6. Название склада живёт либо в колонке «Физический склад
+    // отгрузки», либо (в старых файлах) в колонке «Заказчик».
+    // Если склад в файле не указан вовсе — оставляем строки как есть,
+    // чтобы не сломать старый формат.
+    $whOf = function(array $row) use ($colWarehouse) {
+        $src = $colWarehouse !== null ? ($row['warehouse'] ?? '') : ($row['customer'] ?? '');
+        return mb_strtolower((string)$src, 'UTF-8');
+    };
+    $isPrilesye6 = function(array $row) use ($whOf) {
+        $c = $whOf($row);
         return strpos($c, 'прилесье 6') !== false || strpos($c, 'прилесье-6') !== false;
     };
-    $filtered = [];
-    foreach ($byAddr as $rowsByKey) {
-        $p6 = array_values(array_filter($rowsByKey, $isPrilesye6));
-        $useRows = !empty($p6) ? $p6 : $rowsByKey;
-        foreach ($useRows as $r) $filtered[] = $r;
+    // Склад считаем указанным, только если он реально назван («Прилесье …»).
+    // В старом шаблоне в колонке «Заказчик» стоит юрлицо («Бургер БК»), а не склад —
+    // такой файл фильтровать по складу нельзя, иначе отсеются все строки.
+    $hasWarehouseInfo = false;
+    foreach ($parsed as $p) {
+        if (strpos($whOf($p), 'прилесье') !== false) { $hasWarehouseInfo = true; break; }
     }
-    $parsed = $filtered;
+    if ($hasWarehouseInfo) {
+        $parsed = array_values(array_filter($parsed, $isPrilesye6));
+    }
 
-    // Дедупликация по (address, customer) — оставляем первый
+    // Дедупликация по адресу — оставляем первую строку. По одному адресу в файле
+    // могут стоять две точки разных юрлиц (наш ресторан и Пицца Стар), но развозит
+    // их один водитель, поэтому лишняя строка ничего не добавляет.
     $seen = [];
     $unique = [];
     foreach ($parsed as $p) {
-        $key = $p['address'] . '||' . $p['customer'];
+        $key = krNormalizeAddress($p['address']);
         if (!isset($seen[$key])) {
             $seen[$key] = true;
             $unique[] = $p;
@@ -2151,56 +2220,50 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
     }
 
     foreach ($unique as $fileRow) {
-        $normAddr = krNormalizeAddress($fileRow['address']);
-        // Шаг 1: точный/подстрочный матч. Самый надёжный, попадает в идеальные случаи.
-        $candidates = [];
+        // Строгий отбор: улица и номер дома обязаны совпасть, город — не
+        // конфликтовать. Адреса чужих юрлиц (Пицца Стар и прочие точки из того же
+        // файла) сюда просто не проходят: среди наших ресторанов их нет.
+        $scored = [];
         foreach ($requestsFull as $rf) {
-            $normReqAddr = krNormalizeAddress($rf['full']);
-            if (strpos($normReqAddr, $normAddr) !== false || strpos($normAddr, $normReqAddr) !== false) {
-                $candidates[] = $rf['req'];
-            }
+            if (!krAddressStrictMatch($fileRow['address'], $rf['full'])) continue;
+            $scored[] = ['req' => $rf['req'], 'score' => krAddressMatchScore($fileRow['address'], $rf['full'])];
         }
-        // Шаг 2: нечёткий матч по токенам. Срабатывает, если в файле и БД
-        // адрес написан по-разному («г. Минск, пл. Свободы, Дом 17 ресторан»
-        // vs «Минск, свободы, 17 (Немига)»). Порог 0.5 — это примерно
-        // «половина значимых слов и номер дома совпали».
-        if (empty($candidates)) {
-            $scored = [];
-            foreach ($requestsFull as $rf) {
-                $score = krAddressMatchScore($fileRow['address'], $rf['full']);
-                if ($score >= 0.5) $scored[] = ['req' => $rf['req'], 'score' => $score];
-            }
-            if (!empty($scored)) {
-                usort($scored, fn($x, $y) => $y['score'] <=> $x['score']);
-                $top = $scored[0]['score'];
-                // Берём всех с очень близким скором (±0.05) — если тай,
-                // ниже фильтр по «Воглия/Бургер» отсеет лишних.
-                foreach ($scored as $s) {
-                    if ($top - $s['score'] <= 0.05) $candidates[] = $s['req'];
-                }
-            }
-        }
-        // Уточняем по customer если несколько кандидатов
-        if (count($candidates) > 1) {
-            $custLower = mb_strtolower($fileRow['customer'] ?? '');
+        usort($scored, fn($x, $y) => $y['score'] <=> $x['score']);
+
+        // Уточняем по заказчику, если он есть в файле (старый формат): «Воглия» — это
+        // всегда ресторан №3, «Бургер» — любой другой.
+        if (count($scored) > 1) {
+            $custLower = mb_strtolower((string)($fileRow['customer'] ?? ''), 'UTF-8');
             if (strpos($custLower, 'воглия') !== false) {
-                $filtered = array_filter($candidates, fn($c) => (int)$c['restaurant_number'] === 3);
+                $byCust = array_filter($scored, fn($s) => (int)$s['req']['restaurant_number'] === 3);
             } elseif (strpos($custLower, 'бургер') !== false || strpos($custLower, 'бк') !== false) {
-                $filtered = array_filter($candidates, fn($c) => (int)$c['restaurant_number'] !== 3);
+                $byCust = array_filter($scored, fn($s) => (int)$s['req']['restaurant_number'] !== 3);
             } else {
-                $filtered = $candidates;
+                $byCust = $scored;
             }
-            if (count($filtered) > 0) $candidates = array_values($filtered);
+            if (count($byCust) > 0) $scored = array_values($byCust);
         }
 
-        if (empty($candidates)) {
+        if (empty($scored)) {
             $preview[] = ['row' => $fileRow, 'match' => null, 'warning' => 'не найден'];
             continue;
         }
 
-        $match = $candidates[0];
+        // Несколько подходящих ресторанов: назначаем автоматически только явного
+        // лидера (заметно более похожий адрес). Если разрыв мал — не гадаем,
+        // оставляем ручной выбор в превью.
+        if (count($scored) > 1 && ($scored[0]['score'] - $scored[1]['score']) < 0.1) {
+            $nums = array_map(fn($s) => '№' . (int)$s['req']['restaurant_number'], $scored);
+            $preview[] = [
+                'row'     => $fileRow,
+                'match'   => null,
+                'warning' => 'подходит несколько ресторанов (' . implode(', ', $nums) . ') — выберите вручную',
+            ];
+            continue;
+        }
+
+        $match = $scored[0]['req'];
         $warning = null;
-        if (count($candidates) > 1) $warning = 'несколько кандидатов';
 
         $preview[] = [
             'row' => $fileRow,
