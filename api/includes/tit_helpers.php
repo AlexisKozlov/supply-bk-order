@@ -16,16 +16,27 @@ function titAllowCompanyForWarehouse(int $warehouse): int
 }
 
 /**
- * По составу заказа (товары + категории Сухой/Холод/Мороз) определяет
- * рекомендуемый склад. Если заказ микс — возвращает массив из двух
- * рекомендаций, чтобы фронт мог разбить заявку на две строки в xlsx.
- *
- * @return array<int>  список номеров складов, например [6] или [1] или [1, 6]
+ * Тип хранения (что выбирает закупщик) → номер склада (что уходит охране):
+ *   DRY    — сухой, Прилесье 6
+ *   COLD   — холод, Прилесье 1
+ *   FROZEN — мороз, Прилесье 1
+ * Для охраны холод и мороз неразличимы: оба идут складом 1 (код доступа 32).
  */
-function titDetectWarehousesForOrder(PDO $pdo, string $orderId, string $legalEntity): array
+function titWarehouseForStorageKind(string $kind): int
 {
-    $hasDry = false;
-    $hasCold = false;
+    return in_array($kind, ['COLD', 'FROZEN'], true) ? 1 : 6;
+}
+
+/**
+ * По составу заказа (категории товаров Сухой/Холод/Мороз) определяет
+ * рекомендуемые типы хранения. Заказ бывает микс — тогда рекомендаций несколько,
+ * и закупщик заводит по машине на каждый тип.
+ *
+ * @return array<string>  например ['DRY'] или ['COLD','FROZEN'] или ['DRY','COLD','FROZEN']
+ */
+function titDetectStorageKindsForOrder(PDO $pdo, string $orderId, string $legalEntity): array
+{
+    $kinds = [];
     try {
         $skuStmt = $pdo->prepare("SELECT DISTINCT sku FROM order_items WHERE order_id = ? AND sku IS NOT NULL AND sku <> ''");
         $skuStmt->execute([$orderId]);
@@ -39,18 +50,31 @@ function titDetectWarehousesForOrder(PDO $pdo, string $orderId, string $legalEnt
             $st->execute(array_merge($skus, $entitiesInGroup));
             foreach ($st->fetchAll() as $row) {
                 $cat = (string)($row['category'] ?? '');
-                if ($cat === 'Сухой') $hasDry = true;
-                if ($cat === 'Холод' || $cat === 'Мороз') $hasCold = true;
+                if ($cat === 'Сухой') $kinds['DRY'] = true;
+                if ($cat === 'Холод') $kinds['COLD'] = true;
+                if ($cat === 'Мороз') $kinds['FROZEN'] = true;
             }
         }
     } catch (Throwable $e) {
-        error_log('[tit_helpers] detectWarehouses failed: ' . $e->getMessage());
+        error_log('[tit_helpers] detectStorageKinds failed: ' . $e->getMessage());
     }
 
-    if ($hasDry && $hasCold) return [1, 6];
-    if ($hasCold) return [1];
-    if ($hasDry)  return [6];
-    return [6]; // дефолт — сухой склад, если категорий не нашли
+    if (!$kinds) return ['DRY']; // дефолт — сухой склад, если категорий не нашли
+    // Порядок фиксируем: сухой, холод, мороз.
+    return array_values(array_filter(['DRY', 'COLD', 'FROZEN'], fn($k) => isset($kinds[$k])));
+}
+
+/**
+ * Те же рекомендации, но номерами складов — для мест, где нужен именно склад.
+ *
+ * @return array<int>  например [6] или [1] или [1, 6]
+ */
+function titDetectWarehousesForOrder(PDO $pdo, string $orderId, string $legalEntity): array
+{
+    $kinds = titDetectStorageKindsForOrder($pdo, $orderId, $legalEntity);
+    $out = [];
+    foreach ($kinds as $k) $out[titWarehouseForStorageKind($k)] = true;
+    return array_keys($out);
 }
 
 /**

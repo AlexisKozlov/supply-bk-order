@@ -33,7 +33,7 @@ $titBuildXlsxRows = function (int $requestId) use ($pdo): array {
     if (!$r) return [];
 
     $vehicles = $pdo->prepare("
-        SELECT plate, phone, warehouse, allow_company, entry_kind, start_time, end_time
+        SELECT plate, phone, warehouse, storage_kind, allow_company, entry_kind, start_time, end_time
         FROM tit_vehicles
         WHERE request_id = ? AND deleted_at IS NULL
         ORDER BY id
@@ -62,6 +62,10 @@ $titBuildXlsxRows = function (int $requestId) use ($pdo): array {
             'status'        => (int)$v['entry_kind'],
             'allow_company' => (int)$v['allow_company'],
             'warehause'     => (int)$v['warehouse'],
+            // Для охраны холод и мороз неразличимы (оба — склад 1), но в снимке
+            // отправки тип сохраняем: в карточке заявки видно, что именно везли.
+            // В сам xlsx это поле не попадает — там только колонки формы ТиТ.
+            'storage_kind'  => $v['storage_kind'] !== null ? (string)$v['storage_kind'] : null,
             'ramp'          => '',
             'supplier'      => (string)$r['supplier_name'],
         ];
@@ -198,11 +202,14 @@ if ($fn === 'tit_get') {
         $defaults = $dStmt->fetch() ?: null;
     }
 
-    // Подскажем рекомендуемый склад по составу заказа (для подсказки в карточке)
-    $warehouses = [6];
+    // Подскажем рекомендуемый тип хранения по составу заказа (сухой/холод/мороз)
+    $storageKinds = ['DRY'];
     if (!empty($req['order_id']) && !empty($req['legal_entity'])) {
-        $warehouses = titDetectWarehousesForOrder($pdo, $req['order_id'], $req['legal_entity']);
+        $storageKinds = titDetectStorageKindsForOrder($pdo, $req['order_id'], $req['legal_entity']);
     }
+    $warehouses = [];
+    foreach ($storageKinds as $k) $warehouses[titWarehouseForStorageKind($k)] = true;
+    $warehouses = array_keys($warehouses);
 
     // Лог отправок охране — для блока «Отправлено» в карточке (история, ошибки SMTP)
     $sStmt = $pdo->prepare("
@@ -235,6 +242,7 @@ if ($fn === 'tit_get') {
         'emails'           => $eStmt->fetchAll(),
         'supplier_defaults'=> $defaults,
         'recommended_warehouses' => $warehouses,
+        'recommended_storage_kinds' => $storageKinds,
         'send_log'         => $sendLog,
     ]);
 }
@@ -453,12 +461,21 @@ if ($fn === 'tit_vehicle_save') {
     $plateRaw    = trim((string)($body['plate'] ?? ''));
     $phoneRaw    = trim((string)($body['phone'] ?? ''));
     $warehouse   = (int)($body['warehouse'] ?? 6);
+    $storageKind = strtoupper(trim((string)($body['storage_kind'] ?? '')));
     $entryKind   = (int)($body['entry_kind'] ?? 1);
     $startTime   = trim((string)($body['start_time'] ?? ''));
     $endTime     = trim((string)($body['end_time'] ?? ''));
     $confirm     = !empty($body['confirm']);
 
     if (!$requestId) respond(['error' => 'Не указана заявка'], 400);
+    // Тип хранения (сухой/холод/мороз) — то, что выбирает закупщик. Номер склада
+    // для охраны выводим из него: холод и мороз оба живут на Прилесье 1.
+    // Запрос без storage_kind (старый клиент) продолжает работать по warehouse.
+    if (in_array($storageKind, ['DRY', 'COLD', 'FROZEN'], true)) {
+        $warehouse = titWarehouseForStorageKind($storageKind);
+    } else {
+        $storageKind = null;
+    }
     if (!in_array($warehouse, [1, 6], true)) $warehouse = 6;
     if (!in_array($entryKind, [1, 2], true)) $entryKind = 1;
 
@@ -482,7 +499,7 @@ if ($fn === 'tit_vehicle_save') {
         $upd = $pdo->prepare("
             UPDATE tit_vehicles
             SET plate = ?, plate_raw = ?, phone = ?, phone_raw = ?,
-                warehouse = ?, allow_company = ?, entry_kind = ?,
+                warehouse = ?, storage_kind = ?, allow_company = ?, entry_kind = ?,
                 start_time = ?, end_time = ?,
                 needs_review = ?, confirmed_by = ?, confirmed_at = ?,
                 updated_at = NOW()
@@ -490,7 +507,7 @@ if ($fn === 'tit_vehicle_save') {
         ");
         $upd->execute([
             $pn['plate'], $pn['raw'], $ph['phone'], $ph['raw'],
-            $warehouse, $allowCompany, $entryKind,
+            $warehouse, $storageKind, $allowCompany, $entryKind,
             $sttDb, $endDb,
             $confirm ? 0 : 1,
             $confirm ? $authUserName : null,
@@ -502,14 +519,14 @@ if ($fn === 'tit_vehicle_save') {
         $ins = $pdo->prepare("
             INSERT INTO tit_vehicles
                 (request_id, plate, plate_raw, phone, phone_raw,
-                 warehouse, allow_company, entry_kind, start_time, end_time,
+                 warehouse, storage_kind, allow_company, entry_kind, start_time, end_time,
                  source, needs_review, confirmed_by, confirmed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, ?, ?)
         ");
         $ins->execute([
             $requestId,
             $pn['plate'], $pn['raw'], $ph['phone'], $ph['raw'],
-            $warehouse, $allowCompany, $entryKind, $sttDb, $endDb,
+            $warehouse, $storageKind, $allowCompany, $entryKind, $sttDb, $endDb,
             $confirm ? 0 : 1,
             $confirm ? $authUserName : null,
             $confirm ? date('Y-m-d H:i:s') : null,
@@ -579,8 +596,8 @@ if ($fn === 'tit_apply_supplier_default') {
     $ins = $pdo->prepare("
         INSERT INTO tit_vehicles
             (request_id, plate, plate_raw, phone, phone_raw,
-             warehouse, allow_company, entry_kind, source, needs_review)
-        VALUES (?, ?, ?, ?, ?, 6, 8, 1, 'SUGGESTION', 1)
+             warehouse, storage_kind, allow_company, entry_kind, source, needs_review)
+        VALUES (?, ?, ?, ?, ?, 6, 'DRY', 8, 1, 'SUGGESTION', 1)
     ");
     $ins->execute([
         $requestId,

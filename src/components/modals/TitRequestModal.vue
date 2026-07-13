@@ -72,11 +72,17 @@
               </label>
               <label>
                 <span>Склад</span>
-                <select v-model.number="v.warehouse">
-                  <option :value="6">Прилесье 6 (сухой)</option>
-                  <option :value="1">Прилесье 1 (холод/мороз)</option>
+                <select v-model="v.storage_kind">
+                  <option value="DRY">Прилесье 6 (сухой)</option>
+                  <option value="COLD">Прилесье 1 (холод)</option>
+                  <option value="FROZEN">Прилесье 1 (мороз)</option>
+                  <!-- Старые машины: склад 1 без уточнения холод/мороз. Опция
+                       живёт только пока её не переключили на конкретный тип. -->
+                  <option v-if="v.storage_kind === 'LEGACY'" value="LEGACY">Прилесье 1 (холод/мороз)</option>
                 </select>
-                <small v-if="recommendedWarehouses.length && !recommendedWarehouses.includes(v.warehouse)">по составу заказа рекомендуется: {{ recommendedWarehouses.map(w => 'Прилесье ' + w).join(' и ') }}</small>
+                <small v-if="recommendedStorageKinds.length && !recommendedStorageKinds.includes(v.storage_kind)">
+                  по составу заказа рекомендуется: {{ recommendedStorageKinds.map(storageKindShort).join(', ') }}
+                </small>
               </label>
               <label>
                 <span>Тип</span>
@@ -250,6 +256,7 @@ const emails = ref([]);
 const sendLog = ref([]);
 const supplierDefaults = ref(null);
 const recommendedWarehouses = ref([6]);
+const recommendedStorageKinds = ref(['DRY']);
 const loaded = ref(false);
 const error = ref('');
 const previewOpen = ref(false);
@@ -366,7 +373,19 @@ const formatDateTime = (dt) => {
 
 const autoUpper = (s) => (s || '').toUpperCase();
 
-const warehouseLabel = (w) => (Number(w) === 1 ? 'Прилесье 1 (холод/мороз)' : 'Прилесье 6 (сухой)');
+// Тип хранения: что выбирает закупщик. Охране холод и мороз уходят одинаково
+// (склад 1), различие нужно нам — видеть, что именно везут.
+const warehouseForKind = (kind) => (kind === 'COLD' || kind === 'FROZEN' ? 1 : 6);
+const storageKindShort = (kind) => ({ DRY: 'сухой', COLD: 'холод', FROZEN: 'мороз' }[kind] || kind);
+const storageKindLabel = (kind) => ({
+  DRY: 'Прилесье 6 (сухой)',
+  COLD: 'Прилесье 1 (холод)',
+  FROZEN: 'Прилесье 1 (мороз)',
+}[kind] || '');
+// Подпись склада там, где типа может не быть (старые записи): склад 6 — точно
+// сухой, склад 1 без уточнения — «холод/мороз».
+const warehouseLabel = (w, kind) => storageKindLabel(kind)
+  || (Number(w) === 1 ? 'Прилесье 1 (холод/мороз)' : 'Прилесье 6 (сухой)');
 
 // В снимке отправки время лежит в формате Excel (число дней от 30.12.1899) —
 // так оно попадает в xlsx для охраны. Переводим обратно в человеческий вид.
@@ -388,7 +407,7 @@ function sentRows(logEntry) {
       phone: r.sms_number,
       start: excelDateToText(r.start_time),
       end: excelDateToText(r.end_time),
-      warehouse: warehouseLabel(r.warehause),
+      warehouse: warehouseLabel(r.warehause, r.storage_kind),
     }));
   }
   return activeVehicles.value.map(v => ({
@@ -396,7 +415,7 @@ function sentRows(logEntry) {
     phone: v.phone,
     start: formatDateTime(v.start_time),
     end: formatDateTime(v.end_time),
-    warehouse: warehouseLabel(v.warehouse),
+    warehouse: warehouseLabel(v.warehouse, v.storage_kind === 'LEGACY' ? null : v.storage_kind),
   }));
 }
 
@@ -409,6 +428,10 @@ async function reload() {
     req.value = data.request;
     vehicles.value = (data.vehicles || []).map(v => ({
       ...v,
+      // Тип хранения. У машин, заведённых до появления выбора из трёх, его нет:
+      // склад 6 — это точно сухой, а склад 1 остаётся «холод/мороз» (LEGACY),
+      // пока закупщик сам не уточнит.
+      storage_kind: v.storage_kind || (Number(v.warehouse) === 1 ? 'LEGACY' : 'DRY'),
       start_time_local: dbDateTimeToLocal(v.start_time, req.value?.delivery_date, '09:00'),
       end_time_local:   dbDateTimeToLocal(v.end_time,   req.value?.delivery_date, '16:00'),
     }));
@@ -416,6 +439,7 @@ async function reload() {
     sendLog.value = data.send_log || [];
     supplierDefaults.value = data.supplier_defaults || null;
     recommendedWarehouses.value = Array.isArray(data.recommended_warehouses) ? data.recommended_warehouses : [6];
+    recommendedStorageKinds.value = Array.isArray(data.recommended_storage_kinds) ? data.recommended_storage_kinds : ['DRY'];
     // Базовые поля для редактирования (поставщик/юрлицо/дата)
     basic.legal_entity = req.value?.legal_entity || '';
     basic.delivery_date = req.value?.delivery_date || '';
@@ -451,10 +475,12 @@ function localToDbDateTime(local) {
 
 function addVehicle() {
   const tmp = req.value?.delivery_date || '';
+  const kind = recommendedStorageKinds.value[0] || 'DRY';
   vehicles.value.push({
     id: 0, plate: '', plate_raw: '', phone: '', phone_raw: '',
-    warehouse: recommendedWarehouses.value[0] || 6,
-    allow_company: (recommendedWarehouses.value[0] || 6) === 1 ? 32 : 8,
+    storage_kind: kind,
+    warehouse: warehouseForKind(kind),
+    allow_company: warehouseForKind(kind) === 1 ? 32 : 8,
     entry_kind: 1,
     start_time_local: tmp ? tmp + 'T09:00' : '',
     end_time_local:   tmp ? tmp + 'T16:00' : '',
@@ -470,11 +496,16 @@ async function saveVehicle(v, doConfirm) {
       await appAlert('Для подтверждения нужны валидный номер машины и телефон.', { type: 'warning' });
       return;
     }
+    // LEGACY — старая запись «Прилесье 1 (холод/мороз)», тип не уточнён.
+    // Тогда шлём только склад, чтобы не приписать машине холод или мороз задним числом.
+    const kind = v.storage_kind === 'LEGACY' ? null : v.storage_kind;
     const { data, error: e } = await db.rpc('tit_vehicle_save', {
       request_id: props.id,
       vehicle_id: v.id || 0,
       plate: v.plate, phone: v.phone,
-      warehouse: v.warehouse, entry_kind: v.entry_kind,
+      storage_kind: kind,
+      warehouse: kind ? warehouseForKind(kind) : v.warehouse,
+      entry_kind: v.entry_kind,
       start_time: localToDbDateTime(v.start_time_local),
       end_time:   localToDbDateTime(v.end_time_local),
       confirm: doConfirm,
