@@ -2106,6 +2106,45 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
+    // «Сделал заявку» по напоминанию о возврате кег (krack:returnDate:returnDow).
+    // Работает как rrack у поставщиков: отмечаем дату вывоза и гасим повторные
+    // напоминания. Нужно, когда заявку подали вне портала.
+    if (str_starts_with($data, 'krack:')) {
+        $parts = explode(':', $data, 3);
+        if (count($parts) !== 3) { answerCallback($cb['id'], 'Ошибка данных'); exit; }
+        $targetDate = $parts[1];
+        $returnDow  = (int)$parts[2];
+
+        $s = $pdo->prepare("SELECT restaurant_number, legal_entity_group, first_name, username FROM ro_telegram_subs WHERE chat_id = ? AND verified_at IS NOT NULL LIMIT 1");
+        $s->execute([$chatId]);
+        $tgUser = $s->fetch();
+        if (!$tgUser) { answerCallback($cb['id'], 'Привязка не найдена'); exit; }
+
+        $r = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
+        $r->execute([$tgUser['restaurant_number'], $tgUser['legal_entity_group']]);
+        $restaurantId = (int)$r->fetchColumn();
+        if (!$restaurantId) { answerCallback($cb['id'], 'Ресторан не найден'); exit; }
+
+        $by = 'tg:' . ($tgUser['first_name'] ?: ($tgUser['username'] ?: $chatId));
+        $minskNow = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('Y-m-d H:i:s');
+        $pdo->prepare("
+            INSERT INTO reminder_acknowledgements (restaurant_id, reminder_kind, supplier_id, target_date, order_day, acknowledged_by, acknowledged_at, source)
+            VALUES (?, 'keg_return', '', ?, ?, ?, ?, 'telegram')
+            ON DUPLICATE KEY UPDATE
+                acknowledged_by = VALUES(acknowledged_by),
+                acknowledged_at = VALUES(acknowledged_at),
+                source = VALUES(source)
+        ")->execute([$restaurantId, $targetDate, $returnDow, $by, $minskNow]);
+
+        $minskTime = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H:i');
+        $origText = $cb['message']['text'] ?? '';
+        $newText = htmlspecialchars($origText, ENT_QUOTES, 'UTF-8') . "\n\n✅ <b>Отмечено как сделано в {$minskTime}</b>";
+        $edited = editMessage($chatId, $msgId, $newText, null);
+        if (!$edited) editMessageReplyMarkup($chatId, $msgId, null);
+        answerCallback($cb['id'], '✓ Отмечено');
+        exit;
+    }
+
     // Открыть раздел напоминаний из меню ресторана
     if ($data === 'rest_reminders' || $data === 'rrmine') {
         answerCallback($cb['id']);

@@ -699,9 +699,10 @@ $kegHasReturn = $pdo->prepare("
 
 $sentKeg = 0; $skippedKeg = 0;
 
-// helper: разослать одно keg-напоминание по каналам с дедупом
+// helper: разослать одно keg-напоминание по каналам с дедупом.
+// $markup — inline-клавиатура для TG (кнопка «Сделал заявку»), либо null.
 $krSend = function ($subscriptionId, $kind, $targetDate, $orderDay, $runHour, $portalEnabled, $telegramEnabled,
-                    $restNumber, $legGroup, $text, $pushTitle, $pushBody) use (
+                    $restNumber, $legGroup, $text, $pushTitle, $pushBody, $markup = null) use (
     &$sentKeg, $portalIns, $tgRunCheck, $tgRunIns, $pushRunCheck, $pushRunIns,
     $kegTgList, $BOT_TOKEN, $pdo
 ) {
@@ -716,7 +717,7 @@ $krSend = function ($subscriptionId, $kind, $targetDate, $orderDay, $runHour, $p
             $chatId = (string)$tg['chat_id'];
             $tgRunCheck->execute([$subscriptionId, $kind, $targetDate, $orderDay, $runHour, $chatId]);
             if ($tgRunCheck->fetchColumn()) continue;
-            $ok = rtgSend($BOT_TOKEN, (int)$chatId, $text, null);
+            $ok = rtgSend($BOT_TOKEN, (int)$chatId, $text, $markup);
             if ($ok) {
                 try { $tgRunIns->execute([$subscriptionId, $kind, $targetDate, $orderDay, $runHour, $chatId]); } catch (Exception $e) { /* ignore */ }
             }
@@ -776,6 +777,12 @@ foreach ($kegRows as $row) {
         $kegHasReturn->execute([$restPk, $returnDateStr]);
         if ($kegHasReturn->fetchColumn()) { $skippedKeg++; continue; }
 
+        // Ресторан уже нажал «Сделал заявку» в Telegram — тоже молчим.
+        // Заявку могли подать вне портала (по телефону, через 1С), и повторные
+        // напоминания в этом случае выглядят как спам.
+        $ackStmt->execute([$restPk, 'keg_return', '', $returnDateStr, $returnDow]);
+        if ($ackStmt->fetchColumn()) { $skippedKeg++; continue; }
+
         $returnLabel = $krReturnLabel($returnDateStr);
         $whenLabel   = $krDeadlineWhen($deadlineDayStr);
         $num = htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8');
@@ -785,11 +792,19 @@ foreach ($kegRows as $row) {
               . "Ресторан №{$num}.";
         $pushBody = "Подайте заявку на возврат кег до {$whenLabel} {$deadlineShort} (вывоз {$returnLabel})";
 
+        // Кнопка «Сделал заявку»: отмечает дату вывоза как закрытую, чтобы
+        // напоминания по ней больше не приходили. Обработчик — telegram_bot.php (krack:).
+        $kegMarkup = [
+            'inline_keyboard' => [
+                [ ['text' => '✓ Сделал заявку', 'callback_data' => "krack:{$returnDateStr}:{$returnDow}"] ],
+            ],
+        ];
+
         foreach ($fireSlots as $slotHour) {
             $krSend($subId, 'keg_return', $returnDateStr, $returnDow, $slotHour,
                 $row['portal_enabled'], $row['telegram_enabled'],
                 $row['restaurant_number'], $row['legal_entity_group'],
-                $text, '♻️ Возврат кег', $pushBody);
+                $text, '♻️ Возврат кег', $pushBody, $kegMarkup);
         }
     }
 }
