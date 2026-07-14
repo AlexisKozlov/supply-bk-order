@@ -39,6 +39,10 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 $BOT_TOKEN = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+// Адрес портала — нужен для кнопок «Открыть заявку» в напоминаниях: ресторану
+// не надо искать нужную страницу руками, кнопка ведёт сразу туда, где подают
+// заявку.
+$SITE_URL = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
 
 // Web Push helpers
 if (!empty($_ENV['VAPID_PUBLIC']) && !empty($_ENV['VAPID_PRIVATE']) && is_file(__DIR__ . '/includes/push_send.php')) {
@@ -438,14 +442,19 @@ foreach ($rowsToProcess as $row) {
                       . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
                       . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
             }
-            // Опциональная ссылка на оформление заявки (если задана у поставщика).
+            // Кнопка перехода к заявке. Раньше её не было: ресторан читал
+            // напоминание, шёл на портал и искал нужного поставщика руками.
+            // Если у поставщика задан свой сайт для заявок — ведём туда,
+            // иначе на вкладку этого поставщика в кабинете.
             $orderUrl = trim((string)($row['supplier_order_url'] ?? ''));
-            if ($orderUrl !== '' && preg_match('~^https?://~i', $orderUrl)) {
-                $text .= "\n\n🔗 <a href=\"" . htmlspecialchars($orderUrl, ENT_QUOTES, 'UTF-8') . "\">Оформить заявку</a>";
-            }
+            $openUrl = (preg_match('~^https?://~i', $orderUrl))
+                ? $orderUrl
+                : $SITE_URL . '/restaurant/orders/supplier/' . $supplierId;
+
             $callback = "rrack:{$supplierId}:{$orderDay}:" . $slot['order_date'];
             $markup = [
                 'inline_keyboard' => [
+                    [ ['text' => '📝 Открыть заявку', 'url' => $openUrl] ],
                     [ ['text' => '✓ Сделал заказ', 'callback_data' => $callback] ],
                 ],
             ];
@@ -481,7 +490,9 @@ foreach ($rowsToProcess as $row) {
                     [
                         'title' => $pushTitle,
                         'body'  => $pushBody,
-                        'url'   => '/restaurant/reminders',
+                        // Ведём сразу к заявке этого поставщика, а не в общий
+                        // список напоминаний — оттуда всё равно надо искать.
+                        'url'   => '/restaurant/orders/supplier/' . $supplierId,
                         'tag'   => "rem-{$supplierId}-{$slot['order_date']}",
                     ]
                 );
@@ -586,6 +597,7 @@ foreach ($mainStmt->fetchAll() as $row) {
             $callback = "rrack:" . MAIN_DELIVERY_LEGACY_UUID . ":{$orderDay}:" . $slot['order_date'];
             $markup = [
                 'inline_keyboard' => [
+                    [ ['text' => '📝 Открыть заказ', 'url' => $SITE_URL . '/restaurant/orders/delivery'] ],
                     [ ['text' => '✓ Сделал заказ', 'callback_data' => $callback] ],
                 ],
             ];
@@ -621,7 +633,7 @@ foreach ($mainStmt->fetchAll() as $row) {
                     [
                         'title' => $pushTitle,
                         'body'  => $pushBody,
-                        'url'   => '/restaurant/reminders',
+                        'url'   => '/restaurant/orders/delivery',
                         'tag'   => "rem-main-{$slot['order_date']}",
                     ]
                 );
@@ -796,6 +808,7 @@ foreach ($kegRows as $row) {
         // напоминания по ней больше не приходили. Обработчик — telegram_bot.php (krack:).
         $kegMarkup = [
             'inline_keyboard' => [
+                [ ['text' => '📝 Открыть заявку', 'url' => $SITE_URL . '/restaurant/keg-returns'] ],
                 [ ['text' => '✓ Сделал заявку', 'callback_data' => "krack:{$returnDateStr}:{$returnDow}"] ],
             ],
         ];
