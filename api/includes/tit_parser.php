@@ -108,13 +108,13 @@ function titLineLooksLikeSignature(string $line): bool
 {
     if (preg_match('/\b(машин|водител|авто|тягач|транспорт|ттн|прицеп)/iu', $line)) return false;
 
-    // Строку «Тел. +375…» подписью НЕ считаем: телефон водителя поставщики
-    // пишут именно так («Данные водителя: … \n Тел. +375297796779»). Подпись
-    // ловим по признакам, которых в данных не бывает: почта, сайт, должность,
-    // реквизиты. Телефон из подписи отсекается вместе с этим блоком.
+    // Кириллическую строку «Тел. +375…» подписью НЕ считаем: телефон водителя
+    // поставщики пишут именно так («Данные водителя: … \n Тел. +375297796779»).
+    // А вот латинские «T:» / «Tel:» — это outlook-подпись, там телефон менеджера.
     $signals = [
         '/[\w\.\-]+@[\w\.\-]+\.\w{2,}/u',                        // email в строке
         '/\bwww\.\w/iu',                                         // сайт
+        '/^\s*(?:T|M|Tel|Mob|Fax)\s*[:.]\s*\+?\d/u',             // «T: +375(29)648 83 31»
         '/\b(?:manager|managing|director|specialist|coordinator|supervisor)\b/iu',
         '/\b(?:менеджер|директор|специалист|координатор|руководител|начальник|бухгалтер)\w*/iu',
         '/\b(?:спецыяліст|намеснік|дырэктар)\w*/iu',             // подписи на белорусском
@@ -309,9 +309,12 @@ function titCleanForwardedBody(string $rawBody): string
 
     // Всё, что ниже цитаты НАШЕГО письма, — это текст заказа, данных о машине
     // там нет и быть не может. Режем, чтобы не искать номера в списке товаров.
-    $ourMail = $_ENV['SMTP_ORDER_USER'] ?? 'order@supply-department.online';
-    foreach (['/(^|\n)[^\n]*' . preg_quote($ourMail, '/') . '.*/su',
-              '/(^|\n)[^\n]*Отдел\s+закупок.*/su'] as $rx) {
+    //
+    // Маркером служит текст самого письма-заказа. По фразе «Отдел закупок»
+    // резать нельзя: в пересылке она стоит в подписи сотрудника ВЫШЕ цитаты
+    // с данными — так терялось всё письмо целиком.
+    $ourMarkers = ['/(^|\n)[^\n]*Просьба\s+отгрузить\s+товар.*/su'];
+    foreach ($ourMarkers as $rx) {
         if (preg_match($rx, $text, $m, PREG_OFFSET_CAPTURE)) {
             $text = substr($text, 0, $m[0][1]);
         }
@@ -324,6 +327,16 @@ function titCleanForwardedBody(string $rawBody): string
         '/^\s*(?:From|To|Cc|Bcc|Sent|Subject|Date|Reply-To)\s*:/i',
         '/^\s*(?:От|Кому|Копия|Отправлено|Тема|Дата)\s*:/u',
     ];
+
+    // Оставляем ровно одно письмо — ПЕРВОЕ пересланное:
+    //  - то, что написал сам пересылающий, отбрасываем: его часть уже разобрал
+    //    первый проход, а его подпись подсовывает телефон сотрудника вместо
+    //    телефона водителя;
+    //  - всё ниже второй цитаты тоже отбрасываем: там переписка прошлых
+    //    поставок со своими номерами машин.
+    $text = titExtractFirstQuotedLetter($text, $headerRx);
+    if ($text === '') return '';
+
     $keep = [];
     foreach (explode("\n", $text) as $line) {
         $skip = titLineLooksLikeSignature($line);
@@ -336,6 +349,58 @@ function titCleanForwardedBody(string $rawBody): string
     }
 
     return trim(implode("\n", $keep));
+}
+
+/**
+ * Возвращает текст ПЕРВОГО цитируемого письма: без части, которую написал
+ * пересылающий, и без более старых цитат.
+ *
+ * Шапка одного письма («-----Original Message-----», затем From/Sent/To/
+ * Subject подряд) считается одним блоком — данные идут сразу под ней. Вторая
+ * шапка означает начало переписки прошлых дней.
+ *
+ * Пустая строка на выходе = цитаты в письме нет, разбирать в этом режиме нечего.
+ *
+ * @param string[] $headerRx регексы строк-заголовков письма
+ */
+function titExtractFirstQuotedLetter(string $text, array $headerRx): string
+{
+    $quoteRx = [
+        '/-{2,}\s*Original Message\s*-{2,}/i',
+        '/\bписал[аи]?\s*\(?а?\)?\s*:/u',
+        '/\bwrote:\s*$/i',
+        '/^\s*\d{2}\.\d{2}\.\d{4},\s*\d{1,2}:\d{2},\s*"/u',
+    ];
+    $isBoundary = function (string $line) use ($headerRx, $quoteRx): bool {
+        foreach ($headerRx as $rx) if (preg_match($rx, $line)) return true;
+        foreach ($quoteRx as $rx) if (preg_match($rx, $line)) return true;
+        return false;
+    };
+
+    $lines = explode("\n", $text);
+    $start = null;   // первая строка тела первой цитаты
+    $inBlock = false;
+    $seenFirst = false;
+
+    foreach ($lines as $i => $line) {
+        $boundary = $isBoundary($line);
+        if ($boundary) {
+            if (!$inBlock) {
+                if ($seenFirst) {
+                    // Вторая шапка — дальше старая переписка.
+                    return $start === null ? '' : trim(implode("\n", array_slice($lines, $start, $i - $start)));
+                }
+                $seenFirst = true;
+                $inBlock = true;
+            }
+            $start = $i + 1;   // тело цитаты начинается сразу за шапкой
+        } elseif (trim($line) !== '') {
+            if ($inBlock) $inBlock = false;   // содержательная строка закрывает шапку
+        }
+    }
+
+    if (!$seenFirst || $start === null) return '';
+    return trim(implode("\n", array_slice($lines, $start)));
 }
 
 /**

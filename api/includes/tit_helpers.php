@@ -185,18 +185,15 @@ function titEnsureRequestForOrder(
  * Привязываем только если кандидат ровно один — иначе рискуем повесить машину
  * не на ту заявку.
  */
-function titMatchRequestByEmail(PDO $pdo, string $fromEmail, string $subject): ?int
+function titMatchRequestByEmail(PDO $pdo, string $fromEmail, string $subject, string $body = ''): ?int
 {
-    $fromEmail = strtolower(trim($fromEmail));
-    if ($fromEmail === '' || $subject === '') return null;
+    if ($subject === '') return null;
     if (!preg_match('/\bна\s+(\d{2})\.(\d{2})\.(\d{4})/u', $subject, $m)) return null;
     $deliveryDate = $m[3] . '-' . $m[2] . '-' . $m[1];
 
-    $domain = substr(strrchr($fromEmail, '@') ?: '', 1);
-
     try {
         $stmt = $pdo->prepare("
-            SELECT id, LOWER(supplier_email) AS supplier_email
+            SELECT id, LOWER(supplier_email) AS supplier_email, supplier_name
             FROM tit_requests
             WHERE delivery_date = ?
               AND status <> 'CANCELLED'
@@ -206,21 +203,71 @@ function titMatchRequestByEmail(PDO $pdo, string $fromEmail, string $subject): ?
         $rows = $stmt->fetchAll();
         if (!$rows) return null;
 
-        $exact = array_values(array_filter($rows, fn($r) => $r['supplier_email'] === $fromEmail));
-        if (count($exact) === 1) return (int)$exact[0]['id'];
-        if (count($exact) > 1) return null;
+        // Адреса-кандидаты: отправитель письма плюс адреса из тела. Второе нужно
+        // для пересылок — там письмо приходит от сотрудника, а адрес поставщика
+        // лежит внутри цитаты («From: Сидорова <sklad@postavshik.by>»).
+        $emails = titCollectEmails($fromEmail . "\n" . $body);
+        if ($emails) {
+            $exact = array_values(array_filter($rows, fn($r) => in_array($r['supplier_email'], $emails, true)));
+            if (count($exact) === 1) return (int)$exact[0]['id'];
+            if (count($exact) > 1) return null;
 
-        if ($domain === '') return null;
-        $byDomain = array_values(array_filter(
-            $rows,
-            fn($r) => $r['supplier_email'] !== '' && str_ends_with($r['supplier_email'], '@' . $domain)
-        ));
-        if (count($byDomain) === 1) return (int)$byDomain[0]['id'];
+            $domains = array_unique(array_map(fn($e) => substr(strrchr($e, '@'), 1), $emails));
+            $byDomain = array_values(array_filter($rows, function ($r) use ($domains) {
+                if ($r['supplier_email'] === '') return false;
+                $d = substr(strrchr($r['supplier_email'], '@') ?: '@', 1);
+                return $d !== '' && in_array($d, $domains, true);
+            }));
+            if (count($byDomain) === 1) return (int)$byDomain[0]['id'];
+            if (count($byDomain) > 1) return null;
+        }
+
+        // Последняя попытка — название поставщика из темы: «… для ООО "ТестТорг" на 21.07.2026».
+        if (preg_match('/\bдля\s+(.+?)\s+на\s+\d{2}\.\d{2}\.\d{4}/u', $subject, $sm)) {
+            $needle = titNormalizeCompanyName($sm[1]);
+            if ($needle !== '') {
+                $byName = array_values(array_filter(
+                    $rows,
+                    fn($r) => titNormalizeCompanyName((string)$r['supplier_name']) === $needle
+                ));
+                if (count($byName) === 1) return (int)$byName[0]['id'];
+            }
+        }
         return null;
     } catch (Throwable $e) {
         error_log('[titMatchRequestByEmail] failed: ' . $e->getMessage());
         return null;
     }
+}
+
+/**
+ * Все адреса почты из текста, кроме наших собственных — свои (order@, копии
+ * закупщиков) для поиска поставщика бесполезны.
+ *
+ * @return string[] нижний регистр, без повторов
+ */
+function titCollectEmails(string $text): array
+{
+    if (!preg_match_all('/[\w\.\-\+]+@[\w\.\-]+\.\w{2,}/u', $text, $m)) return [];
+    $ourDomains = ['supply-department.online', 'burger-king.by'];
+    $out = [];
+    foreach ($m[0] as $e) {
+        $e = strtolower($e);
+        $domain = substr(strrchr($e, '@'), 1);
+        if (in_array($domain, $ourDomains, true)) continue;
+        $out[$e] = true;
+    }
+    return array_keys($out);
+}
+
+/** Название компании к сравнимому виду: без кавычек, формы собственности и регистра. */
+function titNormalizeCompanyName(string $name): string
+{
+    $s = mb_strtolower($name, 'UTF-8');
+    $s = str_replace(['«', '»', '"', '“', '”', '\''], ' ', $s);
+    $s = preg_replace('/\b(ооо|иооо|оао|зао|уп|чуп|ип|одо|сооо)\b/u', ' ', $s) ?? $s;
+    $s = preg_replace('/\s+/u', ' ', $s) ?? $s;
+    return trim($s);
 }
 
 /**

@@ -241,17 +241,19 @@ foreach ($unseen as $msgNum) {
             $f->execute(array_values($tryIds));
             $requestId = $f->fetchColumn() ?: null;
         }
-        // Запасной путь: по теме письма (дата поставки) + адресу отправителя.
-        // Нужен для писем, у которых почтовик поставщика не проставил
-        // In-Reply-To, и для старых заявок без сохранённого Message-Id.
-        if (!$requestId) {
-            $requestId = titMatchRequestByEmail($pdo, $fromEmail, $subject);
-        }
-
         $structure = imap_fetchstructure($mbox, $msgNum);
         $parsed = walkMessage($mbox, $msgNum, $structure);
         $bodyText = (string)$parsed['text'];
         $bodyExcerpt = mb_substr($bodyText, 0, 2000);
+
+        // Запасной путь: по теме письма (дата поставки) + адресу поставщика.
+        // Нужен для писем, у которых почтовик поставщика не проставил
+        // In-Reply-To, для старых заявок без сохранённого Message-Id и для
+        // пересылок — там письмо приходит от сотрудника, а адрес поставщика
+        // виден только внутри тела, поэтому его сюда и передаём.
+        if (!$requestId) {
+            $requestId = titMatchRequestByEmail($pdo, $fromEmail, $subject, $bodyText);
+        }
 
         // Парсим тело — список пар
         $pairs = $bodyText !== '' ? titParseReplyBody($bodyText) : [];
