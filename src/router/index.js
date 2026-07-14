@@ -142,6 +142,9 @@ const routes = [
       { path: 'info', name: 'restaurant-info', component: EmptySlot, meta: { title: 'Важная информация' } },
       { path: 'surveys', name: 'restaurant-surveys', component: EmptySlot, meta: { title: 'Опросы' } },
       { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Сбор остатков' } },
+      // Свой адрес у каждого сбора: ссылка из Telegram/push ведёт сразу в нужный,
+      // а не в общий раздел, где ресторан видел только самый новый сбор.
+      { path: 'stock/:collectionId', name: 'restaurant-stock-collection', component: EmptySlot, meta: { title: 'Сбор остатков' } },
       { path: 'warehouse-stock', name: 'restaurant-warehouse-stock', component: EmptySlot, meta: { title: 'Остатки склада' } },
       { path: 'contacts', name: 'restaurant-contacts', component: EmptySlot, meta: { title: 'Контакты поставщиков' } },
       { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },

@@ -807,27 +807,62 @@
         <h2>Нет активного сбора</h2>
         <p>Сейчас сбор остатков не проводится.</p>
       </div>
-      <div v-else class="sc-wrap">
-        <!-- Переключатель коллекций -->
-        <div v-if="stockCollection.collections.length > 1" class="sc-coll-switcher">
+      <!-- Список сборов. Показывается, пока сбор не выбран: раньше вместо него
+           молча открывался самый новый сбор, и про остальные ресторан не знал. -->
+      <div v-else-if="!stockCollection.selectedId" class="sc-wrap">
+        <div class="sc-list-head">
+          <h2 class="sc-list-title">Активных сборов: {{ stockCollection.collections.length }}</h2>
+          <p class="sc-list-sub">Заполнить нужно каждый. Откройте сбор, чтобы внести остатки.</p>
+        </div>
+        <div class="sc-list">
           <button
             v-for="c in stockCollection.collections"
             :key="c.id"
-            class="sc-coll-chip"
-            :class="{ active: String(stockCollection.collection?.id) === String(c.id) }"
+            class="sc-list-item"
+            :class="{ done: c.submitted }"
             @click="selectStockCollection(c.id)"
           >
-            <span>{{ c.name }}</span>
-            <small>{{ c.submitted_count }}/{{ c.total_products }}</small>
+            <div class="sc-list-item-main">
+              <div class="sc-list-item-name">{{ c.name }}</div>
+              <div class="sc-list-item-meta">
+                <span v-if="c.submitted" class="sc-list-badge done">Сдан</span>
+                <span v-else class="sc-list-badge">Не сдан</span>
+                <span class="sc-list-count">Заполнено {{ c.submitted_count }} из {{ c.total_products }}</span>
+              </div>
+              <div class="sc-list-item-bar">
+                <div
+                  class="sc-list-item-fill"
+                  :style="{ width: (c.total_products ? Math.round(c.submitted_count / c.total_products * 100) : 0) + '%' }"
+                ></div>
+              </div>
+            </div>
+            <span class="sc-list-item-arrow">›</span>
           </button>
         </div>
+      </div>
 
+      <div v-else class="sc-wrap">
         <!-- Шапка коллекции -->
         <div class="sc-head">
+          <button
+            v-if="stockCollection.collections.length > 1"
+            class="sc-back-btn"
+            @click="backToStockList"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+            <span>Все сборы</span>
+            <em>{{ stockCollection.collections.length }}</em>
+          </button>
           <h2 class="sc-head-title">{{ stockCollection.collection?.name }}</h2>
           <p class="sc-head-sub">
             <span v-if="stockLastSubmittedAt">Последнее сохранение: {{ fmtDateTime(stockLastSubmittedAt) }}</span>
             <span v-else>Если товара нет — поставьте 0.</span>
+          </p>
+          <p v-if="otherPendingStockCount" class="sc-head-warn">
+            Ещё {{ otherPendingStockCount }} {{ otherPendingStockCount === 1 ? 'сбор ждёт' : 'сбора ждут' }} заполнения — не забудьте вернуться к списку.
           </p>
         </div>
 
@@ -1716,24 +1751,10 @@ const surveyPendingCount = computed(() => surveyItems.value.filter(item => !item
 // чтобы избежать TDZ — в композабл передаётся как ref.
 // Тело computed выполняется лениво, поэтому stockProducts/stockProductFilled
 // внутри могут быть объявлены ниже.
-const stockCollectionUnfilledCount = computed(() => {
-  if (!stockCollection.active) return 0;
-  const products = stockProducts.value || [];
-  if (products.length) {
-    let n = 0;
-    for (const p of products) {
-      if (!stockProductFilled(p.id)) n++;
-    }
-    return n;
-  }
-  const c = stockCollection.collection;
-  if (c && c.total_products != null) {
-    const total = Number(c.total_products) || 0;
-    const sub = Number(c.submitted_count) || 0;
-    return Math.max(0, total - sub);
-  }
-  return 0;
-});
+// Считается по ВСЕМ активным сборам (см. stockUnfilledTotal ниже). Раньше здесь
+// учитывался только открытый сбор, и при двух сборах ресторан видел заниженное
+// число — казалось, что осталась пара позиций, хотя второй сбор не тронут.
+const stockCollectionUnfilledCount = computed(() => stockUnfilledTotal.value);
 // ═══ Dashboard ═══
 const dashOrdersSubmitted = computed(() => {
   let total = roStore.restaurantOrdersEnabled
@@ -1795,14 +1816,17 @@ const urgentItems = computed(() => {
       });
     }
   }
-  // Stock
-  if (stockCollection.active && !stockCollection.collection?.submitted) {
+  // Stock: отдельная карточка на КАЖДЫЙ несданный сбор. Одна общая карточка
+  // скрывала тот факт, что сборов несколько — ресторан заполнял первый и
+  // считал, что закончил.
+  for (const c of stockPendingCollections.value) {
+    const left = Math.max(0, (Number(c.total_products) || 0) - (Number(c.submitted_count) || 0));
     items.push({
-      key: 'stock', type: 'alert',
+      key: 'stock_' + c.id, type: 'alert',
       icon: cabIconSvg.stock, title: 'Сбор остатков',
-      subtitle: stockCollection.collection?.name || 'Нужно заполнить',
+      subtitle: `${c.name} — осталось ${left} из ${c.total_products}`,
       deadline: '9999-12-31 23:59',
-      action: () => switchTab('stock'),
+      action: () => openStockCollection(c.id),
     });
   }
   // Ответ на обращение
@@ -2706,6 +2730,17 @@ function applyRouteToState() {
     if (!surveyItems.value.length && !surveyListLoading.value) loadSurveyList();
   } else if (name === 'restaurant-stock') {
     activeTab.value = 'stock';
+    // Без номера сбора — показываем список. Если сбор всего один, openStockList
+    // сразу уведёт в него: выбирать не из чего.
+    stockCollection.selectedId = null;
+    maybeOpenSingleStockCollection();
+  } else if (name === 'restaurant-stock-collection') {
+    activeTab.value = 'stock';
+    const cid = String(route.params.collectionId || '');
+    if (cid) {
+      stockCollection.selectedId = cid;
+      loadStockInline(cid);
+    }
   } else if (name === 'restaurant-warehouse-stock') {
     activeTab.value = 'warehouse-stock';
     if (!warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
@@ -2739,7 +2774,9 @@ function syncStateToRoute() {
   } else if (activeTab.value === 'surveys') {
     target = { name: 'restaurant-surveys' };
   } else if (activeTab.value === 'stock') {
-    target = { name: 'restaurant-stock' };
+    target = stockCollection.selectedId
+      ? { name: 'restaurant-stock-collection', params: { collectionId: String(stockCollection.selectedId) } }
+      : { name: 'restaurant-stock' };
   } else if (activeTab.value === 'warehouse-stock') {
     target = { name: 'restaurant-warehouse-stock' };
   } else if (activeTab.value === 'contacts') {
@@ -2781,7 +2818,9 @@ function syncStateToRoute() {
 // Реакция на навигацию через браузер (back/forward) или переход по ссылке
 watch(() => route.fullPath, applyRouteToState);
 // Реакция на смену табов в любом месте кода — обновляем URL
-watch([activeTab, orderSubTab], syncStateToRoute);
+// Смена вкладки или выбранного сбора остатков — обновляем адрес страницы,
+// чтобы у каждого сбора была своя ссылка.
+watch([activeTab, orderSubTab, () => stockCollection.selectedId], syncStateToRoute);
 
 function supAutoSelectDate(sup) {
   const dates = sup.available_dates || [];
@@ -3345,14 +3384,22 @@ async function checkStockCollection() {
     const data = await roStore.getStockCollectionStatus();
     stockCollection.active = data.active;
     stockCollection.collections = Array.isArray(data.collections) ? data.collections : (data.collection ? [data.collection] : []);
-    const selectedId = stockCollection.selectedId && stockCollection.collections.some(c => String(c.id) === String(stockCollection.selectedId))
-      ? stockCollection.selectedId
-      : (data.collection?.id || stockCollection.collections[0]?.id || null);
-    stockCollection.selectedId = selectedId;
-    stockCollection.collection = stockCollection.collections.find(c => String(c.id) === String(selectedId)) || data.collection || null;
-    // Если пользователь уже на вкладке остатков — подгружаем форму
+
+    // Сбор больше не выбирается сам собой: раньше открывался самый новый, и про
+    // остальные ресторан просто не знал. Открытым остаётся только тот, который
+    // выбрали явно (в списке или по ссылке).
+    const stillExists = stockCollection.selectedId
+      && stockCollection.collections.some(c => String(c.id) === String(stockCollection.selectedId));
+    if (!stillExists) stockCollection.selectedId = null;
+    stockCollection.collection = stockCollection.collections
+      .find(c => String(c.id) === String(stockCollection.selectedId)) || null;
+
     if (stockCollection.active && activeTab.value === 'stock') {
-      await loadStockInline(stockCollection.selectedId);
+      if (stockCollection.selectedId) {
+        await loadStockInline(stockCollection.selectedId);
+      } else {
+        maybeOpenSingleStockCollection();
+      }
     }
   } catch (e) {
     if (activeTab.value === 'stock') {
@@ -3387,6 +3434,56 @@ async function selectStockCollection(collectionId) {
   stockCollection.selectedId = collectionId;
   await loadStockInline(collectionId);
 }
+
+// Открыть конкретный сбор из любого места кабинета (карточка на главной, плитка).
+async function openStockCollection(collectionId) {
+  await switchTab('stock');
+  await selectStockCollection(collectionId);
+}
+
+// Назад к списку сборов. Из формы единственного сбора возвращаться некуда —
+// кнопку там не показываем.
+function backToStockList() {
+  stockCollection.selectedId = null;
+  stockCollection.collection = null;
+  stockProducts.value = [];
+  checkStockCollection();
+}
+
+// Сбор всего один — списка из одного пункта не показываем, сразу открываем форму.
+function maybeOpenSingleStockCollection() {
+  if (stockCollection.collections.length === 1) {
+    selectStockCollection(stockCollection.collections[0].id);
+  }
+}
+
+// Сколько позиций не сдано — ПО ВСЕМ активным сборам, а не только по открытому.
+// Раньше считался только открытый сбор: при двух сборах (1 и 7 товаров) ресторан
+// видел «не заполнено 1» и был уверен, что почти всё сдал.
+const stockUnfilledTotal = computed(() => {
+  if (!stockCollection.active) return 0;
+  let n = 0;
+  for (const c of stockCollection.collections) {
+    // Для открытого сбора считаем по факту введённого — счётчик живой,
+    // уменьшается прямо во время заполнения.
+    if (String(c.id) === String(stockCollection.selectedId) && stockProducts.value.length) {
+      for (const p of stockProducts.value) if (!stockProductFilled(p.id)) n++;
+      continue;
+    }
+    n += Math.max(0, (Number(c.total_products) || 0) - (Number(c.submitted_count) || 0));
+  }
+  return n;
+});
+
+// Сборы, которые ресторан ещё не сдал целиком.
+const stockPendingCollections = computed(() =>
+  stockCollection.collections.filter(c => !c.submitted)
+);
+
+// Сколько ДРУГИХ сборов ждут заполнения, пока человек сидит в открытом.
+const otherPendingStockCount = computed(() =>
+  stockPendingCollections.value.filter(c => String(c.id) !== String(stockCollection.selectedId)).length
+);
 
 async function loadStockInline(collectionId = null) {
   stockLoading.value = true;
@@ -4443,24 +4540,57 @@ tr.del-err { background: #fef2f2; }
 .sc-section { padding-bottom: 120px; }
 .sc-wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 
-/* Переключатель коллекций (если несколько) */
-.sc-coll-switcher { display: flex; flex-wrap: wrap; gap: 8px; }
-.sc-coll-chip {
-  display: inline-flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 9px 14px; border-radius: 999px; border: 1.5px solid #EDE8E3;
-  background: #FFFBF6; color: #502314; cursor: pointer; font: inherit;
-  transition: all .15s ease;
+/* Список сборов — когда их несколько, ресторан сначала видит их все */
+.sc-list-head { padding: 2px 2px 0; }
+.sc-list-title { margin: 0 0 4px; color: #2C1A12; font-size: 20px; font-weight: 800; }
+.sc-list-sub { margin: 0; color: #8b7355; font-size: 13px; }
+.sc-list { display: flex; flex-direction: column; gap: 10px; }
+.sc-list-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: #fff; border: 1.5px solid #EDE8E3; border-radius: 14px;
+  padding: 14px 16px; cursor: pointer; font: inherit; transition: border-color .15s ease, transform .1s ease;
 }
-.sc-coll-chip span { font-weight: 700; font-size: 13px; }
-.sc-coll-chip small { color: #8b7355; font-size: 11px; font-weight: 700; }
-.sc-coll-chip.active { background: #502314; border-color: #502314; color: #fff; }
-.sc-coll-chip.active small { color: rgba(255,255,255,.85); }
-.sc-coll-chip:hover:not(.active) { border-color: #E76F51; }
+.sc-list-item:hover { border-color: #E76F51; }
+.sc-list-item:active { transform: scale(.995); }
+.sc-list-item.done { background: #FBFAF8; }
+.sc-list-item-main { flex: 1; min-width: 0; }
+.sc-list-item-name {
+  color: #2C1A12; font-size: 15px; font-weight: 700; margin-bottom: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sc-list-item-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.sc-list-badge {
+  padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  background: #FEF3C7; color: #B45309;
+}
+.sc-list-badge.done { background: #ECFDF5; color: #16A34A; }
+.sc-list-count { color: #8b7355; font-size: 12px; font-weight: 600; }
+.sc-list-item-bar { height: 5px; border-radius: 999px; background: #F0E5D6; overflow: hidden; }
+.sc-list-item-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #F4A261, #E76F51); }
+.sc-list-item.done .sc-list-item-fill { background: #16A34A; }
+.sc-list-item-arrow { color: #C8B6A6; font-size: 22px; line-height: 1; }
 
 /* Шапка коллекции */
 .sc-head { background: #fff; border: 1px solid #EDE8E3; border-radius: 14px; padding: 16px 18px; }
 .sc-head-title { margin: 0 0 4px; color: #2C1A12; font-size: 18px; font-weight: 700; }
 .sc-head-sub { margin: 0; color: #8b7355; font-size: 13px; }
+.sc-head-warn { margin: 8px 0 0; color: #B45309; font-size: 13px; font-weight: 600; }
+.sc-back-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-bottom: 10px; padding: 7px 12px 7px 9px;
+  background: #FFF6F2; border: 1.5px solid #F6D9CE; border-radius: 999px;
+  color: #C2410C; font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background .15s ease, border-color .15s ease;
+}
+.sc-back-btn:hover { background: #FFEDE5; border-color: #E76F51; }
+.sc-back-btn:active { transform: scale(.98); }
+.sc-back-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+.sc-back-btn em {
+  font-style: normal; font-size: 11px; font-weight: 800;
+  background: #E76F51; color: #fff; border-radius: 999px;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
 
 /* Тулбар: поиск + фильтры */
 .sc-toolbar { display: flex; flex-direction: column; gap: 10px; }
@@ -4660,7 +4790,10 @@ tr.del-err { background: #fef2f2; }
   background: linear-gradient(90deg, #F4A261, #E76F51);
   transition: width .25s ease;
 }
-.sc-savebar-btn { flex-shrink: 0; min-width: 180px; }
+/* min-width держит ширину кнопки одинаковой при смене надписи
+   («Сохранить» → «Сохранить изменения»), поэтому содержимое нужно центровать
+   явно: у .btn стоит inline-flex без justify-content, и текст прижимался влево. */
+.sc-savebar-btn { flex-shrink: 0; min-width: 180px; justify-content: center; }
 
 /* Profile */
 .profile-card { background: white; border-radius: 18px; padding: 20px; margin-bottom: 12px; display: flex; border: 1px solid #EDE8E3; }

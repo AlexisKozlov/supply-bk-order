@@ -653,10 +653,13 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     $text .= "📦 Товаров: " . (int)$productsCount . "\n\n";
     $text .= "Заполните остатки по вашему ресторану:";
 
-    // Только заполнение в боте — публичная ссылка отключена,
-    // через ЛК ресторан тоже может зайти, но кнопка ведёт в бот напрямую.
+    // Заполнить можно в боте или в кабинете. Ссылка в кабинет ведёт СРАЗУ в этот
+    // сбор: сборов бывает несколько, и общий раздел открывал только самый новый —
+    // про остальные ресторан не узнавал.
+    $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
     $btns = [
         [['text' => '📋 Заполнить в боте', 'callback_data' => 'rest_sc_start']],
+        [['text' => '🌐 Открыть в кабинете', 'url' => $siteUrl . '/restaurant/stock/' . (int)$collectionId]],
     ];
     $keyboard = json_encode(['inline_keyboard' => $btns]);
 
@@ -685,7 +688,7 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
             pushSendToRestaurant($pdo, (int)$r['number'], (string)$r['legal_entity_group'], [
                 'title' => '📋 Новый сбор остатков',
                 'body'  => $collectionName . ' · товаров: ' . (int)$productsCount,
-                'url'   => '/restaurant?tab=stock',
+                'url'   => '/restaurant/stock/' . (int)$collectionId,
                 'tag'   => 'stock-collection-' . (int)$collectionId,
             ]);
         }
