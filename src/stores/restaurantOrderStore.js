@@ -779,6 +779,14 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
+  // Черновик остатков — «как набрано», до отправки. Пустой payload стирает черновик.
+  async function saveStockCollectionDraft(collectionId, payload) {
+    return await api('stock-collection-draft', {
+      method: 'POST',
+      body: JSON.stringify({ collection_id: collectionId, payload }),
+    });
+  }
+
   async function loadWarehouseStock() {
     return await api('warehouse-stock');
   }
@@ -793,7 +801,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     loadBroadcasts, heartbeat, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,
     loadSurveys, loadSurvey, submitSurvey, uploadSurveyFile, removeSurveyFile, markBroadcastRead,
-    getStockCollectionStatus, getStockCollectionData, submitStockCollection, loadWarehouseStock,
+    getStockCollectionStatus, getStockCollectionData, submitStockCollection, saveStockCollectionDraft, loadWarehouseStock,
     adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,

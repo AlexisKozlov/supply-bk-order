@@ -2231,6 +2231,26 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
         }
     }
 
+    // Черновик — то, что ресторан уже ввёл, но ещё не сдал. Отдаём как есть;
+    // решение, накладывать ли его поверх сданных значений, принимает форма
+    // (сравнивает время черновика с временем последней отправки).
+    $draft = null;
+    $draftUpdatedAt = null;
+    try {
+        $dr = $pdo->prepare("SELECT payload, updated_at FROM stock_collection_drafts
+                             WHERE collection_id = ? AND restaurant_number = ? LIMIT 1");
+        $dr->execute([$coll['id'], $rest['restaurant_number']]);
+        if ($row = $dr->fetch()) {
+            $decoded = json_decode((string)$row['payload'], true);
+            if (is_array($decoded)) {
+                $draft = $decoded;
+                $draftUpdatedAt = $row['updated_at'];
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[stock-collection-data] draft load failed: ' . $e->getMessage());
+    }
+
     roRespond([
         'active' => true,
         'collection' => [
@@ -2241,6 +2261,8 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
         'values' => $values,
         'batches' => $batches,
         'last_submitted_at' => $lastSubmittedAt,
+        'draft' => $draft,
+        'draft_updated_at' => $draftUpdatedAt,
     ]);
 }
 
@@ -2292,6 +2314,49 @@ function roNormalizeStockCollectionBatches($item, $allowExpiry = true) {
     }
 
     return $batches;
+}
+
+// --- Черновик остатков: автосохранение введённого до отправки ---
+// Ничего не проверяем по содержимому: черновик — это «как набрано», с пустыми
+// полями и недописанными числами. Валидация и превращение пустых в нули
+// происходят только при отправке (stock-collection-submit).
+if ($roAction === 'stock-collection-draft' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $collId = intval($body['collection_id'] ?? 0);
+    $payload = $body['payload'] ?? null;
+    if ($collId <= 0) roRespond(['error' => 'Не указан сбор'], 400);
+    if (!is_array($payload)) roRespond(['error' => 'Некорректные данные'], 400);
+
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $check = $pdo->prepare("SELECT id, legal_entity_group FROM stock_collections WHERE id = ? AND status = 'active'");
+    $check->execute([$collId]);
+    $coll = $check->fetch();
+    if (!$coll) roRespond(['error' => 'Сбор не найден или уже закрыт'], 404);
+    if ($coll['legal_entity_group'] !== $group) roRespond(['error' => 'Сбор не для вашего юрлица'], 403);
+
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    // Ограничение размера — защита от мусора: даже сбор на тысячу товаров
+    // с партиями укладывается в сотни килобайт.
+    if ($json === false || strlen($json) > 1024 * 1024) {
+        roRespond(['error' => 'Черновик слишком большой'], 413);
+    }
+
+    if ($payload) {
+        $pdo->prepare("
+            INSERT INTO stock_collection_drafts (collection_id, restaurant_number, payload)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE payload = VALUES(payload), updated_at = NOW()
+        ")->execute([$collId, $rest['restaurant_number'], $json]);
+    } else {
+        // Пустой черновик = всё стёрли, хранить нечего.
+        $pdo->prepare("DELETE FROM stock_collection_drafts WHERE collection_id = ? AND restaurant_number = ?")
+            ->execute([$collId, $rest['restaurant_number']]);
+    }
+
+    $saved = $pdo->prepare("SELECT updated_at FROM stock_collection_drafts WHERE collection_id = ? AND restaurant_number = ? LIMIT 1");
+    $saved->execute([$collId, $rest['restaurant_number']]);
+    roRespond(['success' => true, 'updated_at' => $saved->fetchColumn() ?: null]);
 }
 
 // --- Сохранение остатков ресторана (из личного кабинета) ---
@@ -2382,6 +2447,16 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
     if ($saved === 0) {
         roRespond(['error' => 'Ничего не сохранено. Проверьте, что введены количества (' . $skippedUnknown . ' позиций пропущено как неизвестные)'], 400);
     }
+
+    // Остатки сданы — черновик больше не нужен. Ошибка здесь не должна ронять
+    // отправку: данные уже записаны.
+    try {
+        $pdo->prepare("DELETE FROM stock_collection_drafts WHERE collection_id = ? AND restaurant_number = ?")
+            ->execute([$collId, $rest['restaurant_number']]);
+    } catch (Throwable $e) {
+        error_log('[stock-collection-submit] draft cleanup failed: ' . $e->getMessage());
+    }
+
     roRespond(['success' => true, 'saved' => $saved]);
 }
 

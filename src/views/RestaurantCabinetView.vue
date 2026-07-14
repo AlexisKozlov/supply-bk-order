@@ -985,6 +985,9 @@
               <div class="sc-savebar-progress-bar">
                 <div class="sc-savebar-progress-fill" :style="{ width: stockProgress + '%' }"></div>
               </div>
+              <div v-if="stockDraftNote" class="sc-savebar-draft" :class="{ pending: stockDraftPending }">
+                {{ stockDraftNote }}
+              </div>
             </div>
             <button
               class="btn btn-primary btn-lg sc-savebar-btn"
@@ -1549,6 +1552,20 @@ const stockLastSubmittedAt = ref(null);
 const stockLoading = ref(false);
 const stockSaving = ref(false);
 const stockSavedFlash = ref(false);
+// Черновик: готовность (после загрузки формы), время последнего сохранения на
+// сервер и признак «лежит только на устройстве, ждём связь».
+const stockDraftReady = ref(false);
+const stockDraftSavedAt = ref(null);
+const stockDraftPending = ref(false);
+// Подпись под прогрессом: человек должен видеть, что набранное не пропадёт,
+// даже если он закроет вкладку не нажав «Сохранить».
+const stockDraftNote = computed(() => {
+  if (!stockDraftSavedAt.value) return '';
+  const t = stockDraftSavedAt.value.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return stockDraftPending.value
+    ? `Черновик сохранён на устройстве в ${t} — отправим, как появится связь`
+    : `Черновик сохранён в ${t}. Остатки попадут в закупку только после кнопки «Сохранить»`;
+});
 const stockSearch = ref('');
 const stockFilter = ref('all'); // all | unfilled | filled
 const warehouseStockItems = ref([]);
@@ -3159,6 +3176,108 @@ function makeStockBatchRow(expiry_date = '', stock = '') {
   return { expiry_date, stock };
 }
 
+// ═══ Черновик остатков ═══
+// Форма хранит введённое только в памяти вкладки, и на телефоне она легко
+// выгружается — набранное за полчаса пропадало. Поэтому пишем черновик и на
+// устройство (сразу), и на сервер (через паузу после ввода). Кнопка «Сохранить»
+// здесь ни при чём: она отправляет остатки закупке, превращая пустые поля в нули,
+// а черновик хранит ровно то, что человек успел ввести.
+
+function stockDraftKey() {
+  const cid = stockCollection.collection?.id;
+  const num = roStore.restaurant?.number;
+  if (!cid || !num) return null;
+  // Группа юрлиц в ключе обязательна: номера BK_VM и PS могут совпадать, и без
+  // неё черновик одного юрлица подцепится в кабинете другого на том же устройстве.
+  const grp = roStore.restaurant?.legal_entity_group || 'BK_VM';
+  return `bk_sc_draft_${grp}_${num}_${cid}`;
+}
+
+// Черновик = только непустые ячейки. Пустые поля не храним: при восстановлении
+// они и так появятся пустыми.
+function buildStockDraftPayload() {
+  const payload = {};
+  for (const p of stockProducts.value) {
+    const rows = (stockDrafts[p.id] || [])
+      .map(batch => ({
+        expiry_date: String(batch.expiry_date ?? '').trim(),
+        stock: String(batch.stock ?? '').trim(),
+      }))
+      .filter(batch => batch.stock !== '' || batch.expiry_date !== '');
+    if (rows.length) payload[p.id] = rows;
+  }
+  return payload;
+}
+
+function applyStockDraftPayload(payload) {
+  if (!payload || typeof payload !== 'object') return 0;
+  let applied = 0;
+  for (const p of stockProducts.value) {
+    const rows = payload[p.id] ?? payload[String(p.id)];
+    if (!Array.isArray(rows) || !rows.length) continue;
+    stockDrafts[p.id] = rows.map(r => makeStockBatchRow(
+      String(r?.expiry_date ?? ''),
+      String(r?.stock ?? ''),
+    ));
+    applied++;
+  }
+  return applied;
+}
+
+let stockDraftTimer = null;
+function scheduleStockDraftSave() {
+  if (!stockDraftReady.value || !stockCollection.collection?.id) return;
+  clearTimeout(stockDraftTimer);
+  // Пауза после последнего нажатия клавиши — чтобы не слать запрос на каждый символ.
+  stockDraftTimer = setTimeout(saveStockDraft, 1500);
+}
+
+async function saveStockDraft() {
+  const collectionId = stockCollection.collection?.id;
+  if (!stockDraftReady.value || !collectionId) return;
+  const payload = buildStockDraftPayload();
+
+  // Сначала на устройство — это работает даже без связи. pending снимем, когда
+  // черновик долетит до сервера.
+  const key = stockDraftKey();
+  const writeLocal = (pending) => {
+    if (!key) return;
+    try {
+      localStorage.setItem(key, JSON.stringify({ payload, saved_at: new Date().toISOString(), pending }));
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('[stock draft] local save failed:', e);
+    }
+  };
+  writeLocal(true);
+
+  try {
+    await roStore.saveStockCollectionDraft(collectionId, payload);
+    writeLocal(false);
+    stockDraftPending.value = false;
+    stockDraftSavedAt.value = new Date();
+  } catch (e) {
+    // Связи нет — черновик уже лежит на устройстве, дошлём позже.
+    stockDraftPending.value = true;
+    stockDraftSavedAt.value = new Date();
+    if (import.meta.env.DEV) console.warn('[stock draft] server save failed:', e);
+  }
+}
+
+function clearStockDraft() {
+  clearTimeout(stockDraftTimer);
+  const key = stockDraftKey();
+  if (key) {
+    try { localStorage.removeItem(key); } catch (e) { /* приватный режим — не страшно */ }
+  }
+  stockDraftPending.value = false;
+  stockDraftSavedAt.value = null;
+}
+
+// Связь вернулась — дошлём черновик, который лежит только на устройстве.
+function flushStockDraftOnline() {
+  if (stockDraftPending.value) saveStockDraft();
+}
+
 function normalizeStockDraft(productId) {
   return (stockDrafts[productId] || [])
     .map(batch => ({
@@ -3271,6 +3390,10 @@ async function selectStockCollection(collectionId) {
 
 async function loadStockInline(collectionId = null) {
   stockLoading.value = true;
+  // Пока подставляем значения в форму, черновик не сохраняем — иначе затрём
+  // его же пустой заготовкой.
+  stockDraftReady.value = false;
+  clearTimeout(stockDraftTimer);
   try {
     const targetCollectionId = collectionId || stockCollection.selectedId || stockCollection.collection?.id || null;
     const data = await roStore.getStockCollectionData(targetCollectionId);
@@ -3307,11 +3430,54 @@ async function loadStockInline(collectionId = null) {
       stockSavedSnapshot[p.id] = JSON.stringify(normalizeStockDraft(p.id));
     }
     stockLastSubmittedAt.value = data.last_submitted_at || null;
+
+    // Поверх сданных значений накладываем незавершённый черновик, если он есть.
+    restoreStockDraft(data);
   } catch (e) {
     toast.error('Ошибка загрузки', e.message || '');
   } finally {
     stockLoading.value = false;
+    // Слушать ввод начинаем только после того, как форма заполнена.
+    await nextTick();
+    stockDraftReady.value = stockCollection.active;
   }
+}
+
+// Черновиков может быть два: на сервере (последнее, что долетело) и на устройстве
+// (последнее, что набрали). Берём тот, который заведомо свежее.
+function restoreStockDraft(data) {
+  const key = stockDraftKey();
+  let local = null;
+  if (key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) local = JSON.parse(raw);
+    } catch (e) {
+      local = null;
+    }
+  }
+  const serverDraft = data.draft && Object.keys(data.draft).length ? data.draft : null;
+
+  // Черновика на сервере нет, а local долетал раньше — значит остатки уже сдали
+  // (при отправке черновик удаляется). Местную копию тоже убираем.
+  if (!serverDraft && local && !local.pending) {
+    if (key) { try { localStorage.removeItem(key); } catch (e) { /* ok */ } }
+    local = null;
+  }
+
+  // Не долетевший черновик всегда новее серверного: он и не был отправлен.
+  const chosen = (local && local.pending) ? local.payload : (serverDraft || local?.payload || null);
+  const applied = applyStockDraftPayload(chosen);
+  if (!applied) {
+    stockDraftSavedAt.value = null;
+    stockDraftPending.value = false;
+    return;
+  }
+
+  stockDraftPending.value = !!(local && local.pending && !serverDraft);
+  const savedAt = (local && local.pending) ? local.saved_at : (data.draft_updated_at || local?.saved_at);
+  stockDraftSavedAt.value = savedAt ? new Date(String(savedAt).replace(' ', 'T')) : null;
+  rebuildStockFillSnapshot();
 }
 
 async function submitStockInline() {
@@ -3354,6 +3520,8 @@ async function submitStockInline() {
       }
     }
     await roStore.submitStockCollection(stockCollection.collection.id, items);
+    // Остатки сданы — черновик больше не нужен (на сервере его удаляет бэкенд).
+    clearStockDraft();
     // Обновляем снапшот и время сохранения
     for (const p of stockProducts.value) {
       stockSavedSnapshot[p.id] = JSON.stringify(normalizeStockDraft(p.id));
@@ -3469,11 +3637,17 @@ async function retryCabinetLoad() {
 function onSessionExpiredFlushDraft() {
   if (delDraftSaveTimer) { clearTimeout(delDraftSaveTimer); delDraftSaveTimer = null; }
   delSaveDraft();
+  // Сессия кончилась — черновик остатков хотя бы на устройстве сохраним сразу.
+  if (stockDraftReady.value) saveStockDraft();
 }
+
+// Любой ввод в форме остатков откладывает сохранение черновика.
+watch(stockDrafts, () => { scheduleStockDraftSave(); }, { deep: true });
 
 onMounted(async () => {
   window.addEventListener('beforeunload', onBeforeUnload);
   window.addEventListener('bk:ro-session-expired', onSessionExpiredFlushDraft);
+  window.addEventListener('online', flushStockDraftOnline);
   // Если в URL есть tg_token — это переход из бота, надо переавторизоваться
   // (важно когда кликают «Через сайт» для другого ресторана)
   const tgTokenParam = route.query.tg_token;
@@ -3525,6 +3699,8 @@ onUnmounted(() => {
   for (const url of Object.values(importantPreviewUrls)) URL.revokeObjectURL(url);
   window.removeEventListener('beforeunload', onBeforeUnload);
   window.removeEventListener('bk:ro-session-expired', onSessionExpiredFlushDraft);
+  window.removeEventListener('online', flushStockDraftOnline);
+  clearTimeout(stockDraftTimer);
 });
 </script>
 
@@ -4475,6 +4651,10 @@ tr.del-err { background: #fef2f2; }
 .sc-savebar-progress-bar {
   height: 6px; border-radius: 999px; background: #F0E5D6; overflow: hidden;
 }
+.sc-savebar-draft {
+  margin-top: 6px; font-size: 12px; line-height: 1.35; color: #6B5344;
+}
+.sc-savebar-draft.pending { color: #B45309; font-weight: 600; }
 .sc-savebar-progress-fill {
   height: 100%; border-radius: 999px;
   background: linear-gradient(90deg, #F4A261, #E76F51);
