@@ -31,10 +31,13 @@ date_default_timezone_set('Europe/Minsk'); // Минск (+03:00) — совпа
 
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 
-$lockFile = __DIR__ . '/cron_tit_replies.lock';
-$lockFp = fopen($lockFile, 'w');
-if (!$lockFp || !flock($lockFp, LOCK_EX | LOCK_NB)) { echo "Already running\n"; exit; }
+require_once __DIR__ . '/includes/cron_lock.php';
+$lock = cronAcquireLock(__DIR__ . '/cron_tit_replies.lock', 900);
+if (!$lock['fp']) { echo "Already running\n"; exit; }
+$lockFp = $lock['fp'];
+$killedStalePid = $lock['killed_pid'];
 set_time_limit(180);
+cronImapTimeouts();
 
 $envFile = '/var/www/bk-calc-secrets/.env';
 if (!file_exists($envFile)) exit("no .env\n");
@@ -72,6 +75,11 @@ if (!is_dir($ATTACHMENT_DIR)) @mkdir($ATTACHMENT_DIR, 0775, true);
 
 $ts = fn() => date('Y-m-d H:i:s');
 $log = function ($msg) use ($ts) { echo '[' . $ts() . '] ' . $msg . "\n"; };
+
+if ($killedStalePid) {
+    $log('ВНИМАНИЕ: снят зависший процесс PID ' . $killedStalePid . ' (висел дольше 15 мин)');
+    error_log('[tit-replies] killed stale cron process ' . $killedStalePid);
+}
 
 $mboxRef = '{' . $IMAP_HOST . ':' . $IMAP_PORT . '/imap/ssl}INBOX';
 $mbox = @imap_open($mboxRef, $IMAP_USER, $IMAP_PASS);
@@ -233,6 +241,12 @@ foreach ($unseen as $msgNum) {
             $f->execute(array_values($tryIds));
             $requestId = $f->fetchColumn() ?: null;
         }
+        // Запасной путь: по теме письма (дата поставки) + адресу отправителя.
+        // Нужен для писем, у которых почтовик поставщика не проставил
+        // In-Reply-To, и для старых заявок без сохранённого Message-Id.
+        if (!$requestId) {
+            $requestId = titMatchRequestByEmail($pdo, $fromEmail, $subject);
+        }
 
         $structure = imap_fetchstructure($mbox, $msgNum);
         $parsed = walkMessage($mbox, $msgNum, $structure);
@@ -262,8 +276,12 @@ foreach ($unseen as $msgNum) {
         }
 
         // Логируем письмо
-        $parsedPlate = $pairs[0]['plate'] ?? ($ocrPlates[0]['plate'] ?? null);
-        $parsedPhone = $pairs[0]['phone'] ?? null;
+        // Номер машины мог не распознаться (в письме только телефон) — тогда
+        // берём номер из накладной, если OCR его нашёл.
+        $parsedPlate = ($pairs[0]['plate'] ?? '') !== ''
+            ? $pairs[0]['plate']
+            : ($ocrPlates[0]['plate'] ?? null);
+        $parsedPhone = ($pairs[0]['phone'] ?? '') !== '' ? $pairs[0]['phone'] : null;
         $parsedVia = 'NONE';
         if ($pairs && $ocrPlates) $parsedVia = 'BOTH';
         elseif ($pairs) $parsedVia = 'EMAIL_TEXT';
@@ -322,6 +340,9 @@ foreach ($unseen as $msgNum) {
             // (та же машина в нескольких письмах) — иначе закупщик видит копии.
             $existsStmt = $pdo->prepare("SELECT id FROM tit_vehicles WHERE request_id = ? AND plate = ? AND deleted_at IS NULL LIMIT 1");
             foreach ($pairs as $pair) {
+                // Пара без номера машины (распознали только телефон водителя) —
+                // машину не заводим, телефон уже сохранён в карточке письма.
+                if ($pair['plate'] === '') continue;
                 $existsStmt->execute([$requestId, $pair['plate']]);
                 if ($existsStmt->fetchColumn()) continue;
                 $pdo->prepare("
@@ -348,8 +369,12 @@ foreach ($unseen as $msgNum) {
                 titRememberSupplierDefaults($pdo, $req['supplier_id'] ?? null, $op['plate'], null);
             }
 
-            // Статус заявки → DATA_RECEIVED (если ещё была WAITING)
-            if (($req['status'] ?? '') === 'WAITING' && ($pairs || $ocrPlates)) {
+            // Статус заявки → DATA_RECEIVED (если ещё была WAITING). Пара без
+            // номера машины (нашли только телефон) данными не считается —
+            // заявка остаётся в ожидании, закупщик дособерёт руками.
+            $hasPlates = (bool)$ocrPlates;
+            foreach ($pairs as $pair) { if ($pair['plate'] !== '') { $hasPlates = true; break; } }
+            if (($req['status'] ?? '') === 'WAITING' && $hasPlates) {
                 $pdo->prepare("UPDATE tit_requests SET status = 'DATA_RECEIVED', updated_at = NOW() WHERE id = ?")
                     ->execute([$requestId]);
             }

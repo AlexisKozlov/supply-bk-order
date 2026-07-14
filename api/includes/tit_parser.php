@@ -20,6 +20,22 @@ function titCleanReplyBody(string $text): string
     // Унифицируем переносы строк
     $text = preg_replace("/\r\n|\r/", "\n", $text) ?? $text;
 
+    // Вычищаем служебный мусор письма ДО всякого поиска. Он не несёт данных,
+    // зато отлично притворяется номером машины: из метки картинки в подписи
+    // «[cid:image001.png@01DD0A3D.2A284D30]» парсер вытаскивал «номер» 2A284D30.
+    $noise = [
+        '/\[cid:[^\]]*\]/i',                 // [cid:image001.png@01DD0A3D.2A284D30]
+        '/\bcid:[^\s>\]]+/i',                // cid:… без скобок
+        '/<mailto:[^>]*>/i',
+        '/<https?:\/\/[^>]*>/i',
+        '/\bhttps?:\/\/\S+/i',
+        '/\b[\w\.\-]+\.(?:png|jpe?g|gif|bmp|webp)\b/i',   // image001.png
+        '/\[[^\]]*AI-generated content[^\]]*\]/i',        // подпись-заглушка Outlook
+    ];
+    foreach ($noise as $rx) {
+        $text = preg_replace($rx, ' ', $text) ?? $text;
+    }
+
     // Отрезаем цитированную часть: всё, что после стандартных маркеров
     // или начиная с первой строки, начинающейся с «>».
     $markers = [
@@ -29,6 +45,8 @@ function titCleanReplyBody(string $text): string
         '/(^|\n)\s*-----\s*Original Message\s*-----.*/si',
         '/(^|\n)\s*От:.*\n\s*Кому:.*/su',              // Outlook-like header
         '/(^|\n)\s*From:.*\n\s*Sent:.*/si',
+        '/(^|\n)\s*Кому:\s*\S+@.*/su',                 // цитата Яндекс-почты
+        '/(^|\n)\s*\d{2}\.\d{2}\.\d{4},\s*\d{1,2}:\d{2},\s*".*/su', // «02.07.2026, 14:48, "Отдел закупок" <…>:»
     ];
     foreach ($markers as $rx) {
         if (preg_match($rx, $text, $m, PREG_OFFSET_CAPTURE)) {
@@ -53,7 +71,59 @@ function titCleanReplyBody(string $text): string
         }
     }
 
+    // Отрезаем подпись без явного маркера — у Outlook её часто нет вовсе,
+    // просто идут имя, должность, компания, телефон и сайт. Такой блок давал
+    // телефон менеджера вместо телефона водителя.
+    $text = titCutContactBlock($text);
+
     return trim($text);
+}
+
+/**
+ * Обрезает текст с первой строки, которая выглядит как начало контактного
+ * блока (подписи): адрес почты, сайт, должность, «T: +375…», реквизиты.
+ *
+ * Телефон водителя пишут в теле ответа («Данные по машине: АВ1234-5,
+ * +375291234567»), а не в строке с сайтом или должностью — поэтому такой
+ * блок можно отсекать целиком, не боясь потерять данные.
+ */
+function titCutContactBlock(string $text): string
+{
+    $lines = explode("\n", $text);
+    foreach ($lines as $i => $line) {
+        if (titLineLooksLikeSignature($line)) {
+            return implode("\n", array_slice($lines, 0, $i));
+        }
+    }
+    return $text;
+}
+
+/**
+ * Строка из подписи/контактного блока, а не данные?
+ *
+ * Строку с якорем («телефон водителя …», «машина …») подписью не считаем,
+ * даже если она начинается с «Тел.» — там как раз данные.
+ */
+function titLineLooksLikeSignature(string $line): bool
+{
+    if (preg_match('/\b(машин|водител|авто|тягач|транспорт|ттн|прицеп)/iu', $line)) return false;
+
+    // Строку «Тел. +375…» подписью НЕ считаем: телефон водителя поставщики
+    // пишут именно так («Данные водителя: … \n Тел. +375297796779»). Подпись
+    // ловим по признакам, которых в данных не бывает: почта, сайт, должность,
+    // реквизиты. Телефон из подписи отсекается вместе с этим блоком.
+    $signals = [
+        '/[\w\.\-]+@[\w\.\-]+\.\w{2,}/u',                        // email в строке
+        '/\bwww\.\w/iu',                                         // сайт
+        '/\b(?:manager|managing|director|specialist|coordinator|supervisor)\b/iu',
+        '/\b(?:менеджер|директор|специалист|координатор|руководител|начальник|бухгалтер)\w*/iu',
+        '/\b(?:спецыяліст|намеснік|дырэктар)\w*/iu',             // подписи на белорусском
+        '/\b(?:УНП|р\/с|IBAN|BIC)\b/iu',                         // реквизиты
+    ];
+    foreach ($signals as $rx) {
+        if (preg_match($rx, $line)) return true;
+    }
+    return false;
 }
 
 /**
@@ -86,6 +156,13 @@ function titNormalizePlateSpacing(string $text): string
     $text = preg_replace_callback(
         '/(?<![\p{L}\p{N}])(\d{4,6})[\-\s]+([' . $A . ']{1,2})((?:[\-\s]\d{1,2})?)(?![\p{L}\p{N}])/u',
         fn($m) => $m[1] . $m[2] . $m[3],
+        $text
+    ) ?? $text;
+    // 4. Тот же новый формат, но с буквами в конце — так пишут поставщики:
+    //    «Газель 1197-5 BA» → «1197BA5». Номер тот же, что «1197 ВА-5».
+    $text = preg_replace_callback(
+        '/(?<![\p{L}\p{N}])(\d{4})[\-\s](\d{1,2})[\-\s]([' . $A . ']{2})(?![\p{L}\p{N}])/u',
+        fn($m) => $m[1] . $m[3] . $m[2],
         $text
     ) ?? $text;
     return $text;
@@ -129,12 +206,10 @@ function titFindPlateCandidates(string $text): array
             [$frag, $pos] = $cap;
             $n = titNormalizePlate($frag);
             if (!$n['valid']) continue;
-            // Должен содержать и буквы И цифры — иначе это слово или просто число.
-            if (!preg_match('/[A-Z]/', $n['plate']) || !preg_match('/[0-9]/', $n['plate'])) continue;
-            // Отсекаем марки автомобилей: у белорусского номера 1–2 буквы спереди,
-            // потом цифры, опционально 1 буква в конце. Если в кандидате идёт
-            // подряд 3+ латинских букв — это «ATEGO», «VOLVO», «MERSEDES» и т.п.
-            if (preg_match('/[A-Z]{3,}/', $n['plate'])) continue;
+            // Кандидат должен иметь форму белорусского номера. Проверка по одной
+            // длине (5–10 символов) пропускала мусор из подписи вроде «2A284D30»
+            // и марки авто («ATEGO», «VOLVO»).
+            if (!titLooksLikePlate($n['plate'])) continue;
             $out[] = ['plate' => $n['plate'], 'raw' => trim($frag), 'pos' => $pos];
         }
     }
@@ -195,7 +270,81 @@ function titFindPhoneCandidates(string $text): array
  */
 function titParseReplyBody(string $rawBody): array
 {
-    $clean = titCleanReplyBody($rawBody);
+    // Проход 1 — только «своя» часть письма (без цитат и подписей).
+    $pairs = titParseCleanedText(titCleanReplyBody($rawBody), true);
+    if ($pairs) return $pairs;
+
+    // Проход 2 — данные лежат в пересланном письме. Закупщик часто просто
+    // пересылает ответ поставщика («Пожалуйста, посодействуйте в приёмке»),
+    // а номер машины и телефон водителя — внутри цитаты. Первый проход её
+    // отрезает, поэтому здесь разбираем и цитату тоже: выбрасываем только
+    // наше собственное исходящее письмо, шапки писем и строки подписей.
+    //
+    // Одинокий телефон здесь не принимаем: в пересланном письме подписей
+    // несколько (наша и поставщика), и телефон без номера машины почти всегда
+    // оказывается контактом менеджера, а не водителя.
+    return titParseCleanedText(titCleanForwardedBody($rawBody), false);
+}
+
+/**
+ * Готовит текст пересылки: цитату поставщика оставляем, но убираем шум,
+ * цитату нашего исходящего письма и служебные шапки.
+ */
+function titCleanForwardedBody(string $rawBody): string
+{
+    $text = preg_replace("/\r\n|\r/", "\n", $rawBody) ?? $rawBody;
+
+    $noise = [
+        '/\[cid:[^\]]*\]/i',
+        '/\bcid:[^\s>\]]+/i',
+        '/<mailto:[^>]*>/i',
+        '/<https?:\/\/[^>]*>/i',
+        '/\bhttps?:\/\/\S+/i',
+        '/\b[\w\.\-]+\.(?:png|jpe?g|gif|bmp|webp)\b/i',
+        '/\[[^\]]*AI-generated content[^\]]*\]/i',
+    ];
+    foreach ($noise as $rx) {
+        $text = preg_replace($rx, ' ', $text) ?? $text;
+    }
+
+    // Всё, что ниже цитаты НАШЕГО письма, — это текст заказа, данных о машине
+    // там нет и быть не может. Режем, чтобы не искать номера в списке товаров.
+    $ourMail = $_ENV['SMTP_ORDER_USER'] ?? 'order@supply-department.online';
+    foreach (['/(^|\n)[^\n]*' . preg_quote($ourMail, '/') . '.*/su',
+              '/(^|\n)[^\n]*Отдел\s+закупок.*/su'] as $rx) {
+        if (preg_match($rx, $text, $m, PREG_OFFSET_CAPTURE)) {
+            $text = substr($text, 0, $m[0][1]);
+        }
+    }
+
+    // Построчно выбрасываем шапки писем и подписи. Именно построчно, а не
+    // «обрезать хвост»: нужные данные могут идти ПОСЛЕ строки с адресом
+    // отправителя цитаты («… <a.ivanova@postavshik.by> писал(а):»).
+    $headerRx = [
+        '/^\s*(?:From|To|Cc|Bcc|Sent|Subject|Date|Reply-To)\s*:/i',
+        '/^\s*(?:От|Кому|Копия|Отправлено|Тема|Дата)\s*:/u',
+    ];
+    $keep = [];
+    foreach (explode("\n", $text) as $line) {
+        $skip = titLineLooksLikeSignature($line);
+        if (!$skip) {
+            foreach ($headerRx as $rx) {
+                if (preg_match($rx, $line)) { $skip = true; break; }
+            }
+        }
+        if (!$skip) $keep[] = $line;
+    }
+
+    return trim(implode("\n", $keep));
+}
+
+/**
+ * Общий разбор уже подготовленного текста. Раньше это было телом
+ * titParseReplyBody — вынесено, чтобы прогнать два прохода (своя часть письма,
+ * затем пересланная) одной и той же логикой.
+ */
+function titParseCleanedText(string $clean, bool $allowPhoneOnly = true): array
+{
     if ($clean === '') return [];
 
     // Склеиваем разорванные пробелами номера ОДИН раз — чтобы позиции
@@ -217,11 +366,20 @@ function titParseReplyBody(string $rawBody): array
     }
     $plates = $uniqPlates;
 
-    // Номера машин — основа: если их нет, отдавать нечего (даже если есть
-    // телефон — без машины пользы нет). Телефон опционален: бывают ответы
-    // «отправили Nissan BB-10-18-5» без указания водителя — номер всё равно
-    // надо сохранить.
-    if (!$plates) return [];
+    // Номера машин — основа. Но если номера нет, а телефон есть и письмо явно
+    // про машину/водителя («Данные по машине и водителю. +375293232842,
+    // Дмитрий») — раньше терялось всё, теперь отдаём телефон с пустым номером.
+    // Закупщик увидит его в карточке письма и впишет номер руками.
+    if (!$plates) {
+        if (!$allowPhoneOnly || !$phones) return [];
+        if (!preg_match('/\b(машин|водител|авто|транспорт|ттн|номер)/iu', $clean)) return [];
+        return [[
+            'plate' => '',
+            'phone' => $phones[0]['phone'],
+            'plate_raw' => '',
+            'phone_raw' => $phones[0]['raw'],
+        ]];
+    }
 
     // Случай 1: один номер — независимо от количества телефонов привязываем
     // к нему первый найденный телефон (если он есть).

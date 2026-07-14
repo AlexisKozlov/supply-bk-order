@@ -25,10 +25,13 @@ date_default_timezone_set('Europe/Minsk'); // Минск (+03:00) — совпа
 
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 
-$lockFile = __DIR__ . '/cron_email_import.lock';
-$lockFp = fopen($lockFile, 'w');
-if (!$lockFp || !flock($lockFp, LOCK_EX | LOCK_NB)) { echo "Already running\n"; exit; }
+require_once __DIR__ . '/includes/cron_lock.php';
+$lock = cronAcquireLock(__DIR__ . '/cron_email_import.lock', 600);
+if (!$lock['fp']) { echo "Already running\n"; exit; }
+$lockFp = $lock['fp'];
+$killedStalePid = $lock['killed_pid'];
 set_time_limit(120);
+cronImapTimeouts();
 
 $envFile = '/var/www/bk-calc-secrets/.env';
 if (!file_exists($envFile)) exit("no .env\n");
@@ -64,6 +67,11 @@ $ALLOWED_EXT = ['xlsx', 'xls', 'csv'];
 
 $ts = fn() => date('Y-m-d H:i:s');
 $log = function ($msg) use ($ts) { echo '[' . $ts() . '] ' . $msg . "\n"; };
+
+if ($killedStalePid) {
+    $log('ВНИМАНИЕ: снят зависший процесс PID ' . $killedStalePid . ' (висел дольше 10 мин)');
+    error_log('[email-import] killed stale cron process ' . $killedStalePid);
+}
 
 $mboxRef = '{' . $IMAP_HOST . ':' . $IMAP_PORT . '/imap/ssl}INBOX';
 $mbox = @imap_open($mboxRef, $IMAP_USER, $IMAP_PASS);

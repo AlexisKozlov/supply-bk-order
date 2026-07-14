@@ -101,21 +101,51 @@ function titEnsureRequestForOrder(
     ?string $createdBy,
     ?string $outgoingMessageId = null
 ): ?int {
-    if ($orderId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) return null;
+    // order_id может быть пустым: письмо поставщику часто отправляют раньше,
+    // чем сохраняют заказ. Раньше в этом случае мы выходили — и Message-Id
+    // письма терялся навсегда, а входящий ответ было не с чем связать.
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) return null;
+    if ($orderId === '' && ($supplierId === null || $supplierId === '') && $supplierEmail === '') return null;
     try {
         $group = function_exists('getEntityGroup') ? getEntityGroup($legalEntity) : 'BK_VM';
-        $check = $pdo->prepare("SELECT id FROM tit_requests WHERE order_id = ? LIMIT 1");
-        $check->execute([$orderId]);
-        $existingId = $check->fetchColumn();
+        $existingId = null;
+
+        if ($orderId !== '') {
+            $check = $pdo->prepare("SELECT id FROM tit_requests WHERE order_id = ? LIMIT 1");
+            $check->execute([$orderId]);
+            $existingId = $check->fetchColumn() ?: null;
+        }
+
+        // Заявка могла быть заведена при отправке письма, когда заказ ещё не
+        // был сохранён — она без order_id. Находим её по поставщику и дате
+        // поставки и «усыновляем», иначе на один заказ появятся две заявки.
+        if (!$existingId) {
+            $orphan = $pdo->prepare("
+                SELECT id FROM tit_requests
+                WHERE (order_id IS NULL OR order_id = '')
+                  AND delivery_date = ?
+                  AND legal_entity_group = ?
+                  AND (
+                        (supplier_id IS NOT NULL AND supplier_id = ?)
+                     OR (supplier_email <> '' AND supplier_email = ?)
+                  )
+                ORDER BY id DESC LIMIT 1
+            ");
+            $orphan->execute([$deliveryDate, $group, (string)$supplierId, $supplierEmail]);
+            $existingId = $orphan->fetchColumn() ?: null;
+        }
+
         if ($existingId) {
             $pdo->prepare("
                 UPDATE tit_requests
-                SET supplier_id = ?, supplier_name = ?, supplier_email = ?,
+                SET order_id = COALESCE(NULLIF(?, ''), order_id),
+                    supplier_id = ?, supplier_name = ?, supplier_email = ?,
                     legal_entity = ?, legal_entity_group = ?, delivery_date = ?,
                     outgoing_message_id = COALESCE(?, outgoing_message_id),
                     updated_at = NOW()
                 WHERE id = ?
             ")->execute([
+                $orderId,
                 $supplierId, $supplierName, $supplierEmail,
                 $legalEntity, $group, $deliveryDate,
                 $outgoingMessageId, $existingId,
@@ -129,13 +159,66 @@ function titEnsureRequestForOrder(
                  status, outgoing_message_id, created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING', ?, ?)
         ")->execute([
-            $orderId, $supplierId, $supplierName, $supplierEmail,
+            $orderId !== '' ? $orderId : null,
+            $supplierId, $supplierName, $supplierEmail,
             $legalEntity, $group, $deliveryDate,
             $outgoingMessageId, $createdBy,
         ]);
         return (int)$pdo->lastInsertId();
     } catch (Throwable $e) {
         error_log('[titEnsureRequestForOrder] failed: ' . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * Запасной способ привязать входящий ответ к заявке, когда заголовки
+ * In-Reply-To / References не помогли (почтовик поставщика их потерял, либо
+ * письмо отправлялось до того, как мы стали сохранять Message-Id).
+ *
+ * Опора — тема письма: она у нас всегда вида
+ *   «Заказ от ООО "Бургер БК" для ООО "Молочный Мир" на 08.07.2026»
+ * Дата в теме = дата поставки заявки. Дальше сужаем по адресу отправителя:
+ * сначала точное совпадение с адресом, куда слали письмо, потом — по домену
+ * (менеджер часто отвечает с личного ящика того же домена).
+ *
+ * Привязываем только если кандидат ровно один — иначе рискуем повесить машину
+ * не на ту заявку.
+ */
+function titMatchRequestByEmail(PDO $pdo, string $fromEmail, string $subject): ?int
+{
+    $fromEmail = strtolower(trim($fromEmail));
+    if ($fromEmail === '' || $subject === '') return null;
+    if (!preg_match('/\bна\s+(\d{2})\.(\d{2})\.(\d{4})/u', $subject, $m)) return null;
+    $deliveryDate = $m[3] . '-' . $m[2] . '-' . $m[1];
+
+    $domain = substr(strrchr($fromEmail, '@') ?: '', 1);
+
+    try {
+        $stmt = $pdo->prepare("
+            SELECT id, LOWER(supplier_email) AS supplier_email
+            FROM tit_requests
+            WHERE delivery_date = ?
+              AND status <> 'CANCELLED'
+            ORDER BY id DESC
+        ");
+        $stmt->execute([$deliveryDate]);
+        $rows = $stmt->fetchAll();
+        if (!$rows) return null;
+
+        $exact = array_values(array_filter($rows, fn($r) => $r['supplier_email'] === $fromEmail));
+        if (count($exact) === 1) return (int)$exact[0]['id'];
+        if (count($exact) > 1) return null;
+
+        if ($domain === '') return null;
+        $byDomain = array_values(array_filter(
+            $rows,
+            fn($r) => $r['supplier_email'] !== '' && str_ends_with($r['supplier_email'], '@' . $domain)
+        ));
+        if (count($byDomain) === 1) return (int)$byDomain[0]['id'];
+        return null;
+    } catch (Throwable $e) {
+        error_log('[titMatchRequestByEmail] failed: ' . $e->getMessage());
         return null;
     }
 }

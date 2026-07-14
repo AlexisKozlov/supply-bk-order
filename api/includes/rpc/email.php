@@ -328,12 +328,16 @@
         }
 
         // Создаём/обновляем «Заявку на пропуск» под этот заказ.
-        // Идемпотентно: при повторной отправке (если ничего ещё не пришло
-        // от поставщика) обновляем outgoing_message_id, чтобы парсер
-        // мог привязать ответ к свежему письму.
+        // Заказ на этот момент может быть ещё не сохранён (письмо часто шлют
+        // раньше сохранения) — order_id тогда пустой, и это нормально: заявку
+        // всё равно заводим, иначе Message-Id письма негде хранить и ответ
+        // поставщика не с чем будет связать. Когда заказ сохранят,
+        // titEnsureRequestForOrder найдёт эту заявку по поставщику и дате
+        // поставки и проставит ей order_id.
         $titRequestId = null;
-        if ($orderId !== '' && $delivery !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $delivery)) {
+        if ($delivery !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $delivery)) {
             try {
+                require_once __DIR__ . '/../tit_helpers.php';
                 $supplierId = null;
                 if ($supplier !== '') {
                     $sIdStmt = $pdo->prepare("
@@ -347,44 +351,17 @@
                     $sIdStmt->execute([getEntityGroup($legalEntity), $supplier, $supplier, $legalEntity]);
                     $supplierId = $sIdStmt->fetchColumn() ?: null;
                 }
-                $existing = $pdo->prepare("SELECT id FROM tit_requests WHERE order_id = ? LIMIT 1");
-                $existing->execute([$orderId]);
-                $existingId = $existing->fetchColumn();
-                $supplierEmail = $recipients[0] ?? '';
-                $titGroup = getEntityGroup($legalEntity);
-                $titNameForRecord = $supplierDisplay !== '' ? $supplierDisplay : $supplier;
-                if ($existingId) {
-                    $upd = $pdo->prepare("
-                        UPDATE tit_requests
-                        SET supplier_id = ?, supplier_name = ?, supplier_email = ?,
-                            legal_entity = ?, legal_entity_group = ?, delivery_date = ?,
-                            outgoing_message_id = COALESCE(?, outgoing_message_id),
-                            updated_at = NOW()
-                        WHERE id = ?
-                    ");
-                    $upd->execute([
-                        $supplierId, $titNameForRecord, $supplierEmail,
-                        $legalEntity, $titGroup, $delivery,
-                        $sendResult['message_id'] ?? null,
-                        $existingId,
-                    ]);
-                    $titRequestId = (int)$existingId;
-                } else {
-                    $ins = $pdo->prepare("
-                        INSERT INTO tit_requests
-                            (order_id, supplier_id, supplier_name, supplier_email,
-                             legal_entity, legal_entity_group, delivery_date,
-                             status, outgoing_message_id, created_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'WAITING', ?, ?)
-                    ");
-                    $ins->execute([
-                        $orderId, $supplierId, $titNameForRecord, $supplierEmail,
-                        $legalEntity, $titGroup, $delivery,
-                        $sendResult['message_id'] ?? null,
-                        $authUserName,
-                    ]);
-                    $titRequestId = (int)$pdo->lastInsertId();
-                }
+                $titRequestId = titEnsureRequestForOrder(
+                    $pdo,
+                    $orderId,
+                    $supplierId,
+                    $supplierDisplay !== '' ? $supplierDisplay : $supplier,
+                    $recipients[0] ?? '',
+                    $legalEntity,
+                    $delivery,
+                    $authUserName,
+                    $sendResult['message_id'] ?? null
+                );
             } catch (Throwable $e) {
                 // Не блокируем ответ — заявку можно создать вручную позже.
                 error_log('[send_supplier_order_email] tit_request upsert failed: ' . $e->getMessage());
