@@ -71,6 +71,125 @@ function soGetSupplierSettings($pdo, $supplierId) {
     ];
 }
 
+/**
+ * Собирает сводку заявок поставщика за день и готовый xlsx-бинарник.
+ * Общая логика для Telegram-сводки, ручной email-отправки и крона.
+ */
+function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate): array {
+    $out = [
+        'status' => 'ok', 'supplier' => null, 'xlsx' => null, 'filename' => '',
+        'date_fmt' => '', 'restaurants_count' => 0, 'submitted_count' => 0,
+        'items_count' => 0, 'error' => null,
+    ];
+
+    $supRow = $pdo->prepare("SELECT short_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
+    $supRow->execute([$supplierId]);
+    $sup = $supRow->fetch();
+    if (!$sup) { $out['status'] = 'no_schedule'; return $out; }
+    $out['supplier'] = $sup;
+    $supName = $sup['short_name'];
+    $supplierGroup = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
+    $supplierEntities = getEntitiesInGroup($supplierGroup);
+    $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
+
+    $deadlineState = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+    if (!empty($deadlineState['forced_closed'])) { $out['status'] = 'closed'; return $out; }
+
+    $expectedRests = array_values(array_filter(
+        soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, null, true),
+        fn($row) => soDeliveryDateMatchesDow($deliveryDate, (int)$row['delivery_day'])
+            && (($row['legal_entity_group'] ?? '') === $supplierGroup)
+    ));
+    usort($expectedRests, function ($a, $b) {
+        $regionCmp = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));
+        if ($regionCmp !== 0) return $regionCmp;
+        return (int)($a['restaurant_number'] ?? 0) <=> (int)($b['restaurant_number'] ?? 0);
+    });
+    if (!$expectedRests) { $out['status'] = 'no_schedule'; return $out; }
+
+    $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'restaurant_number'))));
+    $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
+
+    $subStmt = $pdo->prepare("
+        SELECT restaurant_number FROM so_orders
+        WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
+          AND legal_entity IN ({$entityPh}) AND restaurant_number IN ({$expectedPh})");
+    $subStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
+    $submittedNums = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
+
+    $ordStmt = $pdo->prepare("
+        SELECT o.restaurant_number, oi.sku, oi.product_name,
+               COALESCE(oi.admin_qty, oi.quantity) AS qty
+        FROM so_orders o JOIN so_order_items oi ON oi.order_id = o.id
+        WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+          AND o.legal_entity IN ({$entityPh}) AND o.restaurant_number IN ({$expectedPh})
+          AND COALESCE(oi.admin_qty, oi.quantity) > 0");
+    $ordStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
+    $orderRows = $ordStmt->fetchAll();
+
+    $productsOrdered = []; $pivot = [];
+    foreach ($orderRows as $row) {
+        $sku = $row['sku'];
+        if (!isset($productsOrdered[$sku])) $productsOrdered[$sku] = ['sku' => $sku, 'name' => $row['product_name']];
+        $rn = $row['restaurant_number'];
+        if (!isset($pivot[$rn])) $pivot[$rn] = [];
+        $pivot[$rn][$sku] = ($pivot[$rn][$sku] ?? 0) + (float)$row['qty'];
+    }
+    uasort($productsOrdered, fn($a, $b) => strcmp($a['name'], $b['name']));
+
+    $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+    $out['date_fmt'] = $dateFmt;
+    $out['restaurants_count'] = count($expectedRests);
+    $out['submitted_count'] = count(array_intersect($expectedNums, array_keys($submittedNums)));
+    $out['items_count'] = count($orderRows);
+    $out['filename'] = "Заявка {$supName} на {$dateFmt}.xlsx";
+    $out['products_map'] = $productsOrdered;
+    $colTotals = [];
+    foreach ($pivot as $rn => $pmap) {
+        foreach ($pmap as $sku => $qty) $colTotals[$sku] = ($colTotals[$sku] ?? 0) + (float)$qty;
+    }
+    $out['col_totals'] = $colTotals;
+
+    if (!$productsOrdered) { $out['status'] = 'empty'; return $out; }
+
+    $productsOut = array_values($productsOrdered);
+    $restaurantsOut = [];
+    foreach ($expectedRests as $rest) {
+        $rn = (string)($rest['restaurant_number'] ?? '');
+        if ($rn === '') continue;
+        $restaurantsOut[] = [
+            'number' => (int)$rn, 'city' => $rest['city'] ?: '', 'region' => $rest['region'] ?: '',
+            'address' => $rest['address'] ?: '', 'submitted' => isset($submittedNums[$rn]),
+        ];
+    }
+    $itemsOut = new stdClass();
+    foreach ($pivot as $rn => $pmap) {
+        foreach ($pmap as $sku => $qty) $itemsOut->{"{$rn}_{$sku}"} = ['qty' => (float)$qty, 'is_admin' => false];
+    }
+    $payload = [
+        'supplier_name' => $supName, 'delivery_date_fmt' => $dateFmt, 'sheet_name' => $supName,
+        'products' => $productsOut, 'restaurants' => $restaurantsOut, 'items' => $itemsOut,
+    ];
+
+    $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
+    $tmpXlsx = tempnam(sys_get_temp_dir(), 'so_xlsx_') . '.xlsx';
+    file_put_contents($tmpJson, json_encode($payload, JSON_UNESCAPED_UNICODE));
+    $scriptPath = escapeshellarg(__DIR__ . '/../../scripts/build_so_order_xlsx.mjs');
+    $cmd = 'node ' . $scriptPath . ' ' . escapeshellarg($tmpJson) . ' ' . escapeshellarg($tmpXlsx) . ' 2>&1';
+    exec($cmd, $outLines, $rc);
+    @unlink($tmpJson);
+    if ($rc !== 0 || !file_exists($tmpXlsx)) {
+        @unlink($tmpXlsx);
+        error_log('[soBuildSummaryXlsx] node failed (rc=' . $rc . '): ' . implode("\n", $outLines));
+        $out['status'] = 'xlsx_error';
+        $out['error'] = implode(' ', $outLines);
+        return $out;
+    }
+    $out['xlsx'] = file_get_contents($tmpXlsx);
+    @unlink($tmpXlsx);
+    return $out;
+}
+
 function soGetSupplierNotifyUsers($pdo, $supplierId) {
     $s = $pdo->prepare("
         SELECT user_name
@@ -2457,224 +2576,75 @@ if ($soAction === 'admin') {
     if ($adminAction === 'send-summary' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
         $deliveryDate = $body['delivery_date'] ?? '';
-
         if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
-        // Данные поставщика
-        $supRow = $pdo->prepare("SELECT short_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
-        $supRow->execute([$supplierId]);
-        $sup = $supRow->fetch();
-        if (!$sup) soRespond(['error' => 'Поставщик не найден'], 404);
-        $supName = $sup['short_name'];
-        $supplierGroup = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
-        $supplierEntities = getEntitiesInGroup($supplierGroup);
-        $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
-
-        $deadlineState = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
-        if (!empty($deadlineState['forced_closed'])) {
-            soRespond(['error' => 'Дата доставки закрыта'], 400);
-        }
-
-        // Подписчики
+        // Подписчики Telegram
         $subsStmt = $pdo->prepare("
-            SELECT u.name, u.telegram_chat_id
-            FROM so_supplier_summary_subscribers sss
+            SELECT u.name, u.telegram_chat_id FROM so_supplier_summary_subscribers sss
             JOIN users u ON u.name = sss.user_name
-            WHERE sss.supplier_id = ?
-              AND u.telegram_chat_id IS NOT NULL
-              AND u.telegram_chat_id != ''
-        ");
+            WHERE sss.supplier_id = ? AND u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id != ''");
         $subsStmt->execute([$supplierId]);
         $subs = $subsStmt->fetchAll();
-
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$subs) soRespond(['error' => 'Нет подписчиков для этого поставщика'], 400);
         if (!$botToken) soRespond(['error' => 'Telegram Bot Token не настроен'], 500);
 
-        // Ожидаемые рестораны по графику на этот день
-        $expectedRests = array_values(array_filter(
-            soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, null, true),
-            fn($row) => soDeliveryDateMatchesDow($deliveryDate, (int)$row['delivery_day'])
-                && (($row['legal_entity_group'] ?? '') === $supplierGroup)
-        ));
-        usort($expectedRests, function ($a, $b) {
-            $regionCmp = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));
-            if ($regionCmp !== 0) return $regionCmp;
-            return (int)($a['restaurant_number'] ?? 0) <=> (int)($b['restaurant_number'] ?? 0);
-        });
+        $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
+        if ($sum['status'] === 'closed')      soRespond(['error' => 'Дата доставки закрыта'], 400);
+        if ($sum['status'] === 'no_schedule') soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
+        if ($sum['status'] === 'xlsx_error')  soRespond(['error' => 'Не удалось сгенерировать Excel: ' . $sum['error']], 500);
 
-        if (!$expectedRests) soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
-
-        $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'restaurant_number'))));
-        $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
-
-        // Кто подал заявку (по статусу, не зависимо от количеств)
-        $subStmt = $pdo->prepare("
-            SELECT restaurant_number FROM so_orders
-            WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
-              AND legal_entity IN ({$entityPh})
-              AND restaurant_number IN ({$expectedPh})
-        ");
-        $subStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
-        $submittedNums = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
-
-        // Позиции с ненулевыми количествами — для таблицы/пивота
-        $ordStmt = $pdo->prepare("
-            SELECT o.restaurant_number, oi.sku, oi.product_name,
-                   COALESCE(oi.admin_qty, oi.quantity) AS qty
-            FROM so_orders o
-            JOIN so_order_items oi ON oi.order_id = o.id
-            WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
-              AND o.legal_entity IN ({$entityPh})
-              AND o.restaurant_number IN ({$expectedPh})
-              AND COALESCE(oi.admin_qty, oi.quantity) > 0
-        ");
-        $ordStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
-        $orderRows = $ordStmt->fetchAll();
-
-        // Пивот
-        $productsOrdered = [];
-        $pivot = [];
-        foreach ($orderRows as $row) {
-            $sku = $row['sku'];
-            if (!isset($productsOrdered[$sku])) {
-                $productsOrdered[$sku] = ['sku' => $sku, 'name' => $row['product_name']];
-            }
-            $rn = $row['restaurant_number'];
-            if (!isset($pivot[$rn])) $pivot[$rn] = [];
-            $pivot[$rn][$sku] = ($pivot[$rn][$sku] ?? 0) + (float)$row['qty'];
-        }
-        uasort($productsOrdered, function($a, $b) { return strcmp($a['name'], $b['name']); });
-
-        $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
-        $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+        $supName = $sum['supplier']['short_name'];
+        $dateFmt = $sum['date_fmt'];
         $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
+        $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
         $dayShort = $dayNames[$deliveryDow] ?? '';
-
-        // Считаем подавших по статусу заявки, а не по наличию позиций
-        $submittedCount = count(array_intersect($expectedNums, array_keys($submittedNums)));
-        $missingCount = count($expectedNums) - $submittedCount;
-
-        // Ключ дедупликации — тот же формат, что и в cron_telegram.php,
-        // чтобы ручная отправка блокировала автоматическую и наоборот.
         $dedupKey = "so_summary_{$supplierId}_{$deliveryDate}";
+        $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
 
-        // Если никто не подал — только текст
-        if (!$productsOrdered) {
-            $caption = "⚠️ <b>Никто не подал заявку</b>\n";
-            $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-            $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
-            $caption .= "🏪 Ресторанов по графику: <b>" . count($expectedRests) . "</b>";
-
+        if ($sum['status'] === 'empty') {
+            $caption = "⚠️ <b>Никто не подал заявку</b>\n"
+                . "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n"
+                . "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n"
+                . "🏪 Ресторанов по графику: <b>{$sum['restaurants_count']}</b>";
             $sentCount = 0;
-            $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
             foreach ($subs as $sub) {
                 $ok = sendTelegramMessage($botToken, $sub['telegram_chat_id'], $caption);
-                $type = $ok ? 'so_summary_sent' : 'so_summary_fail';
-                $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
+                $perUser->execute([$ok ? 'so_summary_sent' : 'so_summary_fail', $sub['telegram_chat_id'], $dedupKey]);
                 if ($ok) $sentCount++;
             }
-            $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
-                ->execute([$dedupKey]);
-            soRespond([
-                'success' => true,
-                'sent' => $sentCount,
-                'total_subs' => count($subs),
-                'mode' => 'text_only',
-            ]);
+            $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")->execute([$dedupKey]);
+            soRespond(['success' => true, 'sent' => $sentCount, 'total_subs' => count($subs), 'mode' => 'text_only']);
         }
 
-        $productsOut = array_values($productsOrdered);
-
-        // Формируем payload для Node
-        $restaurantsOut = [];
-        foreach ($expectedRests as $rest) {
-            $rn = (string)($rest['restaurant_number'] ?? '');
-            if ($rn === '') continue;
-            $restaurantsOut[] = [
-                'number'    => (int)$rn,
-                'city'      => $rest['city'] ?: '',
-                'region'    => $rest['region'] ?: '',
-                'address'   => $rest['address'] ?: '',
-                'submitted' => isset($submittedNums[$rn]),
-            ];
-        }
-
-        $itemsOut = new stdClass();
-        $colTotals = array_fill_keys(array_column($productsOut, 'sku'), 0);
-        foreach ($pivot as $rn => $pmap) {
-            foreach ($pmap as $sku => $qty) {
-                $itemsOut->{"{$rn}_{$sku}"} = ['qty' => (float)$qty, 'is_admin' => false];
-                if (isset($colTotals[$sku])) $colTotals[$sku] += (float)$qty;
-            }
-        }
-
-        $payload = [
-            'supplier_name'     => $supName,
-            'delivery_date_fmt' => $dateFmt,
-            'sheet_name'        => $supName,
-            'products'          => $productsOut,
-            'restaurants'       => $restaurantsOut,
-            'items'             => $itemsOut,
-        ];
-
-        // Генерируем Excel через Node
-        $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
-        $tmpXlsx = tempnam(sys_get_temp_dir(), 'so_xlsx_') . '.xlsx';
-        file_put_contents($tmpJson, json_encode($payload, JSON_UNESCAPED_UNICODE));
-
-        $scriptPath = escapeshellarg(__DIR__ . '/../../scripts/build_so_order_xlsx.mjs');
-        $cmd = 'node ' . $scriptPath . ' ' . escapeshellarg($tmpJson) . ' ' . escapeshellarg($tmpXlsx) . ' 2>&1';
-        exec($cmd, $outLines, $rc);
-        @unlink($tmpJson);
-
-        if ($rc !== 0 || !file_exists($tmpXlsx)) {
-            error_log('[so send-summary] node generator failed (rc=' . $rc . '): ' . implode("\n", $outLines));
-            @unlink($tmpXlsx);
-            soRespond(['error' => 'Не удалось сгенерировать Excel: ' . implode(' ', $outLines)], 500);
-        }
-
-        $xlsxBinary = file_get_contents($tmpXlsx);
-        @unlink($tmpXlsx);
-
-        $filename = "Заявка {$supName} на {$dateFmt}.xlsx";
-
-        $caption = "🧾 <b>Заказ поставщику</b> (повторная отправка)\n";
-        $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-        $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n\n";
-        $caption .= "✅ Подали: <b>{$submittedCount}</b> из <b>" . count($expectedRests) . "</b>\n";
+        $missingCount = $sum['restaurants_count'] - $sum['submitted_count'];
+        $caption = "🧾 <b>Заказ поставщику</b> (повторная отправка)\n"
+            . "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n"
+            . "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n\n"
+            . "✅ Подали: <b>{$sum['submitted_count']}</b> из <b>{$sum['restaurants_count']}</b>\n";
         if ($missingCount > 0) $caption .= "❌ Не подали: <b>{$missingCount}</b>\n";
+        $colTotals = $sum['col_totals'];
         arsort($colTotals);
         $topProducts = array_slice($colTotals, 0, 5, true);
         if ($topProducts) {
             $caption .= "\n📊 <b>Итого по товарам:</b>\n";
             foreach ($topProducts as $sku => $tot) {
                 if ($tot <= 0) continue;
-                $name = $productsOrdered[$sku]['name'] ?? $sku;
+                $name = $sum['products_map'][$sku]['name'] ?? $sku;
                 $caption .= "• " . htmlspecialchars($name, ENT_QUOTES) . " — <b>" . rtrim(rtrim(number_format($tot, 2, '.', ''), '0'), '.') . "</b>\n";
             }
-            if (count($colTotals) > 5) {
-                $caption .= "… и ещё " . (count($colTotals) - 5) . " позиций в файле";
-            }
+            if (count($colTotals) > 5) $caption .= "… и ещё " . (count($colTotals) - 5) . " позиций в файле";
         }
 
         $sentCount = 0;
-        $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
         foreach ($subs as $sub) {
-            $ok = sendTelegramDocument($botToken, $sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
-            $type = $ok ? 'so_summary_sent' : 'so_summary_fail';
-            $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
+            $ok = sendTelegramDocument($botToken, $sub['telegram_chat_id'], $sum['filename'], $sum['xlsx'], $caption);
+            $perUser->execute([$ok ? 'so_summary_sent' : 'so_summary_fail', $sub['telegram_chat_id'], $dedupKey]);
             if ($ok) $sentCount++;
         }
-        $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
-            ->execute([$dedupKey]);
-
-        soRespond([
-            'success' => true,
-            'sent' => $sentCount,
-            'total_subs' => count($subs),
-        ]);
+        $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")->execute([$dedupKey]);
+        soRespond(['success' => true, 'sent' => $sentCount, 'total_subs' => count($subs)]);
     }
 
     // --- Экспорт ---
