@@ -190,6 +190,79 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     return $out;
 }
 
+/**
+ * Отправляет сводку заявок поставщику на email + пишет в so_email_log.
+ * trigger: 'manual' | 'auto'. Для 'auto' защита от дублей через so_email_auto_log.
+ */
+function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, string $triggerType, ?string $senderName = null, ?string $ip = null): array {
+    require_once __DIR__ . '/mail_send.php';
+    require_once __DIR__ . '/mail_templates.php';
+
+    // Захват права на авто-отправку (одно письмо на поставщика+день).
+    if ($triggerType === 'auto') {
+        $lock = $pdo->prepare("INSERT IGNORE INTO so_email_auto_log (supplier_id, delivery_date) VALUES (?, ?)");
+        $lock->execute([$supplierId, $deliveryDate]);
+        if ($lock->rowCount() === 0) return ['success' => false, 'skipped' => 'already_sent', 'restaurants_count' => 0, 'items_count' => 0];
+    }
+
+    $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
+    $rc = $sum['restaurants_count']; $ic = $sum['items_count'];
+    if ($sum['status'] !== 'ok') {
+        // Нет заявок / закрыто / нет графика / ошибка xlsx — не отправляем.
+        return ['success' => false, 'skipped' => $sum['status'], 'error' => $sum['error'] ?? null, 'restaurants_count' => $rc, 'items_count' => $ic];
+    }
+
+    // Адреса
+    $addr = $pdo->prepare("SELECT short_name, email, cc_emails FROM suppliers WHERE id = ?");
+    $addr->execute([$supplierId]);
+    $s = $addr->fetch();
+    $toEmail = trim((string)($s['email'] ?? ''));
+    if ($toEmail === '') return ['success' => false, 'skipped' => 'no_email', 'restaurants_count' => $rc, 'items_count' => $ic];
+    $ccList = array_values(array_filter(array_map('trim', explode(',', (string)($s['cc_emails'] ?? '')))));
+
+    $supName = $s['short_name'];
+    $dateFmt = $sum['date_fmt'];
+    $subject = "Заявки на {$dateFmt} — {$supName}";
+    $bodyHtml = renderMailHtml([
+        'title'   => 'Заявки ресторанов',
+        'preview' => "Сводка заявок на {$dateFmt}",
+        'intro'   => 'Здравствуйте!',
+        'body'    => "<p>Направляем заявки ресторанов на доставку <b>{$dateFmt}</b>.</p>"
+                   . "<p>Ресторанов: <b>{$sum['submitted_count']}</b> из <b>{$sum['restaurants_count']}</b>. Позиций: <b>{$ic}</b>.</p>"
+                   . "<p>Подробности — в приложенном файле Excel.</p>",
+        'footer'  => 'Это письмо сформировано автоматически системой отдела закупок.',
+    ]);
+
+    $attachB64 = base64_encode($sum['xlsx']);
+    // Лимит вложения 4 МБ (в base64 ~ *1.34).
+    if (strlen($attachB64) > 4 * 1024 * 1024 * 4 / 3) {
+        soLogEmail($pdo, $supplierId, $deliveryDate, $sum, $toEmail, $ccList, $subject, $triggerType, false, 'attachment_too_large', $senderName, $ip);
+        return ['success' => false, 'error' => 'attachment_too_large', 'restaurants_count' => $rc, 'items_count' => $ic];
+    }
+
+    $res = sendEmail($toEmail, $subject, $bodyHtml, true, [
+        'account' => 'order',
+        'reply_to' => 'order@supply-department.online',
+        'cc' => $ccList,
+        'attachments' => [['filename' => $sum['filename'], 'content_b64' => $attachB64,
+            'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']],
+    ]);
+    $ok = !empty($res['success']);
+    soLogEmail($pdo, $supplierId, $deliveryDate, $sum, $toEmail, $ccList, $subject, $triggerType, $ok, $ok ? null : ($res['error'] ?? 'send_failed'), $senderName, $ip);
+    return ['success' => $ok, 'error' => $ok ? null : ($res['error'] ?? 'send_failed'), 'restaurants_count' => $rc, 'items_count' => $ic];
+}
+
+/** Пишет строку в so_email_log. */
+function soLogEmail(PDO $pdo, string $supplierId, string $deliveryDate, array $sum, string $to, array $cc, string $subject, string $trigger, bool $success, ?string $err, ?string $senderName, ?string $ip): void {
+    $le = $sum['supplier']['legal_entity'] ?? null;
+    $pdo->prepare("INSERT INTO so_email_log
+        (supplier_id, delivery_date, legal_entity, recipients, cc_recipients, subject, restaurants_count, items_count, trigger_type, success, error_message, sender_user_name, ip_address)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        ->execute([$supplierId, $deliveryDate, $le, $to, implode(',', $cc), mb_substr($subject, 0, 255),
+            (int)$sum['restaurants_count'], (int)$sum['items_count'], $trigger, $success ? 1 : 0,
+            $err ? mb_substr($err, 0, 1000) : null, $senderName, $ip]);
+}
+
 function soGetSupplierNotifyUsers($pdo, $supplierId) {
     $s = $pdo->prepare("
         SELECT user_name
@@ -2645,6 +2718,31 @@ if ($soAction === 'admin') {
         }
         $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")->execute([$dedupKey]);
         soRespond(['success' => true, 'sent' => $sentCount, 'total_subs' => count($subs)]);
+    }
+
+    // --- Ручная отправка сводки поставщику на email ---
+    if ($adminAction === 'send-summary-email' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        $deliveryDate = $body['delivery_date'] ?? '';
+        if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+
+        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        $senderName = $sessionUser['name'] ?? null;
+        $r = soSendSummaryEmail($pdo, $supplierId, $deliveryDate, 'manual', $senderName, $ip);
+
+        if (!empty($r['success'])) {
+            soRespond(['success' => true, 'restaurants_count' => $r['restaurants_count'], 'items_count' => $r['items_count']]);
+        }
+        $map = [
+            'no_email'    => 'У поставщика не указана почта',
+            'empty'       => 'Нет заявок за этот день',
+            'closed'      => 'Дата доставки закрыта',
+            'no_schedule' => 'Нет ресторанов в графике на этот день',
+        ];
+        $skip = $r['skipped'] ?? null;
+        $msg = $map[$skip] ?? ('Не удалось отправить письмо' . (!empty($r['error']) ? ': ' . $r['error'] : ''));
+        soRespond(['error' => $msg], 400);
     }
 
     // --- Экспорт ---
