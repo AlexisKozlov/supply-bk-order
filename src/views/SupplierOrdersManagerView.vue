@@ -50,6 +50,10 @@
             <input type="checkbox" :checked="!!settings.auto_submit_previous" @change="toggleAutoSubmit" />
             Авто-подача предыдущей по дедлайну
           </label>
+          <label style="font-size:12px;color:#666;display:inline-flex;align-items:center;gap:4px;margin-left:8px;" title="Если включено — после дедлайна система сама отправит сводку заявок на почту поставщика">
+            <input type="checkbox" :checked="!!settings.auto_email_summary" @change="toggleAutoEmail" />
+            Авто-письмо поставщику в дедлайн
+          </label>
           <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
         </div>
       </div>
@@ -602,7 +606,7 @@ const restaurants = ref([]);
 const weekDates = ref([]);
 
 // Settings (постоянный режим приёма)
-const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, default_deadline_time: '14:00:00', pause_message: null });
+const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null });
 const defaultDeadline = ref('14:00');
 const pauseMessage = ref('');
 const deadlineOverrides = ref([]);
@@ -812,7 +816,7 @@ async function loadSettings() {
   if (!currentSupplierId.value) return;
   try {
     const data = await store.adminGetSettings(currentSupplierId.value);
-    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, default_deadline_time: '14:00:00', pause_message: null };
+    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null };
     defaultDeadline.value = (settings.value.default_deadline_time || '14:00:00').substring(0, 5);
     pauseMessage.value = settings.value.pause_message || '';
     deadlineOverrides.value = data.overrides || [];
@@ -839,6 +843,7 @@ function currentSettingsPayload(overrides = {}) {
   return {
     is_accepting_orders: settings.value.is_accepting_orders,
     auto_submit_previous: settings.value.auto_submit_previous ? 1 : 0,
+    auto_email_summary: settings.value.auto_email_summary ? 1 : 0,
     default_deadline_time: defaultDeadline.value + ':00',
     pause_message: pauseMessage.value || null,
     ...overrides,
@@ -863,6 +868,16 @@ async function toggleAutoSubmit(ev) {
   const next = ev.target.checked ? 1 : 0;
   try {
     await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ auto_submit_previous: next }));
+    await loadSettings();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  }
+}
+
+async function toggleAutoEmail(ev) {
+  const next = ev.target.checked ? 1 : 0;
+  try {
+    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ auto_email_summary: next }));
     await loadSettings();
   } catch (e) {
     toast.error('Ошибка', e.message);
