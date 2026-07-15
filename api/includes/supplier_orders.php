@@ -75,6 +75,10 @@ function soGetSupplierSettings($pdo, $supplierId) {
 /**
  * Собирает сводку заявок поставщика за день и готовый xlsx-бинарник.
  * Общая логика для Telegram-сводки, ручной email-отправки и крона.
+ *
+ * Внимание: 'col_totals' и 'products_map' заполнены только при status 'ok' или 'empty'.
+ * В ветках 'closed' и 'no_schedule' этих ключей в результате нет — потребитель обязан
+ * сперва проверить 'status', прежде чем обращаться к ним.
  */
 function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate): array {
     $out = [
@@ -205,11 +209,21 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
         $lock->execute([$supplierId, $deliveryDate]);
         if ($lock->rowCount() === 0) return ['success' => false, 'skipped' => 'already_sent', 'restaurants_count' => 0, 'items_count' => 0];
     }
+    // Освобождает замок авто-отправки — только для транзиентных сбоев (xlsx_error, send_failed),
+    // чтобы следующий тик крона повторил попытку в пределах окна.
+    $releaseAutoLock = function () use ($pdo, $triggerType, $supplierId, $deliveryDate) {
+        if ($triggerType === 'auto') {
+            $pdo->prepare("DELETE FROM so_email_auto_log WHERE supplier_id = ? AND delivery_date = ?")
+                ->execute([$supplierId, $deliveryDate]);
+        }
+    };
 
     $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
     $rc = $sum['restaurants_count']; $ic = $sum['items_count'];
     if ($sum['status'] !== 'ok') {
-        // Нет заявок / закрыто / нет графика / ошибка xlsx — не отправляем.
+        // Нет заявок / закрыто / нет графика — терминально, замок не освобождаем.
+        // Ошибка сборки xlsx — временный сбой, освобождаем замок для повтора.
+        if ($sum['status'] === 'xlsx_error') $releaseAutoLock();
         return ['success' => false, 'skipped' => $sum['status'], 'error' => $sum['error'] ?? null, 'restaurants_count' => $rc, 'items_count' => $ic];
     }
 
@@ -250,6 +264,8 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     ]);
     $ok = !empty($res['success']);
     soLogEmail($pdo, $supplierId, $deliveryDate, $sum, $toEmail, $ccList, $subject, $triggerType, $ok, $ok ? null : ($res['error'] ?? 'send_failed'), $senderName, $ip);
+    // SMTP-отправка не удалась — временный сбой, освобождаем замок для повтора кроном.
+    if (!$ok) $releaseAutoLock();
     return ['success' => $ok, 'error' => $ok ? null : ($res['error'] ?? 'send_failed'), 'restaurants_count' => $rc, 'items_count' => $ic];
 }
 
@@ -2742,6 +2758,7 @@ if ($soAction === 'admin') {
             'empty'       => 'Нет заявок за этот день',
             'closed'      => 'Дата доставки закрыта',
             'no_schedule' => 'Нет ресторанов в графике на этот день',
+            'xlsx_error'  => 'Не удалось сформировать Excel',
         ];
         $skip = $r['skipped'] ?? null;
         $msg = $map[$skip] ?? ('Не удалось отправить письмо' . (!empty($r['error']) ? ': ' . $r['error'] : ''));

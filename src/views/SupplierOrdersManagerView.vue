@@ -1486,8 +1486,7 @@ async function sendSummaryEmail() {
   sendingSummaryEmail.value = true;
   try {
     const r = await store.adminSendSummaryEmail(currentSupplierId.value, selectedDate.value);
-    if (r?.error) { toast.warning('Не отправлено', r.error); }
-    else { toast.success('Отправлено', `Сводка ушла на почту поставщика (ресторанов: ${r.restaurants_count ?? '—'})`); }
+    toast.success('Отправлено', `Сводка ушла на почту поставщика (ресторанов: ${r.restaurants_count ?? '—'})`);
   } catch (e) {
     toast.error('Ошибка', e?.message || 'Не удалось отправить письмо');
   } finally {
