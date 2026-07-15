@@ -130,6 +130,10 @@
               <BurgerSpinner v-if="sendingSummary" size="xs" />
               <span>{{ sendingSummary ? 'Отправка...' : '📤 Отправить сводку' }}</span>
             </button>
+            <button class="rom-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
+              title="Сгенерировать Excel и отправить на почту поставщика">
+              {{ sendingSummaryEmail ? 'Отправка…' : '✉️ На почту поставщику' }}
+            </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
             <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
               📋 Копировать не подавших
@@ -661,6 +665,7 @@ const showOrderModal = ref(false);
 const viewedOrder = ref(null);
 const exporting = ref(false);
 const sendingSummary = ref(false);
+const sendingSummaryEmail = ref(false);
 
 // Multi-date export
 const exportDatePickerOpen = ref(false);
@@ -1458,6 +1463,20 @@ async function sendSummary() {
     toast.error('Ошибка отправки', e.message || String(e));
   } finally {
     sendingSummary.value = false;
+  }
+}
+
+async function sendSummaryEmail() {
+  if (!selectedDate.value || !currentSupplierId.value) return;
+  sendingSummaryEmail.value = true;
+  try {
+    const r = await store.adminSendSummaryEmail(currentSupplierId.value, selectedDate.value);
+    if (r?.error) { toast.warning('Не отправлено', r.error); }
+    else { toast.success('Отправлено', `Сводка ушла на почту поставщика (ресторанов: ${r.restaurants_count ?? '—'})`); }
+  } catch (e) {
+    toast.error('Ошибка', e?.message || 'Не удалось отправить письмо');
+  } finally {
+    sendingSummaryEmail.value = false;
   }
 }
 
