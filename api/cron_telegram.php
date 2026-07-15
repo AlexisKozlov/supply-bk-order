@@ -43,6 +43,17 @@ require_once __DIR__ . '/includes/legal_entities.php';
 require_once __DIR__ . '/includes/so_deadline.php';
 require_once __DIR__ . '/includes/tg_client.php';
 
+// supplier_orders.php обычно подключается только из index.php как HTTP-роутер
+// (внутри — `if ($endpoint !== 'so') return;` и парсинг $uri/$method в самом низу).
+// Нам нужна только функция soSendSummaryEmail() и её зависимости (объявления
+// функций наверху файла) — не HTTP-роутинг. Задаём безопасные заглушки, чтобы
+// пройти страж и не попасть ни в один маршрут ($method !== 'GET'/'POST'/... и
+// $soAction === '' не совпадёт ни с одним условием ниже).
+$endpoint = 'so';
+$method = null;
+$uri = '';
+require_once __DIR__ . '/includes/supplier_orders.php';
+
 // TTL одноразовых токенов входа в кабинет ресторана (синхронизировано с helpers.php).
 if (!defined('RO_AUTH_TOKEN_TTL_MINUTES')) define('RO_AUTH_TOKEN_TTL_MINUTES', 10);
 
@@ -1258,6 +1269,55 @@ try {
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] so auto-submit error: ' . $e->getMessage());
+}
+
+// Авто-отправка сводки поставщику на email в дедлайн.
+// Отдельно от auto_submit_previous: критерий — so_supplier_settings.auto_email_summary=1
+// и непустой suppliers.email. Идём тем же окном дедлайна (0..15 мин после), одно
+// письмо на (поставщик, день) — защита в soSendSummaryEmail через so_email_auto_log.
+try {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $now = new DateTime('now', $tz);
+    $emailSuppliers = $pdo->query("
+        SELECT s.id, COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+        FROM suppliers s
+        JOIN so_supplier_settings sst ON sst.supplier_id = s.id
+        WHERE s.is_active = 1 AND s.so_enabled = 1
+          AND sst.auto_email_summary = 1
+          AND s.email IS NOT NULL AND s.email <> ''
+    ")->fetchAll();
+
+    foreach ($emailSuppliers as $sup) {
+        $supId = $sup['id'];
+        $defaultDl = $sup['default_deadline_time'];
+        for ($iDay = 0; $iDay < 15; $iDay++) {
+            $dObj = (clone $now)->setTime(0, 0, 0)->modify("+{$iDay} days");
+            $deliveryDate = $dObj->format('Y-m-d');
+            $deliveryDow = (int)$dObj->format('N');
+
+            $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+            $ovStmt->execute([$supId, $deliveryDate]);
+            $ov = $ovStmt->fetch() ?: null;
+            $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
+            $rlStmt->execute([$supId, $deliveryDow]);
+            $rule = $rlStmt->fetch() ?: null;
+
+            $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz);
+            if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
+            $minutesSinceDeadline = ($now->getTimestamp() - $r['deadline_dt']->getTimestamp()) / 60;
+            if ($minutesSinceDeadline < -1 || $minutesSinceDeadline > 15) continue;
+
+            // Одно письмо на поставщика+день; skipped='already_sent' при повторе.
+            $res = soSendSummaryEmail($pdo, $supId, $deliveryDate, 'auto', null, null);
+            if (!empty($res['success'])) {
+                error_log("[so auto-email] sent supplier={$supId} date={$deliveryDate} rests={$res['restaurants_count']}");
+            } elseif (!empty($res['skipped']) && $res['skipped'] !== 'already_sent' && $res['skipped'] !== 'empty') {
+                error_log("[so auto-email] skip supplier={$supId} date={$deliveryDate} reason={$res['skipped']}");
+            }
+        }
+    }
+} catch (Throwable $e) {
+    error_log('[so auto-email] fatal: ' . $e->getMessage());
 }
 
 // ═══ ЗАЯВКИ ПОСТАВЩИКАМ (so_*): итоговая сводка отделу закупок после дедлайна ═══
