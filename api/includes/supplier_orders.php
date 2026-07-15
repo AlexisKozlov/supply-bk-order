@@ -58,7 +58,7 @@ function soGetRestaurantSession($pdo) {
 
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) return $row;
@@ -66,6 +66,7 @@ function soGetSupplierSettings($pdo, $supplierId) {
         'supplier_id' => $supplierId,
         'is_accepting_orders' => 1,
         'auto_submit_previous' => 0,
+        'auto_email_summary' => 0,
         'default_deadline_time' => '14:00:00',
         'pause_message' => null,
     ];
@@ -1458,6 +1459,7 @@ if ($soAction === 'admin') {
 
         $isAccepting = isset($body['is_accepting_orders']) ? ((int)!!$body['is_accepting_orders']) : 1;
         $autoSubmitPrev = !empty($body['auto_submit_previous']) ? 1 : 0;
+        $autoEmailSummary = !empty($body['auto_email_summary']) ? 1 : 0;
         $defaultDl = $body['default_deadline_time'] ?? '14:00:00';
         if (preg_match('/^(\d{1,2}):(\d{2})$/', $defaultDl, $m)) {
             $defaultDl = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
@@ -1467,15 +1469,16 @@ if ($soAction === 'admin') {
         $pauseMsg = $body['pause_message'] ?? null;
         $notifyUsers = array_key_exists('notify_users', $body) ? ($body['notify_users'] ?? []) : null;
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?)
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
               auto_submit_previous = VALUES(auto_submit_previous),
+              auto_email_summary = VALUES(auto_email_summary),
               default_deadline_time = VALUES(default_deadline_time),
               pause_message = VALUES(pause_message),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $defaultDl, $pauseMsg, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $updatedBy]);
 
         if ($notifyUsers !== null) {
             try {
