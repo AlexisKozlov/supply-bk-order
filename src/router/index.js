@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { useUserStore } from '@/stores/userStore.js';
+import { useUserStore, loadRbacConfig } from '@/stores/userStore.js';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 
 const APP_TITLE = 'Портал закупок';
@@ -256,6 +256,14 @@ router.beforeEach(async (to) => {
   // правильный pinia (injected через app.use), и await блокирует
   // навигацию до завершения validate_session.
   await userStore.restoreSession();
+  // Подтягиваем актуальный RBAC-конфиг с сервера для всех авторизованных
+  // сотрудников, а не только при открытии админки. Иначе у пользователя с
+  // пустыми permissions доступ считается по устаревшему встроенному шаблону,
+  // где нет выделенных модулей (keg-returns/reconciliation/tit-requests), и
+  // они ошибочно недоступны. loadRbacConfig грузится один раз (кэш внутри).
+  if (userStore.isAuthenticated) {
+    await loadRbacConfig();
+  }
   // Защита кабинета ресторана: пути /restaurant/* (кроме /restaurant/login)
   // требуют залогиненного ресторана. Сам токен живёт в HttpOnly-cookie и
   // из JS не виден, поэтому ориентируемся на кэш ресторана в сторе:
