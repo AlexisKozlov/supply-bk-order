@@ -2579,6 +2579,11 @@ if ($soAction === 'admin') {
         if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
+        $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
+        if ($sum['status'] === 'closed')      soRespond(['error' => 'Дата доставки закрыта'], 400);
+        if ($sum['status'] === 'no_schedule') soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
+        if ($sum['status'] === 'xlsx_error')  soRespond(['error' => 'Не удалось сгенерировать Excel: ' . $sum['error']], 500);
+
         // Подписчики Telegram
         $subsStmt = $pdo->prepare("
             SELECT u.name, u.telegram_chat_id FROM so_supplier_summary_subscribers sss
@@ -2589,11 +2594,6 @@ if ($soAction === 'admin') {
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if (!$subs) soRespond(['error' => 'Нет подписчиков для этого поставщика'], 400);
         if (!$botToken) soRespond(['error' => 'Telegram Bot Token не настроен'], 500);
-
-        $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
-        if ($sum['status'] === 'closed')      soRespond(['error' => 'Дата доставки закрыта'], 400);
-        if ($sum['status'] === 'no_schedule') soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
-        if ($sum['status'] === 'xlsx_error')  soRespond(['error' => 'Не удалось сгенерировать Excel: ' . $sum['error']], 500);
 
         $supName = $sum['supplier']['short_name'];
         $dateFmt = $sum['date_fmt'];
