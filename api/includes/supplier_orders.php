@@ -487,9 +487,10 @@ function soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers) {
         return [];
     }
 
-    // Валидация: все имена должны быть активными пользователями.
+    // Валидация: все имена должны существовать в users.
+    // (в таблице users нет колонки active — сотрудники проверяются только по имени)
     $ph = implode(',', array_fill(0, count($names), '?'));
-    $validStmt = $pdo->prepare("SELECT name FROM users WHERE name IN ({$ph}) AND active = 1");
+    $validStmt = $pdo->prepare("SELECT name FROM users WHERE name IN ({$ph})");
     $validStmt->execute($names);
     $validNames = $validStmt->fetchAll(PDO::FETCH_COLUMN);
 
