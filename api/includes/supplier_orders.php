@@ -1360,6 +1360,44 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         // Уведомление не критично — игнорируем ошибку
     }
 
+    // ── Подтверждение подачи ресторану (Telegram + Push) ────────────────────
+    // Отдельный try/catch: любая ошибка тут НЕ должна ломать подачу заявки
+    // и не меняет уже отданный клиенту ответ.
+    try {
+        $confSt = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+        $confSt->execute([$supplierId]);
+        $confName = (string)($confSt->fetchColumn() ?: '');
+        $confNameEsc = htmlspecialchars($confName, ENT_QUOTES, 'UTF-8');
+        $confDateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+
+        if ($skipDelivery) {
+            $confTgHtml = "✅ <b>{$confNameEsc}</b>, {$confDateFmt}: отмечено, что поставка не нужна.";
+            $confPlain  = "{$confName}, {$confDateFmt}: отмечено, что поставка не нужна.";
+        } else {
+            $confTgHtml = "✅ Заявка <b>{$confNameEsc}</b> на {$confDateFmt} принята.";
+            $confPlain  = "Заявка {$confName} на {$confDateFmt} принята.";
+        }
+
+        $confPush = [
+            'title' => "{$confName}",
+            'body'  => $confPlain,
+            'url'   => '/restaurant/cabinet',
+            'tag'   => "so-confirm-{$supplierId}-{$deliveryDate}",
+        ];
+
+        soNotifyRestaurantOrders(
+            $pdo,
+            $_ENV['TELEGRAM_BOT_TOKEN'] ?? '',
+            (int)$rest['restaurant_number'],
+            (string)($rest['legal_entity_group'] ?? ''),
+            $confTgHtml,
+            $confPush,
+            'notify_confirmations'
+        );
+    } catch (Throwable $e) {
+        error_log('[so submit confirm] ' . $e->getMessage());
+    }
+
     // Аудит
     try {
         $supNameForLog = $supplierName ?? null;
