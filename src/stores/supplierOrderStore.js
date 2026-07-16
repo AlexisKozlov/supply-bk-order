@@ -108,6 +108,14 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return data;
   }
 
+  async function adminGetOverview(date, legalEntity = null) {
+    const params = new URLSearchParams();
+    if (date) params.set('date', date);
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    const data = await api(`admin/overview${params.toString() ? '?' + params : ''}`);
+    return data;
+  }
+
   async function adminGetSettings(supplierId) {
     const data = await api(`admin/settings?supplier_id=${supplierId}`);
     return data;
@@ -245,7 +253,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     loadSuppliers, loadProducts, loadMyOrder, loadMyOrders, submitOrder,
     // Отдел закупок
     adminGetSuppliers, adminGetAvailableSuppliers, adminRegisterSupplier, adminDisconnectSupplier,
-    adminGetStatus, adminGetOrders, adminGetOrder,
+    adminGetStatus, adminGetOverview, adminGetOrders, adminGetOrder,
     adminUpdateOrder, adminDeleteOrder,
     adminGetSettings, adminSaveSettings,
     adminGetSchedules, adminSaveSchedules,
