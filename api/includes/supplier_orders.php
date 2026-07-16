@@ -80,7 +80,7 @@ function soGetSupplierSettings($pdo, $supplierId) {
  * В ветках 'closed' и 'no_schedule' этих ключей в результате нет — потребитель обязан
  * сперва проверить 'status', прежде чем обращаться к ним.
  */
-function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate): array {
+function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate, array $options = ['drop_empty_rows' => false, 'show_pallet_weight' => false]): array {
     $out = [
         'status' => 'ok', 'supplier' => null, 'xlsx' => null, 'filename' => '',
         'date_fmt' => '', 'restaurants_count' => 0, 'submitted_count' => 0,
@@ -215,6 +215,10 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     $payload = [
         'supplier_name' => $supName, 'delivery_date_fmt' => $dateFmt, 'sheet_name' => $supName,
         'products' => $productsOut, 'restaurants' => $restaurantsOut, 'items' => $itemsOut,
+        'options' => [
+            'drop_empty_rows'    => (bool)($options['drop_empty_rows'] ?? false),
+            'show_pallet_weight' => (bool)($options['show_pallet_weight'] ?? false),
+        ],
     ];
 
     $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
@@ -405,7 +409,7 @@ function soGetUnsubmittedRestaurants(PDO $pdo, string $supplierId, string $suppl
  * Отправляет сводку заявок поставщику на email + пишет в so_email_log.
  * trigger: 'manual' | 'auto'. Для 'auto' защита от дублей через so_email_auto_log.
  */
-function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, string $triggerType, ?string $senderName = null, ?string $ip = null): array {
+function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, string $triggerType, ?string $senderName = null, ?string $ip = null, array $options = ['drop_empty_rows' => false, 'show_pallet_weight' => false]): array {
     require_once __DIR__ . '/mail_send.php';
     require_once __DIR__ . '/mail_templates.php';
 
@@ -424,7 +428,7 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
         }
     };
 
-    $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
+    $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate, $options);
     $rc = $sum['restaurants_count']; $ic = $sum['items_count'];
     if ($sum['status'] !== 'ok') {
         // Нет заявок / закрыто / нет графика — терминально, замок не освобождаем.
@@ -3073,7 +3077,11 @@ if ($soAction === 'admin') {
         if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
-        $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
+        $summaryOptions = [
+            'drop_empty_rows'    => filter_var($body['drop_empty_rows'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            'show_pallet_weight' => filter_var($body['show_pallet_weight'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        ];
+        $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate, $summaryOptions);
         if ($sum['status'] === 'closed')      soRespond(['error' => 'Дата доставки закрыта'], 400);
         if ($sum['status'] === 'no_schedule') soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
         if ($sum['status'] === 'xlsx_error')  soRespond(['error' => 'Не удалось сгенерировать Excel: ' . $sum['error']], 500);
@@ -3150,7 +3158,11 @@ if ($soAction === 'admin') {
 
         $ip = $_SERVER['REMOTE_ADDR'] ?? null;
         $senderName = $sessionUser['name'] ?? null;
-        $r = soSendSummaryEmail($pdo, $supplierId, $deliveryDate, 'manual', $senderName, $ip);
+        $summaryOptions = [
+            'drop_empty_rows'    => filter_var($body['drop_empty_rows'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            'show_pallet_weight' => filter_var($body['show_pallet_weight'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        ];
+        $r = soSendSummaryEmail($pdo, $supplierId, $deliveryDate, 'manual', $senderName, $ip, $summaryOptions);
 
         if (!empty($r['success'])) {
             soRespond(['success' => true, 'restaurants_count' => $r['restaurants_count'], 'items_count' => $r['items_count']]);
