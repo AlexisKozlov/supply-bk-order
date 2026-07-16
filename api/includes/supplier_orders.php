@@ -2960,7 +2960,13 @@ if ($soAction === 'admin') {
             ORDER BY t.sort_order, t.product_name
         ");
         $s->execute([$supplierId, $le]);
-        soRespond(['templates' => $s->fetchAll()]);
+        // PDO с эмулированными prepare отдаёт все колонки строками — приводим
+        // флаг связи к int, чтобы фронт (v-else-if="t.linked") корректно различал
+        // 0/1 (строка "0" в JS истинна и ломала бы индикатор «нет карточки»).
+        $tplRows = $s->fetchAll();
+        foreach ($tplRows as &$tplRow) { $tplRow['linked'] = (int)$tplRow['linked']; }
+        unset($tplRow);
+        soRespond(['templates' => $tplRows]);
     }
 
     // --- Сохранение шаблона ---
