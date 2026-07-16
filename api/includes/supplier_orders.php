@@ -1370,7 +1370,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         $confNameEsc = htmlspecialchars($confName, ENT_QUOTES, 'UTF-8');
         $confDateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
 
-        if ($skipDelivery) {
+        if ($isSkip) {
             $confTgHtml = "✅ <b>{$confNameEsc}</b>, {$confDateFmt}: отмечено, что поставка не нужна.";
             $confPlain  = "{$confName}, {$confDateFmt}: отмечено, что поставка не нужна.";
         } else {
