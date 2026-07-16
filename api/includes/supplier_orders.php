@@ -2838,6 +2838,72 @@ if ($soAction === 'admin') {
         soRespond(['success' => true]);
     }
 
+    // --- Напоминание ресторанам, не подавшим заявку ---
+    if ($adminAction === 'remind-unsubmitted' && $method === 'POST') {
+        $supplierId   = $body['supplier_id'] ?? '';
+        $deliveryDate = $body['delivery_date'] ?? '';
+
+        // Валидация: непустые поля + корректная календарная дата YYYY-MM-DD.
+        if ($supplierId === '' || $deliveryDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) {
+            soRespond(['error' => 'Неверная дата'], 400);
+        }
+        [$dY, $dM, $dD] = array_map('intval', explode('-', $deliveryDate));
+        if (!checkdate($dM, $dD, $dY)) {
+            soRespond(['error' => 'Неверная дата'], 400);
+        }
+
+        // Доступ к поставщику — тот же guard, что у соседних admin-обработчиков.
+        $supplier = soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        $group    = $supplier['legal_entity_group'] ?: getEntityGroup($supplier['legal_entity'] ?? '');
+        $supName  = $supplier['short_name'] ?? '';
+
+        // Если приём заявок на эту дату закрыт — ничего не рассылаем.
+        $dl = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+        if (!empty($dl['is_closed']) || !empty($dl['forced_closed'])) {
+            soRespond([
+                'reminded' => 0,
+                'total_unsubmitted' => 0,
+                'closed' => true,
+                'message' => 'Приём заявок на эту дату уже закрыт',
+            ]);
+        }
+
+        $list = soGetUnsubmittedRestaurants($pdo, $supplierId, $group, $deliveryDate);
+
+        $dateFmt    = (new DateTime($deliveryDate))->format('d.m.Y');
+        $deadlineHm = !empty($dl['deadline_time']) ? substr($dl['deadline_time'], 0, 5) : '';
+        $nameEsc    = htmlspecialchars($supName, ENT_QUOTES, 'UTF-8');
+
+        $tgHtml   = "🔔 <b>{$nameEsc}</b>: не забудьте подать заявку на {$dateFmt}.";
+        $pushBody = "{$supName}: подайте заявку на {$dateFmt}";
+        if ($deadlineHm !== '') {
+            $tgHtml   .= " Дедлайн {$deadlineHm}.";
+            $pushBody .= ", дедлайн {$deadlineHm}";
+        }
+        $push = [
+            'title' => $supName,
+            'body'  => $pushBody,
+            'url'   => '/restaurant/cabinet',
+            'tag'   => "so-remind-{$supplierId}-{$deliveryDate}",
+        ];
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+
+        $reminded = 0;
+        foreach ($list as $r) {
+            $reminded += soNotifyRestaurantOrders(
+                $pdo,
+                $botToken,
+                (int)$r['restaurant_number'],
+                (string)$r['legal_entity_group'],
+                $tgHtml,
+                $push,
+                'notify_so_reminders'
+            );
+        }
+
+        soRespond(['reminded' => $reminded, 'total_unsubmitted' => count($list)]);
+    }
+
     // --- Шаблоны товаров ---
     if ($adminAction === 'templates' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
