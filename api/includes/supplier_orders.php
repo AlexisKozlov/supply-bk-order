@@ -56,12 +56,54 @@ function soGetRestaurantSession($pdo) {
     return $user;
 }
 
+// Белые списки напоминаний (строго фиксированы; порядок = порядок отображения)
+function soReminderOffsetWhitelist() { return ['evening', '3h', '2h', '1h', '30m', 'expired']; }
+function soReminderChannelWhitelist() { return ['tg', 'push']; }
+
+/**
+ * Разбирает сохранённое CSV-значение напоминаний в массив.
+ * $raw === null  → настройка не задавалась → вернуть $default (дефолт).
+ * $raw !== null  → распарсить CSV ∩ белый список (в порядке белого списка);
+ *                  пустой результат остаётся пустым массивом (осознанное «выключено»),
+ *                  дефолтом НЕ подменяется.
+ */
+function soParseReminderList($raw, array $whitelist, array $default) {
+    if ($raw === null) return $default;
+    $items = array_map('trim', explode(',', (string)$raw));
+    $set = array_flip($items);
+    $out = [];
+    foreach ($whitelist as $w) {
+        if (isset($set[$w])) $out[] = $w;
+    }
+    return $out;
+}
+
+/**
+ * Нормализует входное значение напоминаний (массив ИЛИ CSV-строка) в CSV
+ * из значений белого списка в порядке белого списка. Пустой результат → ''.
+ */
+function soNormalizeReminderCsv($input, array $whitelist) {
+    $items = is_array($input) ? $input : explode(',', (string)$input);
+    $items = array_map('trim', array_map('strval', $items));
+    $set = array_flip($items);
+    $out = [];
+    foreach ($whitelist as $w) {
+        if (isset($set[$w])) $out[] = $w;
+    }
+    return implode(',', $out);
+}
+
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
-    if ($row) return $row;
+    if ($row) {
+        // Сырые CSV-строки заменяем распарсенными массивами (фронту удобнее)
+        $row['reminder_offsets'] = soParseReminderList($row['reminder_offsets'] ?? null, soReminderOffsetWhitelist(), soReminderOffsetWhitelist());
+        $row['reminder_channels'] = soParseReminderList($row['reminder_channels'] ?? null, soReminderChannelWhitelist(), ['tg']);
+        return $row;
+    }
     return [
         'supplier_id' => $supplierId,
         'is_accepting_orders' => 1,
@@ -69,6 +111,9 @@ function soGetSupplierSettings($pdo, $supplierId) {
         'auto_email_summary' => 0,
         'default_deadline_time' => '14:00:00',
         'pause_message' => null,
+        // Строки настроек нет → дефолты: все тайминги, только Telegram
+        'reminder_offsets' => soReminderOffsetWhitelist(),
+        'reminder_channels' => ['tg'],
     ];
 }
 
@@ -1785,6 +1830,25 @@ if ($soAction === 'admin') {
               pause_message = VALUES(pause_message),
               updated_by = VALUES(updated_by)")
             ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $updatedBy]);
+
+        // Настройки напоминаний обновляем ТОЛЬКО если ключ реально присутствует в теле
+        // (паттерн notify_users): toggle приёма шлёт объект без reminder_* и не должен их обнулять.
+        // Отдельным UPDATE, чтобы одиночный INSERT…ON DUPLICATE не затирал колонки при их отсутствии.
+        $reminderSets = [];
+        $reminderParams = [];
+        if (array_key_exists('reminder_offsets', $body)) {
+            $reminderSets[] = 'reminder_offsets = ?';
+            $reminderParams[] = soNormalizeReminderCsv($body['reminder_offsets'], soReminderOffsetWhitelist());
+        }
+        if (array_key_exists('reminder_channels', $body)) {
+            $reminderSets[] = 'reminder_channels = ?';
+            $reminderParams[] = soNormalizeReminderCsv($body['reminder_channels'], soReminderChannelWhitelist());
+        }
+        if ($reminderSets) {
+            $reminderParams[] = $supplierId;
+            $pdo->prepare("UPDATE so_supplier_settings SET " . implode(', ', $reminderSets) . " WHERE supplier_id = ?")
+                ->execute($reminderParams);
+        }
 
         if ($notifyUsers !== null) {
             try {
