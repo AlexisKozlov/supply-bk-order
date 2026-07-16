@@ -543,7 +543,7 @@
             placeholder="Найти товар в справочнике"
             @input="searchTemplateProducts"
           />
-          <div v-if="templateProductResults.length" class="so-template-dropdown">
+          <div v-if="templateProductResults.length && linkingRowIdx === null" class="so-template-dropdown">
             <button
               v-for="p in templateProductResults"
               :key="p.id || p.sku"
@@ -571,6 +571,7 @@
               <tr>
                 <th style="width:50px">Порядок</th>
                 <th>Товар</th>
+                <th style="width:220px">Каталог</th>
                 <th style="width:80px">Кратность</th>
                 <th style="width:80px">Мин. кол-во</th>
                 <th style="width:40px"></th>
@@ -583,6 +584,39 @@
                   <div class="so-template-product-cell">
                     <input v-model="t.sku" class="rom-input-sm so-template-sku-input" placeholder="SKU" />
                     <input v-model="t.product_name" class="rom-input-sm so-template-name-input" placeholder="Название товара" />
+                  </div>
+                </td>
+                <td>
+                  <!-- Статус связи с карточкой каталога -->
+                  <div v-if="linkingRowIdx === idx" class="so-tpl-link-search">
+                    <input
+                      v-model="templateProductSearch"
+                      class="rom-input-sm"
+                      type="text"
+                      placeholder="Найти карточку"
+                      @input="searchTemplateProducts"
+                    />
+                    <button type="button" class="rom-btn-sm" @click="cancelLinkRow">Отмена</button>
+                    <div v-if="templateProductResults.length" class="so-template-dropdown">
+                      <button
+                        v-for="p in templateProductResults"
+                        :key="p.id || p.sku"
+                        type="button"
+                        class="so-template-option"
+                        @click="linkTemplateRow(idx, p)"
+                      >
+                        <b>{{ p.sku }}</b>
+                        <span>{{ p.name || p.product_name }}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div v-else-if="t.linked" class="so-tpl-linked" :title="catalogHint(t)">
+                    <span class="so-tpl-linked-mark">✅</span>
+                    <span class="so-tpl-linked-text">{{ t.catalog_name || 'привязан' }}<template v-if="catalogAttrs(t)"> · {{ catalogAttrs(t) }}</template></span>
+                  </div>
+                  <div v-else class="so-tpl-unlinked">
+                    <span class="so-tpl-unlinked-mark">⚠️ нет карточки</span>
+                    <button type="button" class="rom-btn-sm" @click="startLinkRow(idx)">Привязать</button>
                   </div>
                 </td>
                 <td><input type="number" v-model.number="t.multiplicity" class="rom-input-sm" style="width:70px" min="0" step="0.01" placeholder="—" /></td>
@@ -735,6 +769,8 @@ const templates = ref([]);
 const templateLe = ref(orderStore.settings.legalEntity || 'ООО "Бургер БК"');
 const templateProductSearch = ref('');
 const templateProductResults = ref([]);
+// Индекс строки шаблона в режиме привязки к карточке каталога (null — режим добавления новой строки)
+const linkingRowIdx = ref(null);
 let templateSearchTimer = null;
 
 // Группа юрлиц текущего поставщика (BK_VM | PS). Определяется из списка
@@ -1557,6 +1593,7 @@ async function loadTemplates() {
   loadingTemplates.value = true;
   templateProductSearch.value = '';
   templateProductResults.value = [];
+  linkingRowIdx.value = null;
   try {
     templates.value = await store.adminGetTemplates(currentSupplierId.value, templateLe.value);
   } catch (e) {
@@ -1596,6 +1633,59 @@ function addTemplateProduct(p) {
   templateProductResults.value = [];
 }
 
+// Короткая подсказка атрибутов каталога (ед. + вес нетто за коробку) для привязанной строки
+function catalogAttrs(t) {
+  const parts = [];
+  if (t.unit_of_measure) parts.push(String(t.unit_of_measure));
+  if (t.weight_netto != null && t.weight_netto !== '') parts.push(`${t.weight_netto} г/кор`);
+  return parts.join(' · ');
+}
+
+// Полная подсказка для title (tooltip) привязанной строки
+function catalogHint(t) {
+  const parts = [];
+  if (t.catalog_name) parts.push(t.catalog_name);
+  if (t.unit_of_measure) parts.push(`ед: ${t.unit_of_measure}`);
+  if (t.weight_netto != null && t.weight_netto !== '') parts.push(`нетто: ${t.weight_netto} г/кор`);
+  if (t.weight_brutto != null && t.weight_brutto !== '') parts.push(`брутто: ${t.weight_brutto} г/кор`);
+  if (t.qty_per_box != null && t.qty_per_box !== '') parts.push(`в коробке: ${t.qty_per_box} шт`);
+  if (t.boxes_per_pallet != null && t.boxes_per_pallet !== '') parts.push(`на паллете: ${t.boxes_per_pallet} кор`);
+  return parts.join('\n');
+}
+
+// Войти в режим привязки карточки для конкретной строки
+function startLinkRow(idx) {
+  linkingRowIdx.value = idx;
+  templateProductSearch.value = '';
+  templateProductResults.value = [];
+}
+
+// Выйти из режима привязки без выбора
+function cancelLinkRow() {
+  linkingRowIdx.value = null;
+  templateProductSearch.value = '';
+  templateProductResults.value = [];
+}
+
+// Привязать карточку каталога к СУЩЕСТВУЮЩЕЙ строке (в отличие от addTemplateProduct — не добавляет новую)
+function linkTemplateRow(idx, p) {
+  const t = templates.value[idx];
+  if (!t) return;
+  t.product_id = p.id || p.product_id || null;
+  // SKU/название заполняем только если строка пустая — введённое закупщиком не затираем
+  if (!String(t.sku || '').trim()) t.sku = String(p.sku || '').trim();
+  if (!String(t.product_name || '').trim()) t.product_name = p.name || p.product_name || '';
+  // Локально отражаем статус и атрибуты, чтобы ✅ появился сразу
+  t.linked = 1;
+  t.catalog_name = p.name || p.product_name || t.catalog_name || '';
+  if (p.unit_of_measure != null) t.unit_of_measure = p.unit_of_measure;
+  if (p.weight_netto != null) t.weight_netto = p.weight_netto;
+  if (p.weight_brutto != null) t.weight_brutto = p.weight_brutto;
+  if (p.qty_per_box != null) t.qty_per_box = p.qty_per_box;
+  if (p.boxes_per_pallet != null) t.boxes_per_pallet = p.boxes_per_pallet;
+  cancelLinkRow();
+}
+
 function searchTemplateProducts() {
   clearTimeout(templateSearchTimer);
   const q = templateProductSearch.value.trim();
@@ -1629,6 +1719,8 @@ async function saveTemplates() {
     await store.adminSaveTemplates(currentSupplierId.value, templateLe.value, items);
     templates.value = items;
     toast.success('Сохранено', 'Шаблон обновлён');
+    // Перезагружаем, чтобы статус связи и атрибуты каталога обновились авторитетно с бэкенда
+    await loadTemplates();
   } catch (e) {
     toast.error('Ошибка', e.message);
   } finally {
@@ -2405,6 +2497,15 @@ watch(
 .so-template-option b { color: #8b7355; min-width: 72px; font-size: 12px; }
 .so-template-product-cell { display: grid; grid-template-columns: minmax(90px, 130px) minmax(240px, 1fr); gap: 8px; }
 .so-template-sku-input, .so-template-name-input { width: 100%; }
+
+/* Статус связи строки шаблона с карточкой каталога */
+.so-tpl-linked { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.so-tpl-linked-mark { flex: 0 0 auto; }
+.so-tpl-linked-text { font-size: 12px; color: #16a34a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.so-tpl-unlinked { display: flex; align-items: center; gap: 8px; }
+.so-tpl-unlinked-mark { font-size: 12px; color: #b45309; white-space: nowrap; }
+.so-tpl-link-search { position: relative; display: flex; align-items: center; gap: 6px; }
+.so-tpl-link-search .rom-input-sm { flex: 1 1 auto; min-width: 120px; }
 
 /* Deadline rules editor */
 .so-deadline-section { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
