@@ -142,6 +142,47 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     }
     uasort($productsOrdered, fn($a, $b) => strcmp($a['name'], $b['name']));
 
+    // Обогащение товаров атрибутами паллет/веса из справочника products.
+    // Справочник фильтруем по ГРУППЕ юрлиц поставщика ($supplierEntities /
+    // $entityPh уже посчитаны выше), как и все прочие обращения к products.
+    // qty_per_box — штук в коробке; boxes_per_pallet — коробок на паллете;
+    // weight_netto / weight_brutto — вес ОДНОЙ КОРОБКИ в граммах.
+    // Поля добавочные: существующие ключи sku/name не трогаем, поэтому
+    // потребители, которые их игнорируют, не заметят изменений.
+    if ($productsOrdered) {
+        $attrSkus = array_keys($productsOrdered);
+        $skuPh = implode(',', array_fill(0, count($attrSkus), '?'));
+        $attrStmt = $pdo->prepare("
+            SELECT sku, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto
+            FROM products
+            WHERE sku IN ({$skuPh}) AND legal_entity IN ({$entityPh})");
+        $attrStmt->execute(array_merge($attrSkus, $supplierEntities));
+        $attrMap = [];
+        foreach ($attrStmt->fetchAll() as $ar) {
+            // В группе (BK+VM) sku может встретиться в двух юрлицах — атрибуты
+            // справочника одинаковы, берём первую попавшуюся строку.
+            if (!isset($attrMap[$ar['sku']])) {
+                $attrMap[$ar['sku']] = [
+                    'qty_per_box'      => (float)$ar['qty_per_box'],
+                    'boxes_per_pallet' => (float)$ar['boxes_per_pallet'],
+                    'weight_netto'     => (float)$ar['weight_netto'],
+                    'weight_brutto'    => (float)$ar['weight_brutto'],
+                ];
+            }
+        }
+        foreach ($productsOrdered as $sku => &$prod) {
+            $a = $attrMap[$sku] ?? [
+                'qty_per_box' => 0, 'boxes_per_pallet' => 0,
+                'weight_netto' => 0, 'weight_brutto' => 0,
+            ];
+            $prod['qty_per_box']      = $a['qty_per_box'];
+            $prod['boxes_per_pallet'] = $a['boxes_per_pallet'];
+            $prod['weight_netto']     = $a['weight_netto'];
+            $prod['weight_brutto']    = $a['weight_brutto'];
+        }
+        unset($prod);
+    }
+
     $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
     $out['date_fmt'] = $dateFmt;
     $out['restaurants_count'] = count($expectedRests);
