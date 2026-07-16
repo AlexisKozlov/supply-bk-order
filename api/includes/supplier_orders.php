@@ -196,6 +196,64 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
 }
 
 /**
+ * Лёгкий статус дня по поставщику: дедлайн + счётчики «подано из ожидаемых».
+ *
+ * Намеренно НЕ переиспользует soBuildSummaryXlsx: та функция — критический путь
+ * Этапа 1 (Telegram + Email), без автотестов, и любое её изменение рискует
+ * задеть отправку сводок. Здесь нужен только быстрый подсчёт для обзора по всем
+ * поставщикам сразу, поэтому логику ожидаемых/поданных ресторанов повторяем
+ * изолированно, БЕЗ чтения so_order_items, без pivot/products и без сборки xlsx.
+ *
+ * $supplierGroup приходит аргументом (эндпоинт уже знает группу из строки
+ * поставщика), чтобы не делать лишний SELECT на каждого поставщика.
+ *
+ * Возвращает:
+ *   deadline_time (string|null), deadline_str (string|null),
+ *   is_closed (bool), forced_closed (bool),
+ *   deadline_at (string|null) — ISO-8601 с офсетом либо null,
+ *   has_schedule (bool), expected_count (int), submitted_count (int).
+ */
+function soGetDayStatusLight(PDO $pdo, string $supplierId, string $supplierGroup, string $deliveryDate): array {
+    $supplierEntities = getEntitiesInGroup($supplierGroup);
+    $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
+
+    $deadlineState = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+    $deadlineDt = $deadlineState['deadline_dt'] ?? null;
+
+    // Ожидаемые рестораны на день (та же логика, что в soBuildSummaryXlsx).
+    // Считаем даже для принудительно закрытого дня, чтобы показать «X из Y».
+    $expectedRests = array_values(array_filter(
+        soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, null, true),
+        fn($row) => soDeliveryDateMatchesDow($deliveryDate, (int)$row['delivery_day'])
+            && (($row['legal_entity_group'] ?? '') === $supplierGroup)
+    ));
+    $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'restaurant_number'))));
+
+    $submittedCount = 0;
+    if ($expectedNums) {
+        $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
+        $subStmt = $pdo->prepare("
+            SELECT restaurant_number FROM so_orders
+            WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
+              AND legal_entity IN ({$entityPh}) AND restaurant_number IN ({$expectedPh})");
+        $subStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
+        $submittedNums = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
+        $submittedCount = count(array_intersect($expectedNums, array_keys($submittedNums)));
+    }
+
+    return [
+        'deadline_time' => $deadlineState['deadline_time'] ?? null,
+        'deadline_str' => $deadlineState['deadline_str'] ?? null,
+        'is_closed' => !empty($deadlineState['is_closed']),
+        'forced_closed' => !empty($deadlineState['forced_closed']),
+        'deadline_at' => $deadlineDt ? $deadlineDt->format(DateTime::ATOM) : null,
+        'has_schedule' => count($expectedNums) > 0,
+        'expected_count' => count($expectedNums),
+        'submitted_count' => $submittedCount,
+    ];
+}
+
+/**
  * Отправляет сводку заявок поставщику на email + пишет в so_email_log.
  * trigger: 'manual' | 'auto'. Для 'auto' защита от дублей через so_email_auto_log.
  */
@@ -1266,6 +1324,56 @@ if ($soAction === 'admin') {
         ");
         $s->execute($params);
         soRespond(['suppliers' => $s->fetchAll()]);
+    }
+
+    // --- Обзор по всем поставщикам группы на выбранную дату ---
+    // Для каждого поставщика — лёгкий статус дня (дедлайн + «подано из ожидаемых»).
+    if ($adminAction === 'overview' && $method === 'GET') {
+        // Таймзона проекта — как в so_deadline.php (Europe/Minsk).
+        $tz = new DateTimeZone('Europe/Minsk');
+        $date = $_GET['date'] ?? '';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $date = (new DateTime('now', $tz))->format('Y-m-d');
+        }
+        $legalEntity = $_GET['legal_entity'] ?? null;
+
+        $where = ["s.is_active = 1", "s.so_enabled = 1"];
+        $params = [];
+        soAppendAllowedSupplierGroupFilter($sessionUser, $legalEntity, $where, $params);
+        $s = $pdo->prepare("
+            SELECT s.id, s.short_name, s.full_name, s.legal_entity, s.legal_entity_group, s.email,
+                   COALESCE(sst.is_accepting_orders, 1) AS is_accepting
+            FROM suppliers s
+            LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY s.short_name
+        ");
+        $s->execute($params);
+        $suppliers = $s->fetchAll();
+
+        $rows = [];
+        foreach ($suppliers as $sup) {
+            $group = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
+            $st = soGetDayStatusLight($pdo, $sup['id'], $group, $date);
+            $email = trim((string)($sup['email'] ?? ''));
+            $rows[] = [
+                'id' => $sup['id'],
+                'short_name' => $sup['short_name'],
+                'full_name' => $sup['full_name'],
+                'legal_entity' => $sup['legal_entity'],
+                'is_accepting' => (int)$sup['is_accepting'] === 1,
+                'has_email' => $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) !== false,
+                'deadline_time' => $st['deadline_time'],
+                'deadline_str' => $st['deadline_str'],
+                'deadline_at' => $st['deadline_at'],
+                'is_closed' => $st['is_closed'],
+                'forced_closed' => $st['forced_closed'],
+                'has_schedule' => $st['has_schedule'],
+                'expected_count' => $st['expected_count'],
+                'submitted_count' => $st['submitted_count'],
+            ];
+        }
+        soRespond(['date' => $date, 'suppliers' => $rows]);
     }
 
     // --- Список поставщиков группы, ещё НЕ подключённых к SO-модулю ---
