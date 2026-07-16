@@ -91,6 +91,9 @@
                     :disabled="isOverviewBusy(row)" title="Отправить сводку в Telegram">✈️</button>
                   <button class="rom-btn-sm" @click="overviewExtend(row)"
                     :disabled="isOverviewBusy(row)" title="Продлить дедлайн">⏰</button>
+                  <button class="rom-btn-sm" @click="overviewRemind(row)"
+                    :disabled="isOverviewBusy(row) || !(row.has_schedule && row.submitted_count < row.expected_count && !row.forced_closed && !overviewIsPassed(row))"
+                    title="Напомнить не подавшим заявку">🔔 Напомнить</button>
                   <button class="rom-btn-sm" :class="row.forced_closed ? 'so-btn-open-day' : 'so-btn-close-day'"
                     @click="overviewToggleClose(row)" :disabled="isOverviewBusy(row)"
                     :title="row.forced_closed ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
@@ -212,6 +215,9 @@
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
             <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
               📋 Копировать не подавших
+            </button>
+            <button class="rom-btn" @click="remindUnsubmitted" :disabled="!selectedDate || remindingStatus" title="Напомнить ресторанам, которые не подали заявку на эту дату">
+              {{ remindingStatus ? 'Отправка…' : '🔔 Напомнить не подавшим' }}
             </button>
             <label class="so-filter-check">
               <input type="checkbox" v-model="showMissing" /> Не подавшие
@@ -755,6 +761,7 @@ const viewedOrder = ref(null);
 const exporting = ref(false);
 const sendingSummary = ref(false);
 const sendingSummaryEmail = ref(false);
+const remindingStatus = ref(false);
 
 // Multi-date export
 const exportDatePickerOpen = ref(false);
@@ -1168,6 +1175,23 @@ async function overviewSendTelegram(row) {
     toast.success('Сводка отправлена', `${Number(res.sent || 0)} из ${Number(res.total_subs || 0)} отправок`);
   } catch (e) {
     toast.error('Ошибка отправки', e.message || String(e));
+  } finally {
+    overviewBusy.value.delete(row.id);
+  }
+}
+
+async function overviewRemind(row) {
+  if (overviewBusy.value.has(row.id)) return;
+  overviewBusy.value.add(row.id);
+  try {
+    const r = await store.adminRemindUnsubmitted(row.id, overviewDate.value);
+    if (r?.closed) {
+      toast.info('Приём закрыт', r.message || 'Приём заявок на эту дату уже закрыт');
+    } else {
+      toast.success('Напоминание отправлено', `Напомнили ${r.reminded} из ${r.total_unsubmitted}`);
+    }
+  } catch (e) {
+    toast.error('Ошибка', e.message || 'Не удалось отправить напоминание');
   } finally {
     overviewBusy.value.delete(row.id);
   }
@@ -1718,6 +1742,23 @@ async function sendSummaryEmail() {
     toast.error('Ошибка', e?.message || 'Не удалось отправить письмо');
   } finally {
     sendingSummaryEmail.value = false;
+  }
+}
+
+async function remindUnsubmitted() {
+  if (!selectedDate.value || !currentSupplierId.value) return;
+  remindingStatus.value = true;
+  try {
+    const r = await store.adminRemindUnsubmitted(currentSupplierId.value, selectedDate.value);
+    if (r?.closed) {
+      toast.info('Приём закрыт', r.message || 'Приём заявок на эту дату уже закрыт');
+    } else {
+      toast.success('Напоминание отправлено', `Напомнили ${r.reminded} из ${r.total_unsubmitted}`);
+    }
+  } catch (e) {
+    toast.error('Ошибка', e.message || 'Не удалось отправить напоминание');
+  } finally {
+    remindingStatus.value = false;
   }
 }
 

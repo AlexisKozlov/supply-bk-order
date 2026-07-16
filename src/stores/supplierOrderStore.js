@@ -247,6 +247,13 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  async function adminRemindUnsubmitted(supplierId, deliveryDate) {
+    return api('admin/remind-unsubmitted', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate }),
+    });
+  }
+
   return {
     loading,
     // Ресторан
@@ -259,6 +266,6 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminGetSchedules, adminSaveSchedules,
     adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
     adminGetTemplates, adminSaveTemplates,
-    adminUpdateQty, adminGetExport, adminSendSummary, adminSendSummaryEmail,
+    adminUpdateQty, adminGetExport, adminSendSummary, adminSendSummaryEmail, adminRemindUnsubmitted,
   };
 });
