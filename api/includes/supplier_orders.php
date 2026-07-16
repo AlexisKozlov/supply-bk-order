@@ -1955,6 +1955,53 @@ if ($soAction === 'admin') {
             return strcmp((string)($a['product_name'] ?? ''), (string)($b['product_name'] ?? ''));
         });
 
+        // Обогащение товаров атрибутами паллет/веса из справочника products.
+        // Справочник фильтруем по ГРУППЕ юрлиц поставщика ($supplierEntities /
+        // $entityPh уже посчитаны выше). Поля добавочные: существующие ключи
+        // (sku/product_name/sort_order/multiplicity/product_id/is_legacy) не
+        // трогаем. У товара без карточки атрибутов оставляем 0.
+        if ($products) {
+            $attrSkus = [];
+            foreach ($products as $p) {
+                $s = (string)($p['sku'] ?? '');
+                if ($s !== '') $attrSkus[$s] = true;
+            }
+            $attrSkus = array_keys($attrSkus);
+            $attrMap = [];
+            if ($attrSkus) {
+                $skuPh = implode(',', array_fill(0, count($attrSkus), '?'));
+                $attrStmt = $pdo->prepare("
+                    SELECT sku, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto
+                    FROM products
+                    WHERE sku IN ({$skuPh}) AND legal_entity IN ({$entityPh})");
+                $attrStmt->execute(array_merge($attrSkus, $supplierEntities));
+                foreach ($attrStmt->fetchAll() as $ar) {
+                    // В группе (BK+VM) sku может встретиться в двух юрлицах —
+                    // атрибуты одинаковы, берём первую строку.
+                    if (!isset($attrMap[$ar['sku']])) {
+                        $attrMap[$ar['sku']] = [
+                            'qty_per_box'      => (float)$ar['qty_per_box'],
+                            'boxes_per_pallet' => (float)$ar['boxes_per_pallet'],
+                            'weight_netto'     => (float)$ar['weight_netto'],
+                            'weight_brutto'    => (float)$ar['weight_brutto'],
+                        ];
+                    }
+                }
+            }
+            foreach ($products as &$prod) {
+                $sku = (string)($prod['sku'] ?? '');
+                $a = $attrMap[$sku] ?? [
+                    'qty_per_box' => 0, 'boxes_per_pallet' => 0,
+                    'weight_netto' => 0, 'weight_brutto' => 0,
+                ];
+                $prod['qty_per_box']      = $a['qty_per_box'];
+                $prod['boxes_per_pallet'] = $a['boxes_per_pallet'];
+                $prod['weight_netto']     = $a['weight_netto'];
+                $prod['weight_brutto']    = $a['weight_brutto'];
+            }
+            unset($prod);
+        }
+
         // Дедлайн для этой даты
         $deadlineInfo = soCheckDeadline($pdo, $supplierId, $date);
 

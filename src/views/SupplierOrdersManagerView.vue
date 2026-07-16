@@ -203,6 +203,12 @@
               @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
               {{ exportDatePickerOpen ? '▲ Дни' : '▼ Дни' }}
             </button>
+            <label class="so-filter-check" title="Не включать в файл строки без заказов">
+              <input type="checkbox" v-model="optDropEmptyRows" /> Убрать пустые строки
+            </label>
+            <label class="so-filter-check" title="Добавить в файл строки паллет и веса">
+              <input type="checkbox" v-model="optShowPalletWeight" /> Паллеты и вес
+            </label>
             <button class="rom-btn" style="background:#f0fdf4;color:#166534;border-color:#166534"
               @click="sendSummary" :disabled="sendingSummary || !selectedDate" title="Сгенерировать Excel и отправить подписчикам в Telegram">
               <BurgerSpinner v-if="sendingSummary" size="xs" />
@@ -803,6 +809,10 @@ const remindingStatus = ref(false);
 // Multi-date export
 const exportDatePickerOpen = ref(false);
 const exportSelectedDates = ref(new Set());
+
+// Опции формирования Excel (скачивание и отправка поставщику)
+const optDropEmptyRows = ref(false);
+const optShowPalletWeight = ref(false);
 
 // Когда weekDates подгружаются — инициализируем все даты как выбранные
 watch(weekDates, (dates) => {
@@ -1809,8 +1819,12 @@ async function sendSummary() {
   try {
     let sent = 0;
     let total = 0;
+    const summaryOptions = {
+      dropEmptyRows: optDropEmptyRows.value,
+      showPalletWeight: optShowPalletWeight.value,
+    };
     for (const date of datesToSend) {
-      const res = await store.adminSendSummary(currentSupplierId.value, date);
+      const res = await store.adminSendSummary(currentSupplierId.value, date, summaryOptions);
       sent += Number(res.sent || 0);
       total += Number(res.total_subs || 0);
     }
@@ -1829,7 +1843,10 @@ async function sendSummaryEmail() {
   if (!selectedDate.value || !currentSupplierId.value) return;
   sendingSummaryEmail.value = true;
   try {
-    const r = await store.adminSendSummaryEmail(currentSupplierId.value, selectedDate.value);
+    const r = await store.adminSendSummaryEmail(currentSupplierId.value, selectedDate.value, {
+      dropEmptyRows: optDropEmptyRows.value,
+      showPalletWeight: optShowPalletWeight.value,
+    });
     toast.success('Отправлено', `Сводка ушла на почту поставщика (ресторанов: ${r.restaurants_count ?? '—'})`);
   } catch (e) {
     toast.error('Ошибка', e?.message || 'Не удалось отправить письмо');
@@ -1870,9 +1887,11 @@ async function exportExcel() {
     const supplierName = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value))?.short_name || 'Поставщик';
     const wb = XLSX.utils.book_new();
 
-    // Опции построения листа. Реальные галочки в UI появятся в Task 3;
-    // пока строим как раньше — обе опции выключены.
-    const sheetOptions = { dropEmptyRows: false, showPalletWeight: false };
+    // Опции построения листа берём из галочек в UI.
+    const sheetOptions = {
+      dropEmptyRows: optDropEmptyRows.value,
+      showPalletWeight: optShowPalletWeight.value,
+    };
 
     // ═══ По одному листу на каждую дату ═══
     for (const date of datesToExport) {

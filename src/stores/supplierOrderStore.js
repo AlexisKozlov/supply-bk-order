@@ -233,17 +233,27 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return data;
   }
 
-  async function adminSendSummary(supplierId, deliveryDate) {
+  async function adminSendSummary(supplierId, deliveryDate, options = {}) {
     return api('admin/send-summary', {
       method: 'POST',
-      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate }),
+      body: JSON.stringify({
+        supplier_id: supplierId,
+        delivery_date: deliveryDate,
+        drop_empty_rows: !!options.dropEmptyRows,
+        show_pallet_weight: !!options.showPalletWeight,
+      }),
     });
   }
 
-  async function adminSendSummaryEmail(supplierId, deliveryDate) {
+  async function adminSendSummaryEmail(supplierId, deliveryDate, options = {}) {
     return api('admin/send-summary-email', {
       method: 'POST',
-      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate }),
+      body: JSON.stringify({
+        supplier_id: supplierId,
+        delivery_date: deliveryDate,
+        drop_empty_rows: !!options.dropEmptyRows,
+        show_pallet_weight: !!options.showPalletWeight,
+      }),
     });
   }
 
