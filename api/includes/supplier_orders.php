@@ -1360,42 +1360,33 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         // Уведомление не критично — игнорируем ошибку
     }
 
-    // ── Подтверждение подачи ресторану (Telegram + Push) ────────────────────
-    // Отдельный try/catch: любая ошибка тут НЕ должна ломать подачу заявки
-    // и не меняет уже отданный клиенту ответ.
+    // ── Push-подтверждение подачи ресторану ─────────────────────────────────
+    // Telegram-подтверждение уже отправлено выше (roNotifyRestaurant, подробное,
+    // по флагу notify_confirmations). Здесь добавляем ТОЛЬКО web-push — для тех,
+    // у кого установлено PWA, — чтобы не дублировать Telegram.
+    // Отдельный try/catch: ошибка тут НЕ ломает подачу и не меняет ответ клиенту.
     try {
         $confSt = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
         $confSt->execute([$supplierId]);
         $confName = (string)($confSt->fetchColumn() ?: '');
-        $confNameEsc = htmlspecialchars($confName, ENT_QUOTES, 'UTF-8');
         $confDateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+        $confPlain = $isSkip
+            ? "{$confName}, {$confDateFmt}: отмечено, что поставка не нужна."
+            : "Заявка {$confName} на {$confDateFmt} принята.";
 
-        if ($isSkip) {
-            $confTgHtml = "✅ <b>{$confNameEsc}</b>, {$confDateFmt}: отмечено, что поставка не нужна.";
-            $confPlain  = "{$confName}, {$confDateFmt}: отмечено, что поставка не нужна.";
-        } else {
-            $confTgHtml = "✅ Заявка <b>{$confNameEsc}</b> на {$confDateFmt} принята.";
-            $confPlain  = "Заявка {$confName} на {$confDateFmt} принята.";
-        }
-
-        $confPush = [
-            'title' => "{$confName}",
-            'body'  => $confPlain,
-            'url'   => '/restaurant/cabinet',
-            'tag'   => "so-confirm-{$supplierId}-{$deliveryDate}",
-        ];
-
-        soNotifyRestaurantOrders(
+        pushSendToRestaurant(
             $pdo,
-            $_ENV['TELEGRAM_BOT_TOKEN'] ?? '',
             (int)$rest['restaurant_number'],
             (string)($rest['legal_entity_group'] ?? ''),
-            $confTgHtml,
-            $confPush,
-            'notify_confirmations'
+            [
+                'title' => $confName !== '' ? $confName : 'Заявка принята',
+                'body'  => $confPlain,
+                'url'   => '/restaurant/cabinet',
+                'tag'   => "so-confirm-{$supplierId}-{$deliveryDate}",
+            ]
         );
     } catch (Throwable $e) {
-        error_log('[so submit confirm] ' . $e->getMessage());
+        error_log('[so submit confirm push] ' . $e->getMessage());
     }
 
     // Аудит
