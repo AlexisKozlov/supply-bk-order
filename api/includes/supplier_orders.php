@@ -254,6 +254,113 @@ function soGetDayStatusLight(PDO $pdo, string $supplierId, string $supplierGroup
 }
 
 /**
+ * Отправляет ресторану уведомление о заявках поставщику по двум каналам —
+ * Telegram и Push (PWA), — с учётом флага предпочтений подписчика и группы юрлиц.
+ *
+ * $notifyCol — колонка-флаг в ro_telegram_subs, определяющая, хочет ли подписчик
+ * получать этот тип уведомлений. Разрешены ТОЛЬКО 'notify_so_reminders' и
+ * 'notify_confirmations' (белый список — защита от SQL-инъекции в имя колонки,
+ * которое подставляется в запрос напрямую). Любое другое значение → 0, без рассылки.
+ *
+ * Telegram шлётся только при непустом $botToken всем верифицированным подписчикам
+ * ресторана этой группы с включённым флагом (верификация с грейсом реверификации,
+ * как в restNotifySubscribers). Push отправляется всегда, даже при пустом токене.
+ * Сбой одного канала не мешает другому и наружу не пробрасывается.
+ *
+ * Метрика возврата («охвачен»): 1 — если ресторан был затронут хотя бы по одному
+ * каналу (был ≥1 TG-чат ИЛИ push вернул >0), иначе 0. То есть это счётчик
+ * охваченных ресторанов (0/1 на вызов), а не число доставленных сообщений.
+ */
+function soNotifyRestaurantOrders(PDO $pdo, string $botToken, int $rNum, string $rGroup, string $tgHtml, array $push, string $notifyCol): int {
+    // Белый список колонки-флага: имя подставляется в SQL напрямую, поэтому
+    // допускаются только заранее известные безопасные идентификаторы.
+    if (!in_array($notifyCol, ['notify_so_reminders', 'notify_confirmations'], true)) return 0;
+
+    $reached = false;
+
+    // Telegram — только при наличии токена; сбой не должен мешать push.
+    if ($botToken !== '') {
+        try {
+            $tgSt = $pdo->prepare("
+                SELECT DISTINCT chat_id
+                FROM ro_telegram_subs
+                WHERE restaurant_number = ? AND legal_entity_group = ?
+                  AND {$notifyCol} = 1
+                  AND (verified_at IS NOT NULL
+                       OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+            ");
+            $tgSt->execute([$rNum, $rGroup]);
+            $chatIds = array_filter($tgSt->fetchAll(PDO::FETCH_COLUMN));
+            foreach ($chatIds as $chatId) {
+                sendTelegramMessage($botToken, $chatId, $tgHtml, 'HTML');
+                $reached = true;
+                usleep(50000); // лёгкая защита от rate-limit Telegram
+            }
+        } catch (Throwable $e) {
+            error_log('[soNotifyRestaurantOrders tg] rest=' . $rNum . ' err=' . $e->getMessage());
+        }
+    }
+
+    // Push (PWA) — пробуем всегда, даже если токена нет.
+    try {
+        $pushSent = pushSendToRestaurant($pdo, $rNum, $rGroup, $push);
+        if ((int)$pushSent > 0) $reached = true;
+    } catch (Throwable $e) {
+        error_log('[soNotifyRestaurantOrders push] rest=' . $rNum . ' err=' . $e->getMessage());
+    }
+
+    return $reached ? 1 : 0;
+}
+
+/**
+ * Возвращает рестораны, которые НЕ подали заявку поставщику на указанную дату.
+ *
+ * Ожидаемые рестораны считаются по той же логике, что и в soGetDayStatusLight/
+ * soBuildSummaryXlsx: строки эффективного графика, чей день поставки совпадает с
+ * $deliveryDate и чья группа юрлиц равна $supplierGroup. Из них исключаются те,
+ * чьи номера уже есть среди поданных (so_orders со status != 'draft' по юрлицам
+ * этой группы). Результат де-дублирован по restaurant_number.
+ *
+ * Возвращает массив вида
+ *   [['restaurant_number' => int, 'legal_entity_group' => string], ...]
+ * где legal_entity_group берётся из строки графика, а при отсутствии — $supplierGroup.
+ */
+function soGetUnsubmittedRestaurants(PDO $pdo, string $supplierId, string $supplierGroup, string $deliveryDate): array {
+    $expectedRests = array_values(array_filter(
+        soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, null, true),
+        fn($row) => soDeliveryDateMatchesDow($deliveryDate, (int)$row['delivery_day'])
+            && (($row['legal_entity_group'] ?? '') === $supplierGroup)
+    ));
+    if (!$expectedRests) return [];
+
+    $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'restaurant_number'))));
+
+    // Множество подавших заявку номеров ресторанов.
+    $supplierEntities = getEntitiesInGroup($supplierGroup);
+    $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
+    $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
+    $subStmt = $pdo->prepare("
+        SELECT restaurant_number FROM so_orders
+        WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
+          AND legal_entity IN ({$entityPh}) AND restaurant_number IN ({$expectedPh})");
+    $subStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
+    $submittedNums = array_flip(array_map('strval', $subStmt->fetchAll(PDO::FETCH_COLUMN)));
+
+    $out = [];
+    $seen = [];
+    foreach ($expectedRests as $row) {
+        $num = (string)($row['restaurant_number'] ?? '');
+        if ($num === '' || isset($seen[$num]) || isset($submittedNums[$num])) continue;
+        $seen[$num] = true;
+        $out[] = [
+            'restaurant_number' => (int)$num,
+            'legal_entity_group' => ($row['legal_entity_group'] ?? '') !== '' ? (string)$row['legal_entity_group'] : $supplierGroup,
+        ];
+    }
+    return $out;
+}
+
+/**
  * Отправляет сводку заявок поставщику на email + пишет в so_email_log.
  * trigger: 'manual' | 'auto'. Для 'auto' защита от дублей через so_email_auto_log.
  */
