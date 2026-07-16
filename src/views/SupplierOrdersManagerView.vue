@@ -83,7 +83,19 @@
                 <span v-else class="so-ov-nodelivery">— нет поставки</span>
               </td>
               <td>
-                <!-- Task 4: кнопки действий по строке -->
+                <div class="so-ov-actions">
+                  <button class="rom-btn-sm" @click="overviewSendEmail(row)"
+                    :disabled="!row.has_email || isOverviewBusy(row)"
+                    :title="!row.has_email ? 'У поставщика не указана почта' : 'Отправить сводку на почту поставщика'">✉️</button>
+                  <button class="rom-btn-sm" @click="overviewSendTelegram(row)"
+                    :disabled="isOverviewBusy(row)" title="Отправить сводку в Telegram">✈️</button>
+                  <button class="rom-btn-sm" @click="overviewExtend(row)"
+                    :disabled="isOverviewBusy(row)" title="Продлить дедлайн">⏰</button>
+                  <button class="rom-btn-sm" :class="row.forced_closed ? 'so-btn-open-day' : 'so-btn-close-day'"
+                    @click="overviewToggleClose(row)" :disabled="isOverviewBusy(row)"
+                    :title="row.forced_closed ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
+                    {{ row.forced_closed ? '🔓 Открыть' : '🔒 Закрыть' }}</button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -671,6 +683,9 @@ const weekDates = ref([]);
 const overviewRows = ref([]);
 const overviewLoading = ref(false);
 const overviewDate = ref(toLocalDateStr(new Date()));
+// Per-row «в процессе»: занятость по id поставщика, чтобы крутилка/дизейбл были только у нажатой строки
+const overviewBusy = ref(new Set());
+function isOverviewBusy(row) { return overviewBusy.value.has(row.id); }
 // Тикающее «сейчас» для живого отсчёта до дедлайна (обновляется раз в минуту)
 const now = ref(Date.now());
 let overviewTimer = null;
@@ -1095,29 +1110,102 @@ async function handleToggleCloseDay(date) {
   }
 }
 
+// Общая механика продления дедлайна: два запроса (дата, время) + валидация + вызов стора.
+// Возвращает true при успехе — вызывающая сторона сама решает, что обновить.
+async function runExtendDeadline(supplierId, date, currentDeadlineDate, currentDeadlineTime) {
+  const deadlineDate = await appPrompt('Формат YYYY-MM-DD', currentDeadlineDate || '', { title: 'Дата дедлайна', okText: 'Далее' });
+  if (!deadlineDate) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(deadlineDate)) {
+    toast.warning('Неверная дата', 'Введите дату в формате YYYY-MM-DD');
+    return false;
+  }
+  const time = await appPrompt('Формат HH:MM (например 15:00)', currentDeadlineTime || '15:00', { title: 'Новое время дедлайна', okText: 'Сохранить' });
+  if (!time) return false;
+  if (!/^\d{1,2}:\d{2}$/.test(time)) {
+    toast.warning('Неверный формат', 'Введите время в формате HH:MM (например 15:00)');
+    return false;
+  }
+  try {
+    await store.adminExtendDeadline(supplierId, date, time, deadlineDate);
+    toast.success('Дедлайн продлён', `Новый дедлайн: ${deadlineDate} ${time}`);
+    return true;
+  } catch (e) {
+    toast.error('Ошибка', e.message || 'Не удалось продлить дедлайн');
+    return false;
+  }
+}
+
 async function handleExtendDeadline() {
   if (!selectedDate.value) return;
   const currentDeadlineDate = selectedDeadline.value?.split(' ')?.[0] || '';
   const currentDeadlineTime = selectedDeadline.value?.split(' ')?.[1]?.substring(0, 5) || '15:00';
-  const deadlineDate = await appPrompt('Формат YYYY-MM-DD', currentDeadlineDate, { title: 'Дата дедлайна', okText: 'Далее' });
-  if (!deadlineDate) return;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(deadlineDate)) {
-    toast.warning('Неверная дата', 'Введите дату в формате YYYY-MM-DD');
-    return;
-  }
-  const time = await appPrompt('Формат HH:MM (например 15:00)', currentDeadlineTime, { title: 'Новое время дедлайна', okText: 'Сохранить' });
-  if (!time) return;
-  if (!/^\d{1,2}:\d{2}$/.test(time)) {
-    toast.warning('Неверный формат', 'Введите время в формате HH:MM (например 15:00)');
-    return;
-  }
-  try {
-    await store.adminExtendDeadline(currentSupplierId.value, selectedDate.value, time, deadlineDate);
-    toast.success('Дедлайн продлён', `Новый дедлайн: ${deadlineDate} ${time}`);
+  const ok = await runExtendDeadline(currentSupplierId.value, selectedDate.value, currentDeadlineDate, currentDeadlineTime);
+  if (ok) {
     await loadSettings();
     await loadStatus();
+  }
+}
+
+// ═══ Действия из вкладки «Обзор» (per-row) ═══
+async function overviewSendEmail(row) {
+  if (!row.has_email || overviewBusy.value.has(row.id)) return;
+  overviewBusy.value.add(row.id);
+  try {
+    const r = await store.adminSendSummaryEmail(row.id, overviewDate.value);
+    toast.success('Отправлено', `Сводка ушла на почту поставщика (ресторанов: ${r.restaurants_count ?? '—'})`);
   } catch (e) {
-    toast.error('Ошибка', e.message || 'Не удалось продлить дедлайн');
+    toast.error('Ошибка', e?.message || 'Не удалось отправить письмо');
+  } finally {
+    overviewBusy.value.delete(row.id);
+  }
+}
+
+async function overviewSendTelegram(row) {
+  if (overviewBusy.value.has(row.id)) return;
+  overviewBusy.value.add(row.id);
+  try {
+    const res = await store.adminSendSummary(row.id, overviewDate.value);
+    toast.success('Сводка отправлена', `${Number(res.sent || 0)} из ${Number(res.total_subs || 0)} отправок`);
+  } catch (e) {
+    toast.error('Ошибка отправки', e.message || String(e));
+  } finally {
+    overviewBusy.value.delete(row.id);
+  }
+}
+
+async function overviewExtend(row) {
+  if (overviewBusy.value.has(row.id)) return;
+  let curDate = overviewDate.value;
+  let curTime = '15:00';
+  if (row.deadline_at) {
+    const parts = String(row.deadline_at).replace('T', ' ').split(' ');
+    if (parts[0]) curDate = parts[0];
+    if (parts[1]) curTime = parts[1].substring(0, 5);
+  }
+  overviewBusy.value.add(row.id);
+  try {
+    const ok = await runExtendDeadline(row.id, overviewDate.value, curDate, curTime);
+    if (ok) await loadOverview();
+  } finally {
+    overviewBusy.value.delete(row.id);
+  }
+}
+
+async function overviewToggleClose(row) {
+  if (overviewBusy.value.has(row.id)) return;
+  const closing = !row.forced_closed;
+  if (closing) {
+    const ok = await showConfirm(`Закрыть день ${overviewDate.value}?`, 'Рестораны не смогут отправить заявку на эту дату.', { danger: true });
+    if (!ok) return;
+  }
+  overviewBusy.value.add(row.id);
+  try {
+    await store.adminCloseDay(row.id, overviewDate.value, closing);
+    await loadOverview();
+  } catch (e) {
+    toast.error('Ошибка', e.message || String(e));
+  } finally {
+    overviewBusy.value.delete(row.id);
   }
 }
 
@@ -2105,6 +2193,10 @@ watch(
   color: #502314; transition: all 0.2s;
 }
 .rom-btn-sm:hover { background: #f5f0eb; }
+.rom-btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
+.rom-btn-sm:disabled:hover { background: white; }
+.so-ov-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.so-ov-actions .rom-btn-sm { padding: 4px 8px; }
 .rom-btn-sm.rom-btn-primary { background: #E76F51; color: white; border-color: #E76F51; }
 .rom-btn-sm.rom-btn-primary:hover { background: #b81e00; }
 .rom-btn-sm.rom-btn-danger { background: white; color: #dc2626; border-color: #dc2626; }
