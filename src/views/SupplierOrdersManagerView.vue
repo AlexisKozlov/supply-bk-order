@@ -7,6 +7,9 @@
 
     <!-- Page tabs -->
     <div class="rom-page-tabs">
+      <button class="rom-page-tab" :class="{ active: pageTab === 'overview' }" @click="pageTab = 'overview'; loadOverview()">
+        Обзор
+      </button>
       <button class="rom-page-tab" :class="{ active: pageTab === 'status' }" @click="pageTab = 'status'; loadStatus()">
         Приём
       </button>
@@ -22,7 +25,7 @@
     </div>
 
     <!-- Supplier selector — только если supplierId не передан через проп -->
-    <div v-if="!supplierId" class="rom-date-row">
+    <div v-if="!supplierId && pageTab !== 'overview'" class="rom-date-row">
       <label>Поставщик:</label>
       <select v-model="currentSupplierId" @change="onSupplierChange" class="rom-select">
         <option value="">— выберите —</option>
@@ -31,6 +34,62 @@
         </option>
       </select>
     </div>
+
+    <!-- ═══ TAB: Обзор ═══ -->
+    <template v-if="pageTab === 'overview'">
+      <div class="rom-date-row">
+        <label>Дата доставки:</label>
+        <input type="date" v-model="overviewDate" @change="loadOverview" class="rom-input-sm" style="width:160px" />
+        <button class="rom-btn-sm" @click="loadOverview">Обновить</button>
+      </div>
+
+      <div v-if="overviewLoading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else class="rom-table-wrap">
+        <table class="rom-table so-ov-table">
+          <thead>
+            <tr>
+              <th>Поставщик</th>
+              <th style="width:220px">Дедлайн</th>
+              <th style="width:140px">Подано</th>
+              <th style="width:160px">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!overviewRows.length">
+              <td colspan="4" class="so-ov-empty">Нет поставщиков</td>
+            </tr>
+            <tr v-for="row in overviewRows" :key="row.id">
+              <td>
+                <button class="so-ov-supplier" @click="openSupplierStatus(row)">
+                  {{ row.short_name || row.name }}
+                </button>
+                <span v-if="!row.is_accepting" class="so-ov-paused">на паузе</span>
+              </td>
+              <td>
+                <template v-if="row.forced_closed">
+                  <span class="so-ov-closed">День закрыт</span>
+                </template>
+                <template v-else>
+                  <span :class="{ 'so-ov-closed': overviewIsPassed(row) }">{{ row.deadline_str || '—' }}</span>
+                  <span v-if="row.deadline_at" class="so-ov-countdown" :class="{ 'so-ov-bad': overviewIsPassed(row) }">
+                    {{ overviewCountdown(row) }}
+                  </span>
+                </template>
+              </td>
+              <td>
+                <span v-if="row.has_schedule" :class="overviewSubmittedClass(row)">
+                  {{ row.submitted_count }} из {{ row.expected_count }}
+                </span>
+                <span v-else class="so-ov-nodelivery">— нет поставки</span>
+              </td>
+              <td>
+                <!-- Task 4: кнопки действий по строке -->
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
 
     <!-- ═══ TAB: Приём ═══ -->
     <template v-if="pageTab === 'status' && currentSupplierId">
@@ -567,7 +626,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, nextTick } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
@@ -595,7 +654,9 @@ const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'С
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
 const daysShort = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
 
-const pageTab = ref('status');
+// Стартовая вкладка: «Обзор» по умолчанию, но при входе по прямой ссылке
+// на конкретного поставщика (props.supplierId) — сразу «Приём».
+const pageTab = ref(props.supplierId ? 'status' : 'overview');
 const loading = ref(false);
 const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');
@@ -604,6 +665,14 @@ const selectedDeadline = ref('');
 const stats = ref({ total: 0, submitted: 0, pending: 0 });
 const restaurants = ref([]);
 const weekDates = ref([]);
+
+// Обзор по всем поставщикам
+const overviewRows = ref([]);
+const overviewLoading = ref(false);
+const overviewDate = ref(new Date().toISOString().slice(0, 10));
+// Тикающее «сейчас» для живого отсчёта до дедлайна (обновляется раз в минуту)
+const now = ref(Date.now());
+let overviewTimer = null;
 
 // Settings (постоянный режим приёма)
 const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null });
@@ -757,6 +826,8 @@ watch(() => props.supplierId, (val) => {
 }, { immediate: true });
 
 onMounted(async () => {
+  // Живой отсчёт до дедлайнов в «Обзоре» — тикаем раз в минуту
+  overviewTimer = setInterval(() => { now.value = Date.now(); }, 60000);
   try {
     allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
     if (!props.supplierId && allSuppliers.value.length === 1) {
@@ -765,6 +836,17 @@ onMounted(async () => {
     }
   } catch (e) {
     console.error(e);
+  }
+  // Если стартовая вкладка — «Обзор», грузим её данные
+  if (pageTab.value === 'overview') {
+    await loadOverview();
+  }
+});
+
+onUnmounted(() => {
+  if (overviewTimer) {
+    clearInterval(overviewTimer);
+    overviewTimer = null;
   }
 });
 
@@ -933,6 +1015,57 @@ async function loadStatus() {
   } finally {
     loading.value = false;
   }
+}
+
+async function loadOverview() {
+  overviewLoading.value = true;
+  try {
+    const r = await store.adminGetOverview(overviewDate.value || undefined, orderStore.settings.legalEntity);
+    overviewRows.value = r.suppliers || [];
+  } catch (e) {
+    console.error(e);
+    toast.error('Ошибка', e.message || String(e));
+  } finally {
+    overviewLoading.value = false;
+  }
+}
+
+// Проваливаемся в «Приём» выбранного поставщика
+function openSupplierStatus(row) {
+  if (!row || !row.id) return;
+  currentSupplierId.value = row.id;
+  pageTab.value = 'status';
+  loadStatus();
+}
+
+// Текст живого отсчёта до дедлайна (тикает через ref now)
+function overviewCountdown(row) {
+  if (!row || !row.deadline_at) return '';
+  const diff = new Date(row.deadline_at).getTime() - now.value;
+  if (diff <= 0) return 'Закрыт';
+  const totalMin = Math.floor(diff / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return `через ${days} дн ${hours} ч`;
+  if (hours > 0) return `через ${hours} ч ${mins} мин`;
+  return `через ${mins} мин`;
+}
+
+// Прошёл ли дедлайн (для приглушения/окраски)
+function overviewIsPassed(row) {
+  if (!row || !row.deadline_at) return false;
+  return new Date(row.deadline_at).getTime() - now.value <= 0;
+}
+
+// Класс окраски колонки «Подано»
+function overviewSubmittedClass(row) {
+  const sub = Number(row.submitted_count) || 0;
+  const exp = Number(row.expected_count) || 0;
+  if (exp <= 0) return '';
+  if (sub >= exp) return 'so-ov-ok';
+  if (sub > 0) return 'so-ov-warn';
+  return 'so-ov-bad';
 }
 
 function isDateForcedClosed(date) {
@@ -2089,6 +2222,34 @@ watch(
 .rom-input-sm { padding: 4px 6px; border: 1px solid #e0d5c8; border-radius: 4px; font-size: 13px; }
 .so-date-nav { display: flex; gap: 4px; flex-wrap: wrap; }
 .so-schedule-count { font-size: 13px; color: #8b7355; margin: 8px 16px; }
+
+/* ═══ Обзор по поставщикам ═══ */
+.so-ov-supplier {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #b45309;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.so-ov-supplier:hover { color: #92400e; }
+.so-ov-paused {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.so-ov-countdown { display: block; font-size: 12px; color: #6b7280; margin-top: 2px; }
+.so-ov-closed { color: #b91c1c; opacity: 0.85; }
+.so-ov-nodelivery { color: #9ca3af; }
+.so-ov-empty { text-align: center; color: #9ca3af; padding: 16px; }
+.so-ov-ok { color: #15803d; font-weight: 600; }
+.so-ov-warn { color: #b45309; font-weight: 600; }
+.so-ov-bad { color: #b91c1c; font-weight: 600; }
 .so-template-search { position: relative; min-width: 260px; }
 .so-template-search .rom-input { width: 100%; }
 .so-template-dropdown {
