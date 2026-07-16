@@ -2945,7 +2945,15 @@ if ($soAction === 'admin') {
         soRequireAdminEntityGroupAccess($sessionUser, $le);
 
         $s = $pdo->prepare("
-            SELECT t.*, p.name as original_name, p.qty_per_box
+            SELECT t.*,
+                   p.name AS original_name,
+                   p.name AS catalog_name,
+                   p.qty_per_box,
+                   p.unit_of_measure,
+                   p.weight_netto,
+                   p.weight_brutto,
+                   p.boxes_per_pallet,
+                   CASE WHEN p.id IS NOT NULL THEN 1 ELSE 0 END AS linked
             FROM so_templates t
             LEFT JOIN products p ON p.id = t.product_id
             WHERE t.supplier_id = ? AND t.legal_entity = ?
@@ -2965,6 +2973,36 @@ if ($soAction === 'admin') {
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         soRequireAdminEntityGroupAccess($sessionUser, $le);
 
+        // Авто-резолв product_id по точному SKU в пределах группы юрлиц поставщика.
+        // Одна выборка на все SKU: собираем карту sku => products.id.
+        $skuToId = [];
+        $skus = [];
+        foreach ($items as $item) {
+            $sku = trim((string)($item['sku'] ?? ''));
+            if ($sku !== '') $skus[$sku] = true;
+        }
+        $skus = array_keys($skus);
+        if ($skus) {
+            $supGrpSt = $pdo->prepare("SELECT legal_entity, legal_entity_group FROM suppliers WHERE id = ? LIMIT 1");
+            $supGrpSt->execute([$supplierId]);
+            $supGrpRow = $supGrpSt->fetch();
+            $group = ($supGrpRow['legal_entity_group'] ?? '') ?: getEntityGroup($supGrpRow['legal_entity'] ?? '');
+            $groupEntities = getEntitiesInGroup($group);
+            if ($groupEntities) {
+                $skuPh    = implode(',', array_fill(0, count($skus), '?'));
+                $entityPh = implode(',', array_fill(0, count($groupEntities), '?'));
+                $mapSt = $pdo->prepare("
+                    SELECT sku, id FROM products
+                    WHERE sku IN ($skuPh) AND legal_entity IN ($entityPh) AND is_active = 1
+                ");
+                $mapSt->execute(array_merge($skus, $groupEntities));
+                foreach ($mapSt->fetchAll() as $row) {
+                    // Если SKU встречается под разными юрлицами группы — берём первый (атрибуты одинаковы).
+                    if (!isset($skuToId[$row['sku']])) $skuToId[$row['sku']] = $row['id'];
+                }
+            }
+        }
+
         $count = 0;
         $pdo->beginTransaction();
         try {
@@ -2982,10 +3020,16 @@ if ($soAction === 'admin') {
             foreach ($items as $i => $item) {
                 $mult = isset($item['multiplicity']) && $item['multiplicity'] !== '' ? (float)$item['multiplicity'] : null;
                 $minQty = isset($item['min_qty']) && $item['min_qty'] !== '' ? (float)$item['min_qty'] : null;
+                // Переданный product_id уважаем; иначе подставляем найденный по SKU; иначе null.
+                $pid = $item['product_id'] ?? null;
+                $itemSku = trim((string)($item['sku'] ?? ''));
+                if (empty($pid) && $itemSku !== '' && isset($skuToId[$itemSku])) {
+                    $pid = $skuToId[$itemSku];
+                }
                 $upsert->execute([
                     $supplierId,
                     $le,
-                    $item['product_id'] ?? null,
+                    $pid,
                     $item['sku'] ?? '',
                     $item['product_name'] ?? '',
                     $item['sort_order'] ?? ($i * 10),
