@@ -633,6 +633,7 @@ import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import { toLocalDateStr } from '@/lib/utils.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
 
@@ -669,7 +670,7 @@ const weekDates = ref([]);
 // Обзор по всем поставщикам
 const overviewRows = ref([]);
 const overviewLoading = ref(false);
-const overviewDate = ref(new Date().toISOString().slice(0, 10));
+const overviewDate = ref(toLocalDateStr(new Date()));
 // Тикающее «сейчас» для живого отсчёта до дедлайна (обновляется раз в минуту)
 const now = ref(Date.now());
 let overviewTimer = null;
@@ -860,6 +861,11 @@ watch(() => orderStore.settings.legalEntity, async () => {
     if (allSuppliers.value.length === 1) {
       currentSupplierId.value = allSuppliers.value[0].id;
       await refreshActiveTab();
+    }
+    // «Обзор» не завязан на выбранного поставщика — перезагружаем его
+    // отдельно, чтобы после смены юрлица таблица показала новых поставщиков.
+    if (pageTab.value === 'overview') {
+      await loadOverview();
     }
   } catch (e) {
     console.error(e);
