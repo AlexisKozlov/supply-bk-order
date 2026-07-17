@@ -1359,7 +1359,11 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             return $s;
         };
         $unitLabel = $minUnit === 'pieces' ? 'шт' : 'кг';
-        if ($orderTotal < $minValue - 0.001) {
+        // Блокируем ТОЛЬКО при положительном итоге. Итог 0 означает либо все
+        // нулевые позиции (по сути пустая заявка — её свернёт агрегация ниже),
+        // либо в кг-режиме у товаров не заполнены веса в справочнике — тогда
+        // посчитать честно нельзя и блокировать вслепую («0 кг») неверно.
+        if ($orderTotal > 0 && $orderTotal < $minValue - 0.001) {
             $minStr = $fmtNum($minValue);
             $totalStr = $fmtNum($orderTotal);
             $diffStr = $fmtNum($minValue - $orderTotal);
