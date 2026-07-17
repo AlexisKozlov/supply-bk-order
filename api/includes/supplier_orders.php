@@ -969,7 +969,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $ph = implode(',', array_fill(0, count($supplierIds), '?'));
 
     // 2. Настройки всех поставщиков — один запрос
-    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
+    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
     $settingsRows->execute($supplierIds);
     $settingsMap = [];
     foreach ($settingsRows->fetchAll() as $r) {
@@ -1017,7 +1017,11 @@ if ($soAction === 'suppliers' && $method === 'GET') {
         $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
         $rule = $rulesMap[$sid][$deliveryDow] ?? null;
         $default = $settingsMap[$sid]['default_deadline_time'] ?? '14:00:00';
-        $r = soCalculateDeadlineCore($override, $rule, $default, $deliveryDate, $tz);
+        // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null) и время к строке|null
+        $rawDow = $settingsMap[$sid]['weekly_deadline_dow'] ?? null;
+        $weeklyDow = ($rawDow !== null && $rawDow !== '' && (int)$rawDow >= 1 && (int)$rawDow <= 7) ? (int)$rawDow : null;
+        $weeklyTime = !empty($settingsMap[$sid]['weekly_deadline_time']) ? $settingsMap[$sid]['weekly_deadline_time'] : null;
+        $r = soCalculateDeadlineCore($override, $rule, $default, $deliveryDate, $tz, $weeklyDow, $weeklyTime);
         return [
             'status' => $r['is_closed'] ? 'closed' : 'open',
             'deadline' => $r['deadline_str'],
@@ -1074,8 +1078,13 @@ if ($soAction === 'suppliers' && $method === 'GET') {
                 return true;
             }));
             usort($availableDates, fn($a, $b) => strcmp($a['delivery_date'], $b['delivery_date']));
-            // Ресторану показываем только три ближайшие доступные даты.
-            $availableDates = array_slice($availableDates, 0, 3);
+            // В недельном режиме подачи показываем все открытые даты недели (в пределах горизонта),
+            // иначе — только три ближайшие доступные даты.
+            $rawDowShow = $settings['weekly_deadline_dow'] ?? null;
+            $isWeeklyMode = ($rawDowShow !== null && $rawDowShow !== '' && (int)$rawDowShow >= 1 && (int)$rawDowShow <= 7);
+            if (!$isWeeklyMode) {
+                $availableDates = array_slice($availableDates, 0, 3);
+            }
         }
 
         $result[] = [

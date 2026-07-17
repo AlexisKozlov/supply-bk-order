@@ -853,7 +853,8 @@ try {
     // модуль cron_delivery_reminders.php с гибкими временами и ack-кнопкой.
     $suppliers = $pdo->query("
         SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
-               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time,
+               sst.weekly_deadline_dow, sst.weekly_deadline_time
         FROM suppliers s
         JOIN supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
         LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
@@ -869,6 +870,9 @@ try {
         $supId = $sup['id'];
         $supName = $sup['short_name'];
         $defaultDeadlineTime = $sup['default_deadline_time'];
+        // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null), время — строка|null
+        $weeklyDow = (isset($sup['weekly_deadline_dow']) && $sup['weekly_deadline_dow'] !== null && $sup['weekly_deadline_dow'] !== '' && (int)$sup['weekly_deadline_dow'] >= 1 && (int)$sup['weekly_deadline_dow'] <= 7) ? (int)$sup['weekly_deadline_dow'] : null;
+        $weeklyTime = !empty($sup['weekly_deadline_time']) ? $sup['weekly_deadline_time'] : null;
 
         if (!isset($supReminderCfg[$supId])) {
             $rcfg = soGetSupplierSettings($pdo, $supId);
@@ -982,7 +986,7 @@ try {
                     $rlStmt->execute([$supId, $deliveryDow]);
                     $rule = $rlStmt->fetch() ?: null;
 
-                    $r = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz);
+                    $r = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz, $weeklyDow, $weeklyTime);
                     if (!$r['deadline_dt']) continue;
                     $deadline = $r['deadline_dt'];
                     $minutesLeft = ($deadline->getTimestamp() - $now->getTimestamp()) / 60;
@@ -1155,7 +1159,8 @@ try {
     // автосабмитим — у них своя логика подачи через приложение.
     $autoSuppliers = $pdo->query("
         SELECT s.id, s.short_name,
-               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time,
+               sst.weekly_deadline_dow, sst.weekly_deadline_time
         FROM suppliers s
         JOIN so_supplier_settings sst ON sst.supplier_id = s.id
         WHERE s.is_active = 1 AND s.so_enabled = 1 AND sst.auto_submit_previous = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
@@ -1165,6 +1170,9 @@ try {
         $supId = $sup['id'];
         $supName = $sup['short_name'];
         $defaultDl = $sup['default_deadline_time'];
+        // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null), время — строка|null
+        $weeklyDow = (isset($sup['weekly_deadline_dow']) && $sup['weekly_deadline_dow'] !== null && $sup['weekly_deadline_dow'] !== '' && (int)$sup['weekly_deadline_dow'] >= 1 && (int)$sup['weekly_deadline_dow'] <= 7) ? (int)$sup['weekly_deadline_dow'] : null;
+        $weeklyTime = !empty($sup['weekly_deadline_time']) ? $sup['weekly_deadline_time'] : null;
 
         // Собираем кандидатов по датам (2 недели вперёд) с учётом ЭФФЕКТИВНОГО графика:
         // внутри активного временного периода — временные дни/рестораны, иначе основные.
@@ -1183,7 +1191,7 @@ try {
             $rlStmt->execute([$supId, $deliveryDow]);
             $rule = $rlStmt->fetch() ?: null;
 
-            $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz);
+            $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz, $weeklyDow, $weeklyTime);
             if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
             $deadline = $r['deadline_dt'];
             $minutesSinceDeadline = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
@@ -1351,7 +1359,8 @@ try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
     $emailSuppliers = $pdo->query("
-        SELECT s.id, COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+        SELECT s.id, COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time,
+               sst.weekly_deadline_dow, sst.weekly_deadline_time
         FROM suppliers s
         JOIN so_supplier_settings sst ON sst.supplier_id = s.id
         WHERE s.is_active = 1 AND s.so_enabled = 1
@@ -1362,6 +1371,9 @@ try {
     foreach ($emailSuppliers as $sup) {
         $supId = $sup['id'];
         $defaultDl = $sup['default_deadline_time'];
+        // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null), время — строка|null
+        $weeklyDow = (isset($sup['weekly_deadline_dow']) && $sup['weekly_deadline_dow'] !== null && $sup['weekly_deadline_dow'] !== '' && (int)$sup['weekly_deadline_dow'] >= 1 && (int)$sup['weekly_deadline_dow'] <= 7) ? (int)$sup['weekly_deadline_dow'] : null;
+        $weeklyTime = !empty($sup['weekly_deadline_time']) ? $sup['weekly_deadline_time'] : null;
         for ($iDay = 0; $iDay < 15; $iDay++) {
             $dObj = (clone $now)->setTime(0, 0, 0)->modify("+{$iDay} days");
             $deliveryDate = $dObj->format('Y-m-d');
@@ -1374,7 +1386,7 @@ try {
             $rlStmt->execute([$supId, $deliveryDow]);
             $rule = $rlStmt->fetch() ?: null;
 
-            $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz);
+            $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz, $weeklyDow, $weeklyTime);
             if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
             $minutesSinceDeadline = ($now->getTimestamp() - $r['deadline_dt']->getTimestamp()) / 60;
             if ($minutesSinceDeadline < -1 || $minutesSinceDeadline > 15) continue;
@@ -1401,7 +1413,8 @@ try {
 
     $suppliers = $pdo->query("
         SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
-               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time,
+               sst.weekly_deadline_dow, sst.weekly_deadline_time
         FROM suppliers s
         JOIN supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
         LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
@@ -1429,6 +1442,9 @@ try {
             $supId = $sup['id'];
             $supName = $sup['short_name'];
             $defaultDeadlineTime = $sup['default_deadline_time'];
+            // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null), время — строка|null
+            $weeklyDow = (isset($sup['weekly_deadline_dow']) && $sup['weekly_deadline_dow'] !== null && $sup['weekly_deadline_dow'] !== '' && (int)$sup['weekly_deadline_dow'] >= 1 && (int)$sup['weekly_deadline_dow'] <= 7) ? (int)$sup['weekly_deadline_dow'] : null;
+            $weeklyTime = !empty($sup['weekly_deadline_time']) ? $sup['weekly_deadline_time'] : null;
             $supplierGroup = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
             $supplierEntities = getEntitiesInGroup($supplierGroup);
             $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
@@ -1471,7 +1487,7 @@ try {
                 $rlStmt->execute([$supId, $deliveryDow]);
                 $rule = $rlStmt->fetch() ?: null;
 
-                $r = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz);
+                $r = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz, $weeklyDow, $weeklyTime);
                 if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
                 $deadline = $r['deadline_dt'];
                 $minutesSince = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
