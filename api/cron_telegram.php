@@ -931,7 +931,12 @@ try {
                 $grp = $s['legal_entity_group'] ?: 'BK_VM';
                 $chatIdsLookup->execute([$rn, $grp]);
                 $cids = $chatIdsLookup->fetchAll(PDO::FETCH_COLUMN);
-                if (empty($cids)) continue; // ресторан без подписок — пропускаем
+                // Пропускаем ресторан, только если у него нет TG-подписок И пуш-канал
+                // у поставщика выключен. Если push включён — ресторан из графика
+                // остаётся с пустым chat_ids: TG-цикл по пустому массиву ничего не
+                // отправит, а web-push уйдёт (push работает как самостоятельный канал).
+                // Дефолт (только 'tg', push выключен) → поведение идентично прежнему.
+                if (empty($cids) && !$pushEnabled) continue;
                 $byRest[$rn] = ['chat_ids' => $cids, 'group' => $grp, 'schedule' => []];
             }
             $byRest[$rn]['schedule'][] = [
