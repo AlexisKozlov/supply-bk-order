@@ -734,6 +734,37 @@
             </label>
           </div>
         </div>
+
+        <!-- Минимальный заказ -->
+        <div class="so-settings-block">
+          <div class="so-notify-head">
+            <div>
+              <div class="so-section-title" style="margin:0">Минимальный заказ</div>
+              <div class="so-section-hint" style="margin:4px 0 0 0">Если задан — заявку меньше минимума нельзя отправить (жёсткий блок). Значение 0 или пусто = минимума нет.</div>
+            </div>
+            <button class="rom-btn rom-btn-export" @click="saveMinOrder" :disabled="savingMinOrder">
+              <BurgerSpinner v-if="savingMinOrder" size="xs" />
+              <span>{{ savingMinOrder ? 'Сохранение...' : 'Сохранить минимальный заказ' }}</span>
+            </button>
+          </div>
+
+          <div class="rom-date-row" style="margin-top:10px;flex-wrap:wrap;gap:12px">
+            <label style="display:flex;align-items:center;gap:6px">
+              Минимум:
+              <input type="number" v-model.number="minOrderValue" class="rom-input-sm" style="width:110px" min="0" step="0.01" placeholder="нет" />
+            </label>
+            <label style="display:flex;align-items:center;gap:6px">
+              Единица:
+              <select v-model="minOrderUnit" class="rom-input-sm">
+                <option value="kg">килограммы</option>
+                <option value="pieces">штуки</option>
+              </select>
+            </label>
+          </div>
+          <p v-if="minOrderUnit === 'kg'" class="so-section-hint" style="margin:8px 0 0 0">
+            Единица «килограммы» работает по весам из справочника: у товаров поставщика должны быть заполнены вес и штук-в-коробке.
+          </p>
+        </div>
       </div>
     </template>
 
@@ -858,6 +889,11 @@ const weeklyEnabled = ref(false);
 const weeklyDow = ref(3);
 const weeklyTime = ref('14:00');
 const savingWeekly = ref(false);
+
+// Минимальный заказ у поставщика (значение и единица кг/штуки)
+const minOrderValue = ref(0);
+const minOrderUnit = ref('kg');
+const savingMinOrder = ref(false);
 const weekdayOptions = [
   { value: 1, label: 'Понедельник' },
   { value: 2, label: 'Вторник' },
@@ -1106,6 +1142,7 @@ async function loadSettings() {
     reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
     reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
     syncWeeklyFromSettings();
+    syncMinOrderFromSettings();
     if (!allNotifyUsers.value.length) await loadNotifyUsers();
   } catch (e) {
     console.error(e);
@@ -1255,6 +1292,37 @@ async function saveWeekly() {
     toast.error('Ошибка', e.message);
   } finally {
     savingWeekly.value = false;
+  }
+}
+
+// Синхронизация локальных полей минимального заказа из settings.value.
+// min_order_value может прийти строкой (PDO) — приводим к Number; пусто/0 = минимума нет.
+function syncMinOrderFromSettings() {
+  const v = Number(settings.value.min_order_value);
+  minOrderValue.value = v > 0 ? v : 0;
+  minOrderUnit.value = settings.value.min_order_unit === 'pieces' ? 'pieces' : 'kg';
+}
+
+// Сохранение минимального заказа — ОТДЕЛЬНЫЙ запрос только с ключами min_order_*,
+// чтобы бэкенд обновил именно их и не тронул прочие настройки.
+async function saveMinOrder() {
+  savingMinOrder.value = true;
+  try {
+    const val = Number(minOrderValue.value);
+    const payload = {
+      min_order_value: val > 0 ? val : null,
+      min_order_unit: minOrderUnit.value,
+    };
+    const data = await store.adminSaveSettings(currentSupplierId.value, payload);
+    if (data && data.settings) {
+      settings.value = data.settings;
+      syncMinOrderFromSettings();
+    }
+    toast.success('Сохранено', 'Минимальный заказ обновлён');
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    savingMinOrder.value = false;
   }
 }
 
