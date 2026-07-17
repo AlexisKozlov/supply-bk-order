@@ -60,6 +60,9 @@ function soGetRestaurantSession($pdo) {
 function soReminderOffsetWhitelist() { return ['evening', '3h', '2h', '1h', '30m', 'expired']; }
 function soReminderChannelWhitelist() { return ['tg', 'push']; }
 
+// Белый список показателей паллет/веса для Excel-отчёта (строго фиксирован; порядок = порядок вывода)
+function soXlsxPalletMetricWhitelist() { return ['boxes', 'pallets', 'netto', 'brutto']; }
+
 /**
  * Разбирает сохранённое CSV-значение напоминаний в массив.
  * $raw === null  → настройка не задавалась → вернуть $default (дефолт).
@@ -95,7 +98,7 @@ function soNormalizeReminderCsv($input, array $whitelist) {
 
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) {
@@ -116,6 +119,9 @@ function soGetSupplierSettings($pdo, $supplierId) {
         $mu = in_array($mu, ['kg', 'pieces'], true) ? $mu : null;
         if ($mv !== null && $mv > 0 && $mu === null) $mu = 'kg';
         $row['min_order_unit'] = $mu;
+        // Опции Excel-отчёта: drop_empty → int 0/1; pallet_metrics → массив CSV ∩ белый список.
+        $row['xlsx_drop_empty'] = !empty($row['xlsx_drop_empty']) ? 1 : 0;
+        $row['xlsx_pallet_metrics'] = soParseReminderList($row['xlsx_pallet_metrics'] ?? null, soXlsxPalletMetricWhitelist(), []);
         return $row;
     }
     return [
@@ -134,6 +140,9 @@ function soGetSupplierSettings($pdo, $supplierId) {
         // Минимальный заказ по умолчанию не задан
         'min_order_value' => null,
         'min_order_unit' => null,
+        // Опции Excel-отчёта по умолчанию: пустые строки не убираем, паллеты/вес выключены
+        'xlsx_drop_empty' => 0,
+        'xlsx_pallet_metrics' => [],
     ];
 }
 
@@ -1928,7 +1937,7 @@ if ($soAction === 'admin') {
         // частичное сохранение: если ключа нет в теле — сохраняем текущее значение,
         // а не дефолт. Иначе частичный POST (напр. только reminder_*) затирал бы
         // приём заявок, авто-подачу/письмо, текст паузы и дедлайн.
-        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id = ?");
+        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
         $curStmt->execute([$supplierId]);
         $curRow = $curStmt->fetch(PDO::FETCH_ASSOC);
         // Прежние дефолты — на случай, если строки ещё нет (первое сохранение).
@@ -1946,6 +1955,9 @@ if ($soAction === 'admin') {
             ? (float)$curRow['min_order_value'] : null;
         $curMinUnit = ($curRow !== false && in_array($curRow['min_order_unit'] ?? null, ['kg', 'pieces'], true))
             ? $curRow['min_order_unit'] : null;
+        // Опции Excel-отчёта: текущие значения (дефолты, если строки ещё нет).
+        $curXlsxDropEmpty = ($curRow !== false && !empty($curRow['xlsx_drop_empty'])) ? 1 : 0;
+        $curXlsxPalletCsv = ($curRow !== false) ? ($curRow['xlsx_pallet_metrics'] ?? null) : null;
 
         // Каждое базовое поле: есть ключ в теле → применяем присланное (с санитизацией);
         // нет ключа → сохраняем текущее значение из БД (или дефолт при первом сохранении).
@@ -2014,8 +2026,23 @@ if ($soAction === 'admin') {
         // Порога нет → единица не хранится.
         if ($minValue === null) $minUnit = null;
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        // Опции Excel-отчёта (партиал-безопасно, тем же паттерном $curRow-мержа, что и min_order_*):
+        //   xlsx_drop_empty     — 0/1; нет ключа → текущее значение.
+        //   xlsx_pallet_metrics — массив ИЛИ CSV → валидируем по белому списку (в его порядке),
+        //                         сериализуем в CSV; пусто → NULL (паллеты/вес выключены).
+        //                         Нет ключа → текущее значение (не трогаем).
+        $xlsxDropEmpty = array_key_exists('xlsx_drop_empty', $body)
+            ? ((int)!!$body['xlsx_drop_empty'])
+            : $curXlsxDropEmpty;
+        if (array_key_exists('xlsx_pallet_metrics', $body)) {
+            $csv = soNormalizeReminderCsv($body['xlsx_pallet_metrics'], soXlsxPalletMetricWhitelist());
+            $xlsxPalletCsv = ($csv === '') ? null : $csv;
+        } else {
+            $xlsxPalletCsv = $curXlsxPalletCsv;
+        }
+
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
               auto_submit_previous = VALUES(auto_submit_previous),
@@ -2026,8 +2053,10 @@ if ($soAction === 'admin') {
               weekly_deadline_time = VALUES(weekly_deadline_time),
               min_order_value = VALUES(min_order_value),
               min_order_unit = VALUES(min_order_unit),
+              xlsx_drop_empty = VALUES(xlsx_drop_empty),
+              xlsx_pallet_metrics = VALUES(xlsx_pallet_metrics),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $minValue, $minUnit, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
 
         // Настройки напоминаний обновляем ТОЛЬКО если ключ реально присутствует в теле
         // (паттерн notify_users): toggle приёма шлёт объект без reminder_* и не должен их обнулять.
