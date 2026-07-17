@@ -95,13 +95,18 @@ function soNormalizeReminderCsv($input, array $whitelist) {
 
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) {
         // Сырые CSV-строки заменяем распарсенными массивами (фронту удобнее)
         $row['reminder_offsets'] = soParseReminderList($row['reminder_offsets'] ?? null, soReminderOffsetWhitelist(), soReminderOffsetWhitelist());
         $row['reminder_channels'] = soParseReminderList($row['reminder_channels'] ?? null, soReminderChannelWhitelist(), ['tg']);
+        // Недельный режим: dow → int|null (1..7), time → 'HH:MM'|null (укороченно для фронта)
+        $row['weekly_deadline_dow'] = (isset($row['weekly_deadline_dow']) && $row['weekly_deadline_dow'] !== null && $row['weekly_deadline_dow'] !== '')
+            ? (int)$row['weekly_deadline_dow'] : null;
+        $row['weekly_deadline_time'] = !empty($row['weekly_deadline_time'])
+            ? substr($row['weekly_deadline_time'], 0, 5) : null;
         return $row;
     }
     return [
@@ -114,6 +119,9 @@ function soGetSupplierSettings($pdo, $supplierId) {
         // Строки настроек нет → дефолты: все тайминги, только Telegram
         'reminder_offsets' => soReminderOffsetWhitelist(),
         'reminder_channels' => ['tg'],
+        // Недельный режим по умолчанию выключен
+        'weekly_deadline_dow' => null,
+        'weekly_deadline_time' => null,
     ];
 }
 
@@ -1812,7 +1820,7 @@ if ($soAction === 'admin') {
         // частичное сохранение: если ключа нет в теле — сохраняем текущее значение,
         // а не дефолт. Иначе частичный POST (напр. только reminder_*) затирал бы
         // приём заявок, авто-подачу/письмо, текст паузы и дедлайн.
-        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time FROM so_supplier_settings WHERE supplier_id = ?");
         $curStmt->execute([$supplierId]);
         $curRow = $curStmt->fetch(PDO::FETCH_ASSOC);
         // Прежние дефолты — на случай, если строки ещё нет (первое сохранение).
@@ -1821,6 +1829,10 @@ if ($soAction === 'admin') {
         $curAutoEmail = $curRow !== false ? (int)$curRow['auto_email_summary'] : 0;
         $curDefaultDl = $curRow !== false ? ($curRow['default_deadline_time'] ?? '14:00:00') : '14:00:00';
         $curPauseMsg = $curRow !== false ? $curRow['pause_message'] : null;
+        // Недельный режим: текущие значения (null = режим выключен / строки ещё нет).
+        $curWeeklyDow = ($curRow !== false && isset($curRow['weekly_deadline_dow']) && $curRow['weekly_deadline_dow'] !== null && $curRow['weekly_deadline_dow'] !== '')
+            ? (int)$curRow['weekly_deadline_dow'] : null;
+        $curWeeklyTime = ($curRow !== false && !empty($curRow['weekly_deadline_time'])) ? $curRow['weekly_deadline_time'] : null;
 
         // Каждое базовое поле: есть ключ в теле → применяем присланное (с санитизацией);
         // нет ключа → сохраняем текущее значение из БД (или дефолт при первом сохранении).
@@ -1847,16 +1859,39 @@ if ($soAction === 'admin') {
         $pauseMsg = array_key_exists('pause_message', $body) ? $body['pause_message'] : $curPauseMsg;
         $notifyUsers = array_key_exists('notify_users', $body) ? ($body['notify_users'] ?? []) : null;
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+        // Недельный режим (партиал-безопасно, как остальные базовые поля):
+        //   dow — int 1..7; '' / null / вне диапазона → NULL (режим выключен).
+        //   time — HH:MM → 'HH:MM:00'; иначе NULL (фолбэк на default_deadline_time в ядре).
+        if (array_key_exists('weekly_deadline_dow', $body)) {
+            $wd = $body['weekly_deadline_dow'];
+            $wd = ($wd === '' || $wd === null) ? null : (int)$wd;
+            $weeklyDow = ($wd !== null && $wd >= 1 && $wd <= 7) ? $wd : null;
+        } else {
+            $weeklyDow = $curWeeklyDow;
+        }
+        if (array_key_exists('weekly_deadline_time', $body)) {
+            $wt = $body['weekly_deadline_time'];
+            if (is_string($wt) && preg_match('/^(\d{1,2}):(\d{2})$/', $wt, $mw)) {
+                $weeklyTime = sprintf('%02d:%02d:00', (int)$mw[1], (int)$mw[2]);
+            } else {
+                $weeklyTime = null;
+            }
+        } else {
+            $weeklyTime = $curWeeklyTime;
+        }
+
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
               auto_submit_previous = VALUES(auto_submit_previous),
               auto_email_summary = VALUES(auto_email_summary),
               default_deadline_time = VALUES(default_deadline_time),
               pause_message = VALUES(pause_message),
+              weekly_deadline_dow = VALUES(weekly_deadline_dow),
+              weekly_deadline_time = VALUES(weekly_deadline_time),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $updatedBy]);
 
         // Настройки напоминаний обновляем ТОЛЬКО если ключ реально присутствует в теле
         // (паттерн notify_users): toggle приёма шлёт объект без reminder_* и не должен их обнулять.

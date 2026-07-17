@@ -28,6 +28,8 @@ if (!function_exists('soCalculateDeadlineCore')) {
  * @param string      $defaultDeadlineTime   fallback, формат HH:MM[:SS]
  * @param string      $deliveryDate          Y-m-d
  * @param DateTimeZone|null $tz              по умолчанию Europe/Minsk
+ * @param int|null    $weeklyDow             день недели недельной отсечки (1..7) или null (режим выключен)
+ * @param string|null $weeklyTime            время недельной отсечки HH:MM[:SS] или null (фолбэк на default)
  * @return array{
  *   is_closed: bool,
  *   forced_closed: bool,
@@ -36,7 +38,7 @@ if (!function_exists('soCalculateDeadlineCore')) {
  *   deadline_time: ?string
  * }
  */
-function soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz = null) {
+function soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz = null, $weeklyDow = null, $weeklyTime = null) {
     $tz = $tz ?: new DateTimeZone('Europe/Minsk');
 
     // 1. Принудительно закрытый день
@@ -61,6 +63,15 @@ function soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $delive
             $deadlineDate = (clone $deliveryObj)->modify('-1 day');
         }
         $deadlineTime = $override['deadline_time'];
+    } elseif ($weeklyDow !== null && (int)$weeklyDow >= 1 && (int)$weeklyDow <= 7) {
+        // Недельный режим: одна общая отсечка на всю неделю доставки (пн–вс),
+        // заданная днём недели + временем на ПРЕДЫДУЩЕЙ неделе.
+        // Активен только когда НЕТ forced_closed и НЕТ per-date override с deadline_time.
+        $weeklyDow = (int)$weeklyDow;
+        $N = (int)$deliveryObj->format('N');                     // день недели доставки (1..7)
+        $monday = (clone $deliveryObj)->modify('-' . ($N - 1) . ' days'); // понедельник недели доставки
+        $deadlineDate = (clone $monday)->modify('-7 days')->modify('+' . ($weeklyDow - 1) . ' days'); // нужный день предыдущей недели
+        $deadlineTime = $weeklyTime ?: ($defaultDeadlineTime ?: '14:00:00');
     } elseif ($rule && !empty($rule['deadline_time'])) {
         $deadlineDate = soDeadlineDateByRule($deliveryObj, $rule);
         $deadlineTime = $rule['deadline_time'];
@@ -120,18 +131,35 @@ function soCalculateDeadline($pdo, $supplierId, $deliveryDate) {
         $rule = $r->fetch() ?: null;
     }
 
-    // 3. Default из настроек поставщика
+    // 3. Default из настроек поставщика + параметры недельного режима
     $defaultDeadlineTime = '14:00:00';
+    $weeklyDow = null;
+    $weeklyTime = null;
     if ($supplierId) {
-        $st = $pdo->prepare("SELECT default_deadline_time FROM so_supplier_settings WHERE supplier_id = ?");
-        $st->execute([$supplierId]);
-        $row = $st->fetch();
+        try {
+            $st = $pdo->prepare("SELECT default_deadline_time, weekly_deadline_dow, weekly_deadline_time FROM so_supplier_settings WHERE supplier_id = ?");
+            $st->execute([$supplierId]);
+            $row = $st->fetch();
+        } catch (PDOException $e) {
+            // Миграция weekly_* не применена — читаем без недельных колонок.
+            $st = $pdo->prepare("SELECT default_deadline_time FROM so_supplier_settings WHERE supplier_id = ?");
+            $st->execute([$supplierId]);
+            $row = $st->fetch();
+        }
         if ($row && !empty($row['default_deadline_time'])) {
             $defaultDeadlineTime = $row['default_deadline_time'];
         }
+        // Недельный режим: dow валиден только как 1..7, иначе выключен.
+        if ($row && isset($row['weekly_deadline_dow']) && $row['weekly_deadline_dow'] !== null && $row['weekly_deadline_dow'] !== '') {
+            $d = (int)$row['weekly_deadline_dow'];
+            if ($d >= 1 && $d <= 7) $weeklyDow = $d;
+        }
+        if ($weeklyDow !== null && !empty($row['weekly_deadline_time'])) {
+            $weeklyTime = $row['weekly_deadline_time']; // 'HH:MM:SS' из TIME-колонки
+        }
     }
 
-    $res = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate);
+    $res = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, null, $weeklyDow, $weeklyTime);
     $res['status'] = $res['is_closed'] ? 'closed' : 'open';
     return $res;
 }
