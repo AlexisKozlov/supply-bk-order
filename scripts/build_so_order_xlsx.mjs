@@ -48,7 +48,11 @@ if (!jsonPath || !outPath) {
 const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 const supplierName = data.supplier_name || 'Поставщик';
 const dateFmt = data.delivery_date_fmt || '';
-const sheetName = (data.sheet_name || supplierName).slice(0, 28);
+// Имя листа Excel не может содержать : \ / ? * [ ] — иначе XLSX.write падает.
+// Чистим их (заменяем на пробел), схлопываем пробелы, обрезаем до 28 символов.
+// Если после чистки пусто — берём запасное имя, лист не может быть безымянным.
+const rawSheetName = String(data.sheet_name || supplierName || '');
+const sheetName = (rawSheetName.replace(/[:\\/?*[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28)) || 'Заявка';
 
 // ── Опции: PHP шлёт snake_case, модуль ждёт camelCase; принимаем оба вида. ──
 const rawOptions = data.options || {};
