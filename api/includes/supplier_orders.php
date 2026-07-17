@@ -95,7 +95,7 @@ function soNormalizeReminderCsv($input, array $whitelist) {
 
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) {
@@ -107,6 +107,15 @@ function soGetSupplierSettings($pdo, $supplierId) {
             ? (int)$row['weekly_deadline_dow'] : null;
         $row['weekly_deadline_time'] = !empty($row['weekly_deadline_time'])
             ? substr($row['weekly_deadline_time'], 0, 5) : null;
+        // Минимальный заказ: value → float|null (0/NULL = минимума нет);
+        // при заданном value>0 и пустом unit трактуем как 'kg'.
+        $mv = (isset($row['min_order_value']) && $row['min_order_value'] !== null && $row['min_order_value'] !== '')
+            ? (float)$row['min_order_value'] : null;
+        $row['min_order_value'] = $mv;
+        $mu = $row['min_order_unit'] ?? null;
+        $mu = in_array($mu, ['kg', 'pieces'], true) ? $mu : null;
+        if ($mv !== null && $mv > 0 && $mu === null) $mu = 'kg';
+        $row['min_order_unit'] = $mu;
         return $row;
     }
     return [
@@ -122,6 +131,9 @@ function soGetSupplierSettings($pdo, $supplierId) {
         // Недельный режим по умолчанию выключен
         'weekly_deadline_dow' => null,
         'weekly_deadline_time' => null,
+        // Минимальный заказ по умолчанию не задан
+        'min_order_value' => null,
+        'min_order_unit' => null,
     ];
 }
 
@@ -1287,6 +1299,78 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         }
     }
 
+    // Жёсткий блок «минимальный заказ у поставщика».
+    // Срабатывает только для реальной заявки (не «Поставка не нужна»),
+    // когда у поставщика задан порог min_order_value > 0.
+    $minValue = isset($settings['min_order_value']) ? (float)$settings['min_order_value'] : 0.0;
+    $minUnit = $settings['min_order_unit'] ?? null;
+    if ($minUnit !== 'pieces' && $minUnit !== 'kg') $minUnit = 'kg';
+    if (!$skipDelivery && !empty($items) && $minValue > 0) {
+        $orderTotal = 0.0;
+        if ($minUnit === 'pieces') {
+            // Итог в штуках — сумма количеств по позициям с qty > 0.
+            foreach ($items as $item) {
+                $q = floatval($item['quantity'] ?? 0);
+                if ($q > 0) $orderTotal += $q;
+            }
+        } else {
+            // Итог в килограммах: подтягиваем вес коробки из справочника products
+            // строго по ГРУППЕ юрлиц ресторана (без утечки между юрлицами).
+            $restGroup = $rest['legal_entity_group'] ?: getEntityGroup($rest['legal_entity'] ?? '');
+            $restEntities = getEntitiesInGroup($restGroup);
+            // SKU позиций с положительным количеством.
+            $qtyBySku = [];
+            foreach ($items as $item) {
+                $q = floatval($item['quantity'] ?? 0);
+                $sku = (string)($item['sku'] ?? '');
+                if ($q <= 0 || $sku === '') continue;
+                $qtyBySku[$sku] = ($qtyBySku[$sku] ?? 0) + $q;
+            }
+            if ($qtyBySku && $restEntities) {
+                $wSkus = array_keys($qtyBySku);
+                $wSkuPh = implode(',', array_fill(0, count($wSkus), '?'));
+                $wEntPh = implode(',', array_fill(0, count($restEntities), '?'));
+                $wStmt = $pdo->prepare("SELECT sku, qty_per_box, weight_netto FROM products WHERE sku IN ({$wSkuPh}) AND legal_entity IN ({$wEntPh})");
+                $wStmt->execute(array_merge($wSkus, $restEntities));
+                $wMap = [];
+                foreach ($wStmt->fetchAll() as $wr) {
+                    // В группе (BK+VM) sku может встретиться в двух юрлицах —
+                    // атрибуты справочника одинаковы, берём первую строку.
+                    if (!isset($wMap[$wr['sku']])) {
+                        $wMap[$wr['sku']] = [
+                            'qty_per_box'  => (float)$wr['qty_per_box'],
+                            'weight_netto' => (float)$wr['weight_netto'],
+                        ];
+                    }
+                }
+                foreach ($qtyBySku as $sku => $q) {
+                    $a = $wMap[$sku] ?? null;
+                    if (!$a || $a['qty_per_box'] <= 0) continue; // нет данных / нулевой делитель — пропускаем
+                    $orderTotal += ($q / $a['qty_per_box']) * $a['weight_netto'] / 1000;
+                }
+            }
+        }
+        // Форматирование чисел: кг — до 1 знака, шт — до целого (обрезаем хвостовые нули).
+        $fmtNum = function ($x) use ($minUnit) {
+            $s = $minUnit === 'kg'
+                ? number_format((float)$x, 1, '.', '')
+                : number_format((float)$x, 0, '.', '');
+            if (strpos($s, '.') !== false) $s = rtrim(rtrim($s, '0'), '.');
+            return $s;
+        };
+        $unitLabel = $minUnit === 'pieces' ? 'шт' : 'кг';
+        if ($orderTotal < $minValue - 0.001) {
+            $minStr = $fmtNum($minValue);
+            $totalStr = $fmtNum($orderTotal);
+            $diffStr = $fmtNum($minValue - $orderTotal);
+            soRespond(['error' =>
+                "Минимальный заказ у поставщика — {$minStr} {$unitLabel}. " .
+                "В заявке {$totalStr} {$unitLabel}. " .
+                "Добавьте ещё {$diffStr} {$unitLabel}."
+            ], 422);
+        }
+    }
+
     // legal_entity ресторана — единый источник истины (restaurants.legal_entity).
     // Один ресторан = одно юрлицо, поэтому ищем существующую заявку строго в этом юрлице.
     $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
@@ -1829,7 +1913,7 @@ if ($soAction === 'admin') {
         // частичное сохранение: если ключа нет в теле — сохраняем текущее значение,
         // а не дефолт. Иначе частичный POST (напр. только reminder_*) затирал бы
         // приём заявок, авто-подачу/письмо, текст паузы и дедлайн.
-        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time FROM so_supplier_settings WHERE supplier_id = ?");
+        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id = ?");
         $curStmt->execute([$supplierId]);
         $curRow = $curStmt->fetch(PDO::FETCH_ASSOC);
         // Прежние дефолты — на случай, если строки ещё нет (первое сохранение).
@@ -1842,6 +1926,11 @@ if ($soAction === 'admin') {
         $curWeeklyDow = ($curRow !== false && isset($curRow['weekly_deadline_dow']) && $curRow['weekly_deadline_dow'] !== null && $curRow['weekly_deadline_dow'] !== '')
             ? (int)$curRow['weekly_deadline_dow'] : null;
         $curWeeklyTime = ($curRow !== false && !empty($curRow['weekly_deadline_time'])) ? $curRow['weekly_deadline_time'] : null;
+        // Минимальный заказ: текущие значения (null = минимума нет / строки ещё нет).
+        $curMinValue = ($curRow !== false && isset($curRow['min_order_value']) && $curRow['min_order_value'] !== null && $curRow['min_order_value'] !== '')
+            ? (float)$curRow['min_order_value'] : null;
+        $curMinUnit = ($curRow !== false && in_array($curRow['min_order_unit'] ?? null, ['kg', 'pieces'], true))
+            ? $curRow['min_order_unit'] : null;
 
         // Каждое базовое поле: есть ключ в теле → применяем присланное (с санитизацией);
         // нет ключа → сохраняем текущее значение из БД (или дефолт при первом сохранении).
@@ -1889,8 +1978,29 @@ if ($soAction === 'admin') {
             $weeklyTime = $curWeeklyTime;
         }
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        // Минимальный заказ (партиал-безопасно, как остальные базовые поля):
+        //   value — число ≥0; ''/null/0 → NULL (минимум выключен).
+        //   unit — белый список 'kg'|'pieces'; иначе 'kg' при заданном value>0, иначе NULL.
+        if (array_key_exists('min_order_value', $body)) {
+            $mvRaw = $body['min_order_value'];
+            $minValue = ($mvRaw === '' || $mvRaw === null) ? null : (float)$mvRaw;
+            if ($minValue !== null && $minValue <= 0) $minValue = null;
+        } else {
+            $minValue = $curMinValue;
+        }
+        if (array_key_exists('min_order_unit', $body)) {
+            $muRaw = $body['min_order_unit'];
+            $minUnit = in_array($muRaw, ['kg', 'pieces'], true) ? $muRaw : null;
+        } else {
+            $minUnit = $curMinUnit;
+        }
+        // При заданном пороге, но пустой единице — по умолчанию килограммы.
+        if ($minValue !== null && $minValue > 0 && $minUnit === null) $minUnit = 'kg';
+        // Порога нет → единица не хранится.
+        if ($minValue === null) $minUnit = null;
+
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
               auto_submit_previous = VALUES(auto_submit_previous),
@@ -1899,8 +2009,10 @@ if ($soAction === 'admin') {
               pause_message = VALUES(pause_message),
               weekly_deadline_dow = VALUES(weekly_deadline_dow),
               weekly_deadline_time = VALUES(weekly_deadline_time),
+              min_order_value = VALUES(min_order_value),
+              min_order_unit = VALUES(min_order_unit),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $minValue, $minUnit, $updatedBy]);
 
         // Настройки напоминаний обновляем ТОЛЬКО если ключ реально присутствует в теле
         // (паттерн notify_users): toggle приёма шлёт объект без reminder_* и не должен их обнулять.
