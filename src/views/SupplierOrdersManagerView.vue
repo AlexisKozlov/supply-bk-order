@@ -702,6 +702,38 @@
             <p class="so-section-hint" style="margin:6px 0 0 0">Если ни один канал не выбран — напоминания не отправляются.</p>
           </div>
         </div>
+
+        <!-- Недельный режим подачи -->
+        <div class="so-settings-block">
+          <div class="so-notify-head">
+            <div>
+              <div class="so-section-title" style="margin:0">Недельный режим подачи</div>
+              <div class="so-section-hint" style="margin:4px 0 0 0">В недельном режиме дедлайны по дням не применяются: вся неделя доставки (пн–вс) закрывается в выбранный день предыдущей недели в указанное время. Ресторан видит всю открытую неделю сразу.</div>
+            </div>
+            <button class="rom-btn rom-btn-export" @click="saveWeekly" :disabled="savingWeekly">
+              <BurgerSpinner v-if="savingWeekly" size="xs" />
+              <span>{{ savingWeekly ? 'Сохранение...' : 'Сохранить недельный режим' }}</span>
+            </button>
+          </div>
+
+          <label class="so-settings-check" style="margin-top:6px">
+            <input type="checkbox" v-model="weeklyEnabled" />
+            <span>Включить недельный режим подачи</span>
+          </label>
+
+          <div v-if="weeklyEnabled" class="rom-date-row" style="margin-top:10px;flex-wrap:wrap;gap:12px">
+            <label style="display:flex;align-items:center;gap:6px">
+              День закрытия недели:
+              <select v-model.number="weeklyDow" class="rom-input-sm">
+                <option v-for="d in weekdayOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
+              </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px">
+              Время:
+              <input type="time" v-model="weeklyTime" class="rom-input-sm" />
+            </label>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -820,6 +852,21 @@ const notifyUsers = ref([]);
 const reminderOffsets = ref([]);
 const reminderChannels = ref([]);
 const savingReminders = ref(false);
+
+// Недельный режим подачи (вкл/выкл, день недели 1..7, время HH:MM)
+const weeklyEnabled = ref(false);
+const weeklyDow = ref(3);
+const weeklyTime = ref('14:00');
+const savingWeekly = ref(false);
+const weekdayOptions = [
+  { value: 1, label: 'Понедельник' },
+  { value: 2, label: 'Вторник' },
+  { value: 3, label: 'Среда' },
+  { value: 4, label: 'Четверг' },
+  { value: 5, label: 'Пятница' },
+  { value: 6, label: 'Суббота' },
+  { value: 7, label: 'Воскресенье' },
+];
 
 // List tab
 const loadingList = ref(false);
@@ -1058,6 +1105,7 @@ async function loadSettings() {
     notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
     reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
     reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
+    syncWeeklyFromSettings();
     if (!allNotifyUsers.value.length) await loadNotifyUsers();
   } catch (e) {
     console.error(e);
@@ -1171,6 +1219,42 @@ async function saveReminders() {
     toast.error('Ошибка', e.message);
   } finally {
     savingReminders.value = false;
+  }
+}
+
+// Синхронизация локальных полей недельного режима из settings.value.
+// PDO может вернуть dow строкой — приводим к Number.
+function syncWeeklyFromSettings() {
+  const dow = settings.value.weekly_deadline_dow;
+  if (dow != null && dow !== '') {
+    weeklyEnabled.value = true;
+    weeklyDow.value = Number(dow);
+    weeklyTime.value = (settings.value.weekly_deadline_time || '14:00').substring(0, 5);
+  } else {
+    weeklyEnabled.value = false;
+    weeklyDow.value = 3;
+    weeklyTime.value = '14:00';
+  }
+}
+
+// Сохранение недельного режима — ОТДЕЛЬНЫЙ запрос только с ключами weekly_*,
+// чтобы бэкенд обновил именно их и не тронул прочие настройки.
+async function saveWeekly() {
+  savingWeekly.value = true;
+  try {
+    const payload = weeklyEnabled.value
+      ? { weekly_deadline_dow: Number(weeklyDow.value), weekly_deadline_time: weeklyTime.value }
+      : { weekly_deadline_dow: null };
+    const data = await store.adminSaveSettings(currentSupplierId.value, payload);
+    if (data && data.settings) {
+      settings.value = data.settings;
+      syncWeeklyFromSettings();
+    }
+    toast.success('Сохранено', 'Недельный режим обновлён');
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    savingWeekly.value = false;
   }
 }
 
