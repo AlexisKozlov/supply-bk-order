@@ -22,6 +22,9 @@
       <button class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadTemplates()">
         Шаблон товаров
       </button>
+      <button class="rom-page-tab" :class="{ active: pageTab === 'settings' }" @click="pageTab = 'settings'; loadSettings()">
+        ⚙️ Настройки
+      </button>
     </div>
 
     <!-- Supplier selector — только если supplierId не передан через проп -->
@@ -108,34 +111,18 @@
 
     <!-- ═══ TAB: Приём ═══ -->
     <template v-if="pageTab === 'status' && currentSupplierId">
-      <!-- Bar: toggle + settings -->
+      <!-- Bar: дедлайн по умолчанию + ссылка (приём/пауза/авто-* переехали в «Настройки») -->
       <div class="so-detail-bar">
-        <button class="rom-btn-sm" @click="toggleAccepting" :class="settings.is_accepting_orders ? 'rom-btn-danger' : 'rom-btn-primary'">
-          {{ settings.is_accepting_orders ? '⏸ Приостановить приём' : '▶ Возобновить приём' }}
-        </button>
-        <span class="so-session-status" :class="settings.is_accepting_orders ? 'st-sess-active' : 'st-sess-closed'">
+        <span class="so-session-status" :class="settings.is_accepting_orders ? 'st-sess-active' : 'st-sess-closed'"
+          :title="'Управление приёмом — во вкладке «Настройки»'">
           {{ settings.is_accepting_orders ? 'Приём включён' : 'Приём приостановлен' }}
         </span>
         <div class="so-detail-actions">
           <label style="font-size:12px;color:#666;">Дедлайн по умолчанию:</label>
           <input type="time" v-model="defaultDeadline" class="rom-input-sm" style="width:100px" />
           <button class="rom-btn-sm" @click="saveDefaultDeadline" :disabled="!defaultDeadline">Сохранить</button>
-          <label style="font-size:12px;color:#666;display:inline-flex;align-items:center;gap:4px;margin-left:8px;" title="Если ресторан не подал заявку до дедлайна — автоматически подать предыдущую заявку этого ресторана">
-            <input type="checkbox" :checked="!!settings.auto_submit_previous" @change="toggleAutoSubmit" />
-            Авто-подача предыдущей по дедлайну
-          </label>
-          <label style="font-size:12px;color:#666;display:inline-flex;align-items:center;gap:4px;margin-left:8px;" title="Если включено — после дедлайна система сама отправит сводку заявок на почту поставщика">
-            <input type="checkbox" :checked="!!settings.auto_email_summary" @change="toggleAutoEmail" />
-            Авто-письмо поставщику в дедлайн
-          </label>
           <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
         </div>
-      </div>
-
-      <!-- Pause message input -->
-      <div v-if="!settings.is_accepting_orders" class="rom-date-row" style="background:#fef2f2;padding:10px;border-radius:8px;">
-        <label>Сообщение для ресторанов:</label>
-        <input type="text" v-model="pauseMessage" @change="savePauseMessage" class="rom-input-sm" style="flex:1;min-width:250px" placeholder="Приём заявок временно приостановлен" />
       </div>
 
       <!-- Date nav -->
@@ -398,27 +385,6 @@
     <template v-if="pageTab === 'schedules' && currentSupplierId">
       <div v-if="loadingSchedules" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else>
-        <div class="so-notify-box" style="margin-bottom:20px">
-          <div class="so-notify-head">
-            <div>
-              <div class="so-section-title" style="margin:0">Получатели итоговой сводки</div>
-              <div class="so-section-hint" style="margin:4px 0 0 0">После дедлайна бот отправит результат только отмеченным сотрудникам этого поставщика.</div>
-            </div>
-            <button class="rom-btn-sm" @click="saveNotifyUsers" :disabled="savingNotifyUsers || loadingNotifyUsers">
-              <BurgerSpinner v-if="savingNotifyUsers" size="xs" />
-              <span>{{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить получателей' }}</span>
-            </button>
-          </div>
-          <div v-if="loadingNotifyUsers" class="rom-loading" style="padding:8px 0"><BurgerSpinner size="sm" text="Загрузка пользователей..." /></div>
-          <div v-else class="so-notify-users">
-            <label v-for="u in allNotifyUsers" :key="u.name" class="so-notify-user">
-              <input type="checkbox" :value="u.name" v-model="notifyUsers" />
-              <span>{{ u.name }}<small v-if="u.display_role"> · {{ u.display_role }}</small></span>
-              <small v-if="!u.telegram_chat_id" class="so-notify-muted">(нет Telegram)</small>
-            </label>
-          </div>
-        </div>
-
         <!-- Дедлайны по дням недели -->
         <div class="so-deadline-section">
           <h3 class="so-section-title">Дедлайны по дням доставки</h3>
@@ -636,6 +602,109 @@
       </div>
     </template>
 
+    <!-- ═══ TAB: Настройки ═══ -->
+    <template v-if="pageTab === 'settings' && currentSupplierId">
+      <div class="so-settings-wrap">
+        <!-- Приём заявок -->
+        <div class="so-settings-block">
+          <div class="so-section-title" style="margin:0">Приём заявок</div>
+          <p class="so-section-hint" style="margin:4px 0 10px 0">Пока приём приостановлен, рестораны видят сообщение и не могут подать заявку.</p>
+          <div class="so-detail-bar">
+            <button class="rom-btn-sm" @click="toggleAccepting" :class="settings.is_accepting_orders ? 'rom-btn-danger' : 'rom-btn-primary'">
+              {{ settings.is_accepting_orders ? '⏸ Приостановить приём' : '▶ Возобновить приём' }}
+            </button>
+            <span class="so-session-status" :class="settings.is_accepting_orders ? 'st-sess-active' : 'st-sess-closed'">
+              {{ settings.is_accepting_orders ? 'Приём включён' : 'Приём приостановлен' }}
+            </span>
+          </div>
+          <div v-if="!settings.is_accepting_orders" class="rom-date-row" style="background:#fef2f2;padding:10px;border-radius:8px;margin-top:10px">
+            <label>Сообщение для ресторанов:</label>
+            <input type="text" v-model="pauseMessage" @change="savePauseMessage" class="rom-input-sm" style="flex:1;min-width:250px" placeholder="Приём заявок временно приостановлен" />
+          </div>
+        </div>
+
+        <!-- Автоматизация -->
+        <div class="so-settings-block">
+          <div class="so-section-title" style="margin:0">Автоматизация по дедлайну</div>
+          <label class="so-settings-check" title="Если ресторан не подал заявку до дедлайна — автоматически подать предыдущую заявку этого ресторана">
+            <input type="checkbox" :checked="!!settings.auto_submit_previous" @change="toggleAutoSubmit" />
+            <span>Авто-подача предыдущей заявки по дедлайну</span>
+          </label>
+          <label class="so-settings-check" title="Если включено — после дедлайна система сама отправит сводку заявок на почту поставщика">
+            <input type="checkbox" :checked="!!settings.auto_email_summary" @change="toggleAutoEmail" />
+            <span>Авто-письмо со сводкой поставщику в дедлайн</span>
+          </label>
+        </div>
+
+        <!-- Почта поставщика (справочно) -->
+        <div class="so-settings-block">
+          <div class="so-section-title" style="margin:0">Почта поставщика</div>
+          <p v-if="currentSupplier?.email" class="so-section-hint" style="margin:4px 0 0 0">
+            {{ currentSupplier.email }} <span class="so-notify-muted">(редактируется в карточке поставщика)</span>
+          </p>
+          <p v-else class="so-section-hint" style="margin:4px 0 0 0">Адрес почты задаётся в карточке поставщика.</p>
+        </div>
+
+        <!-- Получатели итоговой сводки -->
+        <div class="so-settings-block">
+          <div class="so-notify-head">
+            <div>
+              <div class="so-section-title" style="margin:0">Получатели итоговой сводки</div>
+              <div class="so-section-hint" style="margin:4px 0 0 0">После дедлайна бот отправит результат только отмеченным сотрудникам этого поставщика.</div>
+            </div>
+            <button class="rom-btn-sm" @click="saveNotifyUsers" :disabled="savingNotifyUsers || loadingNotifyUsers">
+              <BurgerSpinner v-if="savingNotifyUsers" size="xs" />
+              <span>{{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить получателей' }}</span>
+            </button>
+          </div>
+          <div v-if="loadingNotifyUsers" class="rom-loading" style="padding:8px 0"><BurgerSpinner size="sm" text="Загрузка пользователей..." /></div>
+          <div v-else class="so-notify-users">
+            <label v-for="u in allNotifyUsers" :key="u.name" class="so-notify-user">
+              <input type="checkbox" :value="u.name" v-model="notifyUsers" />
+              <span>{{ u.name }}<small v-if="u.display_role"> · {{ u.display_role }}</small></span>
+              <small v-if="!u.telegram_chat_id" class="so-notify-muted">(нет Telegram)</small>
+            </label>
+          </div>
+        </div>
+
+        <!-- Напоминания о подаче заявок -->
+        <div class="so-settings-block">
+          <div class="so-notify-head">
+            <div>
+              <div class="so-section-title" style="margin:0">Напоминания о подаче заявок</div>
+              <div class="so-section-hint" style="margin:4px 0 0 0">Бот напомнит ресторанам, не подавшим заявку, в выбранные моменты до дедлайна.</div>
+            </div>
+            <button class="rom-btn rom-btn-export" @click="saveReminders" :disabled="savingReminders">
+              <BurgerSpinner v-if="savingReminders" size="xs" />
+              <span>{{ savingReminders ? 'Сохранение...' : 'Сохранить напоминания' }}</span>
+            </button>
+          </div>
+
+          <div class="so-reminder-group">
+            <div class="so-reminder-title">Когда напоминать</div>
+            <div class="so-reminder-checks">
+              <label class="so-settings-check"><input type="checkbox" value="evening" v-model="reminderOffsets" /><span>Вечернее (накануне)</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="3h" v-model="reminderOffsets" /><span>За 3 часа</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="2h" v-model="reminderOffsets" /><span>За 2 часа</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="1h" v-model="reminderOffsets" /><span>За 1 час</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="30m" v-model="reminderOffsets" /><span>За 30 минут</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="expired" v-model="reminderOffsets" /><span>Когда дедлайн истёк</span></label>
+            </div>
+            <p class="so-section-hint" style="margin:6px 0 0 0">Если ничего не выбрано — напоминания не отправляются.</p>
+          </div>
+
+          <div class="so-reminder-group">
+            <div class="so-reminder-title">Куда отправлять</div>
+            <div class="so-reminder-checks">
+              <label class="so-settings-check"><input type="checkbox" value="tg" v-model="reminderChannels" /><span>Telegram</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="push" v-model="reminderChannels" /><span>Пуш</span></label>
+            </div>
+            <p class="so-section-hint" style="margin:6px 0 0 0">Если ни один канал не выбран — напоминания не отправляются.</p>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <!-- ═══ Modal: Order detail ═══ -->
     <div v-if="showOrderModal" class="rom-modal-overlay" @click.self="showOrderModal = false">
       <div class="rom-modal">
@@ -746,6 +815,11 @@ const allNotifyUsers = ref([]);
 const loadingNotifyUsers = ref(false);
 const savingNotifyUsers = ref(false);
 const notifyUsers = ref([]);
+
+// Напоминания о подаче заявок (массивы выбранных таймингов и каналов)
+const reminderOffsets = ref([]);
+const reminderChannels = ref([]);
+const savingReminders = ref(false);
 
 // List tab
 const loadingList = ref(false);
@@ -966,6 +1040,10 @@ async function refreshActiveTab() {
     await loadOrdersList();
     return;
   }
+  if (pageTab.value === 'settings') {
+    // loadSettings уже вызван выше; получателей подтягивает он же
+    return;
+  }
   await loadStatus();
 }
 
@@ -978,6 +1056,8 @@ async function loadSettings() {
     pauseMessage.value = settings.value.pause_message || '';
     deadlineOverrides.value = data.overrides || [];
     notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
+    reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
+    reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
     if (!allNotifyUsers.value.length) await loadNotifyUsers();
   } catch (e) {
     console.error(e);
@@ -1069,6 +1149,28 @@ async function saveNotifyUsers() {
     toast.error('Ошибка', e.message);
   } finally {
     savingNotifyUsers.value = false;
+  }
+}
+
+// Сохранение напоминаний — ОТДЕЛЬНЫЙ запрос только с ключами reminder_*,
+// чтобы бэкенд обновил именно их и не тронул прочие настройки.
+async function saveReminders() {
+  savingReminders.value = true;
+  try {
+    const data = await store.adminSaveSettings(currentSupplierId.value, {
+      reminder_offsets: [...reminderOffsets.value],
+      reminder_channels: [...reminderChannels.value],
+    });
+    if (data && data.settings) {
+      settings.value = data.settings;
+      reminderOffsets.value = Array.isArray(data.settings.reminder_offsets) ? [...data.settings.reminder_offsets] : [];
+      reminderChannels.value = Array.isArray(data.settings.reminder_channels) ? [...data.settings.reminder_channels] : [];
+    }
+    toast.success('Сохранено', 'Настройки напоминаний обновлены');
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    savingReminders.value = false;
   }
 }
 
@@ -2594,6 +2696,42 @@ watch(
 }
 .so-notify-muted {
   color: #b45309 !important;
+}
+/* Вкладка «Настройки» */
+.so-settings-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 860px;
+}
+.so-settings-block {
+  padding: 14px 16px;
+  border: 1px solid #eadfce;
+  border-radius: 12px;
+  background: #fffaf4;
+}
+.so-settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: #502314;
+  cursor: pointer;
+}
+.so-reminder-group {
+  margin-top: 12px;
+}
+.so-reminder-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #502314;
+  margin-bottom: 4px;
+}
+.so-reminder-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 2px 12px;
 }
 .so-temp-actions {
   display: flex;
