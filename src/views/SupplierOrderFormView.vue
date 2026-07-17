@@ -205,10 +205,25 @@
               <div class="ro-submit-summary">
                 {{ filledCount }} поз., {{ filledTotal }} шт.
               </div>
+              <!-- Минимальный заказ поставщика: живой итог + подсветка недобора -->
+              <div
+                v-if="minOrderValue"
+                class="so-minorder"
+                :class="{ below: belowMinOrder }"
+              >
+                <div class="so-minorder-line">
+                  Минимум: <strong>{{ fmtOrderTotal(minOrderValue) }} {{ minOrderUnitLabel }}</strong>
+                  <span class="so-minorder-sep">·</span>
+                  В заявке: <strong>{{ fmtOrderTotal(orderTotal) }} {{ minOrderUnitLabel }}</strong>
+                </div>
+                <div v-if="belowMinOrder" class="so-minorder-warn">
+                  Недобор до минимума — заявку не получится отправить. Добавьте позиции.
+                </div>
+              </div>
               <div v-if="hasErrors" class="so-error-msg">Исправьте количество (кратность / минимум)</div>
               <button
                 class="ro-submit-btn"
-                :disabled="submitting || hasErrors"
+                :disabled="submitting || hasErrors || belowMinOrder"
                 @click="handleSubmit"
               >
                 {{ submitButtonLabel }}
@@ -331,6 +346,44 @@ function minError(p) {
 function hasError(p) { return multError(p) || minError(p); }
 
 const hasErrors = computed(() => products.value.some(p => hasError(p)));
+
+// ═══ Минимальный заказ поставщика ═══
+const minOrderValue = computed(() => {
+  const v = parseFloat(selectedSupplier.value?.min_order_value);
+  return v > 0 ? v : null;
+});
+const minOrderUnit = computed(() => selectedSupplier.value?.min_order_unit || 'kg');
+const minOrderUnitLabel = computed(() => (minOrderUnit.value === 'pieces' ? 'шт' : 'кг'));
+
+// Живой итог заявки в единице минимума (шт — целое, кг — из веса коробок).
+const orderTotal = computed(() => {
+  if (!minOrderValue.value) return 0;
+  let total = 0;
+  for (const p of products.value) {
+    const qty = parseFloat(quantities.value[p.sku]) || 0;
+    if (qty <= 0) continue;
+    if (minOrderUnit.value === 'pieces') {
+      total += qty;
+    } else {
+      const perBox = parseFloat(p.qty_per_box) || 0;
+      const wNetto = parseFloat(p.weight_netto) || 0;
+      if (perBox <= 0) continue; // нет делителя — не считаем (как на сервере)
+      total += (qty / perBox) * wNetto / 1000;
+    }
+  }
+  return total;
+});
+
+function fmtOrderTotal(v) {
+  const n = parseFloat(v) || 0;
+  return minOrderUnit.value === 'kg' ? n.toFixed(1) : String(Math.round(n));
+}
+
+// Недобор: согласовано с сервером — итог>0 И итог<минимума.
+// При итоге 0 (пустая заявка или в кг нет весов) ложного блока не показываем.
+const belowMinOrder = computed(() =>
+  !!minOrderValue.value && orderTotal.value > 0 && orderTotal.value < minOrderValue.value - 0.001,
+);
 
 function fmtNum(v) {
   const n = parseFloat(v);
@@ -671,6 +724,14 @@ function formatDateShort(d) {
 .so-hint-min { background: #fef3c7; color: #92400e; }
 .so-qty-error { font-size: 10px; color: #dc2626; margin-top: 2px; text-align: center; }
 .so-error-msg { padding: 8px 16px; border-radius: 8px; background: #fef2f2; color: #dc2626; font-size: 13px; font-weight: 600; margin-bottom: 10px; text-align: center; }
+
+/* Минимальный заказ поставщика */
+.so-minorder { padding: 8px 14px; border-radius: 8px; background: #f0ebe4; color: #502314; font-size: 13px; margin-bottom: 10px; text-align: center; }
+.so-minorder-line strong { font-weight: 700; }
+.so-minorder-sep { margin: 0 6px; color: #8b7355; }
+.so-minorder.below { background: #fef2f2; color: #dc2626; }
+.so-minorder.below .so-minorder-sep { color: #dc2626; }
+.so-minorder-warn { margin-top: 4px; font-size: 12px; font-weight: 600; }
 .ro-qty-error { border-color: #dc2626 !important; background: #fef2f2; }
 .ro-row-error { background: #fef2f2; }
 

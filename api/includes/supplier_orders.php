@@ -981,7 +981,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $ph = implode(',', array_fill(0, count($supplierIds), '?'));
 
     // 2. Настройки всех поставщиков — один запрос
-    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
+    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
     $settingsRows->execute($supplierIds);
     $settingsMap = [];
     foreach ($settingsRows->fetchAll() as $r) {
@@ -1044,6 +1044,15 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     foreach ($suppliersMap as $sid => $sup) {
         $settings = $settingsMap[$sid] ?? ['is_accepting_orders' => 1, 'default_deadline_time' => '14:00:00', 'pause_message' => null];
         $isAccepting = (int)($settings['is_accepting_orders'] ?? 1) === 1;
+
+        // Минимальный заказ поставщика: value>0 иначе null; unit 'kg'/'pieces'
+        // (при заданном value и пустом unit трактуем как 'kg' — как на бэке при подаче).
+        $minValueRaw = $settings['min_order_value'] ?? null;
+        $minOrderValue = ($minValueRaw !== null && $minValueRaw !== '' && (float)$minValueRaw > 0)
+            ? (float)$minValueRaw : null;
+        $minOrderUnit = $settings['min_order_unit'] ?? null;
+        $minOrderUnit = in_array($minOrderUnit, ['kg', 'pieces'], true) ? $minOrderUnit : null;
+        if ($minOrderValue !== null && $minOrderUnit === null) $minOrderUnit = 'kg';
 
         $scheduleFormatted = [];
         foreach ($sup['schedule'] as $sc) {
@@ -1110,6 +1119,8 @@ if ($soAction === 'suppliers' && $method === 'GET') {
             ] : null),
             'is_accepting_orders'=> $isAccepting,
             'pause_message'      => $settings['pause_message'] ?? null,
+            'min_order_value'    => $minOrderValue,
+            'min_order_unit'     => $minOrderUnit,
             'available_dates'    => $availableDates,
         ];
     }
@@ -1130,7 +1141,7 @@ if ($soAction === 'products' && $method === 'GET' && $soParam1) {
         SELECT t.id, t.product_id, t.sku, t.product_name, t.sort_order,
                COALESCE(t.multiplicity, p.multiplicity) as multiplicity,
                t.min_qty,
-               p.qty_per_box, p.unit_of_measure
+               p.qty_per_box, p.unit_of_measure, p.weight_netto
         FROM so_templates t
         LEFT JOIN products p ON p.id = t.product_id
         WHERE t.supplier_id = ? AND t.legal_entity = ? AND t.is_active = 1
