@@ -25,9 +25,10 @@
  *   "items": {                       // ключ "{number}_{sku}"
  *     "1_SKU1": { "qty": 10, "is_admin": false }
  *   },
- *   "options": {                     // обе по умолчанию false
+ *   "options": {
  *     "drop_empty_rows": false,      // убрать неподавших и «пустые» рестораны
- *     "show_pallet_weight": false    // добавить строки коробки/паллеты/вес
+ *     "pallet_metrics": []           // какие показатели паллет/веса показывать:
+ *                                    // ['boxes','pallets','netto','brutto']; []=не показывать
  *   }
  * }
  *
@@ -56,9 +57,10 @@ const sheetName = (rawSheetName.replace(/[:\\/?*[\]]/g, ' ').replace(/\s+/g, ' '
 
 // ── Опции: PHP шлёт snake_case, модуль ждёт camelCase; принимаем оба вида. ──
 const rawOptions = data.options || {};
+const rawMetrics = rawOptions.palletMetrics ?? rawOptions.pallet_metrics ?? [];
 const options = {
     dropEmptyRows: !!(rawOptions.dropEmptyRows ?? rawOptions.drop_empty_rows ?? false),
-    showPalletWeight: !!(rawOptions.showPalletWeight ?? rawOptions.show_pallet_weight ?? false),
+    palletMetrics: Array.isArray(rawMetrics) ? rawMetrics : [],
 };
 
 // ── Товары: name → product_name, плоские (без группировки). ──

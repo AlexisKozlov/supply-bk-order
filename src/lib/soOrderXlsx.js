@@ -16,7 +16,11 @@
  *   restaurants   — [{ number, city?/region?, address?, order_status }]
  *   items         — массив позиций заявок: { restaurant_number, sku, quantity, admin_qty }
  *   isAutoSubmitted — (row) => bool; в браузере передаётся существующая, в Node — () => false
- *   options       — { dropEmptyRows = false, showPalletWeight = false }
+ *   options       — { dropEmptyRows = false, palletMetrics = [] }
+ *                   palletMetrics — какие показатели паллет/веса показывать; массив из
+ *                   'boxes' | 'pallets' | 'netto' | 'brutto'. Порядок = порядок столбцов
+ *                   справа и строк снизу. Пустой массив = показатели не показываем вообще
+ *                   (ни правых столбцов, ни нижних строк).
  */
 export function buildSoOrderSheet(XLSX, {
   supplierName = 'Поставщик',
@@ -27,7 +31,7 @@ export function buildSoOrderSheet(XLSX, {
   isAutoSubmitted = () => false,
   options = {},
 } = {}) {
-  const { dropEmptyRows = false, showPalletWeight = false } = options || {};
+  const { dropEmptyRows = false, palletMetrics = [] } = options || {};
 
   const prods = products || [];
   const rests = restaurants || [];
@@ -106,9 +110,55 @@ export function buildSoOrderSheet(XLSX, {
     cityGroups[c].push(r);
   }
 
+  // ═══ Показатели паллет/веса (настраиваемый набор) ═══
+  const num = (val) => {
+    if (val === null || val === undefined || val === '' || isNaN(val)) return NaN;
+    return parseFloat(val);
+  };
+  // Округление до N знаков с удалением хвостовых нулей
+  const round = (v, dec) => (v === null || v === undefined || isNaN(v)) ? '' : parseFloat(Number(v).toFixed(dec));
+
+  const METRIC_LABELS = { boxes: 'Коробок', pallets: 'Паллет', netto: 'Вес нетто, кг', brutto: 'Вес брутто, кг' };
+  const METRIC_DEC = { boxes: 2, pallets: 2, netto: 1, brutto: 1 };
+  // Оставляем только известные показатели, сохраняя порядок из palletMetrics
+  const metrics = (Array.isArray(palletMetrics) ? palletMetrics : []).filter(m => METRIC_LABELS[m]);
+  const M = metrics.length;
+
+  // Атрибуты справочника по каждому товару (граммы веса на ОДНУ коробку)
+  const prodAttrs = prods.map(p => ({
+    qpb: num(p.qty_per_box),
+    bpp: num(p.boxes_per_pallet),
+    wn: num(p.weight_netto),
+    wb: num(p.weight_brutto),
+  }));
+
+  // Итоги показателей по массиву штук на товар (штуки → коробки → паллеты/вес).
+  // Товары без атрибутов дают вклад 0. Всё линейно по штукам, поэтому сумму
+  // по ресторанам можно считать как сумму штук, а показатель — один раз в конце.
+  const computeMetricTotals = (piecesArr) => {
+    const acc = { boxes: 0, pallets: 0, netto: 0, brutto: 0 };
+    for (let pi = 0; pi < prods.length; pi++) {
+      const a = prodAttrs[pi];
+      const pieces = piecesArr[pi] || 0;
+      if (isNaN(a.qpb) || a.qpb <= 0) continue;
+      const boxes = pieces / a.qpb;
+      acc.boxes += boxes;
+      if (!isNaN(a.bpp) && a.bpp > 0) acc.pallets += boxes / a.bpp;
+      if (!isNaN(a.wn) && a.wn > 0) acc.netto += boxes * a.wn / 1000;
+      if (!isNaN(a.wb) && a.wb > 0) acc.brutto += boxes * a.wb / 1000;
+    }
+    return acc;
+  };
+  // Ячейки правых столбцов (в порядке metrics) с округлением по каждому показателю
+  const metricCells = (piecesArr) => {
+    const t = computeMetricTotals(piecesArr);
+    return metrics.map(m => round(t[m], METRIC_DEC[m]));
+  };
+
   // ═══ Заголовок таблицы ═══
   const header = ['№', 'Адрес'];
   for (const p of prods) header.push(p.is_grouped ? `${p.product_name}\nSKU ×${p.source_skus.length}` : (p.sku ? `${p.sku}\n${p.product_name}` : p.product_name));
+  for (const m of metrics) header.push(METRIC_LABELS[m]);
   header.push('Пометка');
 
   const aoa = [[`Заявка ${supplierName} на ${dateFmt}`], header];
@@ -125,7 +175,13 @@ export function buildSoOrderSheet(XLSX, {
       const r = group[i];
       const isSubmitted = isSubmittedRest(r);
       const row = [r.number, r.address || ''];
-      for (const p of prods) { if (!isSubmitted) { row.push(0); continue; } const v = getQty(r, p); row.push(v ? v.qty : 0); }
+      const piecesArr = [];
+      for (const p of prods) { if (!isSubmitted) { row.push(0); piecesArr.push(0); continue; } const v = getQty(r, p); const q = v ? v.qty : 0; row.push(q); piecesArr.push(q); }
+      if (M) {
+        // Неподавший — пусто (0 в товарах = «не подал», не путаем с реальным 0)
+        if (!isSubmitted) { for (let k = 0; k < M; k++) row.push(''); }
+        else { for (const cell of metricCells(piecesArr)) row.push(cell); }
+      }
       let note = '';
       if (!isSubmitted) note = 'Не подал';
       else if (skipRest(r)) note = 'Не нужна';
@@ -134,11 +190,14 @@ export function buildSoOrderSheet(XLSX, {
       rowMeta.push({ type: 'data', row: r, isEven: i % 2 === 1, isSubmitted });
     }
     const subRow = [`Итого ${city}`, ''];
+    const cityPieces = [];
     for (const p of prods) {
       let sum = 0, hasAny = false;
       for (const r of group) { if (!r.order_status || r.order_status === 'draft') continue; const v = getQty(r, p); if (v) { sum += v.qty; hasAny = true; } }
       subRow.push(hasAny ? sum : '');
+      cityPieces.push(sum);
     }
+    if (M) { for (const cell of metricCells(cityPieces)) subRow.push(cell); }
     subRow.push(''); aoa.push(subRow); rowMeta.push({ type: 'subtotal' });
   }
 
@@ -152,42 +211,31 @@ export function buildSoOrderSheet(XLSX, {
     totalPieces[pi] = sum;
     grandRow.push(hasAny ? sum : '');
   }
+  if (M) { for (const cell of metricCells(totalPieces)) grandRow.push(cell); }
   grandRow.push(''); aoa.push(grandRow); rowMeta.push({ type: 'total' });
 
-  // ═══ Опция showPalletWeight: 4 строки коробки/паллеты/вес ═══
-  const num = (val) => {
-    if (val === null || val === undefined || val === '' || isNaN(val)) return NaN;
-    return parseFloat(val);
-  };
-  // Округление до N знаков с удалением хвостовых нулей
-  const round = (v, dec) => (v === null || v === undefined || isNaN(v)) ? '' : parseFloat(Number(v).toFixed(dec));
-
-  if (showPalletWeight) {
-    const boxesArr = [], palletArr = [], nettoArr = [], bruttoArr = [];
+  // ═══ Нижняя сводка по товарам: только выбранные показатели ═══
+  if (M) {
+    // Значения по каждому товару (не сумма): показатель на totalPieces товара
+    const perProd = { boxes: [], pallets: [], netto: [], brutto: [] };
     for (let pi = 0; pi < prods.length; pi++) {
-      const p = prods[pi];
-      const qpb = num(p.qty_per_box);
-      const bpp = num(p.boxes_per_pallet);
-      const wn = num(p.weight_netto);
-      const wb = num(p.weight_brutto);
+      const a = prodAttrs[pi];
       const pieces = totalPieces[pi] || 0;
-      const boxes = (!isNaN(qpb) && qpb > 0) ? pieces / qpb : null;
-      boxesArr.push(boxes === null ? '' : round(boxes, 2));
-      palletArr.push((boxes !== null && !isNaN(bpp) && bpp > 0) ? round(boxes / bpp, 2) : '');
-      nettoArr.push((boxes !== null && !isNaN(wn) && wn > 0) ? round(boxes * wn / 1000, 1) : '');
-      bruttoArr.push((boxes !== null && !isNaN(wb) && wb > 0) ? round(boxes * wb / 1000, 1) : '');
+      const boxes = (!isNaN(a.qpb) && a.qpb > 0) ? pieces / a.qpb : null;
+      perProd.boxes.push(boxes === null ? '' : round(boxes, 2));
+      perProd.pallets.push((boxes !== null && !isNaN(a.bpp) && a.bpp > 0) ? round(boxes / a.bpp, 2) : '');
+      perProd.netto.push((boxes !== null && !isNaN(a.wn) && a.wn > 0) ? round(boxes * a.wn / 1000, 1) : '');
+      perProd.brutto.push((boxes !== null && !isNaN(a.wb) && a.wb > 0) ? round(boxes * a.wb / 1000, 1) : '');
     }
     const pushInfoRow = (label, values) => {
       const row = [label, ''];
       for (const v of values) row.push(v);
-      row.push('');
+      for (let k = 0; k < M; k++) row.push(''); // правые столбцы показателей — пусто
+      row.push(''); // Пометка
       aoa.push(row);
       rowMeta.push({ type: 'palletinfo' });
     };
-    pushInfoRow('Коробок', boxesArr);
-    pushInfoRow('Паллет (доля)', palletArr);
-    pushInfoRow('Вес нетто, кг', nettoArr);
-    pushInfoRow('Вес брутто, кг', bruttoArr);
+    for (const m of metrics) pushInfoRow(METRIC_LABELS[m], perProd[m]);
   }
 
   // ═══ Лист + применение стилей ═══
@@ -218,6 +266,11 @@ export function buildSoOrderSheet(XLSX, {
         else if (v) cell.s = { ...qtyFilledStyle, ...(meta.isEven ? { fill: { fgColor: { rgb: 'E8F5E9' } } } : {}) };
         else cell.s = { ...qtyStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) };
       }
+      for (let k = 0; k < M; k++) {
+        const c = 2 + prods.length + k; const cell = ws[XLSX.utils.encode_cell({ r: ri, c })]; if (!cell) continue;
+        if (!meta.isSubmitted) { cell.s = missQtyStyle; continue; }
+        cell.s = { ...qtyStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) };
+      }
       const nCell = ws[XLSX.utils.encode_cell({ r: ri, c: header.length - 1 })];
       if (nCell) nCell.s = meta.isSubmitted ? { ...noteStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) } : missNoteStyle;
     } else if (meta.type === 'subtotal') {
@@ -229,7 +282,7 @@ export function buildSoOrderSheet(XLSX, {
     }
   }
 
-  ws['!cols'] = [{ wch: 8 }, { wch: 32 }, ...Array(prods.length).fill({ wch: 14 }), { wch: 20 }];
+  ws['!cols'] = [{ wch: 8 }, { wch: 32 }, ...Array(prods.length).fill({ wch: 14 }), ...Array(M).fill({ wch: 11 }), { wch: 20 }];
   ws['!rows'] = [{ hpx: 28 }, { hpx: 42 }];
 
   return ws;
