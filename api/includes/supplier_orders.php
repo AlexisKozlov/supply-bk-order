@@ -1539,7 +1539,7 @@ if ($soAction === 'admin') {
         // Показываем только подключённых к SO-модулю поставщиков (so_enabled=1),
         // остальные доступны через мастер «+ Подключить поставщика».
         $s = $pdo->prepare("
-            SELECT s.id, s.short_name, s.full_name, s.legal_entity, s.legal_entity_group,
+            SELECT s.id, s.short_name, s.full_name, s.legal_entity, s.legal_entity_group, s.email,
                    COUNT(DISTINCT ss.restaurant_id) as restaurant_count,
                    COALESCE(sst.is_accepting_orders, 1) as is_accepting_orders
             FROM suppliers s
