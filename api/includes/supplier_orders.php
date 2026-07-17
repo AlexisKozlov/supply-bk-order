@@ -1808,16 +1808,43 @@ if ($soAction === 'admin') {
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $updatedBy = resolveActorName($pdo, $sessionUser);
 
-        $isAccepting = isset($body['is_accepting_orders']) ? ((int)!!$body['is_accepting_orders']) : 1;
-        $autoSubmitPrev = !empty($body['auto_submit_previous']) ? 1 : 0;
-        $autoEmailSummary = !empty($body['auto_email_summary']) ? 1 : 0;
-        $defaultDl = $body['default_deadline_time'] ?? '14:00:00';
-        if (preg_match('/^(\d{1,2}):(\d{2})$/', $defaultDl, $m)) {
-            $defaultDl = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
-        } elseif (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $defaultDl)) {
-            $defaultDl = '14:00:00';
+        // Читаем ТЕКУЩИЕ базовые настройки поставщика (сырьём), чтобы поддержать
+        // частичное сохранение: если ключа нет в теле — сохраняем текущее значение,
+        // а не дефолт. Иначе частичный POST (напр. только reminder_*) затирал бы
+        // приём заявок, авто-подачу/письмо, текст паузы и дедлайн.
+        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+        $curStmt->execute([$supplierId]);
+        $curRow = $curStmt->fetch(PDO::FETCH_ASSOC);
+        // Прежние дефолты — на случай, если строки ещё нет (первое сохранение).
+        $curIsAccepting = $curRow !== false ? (int)$curRow['is_accepting_orders'] : 1;
+        $curAutoSubmit = $curRow !== false ? (int)$curRow['auto_submit_previous'] : 0;
+        $curAutoEmail = $curRow !== false ? (int)$curRow['auto_email_summary'] : 0;
+        $curDefaultDl = $curRow !== false ? ($curRow['default_deadline_time'] ?? '14:00:00') : '14:00:00';
+        $curPauseMsg = $curRow !== false ? $curRow['pause_message'] : null;
+
+        // Каждое базовое поле: есть ключ в теле → применяем присланное (с санитизацией);
+        // нет ключа → сохраняем текущее значение из БД (или дефолт при первом сохранении).
+        $isAccepting = array_key_exists('is_accepting_orders', $body)
+            ? ((int)!!$body['is_accepting_orders'])
+            : $curIsAccepting;
+        // Для auto_* важно РАЗЛИЧАТЬ отсутствие ключа и «0»: !empty само по себе их не различает.
+        $autoSubmitPrev = array_key_exists('auto_submit_previous', $body)
+            ? (!empty($body['auto_submit_previous']) ? 1 : 0)
+            : $curAutoSubmit;
+        $autoEmailSummary = array_key_exists('auto_email_summary', $body)
+            ? (!empty($body['auto_email_summary']) ? 1 : 0)
+            : $curAutoEmail;
+        if (array_key_exists('default_deadline_time', $body)) {
+            $defaultDl = $body['default_deadline_time'] ?? '14:00:00';
+            if (preg_match('/^(\d{1,2}):(\d{2})$/', $defaultDl, $m)) {
+                $defaultDl = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
+            } elseif (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $defaultDl)) {
+                $defaultDl = '14:00:00';
+            }
+        } else {
+            $defaultDl = $curDefaultDl;
         }
-        $pauseMsg = $body['pause_message'] ?? null;
+        $pauseMsg = array_key_exists('pause_message', $body) ? $body['pause_message'] : $curPauseMsg;
         $notifyUsers = array_key_exists('notify_users', $body) ? ($body['notify_users'] ?? []) : null;
 
         $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, updated_by)
