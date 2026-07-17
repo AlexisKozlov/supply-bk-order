@@ -42,6 +42,7 @@ $pdo->exec("SET SESSION max_statement_time = 30");
 require_once __DIR__ . '/includes/legal_entities.php';
 require_once __DIR__ . '/includes/so_deadline.php';
 require_once __DIR__ . '/includes/tg_client.php';
+require_once __DIR__ . '/includes/push_send.php'; // web-push для напоминаний по каналу 'push'
 
 // supplier_orders.php обычно подключается только из index.php как HTTP-роутер
 // (внутри — `if ($endpoint !== 'so') return;` и парсинг $uri/$method в самом низу).
@@ -859,10 +860,27 @@ try {
         WHERE s.is_active = 1 AND s.so_enabled = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
     ")->fetchAll();
 
+    // Кэш настроек напоминаний поставщика (тайминги + каналы). Читаем один раз
+    // на поставщика, а не на каждый ресторан. Дефолты (все тайминги / канал 'tg')
+    // уже подставляет soGetSupplierSettings — при отсутствии настроек поведение как раньше.
+    $supReminderCfg = [];
+
     foreach ($suppliers as $sup) {
         $supId = $sup['id'];
         $supName = $sup['short_name'];
         $defaultDeadlineTime = $sup['default_deadline_time'];
+
+        if (!isset($supReminderCfg[$supId])) {
+            $rcfg = soGetSupplierSettings($pdo, $supId);
+            $supReminderCfg[$supId] = [
+                'offsets'  => $rcfg['reminder_offsets']  ?? [],
+                'channels' => $rcfg['reminder_channels'] ?? [],
+            ];
+        }
+        $remOffsets  = $supReminderCfg[$supId]['offsets'];
+        $remChannels = $supReminderCfg[$supId]['channels'];
+        $tgEnabled   = in_array('tg', $remChannels, true);
+        $pushEnabled = in_array('push', $remChannels, true);
 
         // Все расписания поставщика: ресторан + дни заказа/доставки
         $schStmt = $pdo->prepare("
@@ -1008,6 +1026,12 @@ try {
 
             if (!$reminderType) continue;
 
+            // Фильтр таймингов по настройкам поставщика (дефолт: все включены — как раньше)
+            if (!in_array($reminderType, $remOffsets, true)) continue;
+
+            // Если поставщик осознанно выключил все каналы — слать нечего
+            if (!$tgEnabled && !$pushEnabled) continue;
+
             // Дедупликация
             $dedupKey = "so_rem_{$reminderType}_{$supId}_{$restNum}_{$deliveryDate}";
             $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 24 HOUR LIMIT 1");
@@ -1046,24 +1070,67 @@ try {
             $restGroup = $byRest[$restNum]['group'] ?? 'BK_VM';
             $redirect = "/restaurant/orders/supplier/{$supId}";
 
+            // Дедуп-ключ на весь тик один (see $dedupKey выше) — не плодим по каналам.
+            // Флаг: записан ли дедуп-лог. При включённом TG его пишет цикл рассылки
+            // (место и поведение как раньше). При push-only лог фиксируем отдельно ниже.
+            $dedupLogged = false;
+
+            // ── Канал Telegram ──
             // Рассылаем каждому подписчику ресторана (свой токен на каждый chat_id)
-            $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL " . RO_AUTH_TOKEN_TTL_MINUTES . " MINUTE), 0)");
-            $logStmt = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)");
-            foreach ($chatIds as $chatId) {
-                $token = bin2hex(random_bytes(32));
-                $tokStmt->execute([$token, $chatId, $restNum, $restGroup]);
-                $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
+            if ($tgEnabled) {
+                $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL " . RO_AUTH_TOKEN_TTL_MINUTES . " MINUTE), 0)");
+                $logStmt = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)");
+                foreach ($chatIds as $chatId) {
+                    $token = bin2hex(random_bytes(32));
+                    $tokStmt->execute([$token, $chatId, $restNum, $restGroup]);
+                    $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
 
-                $rows = [];
-                if ($reminderType !== 'expired') {
-                    $rows[] = [['text' => '📝 Подать в боте', 'callback_data' => "soord_day_{$supId}_{$restNum}_{$deliveryDate}"]];
+                    $rows = [];
+                    if ($reminderType !== 'expired') {
+                        $rows[] = [['text' => '📝 Подать в боте', 'callback_data' => "soord_day_{$supId}_{$restNum}_{$deliveryDate}"]];
+                    }
+                    $rows[] = [['text' => '🌐 Открыть на сайте', 'url' => $url]];
+                    $keyboard = ['inline_keyboard' => $rows];
+
+                    tgSend($chatId, $msgText, true, $keyboard);
+                    $sent++;
+                    $logStmt->execute([$chatId, $dedupKey]);
+                    $dedupLogged = true;
                 }
-                $rows[] = [['text' => '🌐 Открыть на сайте', 'url' => $url]];
-                $keyboard = ['inline_keyboard' => $rows];
+            }
 
-                tgSend($chatId, $msgText, true, $keyboard);
-                $sent++;
-                $logStmt->execute([$chatId, $dedupKey]);
+            // ── Канал Web Push ──
+            // Один вызов на ресторан (не на каждый chat_id). Сбой пуша не должен
+            // мешать TG и не ронять крон — оборачиваем в try/catch.
+            if ($pushEnabled) {
+                try {
+                    // Короткий заголовок/текст без HTML-разметки Telegram
+                    $pushTitles = [
+                        'expired' => '⚠️ Дедлайн заявки истёк',
+                        'evening' => '🌙 Напоминание: заявка поставщику',
+                    ];
+                    $pushTitle = $pushTitles[$reminderType] ?? '⏰ Напоминание: заявка поставщику';
+                    if ($reminderType === 'expired') {
+                        $pushBody = "{$supName}: заявка на {$deliveryDate} не подана, дедлайн истёк.";
+                    } else {
+                        $pushBody = "{$supName}: подайте заявку на {$deliveryDate}, дедлайн {$deadlineFmt}.";
+                    }
+                    pushSendToRestaurant($pdo, (int)$restNum, $restGroup, [
+                        'title' => $pushTitle,
+                        'body'  => $pushBody,
+                        'url'   => $redirect,
+                        'tag'   => $dedupKey,
+                    ]);
+                } catch (\Throwable $e) {
+                    error_log('[cron_telegram] so reminder push error: ' . $e->getMessage());
+                }
+            }
+
+            // Если TG выключен (цикл рассылки не выполнялся и дедуп не записан),
+            // но мы пытались отправить пуш — фиксируем дедуп один раз, чтобы
+            // напоминание не уходило каждый прогон крона.
+            if (!$dedupLogged && $pushEnabled) {
+                $pdo->prepare("INSERT INTO tg_notification_log (notification_type, notification_key) VALUES ('so_reminder', ?)")->execute([$dedupKey]);
             }
         }
     }
