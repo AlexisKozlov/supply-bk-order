@@ -759,6 +759,44 @@
             Единица «килограммы» работает по весам из справочника: у товаров поставщика должны быть заполнены вес и штук-в-коробке.
           </p>
         </div>
+
+        <!-- Отчёт Excel -->
+        <div class="so-settings-block">
+          <div class="so-notify-head">
+            <div>
+              <div class="so-section-title" style="margin:0">Отчёт Excel</div>
+              <div class="so-section-hint" style="margin:4px 0 0 0">Как выглядит файл заявки, который скачивается и уходит поставщику письмом.</div>
+            </div>
+            <button class="rom-btn rom-btn-export" @click="saveXlsx" :disabled="savingXlsx">
+              <BurgerSpinner v-if="savingXlsx" size="xs" />
+              <span>{{ savingXlsx ? 'Сохранение...' : 'Сохранить настройки отчёта' }}</span>
+            </button>
+          </div>
+
+          <label class="so-settings-check" style="margin-top:6px">
+            <input type="checkbox" v-model="xlsxDropEmpty" />
+            <span>Убрать пустые строки</span>
+          </label>
+          <p class="so-section-hint" style="margin:6px 0 0 0">Рестораны без заказа не попадут в отчёт.</p>
+
+          <div class="so-reminder-group">
+            <div class="so-reminder-title">Показатели паллет и веса</div>
+            <div class="so-reminder-checks">
+              <label class="so-settings-check"><input type="checkbox" value="boxes" v-model="xlsxPalletMetrics" /><span>Коробки</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="pallets" v-model="xlsxPalletMetrics" /><span>Паллеты</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="netto" v-model="xlsxPalletMetrics" /><span>Вес нетто</span></label>
+              <label class="so-settings-check"><input type="checkbox" value="brutto" v-model="xlsxPalletMetrics" /><span>Вес брутто</span></label>
+            </div>
+            <p class="so-section-hint" style="margin:6px 0 0 0">
+              Выбранные показатели выводятся столбцами у каждого ресторана и сводкой по товарам внизу отчёта.
+              Порядок столбцов всегда одинаковый (коробки, паллеты, нетто, брутто) — от порядка выбора не зависит.
+              Если ничего не выбрано — паллеты и вес не показываются.
+            </p>
+            <p class="so-section-hint" style="margin:6px 0 0 0">
+              Считается по весам из справочника: у товаров должны быть заполнены вес и штук-в-коробке.
+            </p>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -890,6 +928,13 @@ const savingWeekly = ref(false);
 const minOrderValue = ref(0);
 const minOrderUnit = ref('kg');
 const savingMinOrder = ref(false);
+
+// Опции Excel-отчёта поставщика: убирать пустые строки и какие показатели
+// паллет/веса выводить (boxes / pallets / netto / brutto).
+const xlsxDropEmpty = ref(false);
+const xlsxPalletMetrics = ref([]);
+const savingXlsx = ref(false);
+
 const weekdayOptions = [
   { value: 1, label: 'Понедельник' },
   { value: 2, label: 'Вторник' },
@@ -1131,7 +1176,7 @@ async function loadSettings() {
   const sid = currentSupplierId.value;
   try {
     const data = await store.adminGetSettings(sid);
-    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null };
+    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null, xlsx_drop_empty: 0, xlsx_pallet_metrics: [] };
     // Отмечаем владельца настроек только если сервер вернул настоящие настройки.
     // Дефолт-заглушка и ошибка запроса владельца не дают.
     settingsLoadedFor.value = data.settings ? sid : null;
@@ -1143,6 +1188,7 @@ async function loadSettings() {
     reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
     syncWeeklyFromSettings();
     syncMinOrderFromSettings();
+    syncXlsxFromSettings();
     if (!allNotifyUsers.value.length) await loadNotifyUsers();
   } catch (e) {
     console.error(e);
@@ -1323,6 +1369,36 @@ async function saveMinOrder() {
     toast.error('Ошибка', e.message);
   } finally {
     savingMinOrder.value = false;
+  }
+}
+
+// Синхронизация локальных полей опций Excel-отчёта из settings.value.
+// xlsx_drop_empty может прийти строкой (PDO) — приводим к числу, затем к bool.
+function syncXlsxFromSettings() {
+  xlsxDropEmpty.value = !!Number(settings.value.xlsx_drop_empty);
+  xlsxPalletMetrics.value = Array.isArray(settings.value.xlsx_pallet_metrics)
+    ? [...settings.value.xlsx_pallet_metrics]
+    : [];
+}
+
+// Сохранение опций Excel-отчёта — ОТДЕЛЬНЫЙ запрос только с ключами xlsx_*,
+// чтобы бэкенд обновил именно их и не тронул прочие настройки.
+async function saveXlsx() {
+  savingXlsx.value = true;
+  try {
+    const data = await store.adminSaveSettings(currentSupplierId.value, {
+      xlsx_drop_empty: xlsxDropEmpty.value ? 1 : 0,
+      xlsx_pallet_metrics: [...xlsxPalletMetrics.value],
+    });
+    if (data && data.settings) {
+      settings.value = data.settings;
+      syncXlsxFromSettings();
+    }
+    toast.success('Сохранено', 'Настройки отчёта обновлены');
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    savingXlsx.value = false;
   }
 }
 
