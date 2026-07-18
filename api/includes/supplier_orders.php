@@ -153,8 +153,12 @@ function soGetSupplierSettings($pdo, $supplierId) {
  * Внимание: 'col_totals' и 'products_map' заполнены только при status 'ok' или 'empty'.
  * В ветках 'closed' и 'no_schedule' этих ключей в результате нет — потребитель обязан
  * сперва проверить 'status', прежде чем обращаться к ним.
+ *
+ * Опции Excel-отчёта (пустые строки, показатели паллет/веса) берутся ТОЛЬКО из
+ * настроек поставщика (so_supplier_settings) — единый источник для скачивания,
+ * ручной отправки и крона. Аргумента с опциями у функции больше нет.
  */
-function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate, array $options = ['drop_empty_rows' => false, 'show_pallet_weight' => false]): array {
+function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate): array {
     $out = [
         'status' => 'ok', 'supplier' => null, 'xlsx' => null, 'filename' => '',
         'date_fmt' => '', 'restaurants_count' => 0, 'submitted_count' => 0,
@@ -286,12 +290,17 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate, 
     foreach ($pivot as $rn => $pmap) {
         foreach ($pmap as $sku => $qty) $itemsOut->{"{$rn}_{$sku}"} = ['qty' => (float)$qty, 'is_admin' => false];
     }
+    // Опции отчёта — из настроек поставщика. Ключи camelCase: их понимает
+    // обёртка scripts/build_so_order_xlsx.mjs и движок src/lib/soOrderXlsx.js.
+    $xlsxCfg = soGetSupplierSettings($pdo, $supplierId);
+    $palletMetrics = $xlsxCfg['xlsx_pallet_metrics'] ?? [];
+    if (!is_array($palletMetrics)) $palletMetrics = [];
     $payload = [
         'supplier_name' => $supName, 'delivery_date_fmt' => $dateFmt, 'sheet_name' => $supName,
         'products' => $productsOut, 'restaurants' => $restaurantsOut, 'items' => $itemsOut,
         'options' => [
-            'drop_empty_rows'    => (bool)($options['drop_empty_rows'] ?? false),
-            'show_pallet_weight' => (bool)($options['show_pallet_weight'] ?? false),
+            'dropEmptyRows' => !empty($xlsxCfg['xlsx_drop_empty']),
+            'palletMetrics' => array_values($palletMetrics),
         ],
     ];
 
@@ -483,7 +492,7 @@ function soGetUnsubmittedRestaurants(PDO $pdo, string $supplierId, string $suppl
  * Отправляет сводку заявок поставщику на email + пишет в so_email_log.
  * trigger: 'manual' | 'auto'. Для 'auto' защита от дублей через so_email_auto_log.
  */
-function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, string $triggerType, ?string $senderName = null, ?string $ip = null, array $options = ['drop_empty_rows' => false, 'show_pallet_weight' => false]): array {
+function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, string $triggerType, ?string $senderName = null, ?string $ip = null): array {
     require_once __DIR__ . '/mail_send.php';
     require_once __DIR__ . '/mail_templates.php';
 
@@ -502,7 +511,7 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
         }
     };
 
-    $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate, $options);
+    $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
     $rc = $sum['restaurants_count']; $ic = $sum['items_count'];
     if ($sum['status'] !== 'ok') {
         // Нет заявок / закрыто / нет графика — терминально, замок не освобождаем.
@@ -3415,11 +3424,8 @@ if ($soAction === 'admin') {
         if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
-        $summaryOptions = [
-            'drop_empty_rows'    => filter_var($body['drop_empty_rows'] ?? false, FILTER_VALIDATE_BOOLEAN),
-            'show_pallet_weight' => filter_var($body['show_pallet_weight'] ?? false, FILTER_VALIDATE_BOOLEAN),
-        ];
-        $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate, $summaryOptions);
+        // Опции Excel-отчёта берутся из настроек поставщика внутри soBuildSummaryXlsx
+        $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);
         if ($sum['status'] === 'closed')      soRespond(['error' => 'Дата доставки закрыта'], 400);
         if ($sum['status'] === 'no_schedule') soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
         if ($sum['status'] === 'xlsx_error')  soRespond(['error' => 'Не удалось сгенерировать Excel: ' . $sum['error']], 500);
@@ -3496,11 +3502,8 @@ if ($soAction === 'admin') {
 
         $ip = $_SERVER['REMOTE_ADDR'] ?? null;
         $senderName = $sessionUser['name'] ?? null;
-        $summaryOptions = [
-            'drop_empty_rows'    => filter_var($body['drop_empty_rows'] ?? false, FILTER_VALIDATE_BOOLEAN),
-            'show_pallet_weight' => filter_var($body['show_pallet_weight'] ?? false, FILTER_VALIDATE_BOOLEAN),
-        ];
-        $r = soSendSummaryEmail($pdo, $supplierId, $deliveryDate, 'manual', $senderName, $ip, $summaryOptions);
+        // Опции Excel-отчёта берутся из настроек поставщика внутри soBuildSummaryXlsx
+        $r = soSendSummaryEmail($pdo, $supplierId, $deliveryDate, 'manual', $senderName, $ip);
 
         if (!empty($r['success'])) {
             soRespond(['success' => true, 'restaurants_count' => $r['restaurants_count'], 'items_count' => $r['items_count']]);

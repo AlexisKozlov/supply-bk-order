@@ -233,27 +233,18 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return data;
   }
 
-  async function adminSendSummary(supplierId, deliveryDate, options = {}) {
+  // Опции Excel-отчёта сервер берёт из настроек поставщика — с фронта не шлём
+  async function adminSendSummary(supplierId, deliveryDate) {
     return api('admin/send-summary', {
       method: 'POST',
-      body: JSON.stringify({
-        supplier_id: supplierId,
-        delivery_date: deliveryDate,
-        drop_empty_rows: !!options.dropEmptyRows,
-        show_pallet_weight: !!options.showPalletWeight,
-      }),
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate }),
     });
   }
 
-  async function adminSendSummaryEmail(supplierId, deliveryDate, options = {}) {
+  async function adminSendSummaryEmail(supplierId, deliveryDate) {
     return api('admin/send-summary-email', {
       method: 'POST',
-      body: JSON.stringify({
-        supplier_id: supplierId,
-        delivery_date: deliveryDate,
-        drop_empty_rows: !!options.dropEmptyRows,
-        show_pallet_weight: !!options.showPalletWeight,
-      }),
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate }),
     });
   }
 
