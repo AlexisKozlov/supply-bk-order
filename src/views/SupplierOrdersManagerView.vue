@@ -865,6 +865,8 @@ let overviewTimer = null;
 
 // Settings (постоянный режим приёма)
 const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null });
+// Для какого поставщика реально загружены настройки (id). null — настройки не свои/не загружены.
+const settingsLoadedFor = ref(null);
 const defaultDeadline = ref('14:00');
 const pauseMessage = ref('');
 const deadlineOverrides = ref([]);
@@ -1125,9 +1127,14 @@ async function refreshActiveTab() {
 
 async function loadSettings() {
   if (!currentSupplierId.value) return;
+  // Запоминаем, за чьими настройками пошли — поставщик мог смениться, пока шёл запрос.
+  const sid = currentSupplierId.value;
   try {
-    const data = await store.adminGetSettings(currentSupplierId.value);
+    const data = await store.adminGetSettings(sid);
     settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null };
+    // Отмечаем владельца настроек только если сервер вернул настоящие настройки.
+    // Дефолт-заглушка и ошибка запроса владельца не дают.
+    settingsLoadedFor.value = data.settings ? sid : null;
     defaultDeadline.value = (settings.value.default_deadline_time || '14:00:00').substring(0, 5);
     pauseMessage.value = settings.value.pause_message || '';
     deadlineOverrides.value = data.overrides || [];
@@ -1357,7 +1364,9 @@ function openSupplierStatus(row) {
   if (!row || !row.id) return;
   currentSupplierId.value = row.id;
   pageTab.value = 'status';
-  loadStatus();
+  // Через refreshActiveTab — он для вкладки «Приём» грузит настройки нового поставщика
+  // и затем статус. Иначе в settings оставались бы настройки прошлого поставщика.
+  refreshActiveTab();
 }
 
 // Текст живого отсчёта до дедлайна (тикает через ref now)
@@ -2126,9 +2135,14 @@ async function exportExcel() {
 
   try {
     // Опции отчёта — только из настроек поставщика (тот же источник, что и на сервере).
-    // На вкладке «Статус» настройки уже загружены, но если по какой-то причине их нет —
-    // подгружаем перед сборкой, иначе файл молча уедет с выключенными опциями.
-    if (!settings.value || !Object.prototype.hasOwnProperty.call(settings.value, 'xlsx_pallet_metrics')) {
+    // На вкладке «Статус» настройки уже загружены, но если в settings лежат настройки
+    // ДРУГОГО поставщика (переход из «Обзора») или их вовсе нет — подгружаем перед сборкой,
+    // иначе файл молча уедет с чужими или выключенными опциями.
+    if (
+      settingsLoadedFor.value !== currentSupplierId.value
+      || !settings.value
+      || !Object.prototype.hasOwnProperty.call(settings.value, 'xlsx_pallet_metrics')
+    ) {
       await loadSettings();
     }
     const sheetOptions = {
