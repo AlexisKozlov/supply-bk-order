@@ -23,7 +23,7 @@
         Шаблон товаров
       </button>
       <button class="rom-page-tab" :class="{ active: pageTab === 'settings' }" @click="pageTab = 'settings'; loadSettings()">
-        ⚙️ Настройки
+        Настройки
       </button>
     </div>
 
@@ -89,18 +89,18 @@
                 <div class="so-ov-actions">
                   <button class="rom-btn-sm" @click="overviewSendEmail(row)"
                     :disabled="!row.has_email || isOverviewBusy(row)"
-                    :title="!row.has_email ? 'У поставщика не указана почта' : 'Отправить сводку на почту поставщика'">✉️</button>
+                    :title="!row.has_email ? 'У поставщика не указана почта' : 'Отправить сводку на почту поставщика'">Почта</button>
                   <button class="rom-btn-sm" @click="overviewSendTelegram(row)"
-                    :disabled="isOverviewBusy(row)" title="Отправить сводку в Telegram">✈️</button>
+                    :disabled="isOverviewBusy(row)" title="Отправить сводку в Telegram">Telegram</button>
                   <button class="rom-btn-sm" @click="overviewExtend(row)"
-                    :disabled="isOverviewBusy(row)" title="Продлить дедлайн">⏰</button>
+                    :disabled="isOverviewBusy(row)" title="Продлить дедлайн">Дедлайн</button>
                   <button class="rom-btn-sm" @click="overviewRemind(row)"
                     :disabled="isOverviewBusy(row) || !(row.has_schedule && row.submitted_count < row.expected_count && !row.forced_closed && !overviewIsPassed(row))"
-                    title="Напомнить не подавшим заявку">🔔 Напомнить</button>
+                    title="Напомнить не подавшим заявку">Напомнить</button>
                   <button class="rom-btn-sm" :class="row.forced_closed ? 'so-btn-open-day' : 'so-btn-close-day'"
                     @click="overviewToggleClose(row)" :disabled="isOverviewBusy(row)"
                     :title="row.forced_closed ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
-                    {{ row.forced_closed ? '🔓 Открыть' : '🔒 Закрыть' }}</button>
+                    {{ row.forced_closed ? 'Открыть' : 'Закрыть' }}</button>
                 </div>
               </td>
             </tr>
@@ -118,7 +118,7 @@
           {{ settings.is_accepting_orders ? 'Приём включён' : 'Приём приостановлен' }}
         </span>
         <div class="so-detail-actions">
-          <label style="font-size:12px;color:#666;">Дедлайн по умолчанию:</label>
+          <label class="so-inline-label">Дедлайн по умолчанию:</label>
           <input type="time" v-model="defaultDeadline" class="rom-input-sm" style="width:100px" />
           <button class="rom-btn-sm" @click="saveDefaultDeadline" :disabled="!defaultDeadline">Сохранить</button>
           <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
@@ -131,32 +131,32 @@
         <div class="so-date-nav">
           <button v-for="wd in weekDates" :key="wd.date"
             class="rom-btn-sm"
-            :class="{ 'rom-btn-primary': selectedDate === wd.date, 'so-day-closed-btn': isDateForcedClosed(wd.date) }"
+            :class="{ 'so-date-active': selectedDate === wd.date, 'so-day-closed-btn': isDateForcedClosed(wd.date) }"
             @click="selectedDate = wd.date; loadStatus()"
-            :title="isDateForcedClosed(wd.date) ? '🔒 День закрыт' : ''">
-            {{ isDateForcedClosed(wd.date) ? '🔒 ' : '' }}{{ wd.day_name }} {{ formatDateShort(wd.date) }}
+            :title="isDateForcedClosed(wd.date) ? 'День закрыт' : ''">
+            {{ wd.day_name }} {{ formatDateShort(wd.date) }}
           </button>
         </div>
         <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
         <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
-          ⏰ Продлить дедлайн
+          Продлить дедлайн
         </button>
         <button v-if="selectedDate" class="rom-btn-sm" :class="isDateForcedClosed(selectedDate) ? 'so-btn-open-day' : 'so-btn-close-day'"
           @click="handleToggleCloseDay(selectedDate)" :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
-          {{ isDateForcedClosed(selectedDate) ? '🔓 Открыть день' : '🔒 Закрыть день' }}
+          {{ isDateForcedClosed(selectedDate) ? 'Открыть день' : 'Закрыть день' }}
         </button>
       </div>
 
       <!-- Существующие переопределения дедлайна -->
       <div v-if="deadlineOverrides.length" class="rom-date-row" style="flex-wrap:wrap;gap:6px;">
-        <span style="font-size:12px;color:#666;">Разовые продления:</span>
+        <span class="so-inline-label">Разовые продления:</span>
         <span v-for="o in deadlineOverrides.filter(o => !o.is_closed)" :key="o.delivery_date" class="so-override-chip">
           {{ formatDateShort(o.delivery_date) }} — до {{ o.deadline_time?.substring(0,5) }}
           <button class="so-override-del" @click="removeOverride(o.delivery_date)" title="Удалить">×</button>
         </span>
       </div>
       <div v-if="deadlineOverrides.some(o => o.is_closed)" class="rom-date-row" style="flex-wrap:wrap;gap:6px;">
-        <span style="font-size:12px;color:#B71C1C;">🔒 Закрытые дни:</span>
+        <span class="so-inline-label">Закрытые дни:</span>
         <span v-for="o in deadlineOverrides.filter(o => o.is_closed)" :key="'cl-'+o.delivery_date" class="so-override-chip so-override-chip-closed">
           {{ formatDateShort(o.delivery_date) }}
           <button class="so-override-del" @click="handleToggleCloseDay(o.delivery_date)" title="Открыть день">×</button>
@@ -186,25 +186,25 @@
             <button class="rom-btn rom-btn-export" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
               {{ exporting ? 'Выгрузка...' : exportSelectedDates.size > 1 ? `Выгрузить ${exportSelectedDates.size} дня в Excel` : 'Выгрузить в Excel' }}
             </button>
-            <button class="rom-btn rom-btn-export" style="background:#f0f9ff;color:#0369a1;border-color:#0369a1"
+            <button class="rom-btn"
               @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
-              {{ exportDatePickerOpen ? '▲ Дни' : '▼ Дни' }}
+              {{ exportDatePickerOpen ? 'Дни ▲' : 'Дни ▼' }}
             </button>
-            <button class="rom-btn" style="background:#f0fdf4;color:#166534;border-color:#166534"
+            <button class="rom-btn rom-btn-primary"
               @click="sendSummary" :disabled="sendingSummary || !selectedDate" title="Сгенерировать Excel и отправить подписчикам в Telegram">
               <BurgerSpinner v-if="sendingSummary" size="xs" />
-              <span>{{ sendingSummary ? 'Отправка...' : '📤 Отправить сводку' }}</span>
+              <span>{{ sendingSummary ? 'Отправка...' : 'Отправить сводку' }}</span>
             </button>
             <button class="rom-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
               title="Сгенерировать Excel и отправить на почту поставщика">
-              {{ sendingSummaryEmail ? 'Отправка…' : '✉️ На почту поставщику' }}
+              {{ sendingSummaryEmail ? 'Отправка…' : 'На почту поставщику' }}
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
             <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
-              📋 Копировать не подавших
+              Копировать не подавших
             </button>
             <button class="rom-btn" @click="remindUnsubmitted" :disabled="!selectedDate || remindingStatus" title="Напомнить ресторанам, которые не подали заявку на эту дату">
-              {{ remindingStatus ? 'Отправка…' : '🔔 Напомнить не подавшим' }}
+              {{ remindingStatus ? 'Отправка…' : 'Напомнить не подавшим' }}
             </button>
             <label class="so-filter-check">
               <input type="checkbox" v-model="showMissing" /> Не подавшие
@@ -243,7 +243,7 @@
                   </td>
                   <td>
                     <span v-if="isSkipOrder(r)" class="rom-status st-skip" title="Ресторан отметил, что поставка не нужна">
-                      🚫 Не нужна
+                      Не нужна
                     </span>
                     <span v-else class="rom-status" :class="'st-' + (r.order_status || 'none')">
                       {{ statusLabel(r.order_status) }}
@@ -309,15 +309,15 @@
       </div>
       <div class="rom-date-row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
         <div>
-          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Доставка от</label>
+          <label class="so-field-label">Доставка от</label>
           <input type="date" v-model="listDeliveryFrom" />
         </div>
         <div>
-          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Доставка до</label>
+          <label class="so-field-label">Доставка до</label>
           <input type="date" v-model="listDeliveryTo" />
         </div>
         <div>
-          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Статус</label>
+          <label class="so-field-label">Статус</label>
           <select v-model="listStatus" class="rom-select">
             <option value="">Все</option>
             <option value="submitted">Подано</option>
@@ -326,7 +326,7 @@
           </select>
         </div>
         <div style="min-width:240px">
-          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Ресторан / адрес</label>
+          <label class="so-field-label">Ресторан / адрес</label>
           <input type="text" v-model="listQuery" class="rom-input-sm" placeholder="Номер, город, адрес" style="min-width:240px" />
         </div>
         <label class="so-filter-check" style="margin-bottom:6px">
@@ -357,7 +357,7 @@
               <td>{{ o.submitted_at ? formatDateTime(o.submitted_at) : '—' }}</td>
               <td>{{ formatDate(o.delivery_date) }}</td>
               <td>
-                <span v-if="Number(o.item_count || 0) === 0 && (o.status === 'submitted' || o.status === 'locked')" class="rom-status st-skip">🚫 Не нужна</span>
+                <span v-if="Number(o.item_count || 0) === 0 && (o.status === 'submitted' || o.status === 'locked')" class="rom-status st-skip">Не нужна</span>
                 <span v-else class="rom-status" :class="'st-' + o.status">{{ statusLabel(o.status) }}</span>
                 <span v-if="isAutoSubmitted(o)" class="so-auto-badge" :title="autoSubmitTitle(o)">
                   АВТО-ПОДАЧА
@@ -577,11 +577,11 @@
                     </div>
                   </div>
                   <div v-else-if="t.linked" class="so-tpl-linked" :title="catalogHint(t)">
-                    <span class="so-tpl-linked-mark">✅</span>
+                    <span class="so-tpl-linked-mark" aria-hidden="true">•</span>
                     <span class="so-tpl-linked-text">{{ t.catalog_name || 'привязан' }}<template v-if="catalogAttrs(t)"> · {{ catalogAttrs(t) }}</template></span>
                   </div>
                   <div v-else class="so-tpl-unlinked">
-                    <span class="so-tpl-unlinked-mark">⚠️ нет карточки</span>
+                    <span class="so-tpl-unlinked-mark">нет карточки</span>
                     <button type="button" class="rom-btn-sm" @click="startLinkRow(idx)">Привязать</button>
                   </div>
                 </td>
@@ -605,13 +605,13 @@
           <p class="so-section-hint" style="margin:4px 0 10px 0">Пока приём приостановлен, рестораны видят сообщение и не могут подать заявку.</p>
           <div class="so-detail-bar">
             <button class="rom-btn-sm" @click="toggleAccepting" :class="settings.is_accepting_orders ? 'rom-btn-danger' : 'rom-btn-primary'">
-              {{ settings.is_accepting_orders ? '⏸ Приостановить приём' : '▶ Возобновить приём' }}
+              {{ settings.is_accepting_orders ? 'Приостановить приём' : 'Возобновить приём' }}
             </button>
             <span class="so-session-status" :class="settings.is_accepting_orders ? 'st-sess-active' : 'st-sess-closed'">
               {{ settings.is_accepting_orders ? 'Приём включён' : 'Приём приостановлен' }}
             </span>
           </div>
-          <div v-if="!settings.is_accepting_orders" class="rom-date-row" style="background:#fef2f2;padding:10px;border-radius:8px;margin-top:10px">
+          <div v-if="!settings.is_accepting_orders" class="rom-date-row so-paused-note">
             <label>Сообщение для ресторанов:</label>
             <input type="text" v-model="pauseMessage" @change="savePauseMessage" class="rom-input-sm" style="flex:1;min-width:250px" placeholder="Приём заявок временно приостановлен" />
           </div>
@@ -2536,465 +2536,531 @@ watch(
 </script>
 
 <style scoped>
-.rom-page { padding: 20px; }
+/*
+ * Оформление построено на дизайн-системе проекта (src/styles/tokens.css, DESIGN.md).
+ * Правило: никаких сырых цветов/отступов/радиусов — только var(--tk-*).
+ * Акцент один (оранжевый) и только для главного действия и активных состояний;
+ * зелёный/красный несут смысл (подано / ошибка), а не «это кнопка».
+ */
+
+.rom-page { padding: var(--tk-s-5); }
 
 .rom-toolbar {
   display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+  margin-bottom: var(--tk-s-5); flex-wrap: wrap; gap: var(--tk-s-3);
 }
-.rom-toolbar h1 { margin: 0; font-size: 22px; color: #502314; }
-.rom-toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rom-toolbar h1 {
+  margin: 0; font-size: var(--tk-fz-h2); font-weight: var(--tk-fw-bold);
+  color: var(--tk-text); letter-spacing: -0.01em;
+}
+.rom-toolbar-actions { display: flex; gap: var(--tk-s-2); flex-wrap: wrap; }
 
+/* ═══ Кнопки ═══ */
 .rom-btn {
-  padding: 8px 16px; border-radius: 8px; border: 1px solid #e0d5c8;
-  background: white; cursor: pointer; font-size: 13px;
-  font-family: inherit; color: #502314; transition: all 0.2s;
+  padding: 7px var(--tk-s-4); border-radius: var(--tk-r-md);
+  border: 1px solid var(--tk-border); background: var(--tk-bg-card);
+  cursor: pointer; font-size: var(--tk-fz-md); font-weight: var(--tk-fw-medium);
+  font-family: inherit; color: var(--tk-text);
+  transition: background var(--tk-anim-fast), border-color var(--tk-anim-fast), color var(--tk-anim-fast);
 }
-.rom-btn:hover { background: #f5f0eb; }
-.rom-btn-primary { background: #E76F51; color: white; border-color: #E76F51; }
-.rom-btn-primary:hover { background: #b81e00; }
+.rom-btn:hover { background: var(--tk-n-50); border-color: var(--tk-n-300); }
+.rom-btn:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
+.rom-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.rom-btn:disabled:hover { background: var(--tk-bg-card); border-color: var(--tk-border); }
+.rom-btn-primary {
+  background: var(--tk-accent); color: var(--tk-n-0); border-color: var(--tk-accent);
+  font-weight: var(--tk-fw-semibold);
+}
+.rom-btn-primary:hover { background: var(--tk-accent-hover); border-color: var(--tk-accent-hover); }
 .rom-btn-outline { border-style: dashed; }
-.rom-btn-export { background: #f0fdf4; color: #16a34a; border-color: #16a34a; }
-.rom-btn-export:hover { background: #dcfce7; }
+/* Выгрузка — обычное второстепенное действие, без заливки. */
+.rom-btn-export { background: var(--tk-bg-card); color: var(--tk-text); border-color: var(--tk-border); }
+.rom-btn-export:hover { background: var(--tk-n-50); border-color: var(--tk-n-300); }
 .rom-btn-sm {
-  padding: 4px 10px; border-radius: 6px; border: 1px solid #e0d5c8;
-  background: white; cursor: pointer; font-size: 12px; font-family: inherit;
-  color: #502314; transition: all 0.2s;
+  padding: 4px var(--tk-s-3); border-radius: var(--tk-r-sm);
+  border: 1px solid var(--tk-border); background: var(--tk-bg-card);
+  cursor: pointer; font-size: var(--tk-fz-sm); font-weight: var(--tk-fw-medium);
+  font-family: inherit; color: var(--tk-text);
+  transition: background var(--tk-anim-fast), border-color var(--tk-anim-fast), color var(--tk-anim-fast);
 }
-.rom-btn-sm:hover { background: #f5f0eb; }
-.rom-btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
-.rom-btn-sm:disabled:hover { background: white; }
-.so-ov-actions { display: flex; flex-wrap: wrap; gap: 4px; }
-.so-ov-actions .rom-btn-sm { padding: 4px 8px; }
-.rom-btn-sm.rom-btn-primary { background: #E76F51; color: white; border-color: #E76F51; }
-.rom-btn-sm.rom-btn-primary:hover { background: #b81e00; }
-.rom-btn-sm.rom-btn-danger { background: white; color: #dc2626; border-color: #dc2626; }
-.rom-btn-sm.rom-btn-danger:hover { background: #fef2f2; }
-.rom-btn-danger { color: #dc2626; border-color: #dc2626; }
+.rom-btn-sm:hover { background: var(--tk-n-50); border-color: var(--tk-n-300); }
+.rom-btn-sm:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
+.rom-btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
+.rom-btn-sm:disabled:hover { background: var(--tk-bg-card); border-color: var(--tk-border); }
+.so-ov-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-1); }
+.so-ov-actions .rom-btn-sm { padding: 4px var(--tk-s-2); }
+.rom-btn-sm.rom-btn-primary {
+  background: var(--tk-accent); color: var(--tk-n-0); border-color: var(--tk-accent);
+}
+.rom-btn-sm.rom-btn-primary:hover { background: var(--tk-accent-hover); border-color: var(--tk-accent-hover); }
+/* Опасное действие: цвет — в тексте, рамка остаётся спокойной до наведения. */
+.rom-btn-sm.rom-btn-danger { background: var(--tk-bg-card); color: var(--tk-danger); border-color: var(--tk-border); }
+.rom-btn-sm.rom-btn-danger:hover { background: var(--tk-danger-soft); border-color: var(--tk-danger); }
+.rom-btn-danger { color: var(--tk-danger); border-color: var(--tk-border); }
+.rom-btn-danger:hover { background: var(--tk-danger-soft); border-color: var(--tk-danger); }
 
+/* ═══ Вкладки страницы ═══ */
 .rom-page-tabs {
-  display: flex; gap: 0; margin-bottom: 16px;
-  border-bottom: 2px solid #e0d5c8;
+  display: flex; gap: 0; margin-bottom: var(--tk-s-4);
+  border-bottom: 1px solid var(--tk-border);
 }
 .rom-page-tab {
-  padding: 10px 24px; border: none; background: transparent;
-  cursor: pointer; font-size: 15px; font-weight: 600;
-  color: #8b7355; border-bottom: 3px solid transparent;
-  transition: all 0.2s; font-family: inherit;
+  padding: var(--tk-s-3) var(--tk-s-5); border: none; background: transparent;
+  cursor: pointer; font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-muted); border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--tk-anim-fast), border-color var(--tk-anim-fast);
+  font-family: inherit;
 }
-.rom-page-tab.active { color: #E76F51; border-bottom-color: #E76F51; }
-.rom-page-tab:hover { color: #502314; }
+.rom-page-tab.active { color: var(--tk-accent-text); border-bottom-color: var(--tk-accent); }
+.rom-page-tab:hover { color: var(--tk-text); }
+.rom-page-tab:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 
+/* ═══ Строки с полями ═══ */
 .rom-date-row {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 16px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  margin-bottom: var(--tk-s-4); flex-wrap: wrap;
 }
-.rom-date-row label { font-size: 14px; font-weight: 600; color: #502314; }
+.rom-date-row label {
+  font-size: var(--tk-fz-md); font-weight: var(--tk-fw-semibold); color: var(--tk-text-secondary);
+}
 .rom-date-row input[type="date"] {
-  padding: 8px 12px; border: 2px solid #e0d5c8; border-radius: 8px;
-  font-size: 14px; font-family: inherit;
+  padding: 6px var(--tk-s-3); border: 1px solid var(--tk-border); border-radius: var(--tk-r-md);
+  font-size: var(--tk-fz-md); font-family: inherit; color: var(--tk-text); background: var(--tk-bg-card);
 }
-.rom-select { padding: 6px 10px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 13px; font-family: inherit; min-width: 200px; }
-.rom-input { padding: 6px 10px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 13px; font-family: inherit; }
+.rom-select {
+  padding: 6px var(--tk-s-3); border: 1px solid var(--tk-border); border-radius: var(--tk-r-md);
+  font-size: var(--tk-fz-md); font-family: inherit; min-width: 200px;
+  color: var(--tk-text); background: var(--tk-bg-card);
+}
+.rom-input {
+  padding: 6px var(--tk-s-3); border: 1px solid var(--tk-border); border-radius: var(--tk-r-md);
+  font-size: var(--tk-fz-md); font-family: inherit; color: var(--tk-text); background: var(--tk-bg-card);
+}
+.rom-select:focus, .rom-input:focus, .rom-date-row input[type="date"]:focus {
+  outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring);
+}
 
+/* ═══ Счётчики ═══ */
 .rom-stats {
-  display: flex; gap: 16px; margin-bottom: 16px;
+  display: flex; gap: var(--tk-s-2); margin-bottom: var(--tk-s-4);
   align-items: center; flex-wrap: wrap;
 }
 .rom-stat {
-  background: white; padding: 12px 20px; border-radius: 10px;
-  text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  background: var(--tk-bg-card); padding: var(--tk-s-2) var(--tk-s-4);
+  border: 1px solid var(--tk-border); border-radius: var(--tk-r-md);
+  display: flex; align-items: baseline; gap: var(--tk-s-2);
 }
-.rom-stat-value { display: block; font-size: 28px; font-weight: 700; color: #16a34a; }
-.rom-stat-pending { color: #E76F51; }
-.rom-stat-label { font-size: 12px; color: #8b7355; }
+.rom-stat-value {
+  font-size: var(--tk-fz-h2); font-weight: var(--tk-fw-bold);
+  color: var(--tk-text); line-height: var(--tk-lh-tight);
+}
+.rom-stat-pending { color: var(--tk-text-muted); }
+.rom-stat-label { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
 
-.rom-export-row { display: flex; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; align-items: center; }
+.rom-export-row { display: flex; gap: var(--tk-s-2); margin-bottom: var(--tk-s-1); flex-wrap: wrap; align-items: center; }
 .so-export-date-picker {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  padding: 8px 12px; margin-bottom: 12px;
-  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;
-  font-size: 13px;
+  display: flex; flex-wrap: wrap; gap: var(--tk-s-2); align-items: center;
+  padding: var(--tk-s-2) var(--tk-s-3); margin-bottom: var(--tk-s-3);
+  background: var(--tk-n-50); border: 1px solid var(--tk-border); border-radius: var(--tk-r-md);
+  font-size: var(--tk-fz-md);
 }
-.so-export-date-hint { color: #0369a1; font-weight: 600; margin-right: 4px; }
-.so-export-date-check { display: flex; align-items: center; gap: 4px; cursor: pointer; color: #374151; }
-.so-export-date-check input { cursor: pointer; }
+.so-export-date-hint { color: var(--tk-text-secondary); font-weight: var(--tk-fw-semibold); margin-right: var(--tk-s-1); }
+.so-export-date-check { display: flex; align-items: center; gap: var(--tk-s-1); cursor: pointer; color: var(--tk-text); }
+.so-export-date-check input { cursor: pointer; accent-color: var(--tk-accent); }
 
-.rom-loading { padding: 40px; text-align: center; color: #8b7355; }
-.rom-empty { padding: 40px; text-align: center; color: #8b7355; font-size: 15px; }
+.rom-loading { padding: var(--tk-s-7); text-align: center; color: var(--tk-text-muted); }
+.rom-empty { padding: var(--tk-s-7); text-align: center; color: var(--tk-text-muted); font-size: var(--tk-fz-lg); }
 
+/* ═══ Обычные таблицы ═══ */
 .rom-table-wrap { overflow-x: auto; }
 .rom-table {
-  width: 100%; border-collapse: collapse; background: white;
-  border-radius: 10px; overflow: hidden;
+  width: 100%; border-collapse: collapse; background: var(--tk-bg-card);
+  border-radius: var(--tk-r-md); overflow: hidden;
 }
 .rom-table th {
-  padding: 10px 12px; font-size: 12px; color: #8b7355;
-  text-align: left; border-bottom: 2px solid #e0d5c8;
-  background: #faf7f4; font-weight: 600;
+  padding: var(--tk-s-2) var(--tk-s-3); font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
+  text-align: left; border-bottom: 1px solid var(--tk-border);
+  background: var(--tk-n-50); font-weight: var(--tk-fw-semibold);
 }
 .rom-table td {
-  padding: 8px 12px; border-bottom: 1px solid #f0ebe4;
-  font-size: 13px; color: #502314;
+  padding: var(--tk-s-2) var(--tk-s-3); border-bottom: 1px solid var(--tk-border-soft);
+  font-size: var(--tk-fz-md); color: var(--tk-text);
 }
-.rom-td-num { font-weight: 700; }
-.rom-td-time { font-size: 12px; color: #8b7355; }
-.rom-td-actions { display: flex; gap: 4px; }
-.rom-row-submitted { background: #f0fdf4; }
+.rom-td-num { font-weight: var(--tk-fw-bold); }
+.rom-td-time { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
+.rom-td-actions { display: flex; gap: var(--tk-s-1); }
+.rom-row-submitted { background: var(--tk-success-soft); }
 .rom-status {
-  padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+  padding: 2px var(--tk-s-2); border-radius: var(--tk-r-sm);
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold);
 }
-.st-submitted { background: #ecfdf5; color: #16a34a; }
-.st-edited { background: #eff6ff; color: #2563eb; }
-.st-draft { background: #f5f5f5; color: #666; }
-.st-none { background: #fef2f2; color: #dc2626; }
-.st-locked { background: #fef3c7; color: #92400e; }
-.st-skip { background: #fff7ed; color: #c2410c; }
+.st-submitted { background: var(--tk-success-soft); color: var(--tk-success); }
+.st-edited { background: var(--tk-info-soft); color: var(--tk-info); }
+.st-draft { background: var(--tk-n-100); color: var(--tk-text-muted); }
+/* «Не подано» — обычное состояние дня, а не ошибка: нейтральный чип. */
+.st-none { background: var(--tk-n-100); color: var(--tk-text-secondary); }
+.st-locked { background: var(--tk-warning-soft); color: var(--tk-warning); }
+.st-skip { background: var(--tk-n-100); color: var(--tk-text-muted); }
 .so-auto-badge {
-  display: inline-flex; align-items: center; margin-left: 6px; padding: 3px 7px;
-  border-radius: 6px; background: #fee2e2; color: #b91c1c;
-  font-size: 11px; font-weight: 800;
+  display: inline-flex; align-items: center; margin-left: var(--tk-s-2); padding: 2px 6px;
+  border-radius: var(--tk-r-sm); background: var(--tk-warning-soft); color: var(--tk-warning);
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold);
 }
 .so-auto-detail {
-  display: inline-block; margin: 4px 0 10px; padding: 6px 10px;
-  border-radius: 6px; background: #fee2e2; color: #b91c1c;
-  font-size: 13px; font-weight: 800;
+  display: inline-block; margin: var(--tk-s-1) 0 var(--tk-s-2); padding: 6px var(--tk-s-3);
+  border-radius: var(--tk-r-sm); background: var(--tk-warning-soft); color: var(--tk-warning);
+  font-size: var(--tk-fz-md); font-weight: var(--tk-fw-semibold);
 }
-.so-row-skip { background: #fff7ed !important; }
-.so-row-skip:hover { background: #ffedd5 !important; }
-.so-td-skip-cell { background: #fff7ed; }
-.so-qty-zero { color: #c2410c; font-weight: 700; }
+.so-row-skip { background: var(--tk-n-50) !important; }
+.so-row-skip:hover { background: var(--tk-n-100) !important; }
+.so-td-skip-cell { background: var(--tk-n-50); }
+.so-qty-zero { color: var(--tk-text-muted); font-weight: var(--tk-fw-semibold); }
 
+/* ═══ Модалка ═══ */
 .rom-modal-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  position: fixed; inset: 0; background: var(--tk-bg-overlay);
   display: flex; align-items: center; justify-content: center;
-  z-index: 1000; padding: 20px;
+  z-index: var(--tk-z-modal); padding: var(--tk-s-5);
 }
 .rom-modal {
-  background: white; border-radius: 16px; width: 100%;
+  background: var(--tk-bg-popover); border-radius: var(--tk-r-lg); width: 100%;
   max-width: 500px; max-height: 85vh; overflow-y: auto;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+  box-shadow: var(--tk-shadow-modal);
 }
 .rom-modal-header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 16px 20px; border-bottom: 1px solid #e0d5c8;
+  padding: var(--tk-s-4) var(--tk-s-5); border-bottom: 1px solid var(--tk-border);
 }
-.rom-modal-header h3 { margin: 0; font-size: 18px; color: #502314; }
+.rom-modal-header h3 { margin: 0; font-size: var(--tk-fz-h1); color: var(--tk-text); }
 .rom-modal-close {
   background: none; border: none; cursor: pointer;
-  font-size: 18px; color: #999; padding: 4px;
+  font-size: var(--tk-fz-h1); color: var(--tk-text-muted); padding: var(--tk-s-1);
 }
-.rom-modal-body { padding: 20px; }
+.rom-modal-close:hover { color: var(--tk-text); }
+.rom-modal-body { padding: var(--tk-s-5); }
 
-.rom-input-sm { padding: 4px 6px; border: 1px solid #e0d5c8; border-radius: 4px; font-size: 13px; }
-.so-date-nav { display: flex; gap: 4px; flex-wrap: wrap; }
-.so-schedule-count { font-size: 13px; color: #8b7355; margin: 8px 16px; }
+.rom-input-sm {
+  padding: 4px 6px; border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
+  font-size: var(--tk-fz-md); font-family: inherit; color: var(--tk-text); background: var(--tk-bg-card);
+}
+.rom-input-sm:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+.so-date-nav { display: flex; gap: var(--tk-s-1); flex-wrap: wrap; }
+/* Выбранный день — подсветка, а не заливка: заливку акцентом на странице
+   держит только главное действие, иначе взгляду не за что зацепиться. */
+.so-date-active {
+  background: var(--tk-accent-soft); color: var(--tk-accent-text);
+  border-color: var(--tk-accent); font-weight: var(--tk-fw-semibold);
+}
+.so-date-active:hover { background: var(--tk-accent-soft-strong); border-color: var(--tk-accent); }
+.so-schedule-count { font-size: var(--tk-fz-md); color: var(--tk-text-muted); margin: var(--tk-s-2) var(--tk-s-4); }
 
 /* ═══ Обзор по поставщикам ═══ */
 .so-ov-supplier {
-  background: none;
-  border: none;
-  padding: 0;
-  color: #b45309;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: underline;
+  background: none; border: none; padding: 0;
+  color: var(--tk-text); font: inherit; font-weight: var(--tk-fw-semibold);
+  cursor: pointer; text-decoration: underline; text-decoration-color: var(--tk-n-300);
+  text-underline-offset: 2px;
 }
-.so-ov-supplier:hover { color: #92400e; }
+.so-ov-supplier:hover { color: var(--tk-accent-text); text-decoration-color: var(--tk-accent); }
 .so-ov-paused {
-  margin-left: 8px;
-  font-size: 12px;
-  color: #92400e;
-  background: #fef3c7;
-  border-radius: 4px;
-  padding: 1px 6px;
+  margin-left: var(--tk-s-2); font-size: var(--tk-fz-sm);
+  color: var(--tk-warning); background: var(--tk-warning-soft);
+  border-radius: var(--tk-r-sm); padding: 1px 6px;
 }
-.so-ov-countdown { display: block; font-size: 12px; color: #6b7280; margin-top: 2px; }
-.so-ov-closed { color: #b91c1c; opacity: 0.85; }
-.so-ov-nodelivery { color: #9ca3af; }
-.so-ov-empty { text-align: center; color: #9ca3af; padding: 16px; }
-.so-ov-ok { color: #15803d; font-weight: 600; }
-.so-ov-warn { color: #b45309; font-weight: 600; }
-.so-ov-bad { color: #b91c1c; font-weight: 600; }
+.so-ov-countdown { display: block; font-size: var(--tk-fz-sm); color: var(--tk-text-muted); margin-top: 2px; }
+.so-ov-closed { color: var(--tk-danger); }
+.so-ov-nodelivery { color: var(--tk-text-muted); }
+.so-ov-empty { text-align: center; color: var(--tk-text-muted); padding: var(--tk-s-4); }
+.so-ov-ok { color: var(--tk-success); font-weight: var(--tk-fw-semibold); }
+.so-ov-warn { color: var(--tk-warning); font-weight: var(--tk-fw-semibold); }
+.so-ov-bad { color: var(--tk-danger); font-weight: var(--tk-fw-semibold); }
+
+/* ═══ Шаблон товаров ═══ */
 .so-template-search { position: relative; min-width: 260px; }
 .so-template-search .rom-input { width: 100%; }
 .so-template-dropdown {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
-  background: white; border: 1px solid #e0d5c8; border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.12); max-height: 260px; overflow-y: auto;
+  position: absolute; top: calc(100% + var(--tk-s-1)); left: 0; right: 0; z-index: var(--tk-z-dropdown);
+  background: var(--tk-bg-popover); border: 1px solid var(--tk-border); border-radius: var(--tk-r-md);
+  box-shadow: var(--tk-shadow-popover); max-height: 260px; overflow-y: auto;
 }
 .so-template-option {
-  width: 100%; display: flex; gap: 8px; align-items: center;
-  padding: 8px 10px; border: 0; border-bottom: 1px solid #f0ebe4;
-  background: white; color: #502314; text-align: left; cursor: pointer; font-family: inherit;
+  width: 100%; display: flex; gap: var(--tk-s-2); align-items: center;
+  padding: var(--tk-s-2) var(--tk-s-3); border: 0; border-bottom: 1px solid var(--tk-border-soft);
+  background: var(--tk-bg-popover); color: var(--tk-text); text-align: left;
+  cursor: pointer; font-family: inherit;
 }
-.so-template-option:hover { background: #faf7f4; }
-.so-template-option b { color: #8b7355; min-width: 72px; font-size: 12px; }
-.so-template-product-cell { display: grid; grid-template-columns: minmax(90px, 130px) minmax(240px, 1fr); gap: 8px; }
+.so-template-option:hover { background: var(--tk-n-50); }
+.so-template-option b { color: var(--tk-text-muted); min-width: 72px; font-size: var(--tk-fz-sm); }
+.so-template-product-cell { display: grid; grid-template-columns: minmax(90px, 130px) minmax(240px, 1fr); gap: var(--tk-s-2); }
 .so-template-sku-input, .so-template-name-input { width: 100%; }
 
 /* Статус связи строки шаблона с карточкой каталога */
 .so-tpl-linked { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .so-tpl-linked-mark { flex: 0 0 auto; }
-.so-tpl-linked-text { font-size: 12px; color: #16a34a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.so-tpl-unlinked { display: flex; align-items: center; gap: 8px; }
-.so-tpl-unlinked-mark { font-size: 12px; color: #b45309; white-space: nowrap; }
+.so-tpl-linked-text { font-size: var(--tk-fz-sm); color: var(--tk-success); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.so-tpl-unlinked { display: flex; align-items: center; gap: var(--tk-s-2); }
+.so-tpl-unlinked-mark { font-size: var(--tk-fz-sm); color: var(--tk-warning); white-space: nowrap; }
 .so-tpl-link-search { position: relative; display: flex; align-items: center; gap: 6px; }
 .so-tpl-link-search .rom-input-sm { flex: 1 1 auto; min-width: 120px; }
 
-/* Deadline rules editor */
-.so-deadline-section { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-.so-section-title { font-size: 14px; font-weight: 700; color: #502314; margin: 0 0 4px; }
-.so-section-hint { font-size: 12px; color: #8b7355; margin: 0 0 12px; }
-.so-deadline-grid { display: flex; flex-direction: column; gap: 6px; }
-.so-deadline-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #faf8f5; border-radius: 8px; }
+/* ═══ Дедлайны по дням ═══ */
+.so-deadline-section {
+  background: var(--tk-bg-card); border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-card); padding: var(--tk-s-4);
+}
+.so-section-title { font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-bold); color: var(--tk-text); margin: 0 0 var(--tk-s-1); }
+.so-section-hint { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); margin: 0 0 var(--tk-s-3); line-height: var(--tk-lh-base); }
+.so-deadline-grid { display: flex; flex-direction: column; gap: var(--tk-s-1); }
+.so-deadline-row {
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  padding: 6px var(--tk-s-3); background: var(--tk-n-50); border-radius: var(--tk-r-md);
+}
 .so-deadline-label { min-width: 120px; }
-.so-dl-day { font-size: 13px; font-weight: 600; color: #502314; }
-.so-dl-hint { font-size: 10px; color: #8b7355; margin-left: 4px; }
-.so-deadline-arrow { color: #8b7355; font-size: 14px; }
-.so-dl-toggle { padding: 3px 8px; border-radius: 4px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; }
-.so-dl-on { background: #ecfdf5; color: #16a34a; }
-.so-dl-off { background: #f5f0eb; color: #8b7355; }
+.so-dl-day { font-size: var(--tk-fz-md); font-weight: var(--tk-fw-semibold); color: var(--tk-text); }
+.so-dl-hint { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); margin-left: var(--tk-s-1); }
+.so-deadline-arrow { color: var(--tk-text-muted); font-size: var(--tk-fz-lg); }
+.so-dl-toggle {
+  padding: 3px var(--tk-s-2); border-radius: var(--tk-r-sm); border: none;
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold); cursor: pointer; font-family: inherit;
+}
+.so-dl-on { background: var(--tk-success-soft); color: var(--tk-success); }
+.so-dl-off { background: var(--tk-n-100); color: var(--tk-text-muted); }
 
-/* Schedule grid (like Planeta) */
-.so-sched-filter { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+/* ═══ Сетка дней доставки ═══ */
+.so-sched-filter { display: flex; gap: var(--tk-s-2); align-items: center; margin-bottom: var(--tk-s-2); flex-wrap: wrap; }
 .so-grid-table { border-collapse: collapse; }
-.so-grid-table th, .so-grid-table td { text-align: center; padding: 6px 4px; }
-.so-grid-rest { text-align: left !important; min-width: 220px; padding-left: 10px !important; }
-.so-grid-day { width: 44px; font-size: 12px; font-weight: 700; color: #8b7355; }
-.so-grid-rest-cell { text-align: left !important; padding: 5px 10px !important; white-space: nowrap; }
-.so-grid-num { font-size: 14px; font-weight: 700; color: #502314; background: #f5f0eb; padding: 1px 6px; border-radius: 4px; margin-right: 6px; }
-.so-grid-addr { font-size: 11px; color: #8b7355; }
-.so-grid-check { cursor: pointer; transition: background 0.1s; user-select: none; }
-.so-grid-check:hover { background: #ecfdf5; }
-.so-grid-check input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: #16a34a; }
+.so-grid-table th, .so-grid-table td { text-align: center; padding: 6px var(--tk-s-1); }
+.so-grid-rest { text-align: left !important; min-width: 220px; padding-left: var(--tk-s-2) !important; }
+.so-grid-day { width: 44px; font-size: var(--tk-fz-sm); font-weight: var(--tk-fw-bold); color: var(--tk-text-muted); }
+.so-grid-rest-cell { text-align: left !important; padding: 5px var(--tk-s-2) !important; white-space: nowrap; }
+.so-grid-num {
+  font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-bold); color: var(--tk-text);
+  background: var(--tk-n-100); padding: 1px 6px; border-radius: var(--tk-r-sm); margin-right: 6px;
+}
+.so-grid-addr { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); }
+.so-grid-check { cursor: pointer; transition: background var(--tk-anim-fast); user-select: none; }
+.so-grid-check:hover { background: var(--tk-accent-soft); }
+.so-grid-check input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--tk-accent); }
 
-/* ═══ Sessions ═══ */
-.so-sessions-list { display: flex; flex-direction: column; gap: 8px; }
+/* ═══ Сессии ═══ */
+.so-sessions-list { display: flex; flex-direction: column; gap: var(--tk-s-2); }
 .so-session-card {
-  background: white; border-radius: 10px; padding: 14px 18px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06); cursor: pointer;
-  border-left: 4px solid #16a34a; transition: all 0.15s;
+  background: var(--tk-bg-card); border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-card); padding: var(--tk-s-3) var(--tk-s-4);
+  cursor: pointer; border-left: 3px solid var(--tk-success);
+  transition: border-color var(--tk-anim-fast), box-shadow var(--tk-anim-fast);
 }
-.so-session-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-.so-session-card.closed { border-left-color: #9ca3af; opacity: 0.7; }
-.so-session-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.so-session-name { font-size: 15px; font-weight: 700; color: #502314; }
+.so-session-card:hover { box-shadow: var(--tk-shadow-card-hover); }
+.so-session-card.closed { border-left-color: var(--tk-n-300); opacity: 0.7; }
+.so-session-header { display: flex; align-items: center; gap: var(--tk-s-2); margin-bottom: var(--tk-s-1); }
+.so-session-name { font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-bold); color: var(--tk-text); }
 .so-session-status {
-  font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600;
+  font-size: var(--tk-fz-xs); padding: 2px var(--tk-s-2);
+  border-radius: var(--tk-r-sm); font-weight: var(--tk-fw-semibold);
 }
-.st-sess-active { background: #ecfdf5; color: #16a34a; }
-.st-sess-closed { background: #f5f5f5; color: #999; }
-.so-session-meta { font-size: 12px; color: #8b7355; }
+.st-sess-active { background: var(--tk-success-soft); color: var(--tk-success); }
+.st-sess-closed { background: var(--tk-n-100); color: var(--tk-text-muted); }
+.so-session-meta { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
 
-/* Detail bar */
+/* ═══ Шапка поставщика ═══ */
 .so-detail-bar {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 16px;
-  flex-wrap: wrap; padding: 10px 0;
+  display: flex; align-items: center; gap: var(--tk-s-2); margin-bottom: var(--tk-s-4);
+  flex-wrap: wrap; padding: var(--tk-s-2) 0;
 }
-.so-detail-name { font-size: 16px; font-weight: 700; color: #502314; }
-.so-detail-actions { display: flex; gap: 6px; margin-left: auto; }
+.so-detail-name { font-size: var(--tk-fz-xl); font-weight: var(--tk-fw-bold); color: var(--tk-text); }
+.so-detail-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
 
-/* Create session form */
-.so-form-row {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+/* ═══ Форма сессии ═══ */
+.so-form-row { display: flex; align-items: center; gap: var(--tk-s-2); margin-bottom: var(--tk-s-3); }
+.so-form-row label {
+  font-size: var(--tk-fz-md); font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-secondary); min-width: 130px;
 }
-.so-form-row label { font-size: 13px; font-weight: 600; color: #502314; min-width: 130px; }
-.so-form-row input { flex: 1; padding: 8px 12px; border: 2px solid #e0d5c8; border-radius: 8px; font-size: 14px; font-family: inherit; }
-.so-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.so-form-row input {
+  flex: 1; padding: 7px var(--tk-s-3); border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-md); font-size: var(--tk-fz-lg); font-family: inherit;
+  color: var(--tk-text); background: var(--tk-bg-card);
+}
+.so-form-row input:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+.so-form-actions { display: flex; gap: var(--tk-s-2); justify-content: flex-end; margin-top: var(--tk-s-4); }
 
-/* ═══ Pivot table ═══ */
+/* ═══ Сводная таблица заявок ═══ */
 .so-filter-check {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 13px; color: #502314; cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; gap: var(--tk-s-1);
+  font-size: var(--tk-fz-md); color: var(--tk-text); cursor: pointer; white-space: nowrap;
 }
+.so-filter-check input { accent-color: var(--tk-accent); }
 .so-filter-input {
-  width: 180px; padding: 6px 10px; border: 1.5px solid #e0d5c8; border-radius: 8px;
-  font-size: 13px; font-family: inherit; background: white; color: #502314;
+  width: 180px; padding: 6px var(--tk-s-3); border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-md); font-size: var(--tk-fz-md); font-family: inherit;
+  background: var(--tk-bg-card); color: var(--tk-text);
 }
-.so-filter-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,0.12); }
+.so-filter-input:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 
 .rom-table-wrap:has(.so-pivot-table) {
-  border: 2px solid #e0d5c8; border-radius: 10px;
+  border: 1px solid var(--tk-border); border-radius: var(--tk-r-card);
 }
 
 .so-pivot-table { border-collapse: separate; border-spacing: 0; min-width: 500px; }
 
+/* Шапка светлая: тёмная заливка перетягивала на себя всё внимание. */
 .so-pivot-table th {
-  background: #502314; color: #fff;
-  padding: 10px 10px; font-size: 11px; font-weight: 700;
+  background: var(--tk-n-50); color: var(--tk-text-secondary);
+  padding: var(--tk-s-2) var(--tk-s-2); font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold);
   text-align: left; white-space: nowrap;
-  position: sticky; top: 0; z-index: 1;
-  border-bottom: 2px solid #3a1a0e;
-  border-right: 1px solid rgba(255,255,255,0.15);
+  position: sticky; top: 0; z-index: var(--tk-z-sticky);
+  border-bottom: 1px solid var(--tk-border);
+  border-right: 1px solid var(--tk-border-soft);
 }
 .so-pivot-table th:last-child { border-right: none; }
 
 .so-pivot-table td {
-  padding: 7px 10px; border-bottom: 1px solid #f0ebe4;
-  border-right: 1px solid #f0ebe4; font-size: 13px; color: #502314;
+  padding: 7px var(--tk-s-2); border-bottom: 1px solid var(--tk-border-soft);
+  border-right: 1px solid var(--tk-border-soft); font-size: var(--tk-fz-md); color: var(--tk-text);
   vertical-align: middle;
 }
 .so-pivot-table td:last-child { border-right: none; }
 
-.so-pivot-table tbody tr:nth-child(even) { background: #faf7f4; }
-.so-pivot-table tbody tr:hover { background: #fff3e0; }
+.so-pivot-table tbody tr:nth-child(even) { background: var(--tk-n-50); }
+.so-pivot-table tbody tr:hover { background: var(--tk-accent-soft); }
 
 .so-th-rest { min-width: 200px; }
 .so-th-status { min-width: 70px; text-align: center; }
 .so-th-qty { text-align: center !important; min-width: 120px; }
 .so-th-prod {
-  font-size: 11px; font-weight: 700; color: #fff;
-  line-height: 1.3; white-space: normal;
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold); color: var(--tk-text);
+  line-height: var(--tk-lh-base); white-space: normal; text-transform: none;
 }
-.so-th-mult { font-size: 9px; color: rgba(255,255,255,0.6); font-weight: 400; }
+.so-th-mult { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); font-weight: var(--tk-fw-regular); }
 
 .so-td-rest {
   white-space: nowrap; max-width: 280px;
-  border-right: 2px solid #e0d5c8 !important;
+  border-right: 1px solid var(--tk-border) !important;
 }
-.so-rest-addr { font-size: 11px; color: #8b7355; margin-left: 6px; }
-.rom-td-num { font-weight: 800; color: #E76F51; display: inline-block; min-width: 24px; }
+.so-rest-addr { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); margin-left: 6px; }
+.rom-td-num { font-weight: var(--tk-fw-bold); color: var(--tk-text-secondary); display: inline-block; min-width: 24px; }
 
 .so-td-qty {
   text-align: center; cursor: pointer; min-width: 65px;
-  transition: background 0.15s;
+  transition: background var(--tk-anim-fast);
 }
-.so-td-qty:hover { background: #fff8e1; }
+.so-td-qty:hover { background: var(--tk-accent-soft-strong); }
 
-.so-qty { font-weight: 700; color: #502314; }
-.so-qty-admin { font-weight: 800; color: #E76F51; }
-.so-qty-empty { color: #ccc; font-size: 14px; }
+.so-qty { font-weight: var(--tk-fw-semibold); color: var(--tk-text); }
+.so-qty-admin { font-weight: var(--tk-fw-bold); color: var(--tk-accent-text); }
+.so-qty-empty { color: var(--tk-n-300); font-size: var(--tk-fz-lg); }
 
 .so-cell-input {
-  width: 56px; padding: 3px 4px; border: 2px solid #E76F51;
-  border-radius: 6px; text-align: center; font-size: 13px; font-weight: 700;
-  font-family: inherit; color: #502314; background: #fff; outline: none;
-  box-shadow: 0 0 0 3px rgba(231,111,81,0.15);
+  width: 56px; padding: 3px var(--tk-s-1); border: 1px solid var(--tk-accent);
+  border-radius: var(--tk-r-sm); text-align: center; font-size: var(--tk-fz-md);
+  font-weight: var(--tk-fw-semibold); font-family: inherit; color: var(--tk-text);
+  background: var(--tk-bg-card); outline: none; box-shadow: var(--tk-focus-ring);
 }
 
-.so-td-total { background: #faf7f4 !important; font-size: 14px; }
+.so-td-total { background: var(--tk-n-50) !important; font-size: var(--tk-fz-lg); }
 .so-totals-row td {
-  border-top: 2px solid #e0d5c8;
-  padding: 10px 10px;
-  color: #502314;
+  border-top: 1px solid var(--tk-border);
+  padding: var(--tk-s-2);
+  color: var(--tk-text);
+  font-weight: var(--tk-fw-semibold);
 }
 
-.so-tpl-sku {
-  font-size: 11px; color: #8b7355; margin-right: 4px; font-weight: 600;
-}
+.so-tpl-sku { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); margin-right: var(--tk-s-1); font-weight: var(--tk-fw-semibold); }
 
+/* ═══ Продления и закрытые дни ═══ */
 .so-override-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 8px; background: #fff4e5; color: #b45309;
-  border: 1px solid #fbbf24; border-radius: 12px; font-size: 11px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: var(--tk-s-1);
+  padding: 3px var(--tk-s-2); background: var(--tk-warning-soft); color: var(--tk-warning);
+  border: 1px solid transparent; border-radius: var(--tk-r-pill);
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold);
 }
 .so-override-del {
-  background: none; border: none; color: #b45309; cursor: pointer;
-  font-size: 14px; line-height: 1; padding: 0 2px;
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: var(--tk-fz-lg); line-height: 1; padding: 0 2px; opacity: 0.7;
 }
-.so-override-del:hover { color: #E76F51; }
-.so-override-chip-closed {
-  background: #fff0f0; color: #B71C1C; border-color: #ef9a9a;
-}
-.so-override-chip-closed .so-override-del { color: #B71C1C; }
-.so-day-closed-btn { background: #fff0f0 !important; color: #B71C1C !important; border-color: #ef9a9a !important; }
-.so-btn-close-day { background: #fff0f0; color: #B71C1C; border-color: #ef9a9a; }
-.so-btn-close-day:hover { background: #ffcdd2; }
-.so-btn-open-day { background: #f0fdf4; color: #166534; border-color: #86efac; }
-.so-btn-open-day:hover { background: #dcfce7; }
+.so-override-del:hover { opacity: 1; }
+.so-override-chip-closed { background: var(--tk-danger-soft); color: var(--tk-danger); }
+.so-override-chip-closed .so-override-del { color: inherit; }
+.so-day-closed-btn { background: var(--tk-danger-soft) !important; color: var(--tk-danger) !important; border-color: var(--tk-border) !important; }
+.so-btn-close-day { background: var(--tk-bg-card); color: var(--tk-danger); border-color: var(--tk-border); }
+.so-btn-close-day:hover { background: var(--tk-danger-soft); border-color: var(--tk-danger); }
+.so-btn-open-day { background: var(--tk-bg-card); color: var(--tk-success); border-color: var(--tk-border); }
+.so-btn-open-day:hover { background: var(--tk-success-soft); border-color: var(--tk-success); }
 
+/* ═══ Блоки-карточки (уведомления, настройки) ═══ */
 .so-notify-box {
-  margin-top: 12px;
-  padding: 14px 16px;
-  border: 1px solid #eadfce;
-  border-radius: 12px;
-  background: #fffaf4;
+  margin-top: var(--tk-s-3);
+  padding: var(--tk-s-4);
+  border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-card);
+  background: var(--tk-bg-card);
 }
 .so-notify-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--tk-s-3); margin-bottom: var(--tk-s-3);
 }
 .so-notify-users {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px 12px;
+  gap: var(--tk-s-2) var(--tk-s-3);
 }
 .so-notify-user {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid #eee2d3;
-  border-radius: 10px;
-  background: #fff;
-  font-size: 13px;
-  color: #502314;
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  padding: var(--tk-s-2) var(--tk-s-2); border: 1px solid var(--tk-border-soft);
+  border-radius: var(--tk-r-md); background: var(--tk-n-50);
+  font-size: var(--tk-fz-md); color: var(--tk-text);
 }
-.so-notify-user small {
-  color: #8b7355;
-}
-.so-notify-muted {
-  color: #b45309 !important;
-}
+.so-notify-user small { color: var(--tk-text-muted); }
+.so-notify-muted { color: var(--tk-warning) !important; }
+
 /* Вкладка «Настройки» */
-.so-settings-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 860px;
-}
+.so-settings-wrap { display: flex; flex-direction: column; gap: var(--tk-s-4); max-width: 860px; }
 .so-settings-block {
-  padding: 14px 16px;
-  border: 1px solid #eadfce;
-  border-radius: 12px;
-  background: #fffaf4;
+  padding: var(--tk-s-4);
+  border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-card);
+  background: var(--tk-bg-card);
 }
 .so-settings-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  font-size: 13px;
-  color: #502314;
-  cursor: pointer;
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  padding: 6px 0; font-size: var(--tk-fz-md); color: var(--tk-text); cursor: pointer;
 }
-.so-reminder-group {
-  margin-top: 12px;
-}
+.so-settings-check input { accent-color: var(--tk-accent); }
+.so-reminder-group { margin-top: var(--tk-s-3); }
 .so-reminder-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #502314;
-  margin-bottom: 4px;
+  font-size: var(--tk-fz-md); font-weight: var(--tk-fw-bold);
+  color: var(--tk-text); margin-bottom: var(--tk-s-1);
 }
 .so-reminder-checks {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 2px 12px;
+  gap: 2px var(--tk-s-3);
 }
-.so-temp-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
+/* Мелкие подписи в строках управления (были инлайн-стилями в разметке). */
+.so-inline-label { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
+.so-field-label {
+  display: block; font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
+  margin-bottom: var(--tk-s-1);
 }
-.so-temp-period {
-  display: flex;
-  gap: 12px;
-  align-items: end;
-  flex-wrap: wrap;
-  margin-top: 12px;
+/* Плашка «приём приостановлен» над формой. */
+.so-paused-note {
+  background: var(--tk-warning-soft); padding: var(--tk-s-2) var(--tk-s-3);
+  border-radius: var(--tk-r-md); margin-top: var(--tk-s-2);
 }
+/* Маркер привязки строки шаблона к карточке каталога. */
+.so-tpl-linked-mark { color: var(--tk-success); font-weight: var(--tk-fw-bold); }
+
+.so-temp-actions { display: flex; gap: var(--tk-s-2); align-items: center; flex-wrap: wrap; }
+.so-temp-period { display: flex; gap: var(--tk-s-3); align-items: end; flex-wrap: wrap; margin-top: var(--tk-s-3); }
 .so-temp-period label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: #8b7355;
+  display: flex; flex-direction: column; gap: var(--tk-s-1);
+  font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rom-btn, .rom-btn-sm, .rom-page-tab, .so-td-qty, .so-grid-check, .so-session-card {
+    transition: none;
+  }
 }
 </style>

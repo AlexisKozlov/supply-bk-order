@@ -143,90 +143,108 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
 </script>
 
 <style scoped>
-.so-hub { padding: 20px; }
+/*
+ * Оформление по дизайн-системе проекта (tokens.css, DESIGN.md): только var(--tk-*).
+ * Заливка акцентом — ровно у одного элемента (главное действие «Подключить»);
+ * выбранный поставщик показывается мягкой подсветкой, а не второй яркой кнопкой.
+ */
+.so-hub { padding: var(--tk-s-5); }
 
 .so-hub-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--tk-s-3);
+  margin-bottom: var(--tk-s-4);
   flex-wrap: wrap;
 }
 .so-hub-header h1 {
   margin: 0;
-  font-size: 22px;
-  color: #502314;
+  font-size: var(--tk-fz-h2);
+  font-weight: var(--tk-fw-bold);
+  color: var(--tk-text);
+  letter-spacing: -0.01em;
 }
 .so-hub-header-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--tk-s-2);
   align-items: center;
   flex-wrap: wrap;
 }
 .so-hub-connect-btn {
-  padding: 9px 18px;
-  border-radius: 8px;
-  background: #E76F51;
-  color: white;
-  border: 1.5px solid #E76F51;
-  font-size: 14px;
-  font-weight: 600;
+  padding: 8px var(--tk-s-4);
+  border-radius: var(--tk-r-md);
+  background: var(--tk-accent);
+  color: var(--tk-n-0);
+  border: 1px solid var(--tk-accent);
+  font-size: var(--tk-fz-md);
+  font-weight: var(--tk-fw-semibold);
   cursor: pointer;
   font-family: inherit;
-  transition: all 0.15s;
+  transition: background var(--tk-anim-fast), border-color var(--tk-anim-fast);
 }
-.so-hub-connect-btn:hover { background: #b51e00; }
+.so-hub-connect-btn:hover { background: var(--tk-accent-hover); border-color: var(--tk-accent-hover); }
+.so-hub-connect-btn:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 .so-hub-disconnect-btn {
-  padding: 9px 18px;
-  border-radius: 8px;
-  background: white;
-  color: #6b4f3a;
-  border: 1.5px solid #e0d5c8;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 8px var(--tk-s-4);
+  border-radius: var(--tk-r-md);
+  background: var(--tk-bg-card);
+  color: var(--tk-text);
+  border: 1px solid var(--tk-border);
+  font-size: var(--tk-fz-md);
+  font-weight: var(--tk-fw-medium);
   cursor: pointer;
   font-family: inherit;
-  transition: all 0.15s;
+  transition: background var(--tk-anim-fast), border-color var(--tk-anim-fast), color var(--tk-anim-fast);
 }
 .so-hub-disconnect-btn:hover:not(:disabled) {
-  border-color: #d97706;
-  color: #d97706;
+  background: var(--tk-danger-soft);
+  border-color: var(--tk-danger);
+  color: var(--tk-danger);
 }
-.so-hub-disconnect-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.so-hub-disconnect-btn:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
+.so-hub-disconnect-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .so-hub-pills {
   display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
+  gap: var(--tk-s-2);
+  margin-bottom: var(--tk-s-5);
   flex-wrap: wrap;
 }
 .so-hub-pill {
-  padding: 10px 24px;
-  border-radius: 10px;
-  border: 2px solid #e0d5c8;
-  background: white;
+  padding: 7px var(--tk-s-4);
+  border-radius: var(--tk-r-md);
+  border: 1px solid var(--tk-border);
+  background: var(--tk-bg-card);
   cursor: pointer;
-  font-size: 15px;
-  font-weight: 600;
-  color: #502314;
+  font-size: var(--tk-fz-lg);
+  font-weight: var(--tk-fw-medium);
+  color: var(--tk-text-secondary);
   font-family: inherit;
-  transition: all 0.2s;
+  transition: background var(--tk-anim-fast), border-color var(--tk-anim-fast), color var(--tk-anim-fast);
 }
 .so-hub-pill:hover {
-  background: #f5f0eb;
-  border-color: #502314;
+  background: var(--tk-n-50);
+  border-color: var(--tk-n-300);
+  color: var(--tk-text);
 }
 .so-hub-pill.active {
-  background: #E76F51;
-  color: white;
-  border-color: #E76F51;
+  background: var(--tk-accent-soft);
+  color: var(--tk-accent-text);
+  border-color: var(--tk-accent);
+  font-weight: var(--tk-fw-semibold);
 }
+.so-hub-pill:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 
 .so-hub-empty {
-  padding: 60px;
+  padding: var(--tk-s-7);
   text-align: center;
-  color: #8b7355;
-  font-size: 15px;
+  color: var(--tk-text-muted);
+  font-size: var(--tk-fz-lg);
+  line-height: var(--tk-lh-loose);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .so-hub-connect-btn, .so-hub-disconnect-btn, .so-hub-pill { transition: none; }
 }
 </style>
