@@ -1191,6 +1191,9 @@ async function loadSettings() {
     syncXlsxFromSettings();
     if (!allNotifyUsers.value.length) await loadNotifyUsers();
   } catch (e) {
+    // Запрос упал — в settings могли остаться настройки прошлого поставщика.
+    // Снимаем метку владельца, чтобы экспорт не собрал файл с чужими опциями.
+    settingsLoadedFor.value = null;
     console.error(e);
   }
 }
@@ -2220,6 +2223,12 @@ async function exportExcel() {
       || !Object.prototype.hasOwnProperty.call(settings.value, 'xlsx_pallet_metrics')
     ) {
       await loadSettings();
+    }
+    // Если настройки так и не загрузились (сбой сети) — лучше не отдавать файл вовсе,
+    // чем отдать с чужими или молча выключенными опциями.
+    if (settingsLoadedFor.value !== currentSupplierId.value) {
+      toast.error('Не удалось скачать', 'Настройки отчёта не загрузились. Обновите страницу и попробуйте снова.');
+      return;
     }
     const sheetOptions = {
       dropEmptyRows: !!settings.value?.xlsx_drop_empty,
