@@ -419,7 +419,7 @@
             </button>
             <span class="so-schedule-count" style="margin:0">{{ scheduleActiveRests }} рест., {{ scheduleActiveDays }} дней</span>
           </div>
-          <div class="rom-table-wrap">
+          <div class="rom-table-wrap so-grid-wrap">
             <table class="rom-table so-grid-table">
               <thead>
                 <tr>
@@ -471,7 +471,7 @@
             </label>
             <span class="so-schedule-count" style="margin:0">{{ temporaryScheduleActiveRests }} рест., {{ temporaryScheduleActiveDays }} дней</span>
           </div>
-          <div v-if="scheduleRestaurants.length" class="rom-table-wrap" style="margin-top:12px">
+          <div v-if="scheduleRestaurants.length" class="rom-table-wrap so-grid-wrap" style="margin-top:12px">
             <table class="rom-table so-grid-table">
               <thead>
                 <tr>
@@ -652,15 +652,18 @@
             </div>
             <button class="rom-btn-sm" @click="saveNotifyUsers" :disabled="savingNotifyUsers || loadingNotifyUsers">
               <BurgerSpinner v-if="savingNotifyUsers" size="xs" />
-              <span>{{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить получателей' }}</span>
+              <span>{{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
           </div>
           <div v-if="loadingNotifyUsers" class="rom-loading" style="padding:8px 0"><BurgerSpinner size="sm" text="Загрузка пользователей..." /></div>
           <div v-else class="so-notify-users">
             <label v-for="u in allNotifyUsers" :key="u.name" class="so-notify-user">
               <input type="checkbox" :value="u.name" v-model="notifyUsers" />
-              <span>{{ u.name }}<small v-if="u.display_role"> · {{ u.display_role }}</small></span>
-              <small v-if="!u.telegram_chat_id" class="so-notify-muted">(нет Telegram)</small>
+              <span class="so-notify-user-text">
+                <span class="so-notify-user-name">{{ u.name }}</span>
+                <small v-if="u.display_role">{{ u.display_role }}</small>
+                <small v-if="!u.telegram_chat_id" class="so-notify-muted">нет Telegram</small>
+              </span>
             </label>
           </div>
         </div>
@@ -672,9 +675,9 @@
               <div class="so-section-title" style="margin:0">Напоминания о подаче заявок</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">Бот напомнит ресторанам, не подавшим заявку, в выбранные моменты до дедлайна.</div>
             </div>
-            <button class="rom-btn rom-btn-export" @click="saveReminders" :disabled="savingReminders">
+            <button class="rom-btn-sm" @click="saveReminders" :disabled="savingReminders">
               <BurgerSpinner v-if="savingReminders" size="xs" />
-              <span>{{ savingReminders ? 'Сохранение...' : 'Сохранить напоминания' }}</span>
+              <span>{{ savingReminders ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
           </div>
 
@@ -708,9 +711,9 @@
               <div class="so-section-title" style="margin:0">Недельный режим подачи</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">В недельном режиме дедлайны по дням не применяются: вся неделя доставки (пн–вс) закрывается в выбранный день предыдущей недели в указанное время. Ресторан видит всю открытую неделю сразу.</div>
             </div>
-            <button class="rom-btn rom-btn-export" @click="saveWeekly" :disabled="savingWeekly">
+            <button class="rom-btn-sm" @click="saveWeekly" :disabled="savingWeekly">
               <BurgerSpinner v-if="savingWeekly" size="xs" />
-              <span>{{ savingWeekly ? 'Сохранение...' : 'Сохранить недельный режим' }}</span>
+              <span>{{ savingWeekly ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
           </div>
 
@@ -740,9 +743,9 @@
               <div class="so-section-title" style="margin:0">Минимальный заказ</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">Если задан — заявку меньше минимума нельзя отправить (жёсткий блок). Значение 0 или пусто = минимума нет.</div>
             </div>
-            <button class="rom-btn rom-btn-export" @click="saveMinOrder" :disabled="savingMinOrder">
+            <button class="rom-btn-sm" @click="saveMinOrder" :disabled="savingMinOrder">
               <BurgerSpinner v-if="savingMinOrder" size="xs" />
-              <span>{{ savingMinOrder ? 'Сохранение...' : 'Сохранить минимальный заказ' }}</span>
+              <span>{{ savingMinOrder ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
           </div>
 
@@ -771,9 +774,9 @@
               <div class="so-section-title" style="margin:0">Отчёт Excel</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">Как выглядит файл заявки, который скачивается и уходит поставщику письмом.</div>
             </div>
-            <button class="rom-btn rom-btn-export" @click="saveXlsx" :disabled="savingXlsx">
+            <button class="rom-btn-sm" @click="saveXlsx" :disabled="savingXlsx">
               <BurgerSpinner v-if="savingXlsx" size="xs" />
-              <span>{{ savingXlsx ? 'Сохранение...' : 'Сохранить настройки отчёта' }}</span>
+              <span>{{ savingXlsx ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
           </div>
 
@@ -812,13 +815,15 @@
           <button class="rom-modal-close" @click="showOrderModal = false">✕</button>
         </div>
         <div class="rom-modal-body" v-if="viewedOrder">
-          <p><strong>Поставщик:</strong> {{ viewedOrder.supplier_name }}</p>
-          <p><strong>Доставка:</strong> {{ formatDate(viewedOrder.delivery_date) }}</p>
-          <p><strong>Подано:</strong> {{ viewedOrder.submitted_at ? formatTime(viewedOrder.submitted_at) : '—' }}</p>
+          <dl class="so-modal-facts">
+            <dt>Поставщик</dt><dd>{{ viewedOrder.supplier_name }}</dd>
+            <dt>Доставка</dt><dd>{{ formatDate(viewedOrder.delivery_date) }}</dd>
+            <dt>Подано</dt><dd>{{ viewedOrder.submitted_at ? formatTime(viewedOrder.submitted_at) : '—' }}</dd>
+          </dl>
           <p v-if="isAutoSubmitted(viewedOrder)" class="so-auto-detail">
             АВТО-ПОДАЧА: скопировано из заявки #{{ viewedOrder.auto_source_order_id }}<template v-if="viewedOrder.auto_source_delivery_date"> от {{ formatDate(viewedOrder.auto_source_delivery_date) }}</template>
           </p>
-          <table class="rom-table">
+          <table class="rom-table so-modal-table">
             <thead><tr><th>Товар</th><th>Кол-во</th></tr></thead>
             <tbody>
               <tr v-for="item in viewedOrder.items" :key="item.id">
@@ -2716,7 +2721,17 @@ watch(
    обычным правилом нельзя. Действует только на эти три таблицы. */
 .so-ov-table td, .so-ov-table th,
 .so-list-table td, .so-list-table th,
-.so-tpl-table td, .so-tpl-table th { text-align: left !important; }
+.so-tpl-table td, .so-tpl-table th,
+.so-modal-table td, .so-modal-table th { text-align: left !important; }
+
+/* Шапка модалки заявки: пары «поле — значение» в две колонки вместо
+   абзацев с жирным началом. */
+.so-modal-facts {
+  display: grid; grid-template-columns: max-content 1fr;
+  gap: var(--tk-s-1) var(--tk-s-3); margin: 0 0 var(--tk-s-4);
+}
+.so-modal-facts dt { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
+.so-modal-facts dd { margin: 0; font-size: var(--tk-fz-md); color: var(--tk-text); }
 .rom-row-submitted { background: var(--tk-success-soft); }
 .rom-status {
   padding: 2px var(--tk-s-2); border-radius: var(--tk-r-sm);
@@ -2868,8 +2883,20 @@ watch(
 
 /* ═══ Сетка дней доставки ═══ */
 .so-sched-filter { display: flex; gap: var(--tk-s-2); align-items: center; margin-bottom: var(--tk-s-2); flex-wrap: wrap; }
-.so-grid-table { border-collapse: collapse; }
+.so-grid-table { border-collapse: separate; border-spacing: 0; }
 .so-grid-table th, .so-grid-table td { text-align: center; padding: 6px var(--tk-s-1); }
+/* Ресторанов под 60 — без липкой шапки к середине списка уже не понять,
+   где какой день недели. Чтобы sticky сработал, у обёртки и самой таблицы
+   не должно быть своего overflow: иначе шапка липнет к невидимому краю
+   обёртки, а не к верху страницы. Таблица узкая, горизонтальный скролл
+   ей не нужен. border-collapse: separate — иначе при прокрутке теряется
+   нижняя граница шапки. */
+.so-grid-wrap { overflow: visible; }
+.so-grid-wrap .so-grid-table { overflow: visible; }
+.so-grid-table thead th {
+  position: sticky; top: 0; z-index: var(--tk-z-sticky);
+  background: var(--tk-n-50); box-shadow: inset 0 -1px 0 var(--tk-border);
+}
 .so-grid-rest { text-align: left !important; min-width: 220px; padding-left: var(--tk-s-2) !important; }
 .so-grid-day { width: 44px; font-size: var(--tk-fz-sm); font-weight: var(--tk-fw-bold); color: var(--tk-text-muted); }
 .so-grid-rest-cell { text-align: left !important; padding: 5px var(--tk-s-2) !important; white-space: nowrap; }
@@ -3039,19 +3066,29 @@ watch(
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: var(--tk-s-3); margin-bottom: var(--tk-s-3);
 }
+/* Кнопка сохранения в шапке карточки не переносится: что именно сохраняем,
+   написано в заголовке слева. */
+.so-notify-head > .rom-btn-sm { flex: 0 0 auto; white-space: nowrap; }
 .so-notify-users {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: var(--tk-s-2) var(--tk-s-3);
 }
 .so-notify-user {
-  display: flex; align-items: center; gap: var(--tk-s-2);
+  display: flex; align-items: start; gap: var(--tk-s-2);
   padding: var(--tk-s-2) var(--tk-s-2); border: 1px solid var(--tk-border-soft);
   border-radius: var(--tk-r-md); background: var(--tk-n-50);
   font-size: var(--tk-fz-md); color: var(--tk-text);
 }
-.so-notify-user small { color: var(--tk-text-muted); }
-.so-notify-muted { color: var(--tk-warning) !important; }
+.so-notify-user input { margin-top: 3px; flex: 0 0 auto; }
+/* Имя — строкой, должность и пометки — под ним. Раньше всё шло вподбор
+   и в карточке получалось три рваных переноса. */
+.so-notify-user-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.so-notify-user-name { font-weight: var(--tk-fw-medium); }
+.so-notify-user small { color: var(--tk-text-muted); font-size: var(--tk-fz-xs); }
+/* «нет Telegram» — справочная пометка, а не предупреждение: жёлтым она
+   повторялась в каждой второй карточке и превращалась в шум. */
+.so-notify-muted { color: var(--tk-text-muted) !important; }
 
 /* Вкладка «Настройки» */
 .so-settings-wrap { display: flex; flex-direction: column; gap: var(--tk-s-4); max-width: 860px; }
