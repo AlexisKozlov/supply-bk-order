@@ -3149,6 +3149,101 @@ watch(
   font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
 }
 
+/* ═══ Телефон ═══
+   На узком экране раскладка ломалась: вкладки налезали друг на друга и
+   «Настройки» уходили за край, кнопки шли по одной в строку на шесть
+   экранов прокрутки, а сводную таблицу занимала колонка с адресом — ни
+   статуса, ни товаров видно не было. */
+@media (max-width: 640px) {
+  /* Вкладки прокручиваются вбок, а не сжимаются до наложения. */
+  .rom-page-tabs {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rom-page-tabs::-webkit-scrollbar { display: none; }
+  .rom-page-tab {
+    flex: 0 0 auto; white-space: nowrap;
+    padding: var(--tk-s-3) var(--tk-s-3); font-size: var(--tk-fz-md);
+  }
+
+  /* Панель действий — две колонки вместо простыни в один столбец. */
+  .rom-export-row { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; }
+  .rom-export-row .rom-btn {
+    width: 100%; justify-content: center; text-align: center;
+    padding-left: var(--tk-s-2); padding-right: var(--tk-s-2);
+  }
+  /* Поиск и фильтр — во всю ширину, они длиннее кнопок. */
+  .rom-export-row .so-filter-check,
+  .rom-export-row .so-filter-input { grid-column: 1 / -1; width: 100%; }
+
+  /* Счётчики в ряд по трети экрана. */
+  .rom-stats { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .rom-stat { justify-content: center; padding: var(--tk-s-2); }
+
+  /* Сводная таблица: адрес прячем — номер ресторана и так опознаётся,
+     а места хватает на статус и заказанные товары. */
+  .so-rest-addr { display: none; }
+  /* overflow: hidden у таблицы (он нужен для скругления углов) обрезает
+     позиционирование sticky у её ячеек — на телефоне скругление не жалко. */
+  .so-pivot-table { overflow: visible; }
+  /* Колонка с номером ресторана держится у левого края при прокрутке вбок,
+     иначе, добравшись до товара, уже не понять, чей это заказ.
+     Фон обязательно непрозрачный — подсветка строки полупрозрачная, и
+     содержимое таблицы просвечивало бы сквозь залипшую колонку. */
+  .so-pivot-table .so-th-rest,
+  .so-pivot-table .so-td-rest {
+    position: sticky; left: 0; z-index: var(--tk-z-sticky);
+    min-width: 0; white-space: nowrap;
+    background: var(--tk-bg-card);
+    box-shadow: inset -1px 0 0 var(--tk-border);
+  }
+  .so-pivot-table .so-th-rest { background: var(--tk-n-50); }
+  .so-pivot-table .rom-row-submitted .so-td-rest {
+    background: linear-gradient(var(--tk-success-soft), var(--tk-success-soft)), var(--tk-bg-card);
+  }
+  .so-pivot-table .so-row-skip .so-td-rest { background: var(--tk-n-50) !important; }
+
+  /* Настройки: карточки во всю ширину, кнопка сохранения под заголовком. */
+  .so-settings-wrap { max-width: none; }
+  .so-notify-head { flex-direction: column; align-items: stretch; gap: var(--tk-s-2); }
+  .so-notify-head > .rom-btn-sm { align-self: flex-start; }
+
+  /* Дедлайны: сетка в шесть колонок не помещается — название дня уходит
+     отдельной строкой, под ним день, время и переключатель. */
+  .so-deadline-row { display: flex; flex-wrap: wrap; align-items: center; }
+  .so-deadline-label { flex: 1 0 100%; }
+  .so-deadline-arrow { display: none; }
+
+  /* Обзор: пять действий в два столбца — иначе колонка шире экрана.
+     Имя поставщика липнет к левому краю при прокрутке вбок. */
+  .so-ov-actions { grid-template-columns: 1fr 1fr; }
+  /* В два столбца подписи вроде «Дедлайн» обрезались — уменьшаем шрифт. */
+  .so-ov-actions .rom-btn-sm { font-size: var(--tk-fz-xs); padding: 4px 6px; }
+  .so-ov-table { overflow: visible; }
+  .so-ov-table tbody td:first-child,
+  .so-ov-table thead th:first-child {
+    position: sticky; left: 0; z-index: var(--tk-z-sticky);
+    background: var(--tk-bg-card);
+    box-shadow: inset -1px 0 0 var(--tk-border);
+  }
+  .so-ov-table thead th:first-child { background: var(--tk-n-50); }
+  /* «на паузе» рядом с именем, а не переносом посреди названия. */
+  .so-ov-paused { display: inline-block; white-space: nowrap; }
+
+  /* Список заявок: адрес занимал треть экрана и рвался на три строки —
+     ресторан опознаётся по номеру. Номер липнет к левому краю. */
+  .so-list-table thead th:nth-child(2),
+  .so-list-table tbody td:nth-child(2) { display: none; }
+  .so-list-table { overflow: visible; }
+  .so-list-table thead th:first-child,
+  .so-list-table tbody td:first-child {
+    position: sticky; left: 0; z-index: var(--tk-z-sticky);
+    background: var(--tk-bg-card);
+    box-shadow: inset -1px 0 0 var(--tk-border);
+  }
+  .so-list-table thead th:first-child { background: var(--tk-n-50); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rom-btn, .rom-btn-sm, .rom-page-tab, .so-td-qty, .so-grid-check, .so-session-card {
     transition: none;

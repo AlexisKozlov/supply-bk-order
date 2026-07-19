@@ -244,6 +244,24 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
   line-height: var(--tk-lh-loose);
 }
 
+/* На телефоне заголовок и кнопки шли одна под другой во всю ширину и
+   съедали пол-экрана до содержимого. */
+@media (max-width: 640px) {
+  .so-hub { padding: var(--tk-s-3); }
+  .so-hub-header h1 { font-size: var(--tk-fz-h1); }
+  .so-hub-header-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .so-hub-connect-btn, .so-hub-disconnect-btn {
+    width: 100%; padding-left: var(--tk-s-2); padding-right: var(--tk-s-2);
+  }
+  /* Поставщиков может быть много — прокручиваем вбок, а не переносим. */
+  .so-hub-pills {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .so-hub-pills::-webkit-scrollbar { display: none; }
+  .so-hub-pill { flex: 0 0 auto; white-space: nowrap; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .so-hub-connect-btn, .so-hub-disconnect-btn, .so-hub-pill { transition: none; }
 }
