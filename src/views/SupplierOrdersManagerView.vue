@@ -52,9 +52,9 @@
           <thead>
             <tr>
               <th>Поставщик</th>
-              <th style="width:220px">Дедлайн</th>
-              <th style="width:140px">Подано</th>
-              <th style="width:160px">Действия</th>
+              <th style="width:200px">Дедлайн</th>
+              <th style="width:130px">Подано</th>
+              <th style="width:330px">Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -70,10 +70,12 @@
               </td>
               <td>
                 <template v-if="row.forced_closed">
-                  <span class="so-ov-closed">День закрыт</span>
+                  <span class="rom-status st-locked">День закрыт</span>
                 </template>
                 <template v-else>
-                  <span :class="{ 'so-ov-closed': overviewIsPassed(row) }">{{ row.deadline_str || '—' }}</span>
+                  <!-- Дата остаётся нейтральной: красным подсвечиваем только статус
+                       под ней, иначе в одной ячейке два одинаковых сигнала. -->
+                  <span :class="{ 'so-ov-date-passed': overviewIsPassed(row) }">{{ row.deadline_str || '—' }}</span>
                   <span v-if="row.deadline_at" class="so-ov-countdown" :class="{ 'so-ov-bad': overviewIsPassed(row) }">
                     {{ overviewCountdown(row) }}
                   </span>
@@ -184,7 +186,7 @@
           <!-- Export + controls -->
           <div class="rom-export-row">
             <button class="rom-btn rom-btn-export" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
-              {{ exporting ? 'Выгрузка...' : exportSelectedDates.size > 1 ? `Выгрузить ${exportSelectedDates.size} дня в Excel` : 'Выгрузить в Excel' }}
+              {{ exporting ? 'Выгрузка...' : exportSelectedDates.size > 1 ? `Выгрузить ${exportSelectedDates.size} ${dayWord(exportSelectedDates.size)} в Excel` : 'Выгрузить в Excel' }}
             </button>
             <button class="rom-btn"
               @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
@@ -337,7 +339,7 @@
       <div v-if="loadingList" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="ordersList.length === 0" class="rom-empty">Заявок за выбранный период нет.</div>
       <div v-else class="rom-table-wrap">
-        <table class="rom-table">
+        <table class="rom-table so-list-table">
           <thead>
             <tr>
               <th>Рест.</th>
@@ -532,7 +534,7 @@
       <div v-if="loadingTemplates" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else>
         <div class="rom-table-wrap">
-          <table class="rom-table">
+          <table class="rom-table so-tpl-table">
             <thead>
               <tr>
                 <th style="width:50px">Порядок</th>
@@ -552,7 +554,7 @@
                     <input v-model="t.product_name" class="rom-input-sm so-template-name-input" placeholder="Название товара" />
                   </div>
                 </td>
-                <td>
+                <td class="so-tpl-cat">
                   <!-- Статус связи с карточкой каталога -->
                   <div v-if="linkingRowIdx === idx" class="so-tpl-link-search">
                     <input
@@ -604,7 +606,9 @@
           <div class="so-section-title" style="margin:0">Приём заявок</div>
           <p class="so-section-hint" style="margin:4px 0 10px 0">Пока приём приостановлен, рестораны видят сообщение и не могут подать заявку.</p>
           <div class="so-detail-bar">
-            <button class="rom-btn-sm" @click="toggleAccepting" :class="settings.is_accepting_orders ? 'rom-btn-danger' : 'rom-btn-primary'">
+            <!-- Возобновление — обычное действие: заливку акцентом на странице
+                 держат только «Подключить поставщика» и «Отправить сводку». -->
+            <button class="rom-btn-sm" @click="toggleAccepting" :class="settings.is_accepting_orders ? 'rom-btn-danger' : ''">
               {{ settings.is_accepting_orders ? 'Приостановить приём' : 'Возобновить приём' }}
             </button>
             <span class="so-session-status" :class="settings.is_accepting_orders ? 'st-sess-active' : 'st-sess-closed'">
@@ -1007,6 +1011,16 @@ const remindingStatus = ref(false);
 // Multi-date export
 const exportDatePickerOpen = ref(false);
 const exportSelectedDates = ref(new Set());
+
+// «2 дня» / «5 дней» — иначе на кнопке выгрузки получалось «15 дня».
+function dayWord(n) {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return 'дней';
+  const mod10 = n % 10;
+  if (mod10 === 1) return 'день';
+  if (mod10 >= 2 && mod10 <= 4) return 'дня';
+  return 'дней';
+}
 
 // Опции формирования Excel (скачивание и отправка) живут в настройках поставщика —
 // см. settings.xlsx_drop_empty / settings.xlsx_pallet_metrics.
@@ -2587,8 +2601,10 @@ watch(
 .rom-btn-sm:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 .rom-btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
 .rom-btn-sm:disabled:hover { background: var(--tk-bg-card); border-color: var(--tk-border); }
-.so-ov-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-1); }
-.so-ov-actions .rom-btn-sm { padding: 4px var(--tk-s-2); }
+/* Пять действий в строке. Раскладываем сеткой, иначе кнопки разной ширины
+   переносятся рвано и колонка выглядит неопрятно. */
+.so-ov-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--tk-s-1); }
+.so-ov-actions .rom-btn-sm { padding: 4px var(--tk-s-2); width: 100%; }
 .rom-btn-sm.rom-btn-primary {
   background: var(--tk-accent); color: var(--tk-n-0); border-color: var(--tk-accent);
 }
@@ -2689,7 +2705,18 @@ watch(
 }
 .rom-td-num { font-weight: var(--tk-fw-bold); }
 .rom-td-time { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
-.rom-td-actions { display: flex; gap: var(--tk-s-1); }
+/* Ячейка с кнопками. display:flex на <td> ломает расчёт ширины колонок
+   (шапка и строки расходятся), поэтому оставляем ячейку ячейкой. */
+.rom-td-actions { white-space: nowrap; }
+.rom-td-actions .rom-btn-sm + .rom-btn-sm { margin-left: var(--tk-s-1); }
+/* В таблицах-списках содержимое читается слева: глобальное правило
+   `td { text-align: center }` из старых стилей здесь неуместно. */
+/* !important — в старом глобальном style.css есть
+   `thead th:nth-child(2) { text-align: center !important }`, перебить его
+   обычным правилом нельзя. Действует только на эти три таблицы. */
+.so-ov-table td, .so-ov-table th,
+.so-list-table td, .so-list-table th,
+.so-tpl-table td, .so-tpl-table th { text-align: left !important; }
 .rom-row-submitted { background: var(--tk-success-soft); }
 .rom-status {
   padding: 2px var(--tk-s-2); border-radius: var(--tk-r-sm);
@@ -2756,22 +2783,25 @@ watch(
 .so-schedule-count { font-size: var(--tk-fz-md); color: var(--tk-text-muted); margin: var(--tk-s-2) var(--tk-s-4); }
 
 /* ═══ Обзор по поставщикам ═══ */
+/* Имя поставщика — кнопка перехода. Постоянное подчёркивание в таблице
+   создаёт визуальный шум, поэтому показываем его только при наведении. */
 .so-ov-supplier {
   background: none; border: none; padding: 0;
   color: var(--tk-text); font: inherit; font-weight: var(--tk-fw-semibold);
-  cursor: pointer; text-decoration: underline; text-decoration-color: var(--tk-n-300);
-  text-underline-offset: 2px;
+  cursor: pointer; text-decoration: none; text-underline-offset: 2px;
+  text-align: left;
 }
-.so-ov-supplier:hover { color: var(--tk-accent-text); text-decoration-color: var(--tk-accent); }
+.so-ov-supplier:hover { color: var(--tk-accent-text); text-decoration: underline; }
+.so-ov-supplier:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); border-radius: var(--tk-r-sm); }
 .so-ov-paused {
   margin-left: var(--tk-s-2); font-size: var(--tk-fz-sm);
   color: var(--tk-warning); background: var(--tk-warning-soft);
   border-radius: var(--tk-r-sm); padding: 1px 6px;
 }
 .so-ov-countdown { display: block; font-size: var(--tk-fz-sm); color: var(--tk-text-muted); margin-top: 2px; }
-.so-ov-closed { color: var(--tk-danger); }
+.so-ov-date-passed { color: var(--tk-text-muted); }
 .so-ov-nodelivery { color: var(--tk-text-muted); }
-.so-ov-empty { text-align: center; color: var(--tk-text-muted); padding: var(--tk-s-4); }
+.so-ov-table td.so-ov-empty { text-align: center !important; color: var(--tk-text-muted); padding: var(--tk-s-4); }
 .so-ov-ok { color: var(--tk-success); font-weight: var(--tk-fw-semibold); }
 .so-ov-warn { color: var(--tk-warning); font-weight: var(--tk-fw-semibold); }
 .so-ov-bad { color: var(--tk-danger); font-weight: var(--tk-fw-semibold); }
@@ -2792,7 +2822,10 @@ watch(
 }
 .so-template-option:hover { background: var(--tk-n-50); }
 .so-template-option b { color: var(--tk-text-muted); min-width: 72px; font-size: var(--tk-fz-sm); }
-.so-template-product-cell { display: grid; grid-template-columns: minmax(90px, 130px) minmax(240px, 1fr); gap: var(--tk-s-2); }
+.so-template-product-cell { display: grid; grid-template-columns: minmax(80px, 110px) minmax(160px, 1fr); gap: var(--tk-s-2); }
+/* Колонка каталога: длинное название с характеристиками обрезаем многоточием,
+   иначе таблица уезжает за правый край и последние колонки не видно. */
+.so-tpl-cat { max-width: 240px; }
 .so-template-sku-input, .so-template-name-input { width: 100%; }
 
 /* Статус связи строки шаблона с карточкой каталога */
@@ -2812,11 +2845,17 @@ watch(
 .so-section-title { font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-bold); color: var(--tk-text); margin: 0 0 var(--tk-s-1); }
 .so-section-hint { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); margin: 0 0 var(--tk-s-3); line-height: var(--tk-lh-base); }
 .so-deadline-grid { display: flex; flex-direction: column; gap: var(--tk-s-1); }
+/* Сетка, а не flex: у дней недели разная длина названия, и на flex-раскладке
+   поля ввода в каждой строке начинались с разного места. */
 .so-deadline-row {
-  display: flex; align-items: center; gap: var(--tk-s-2);
+  display: grid;
+  /* Последняя колонка — пустой «хвост», чтобы поля не растягивались на всю карточку. */
+  grid-template-columns: minmax(150px, 190px) 16px 72px 140px max-content 1fr;
+  align-items: center; gap: var(--tk-s-2);
   padding: 6px var(--tk-s-3); background: var(--tk-n-50); border-radius: var(--tk-r-md);
 }
-.so-deadline-label { min-width: 120px; }
+.so-deadline-row > select, .so-deadline-row > input { min-width: 0; }
+.so-deadline-label { min-width: 0; }
 .so-dl-day { font-size: var(--tk-fz-md); font-weight: var(--tk-fw-semibold); color: var(--tk-text); }
 .so-dl-hint { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); margin-left: var(--tk-s-1); }
 .so-deadline-arrow { color: var(--tk-text-muted); font-size: var(--tk-fz-lg); }
