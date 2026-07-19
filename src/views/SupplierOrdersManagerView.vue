@@ -1079,12 +1079,27 @@ function buildDisplayProducts(list) {
     }
 
     const multiplicities = [...new Set(group.map(p => p.multiplicity).filter(v => v !== null && v !== undefined && v !== ''))];
+
+    // Атрибуты упаковки берём у группы только если они совпадают у всех
+    // аналогов. Количества в объединённой строке уже сложены, разложить их
+    // обратно по SKU нельзя — поэтому при разной упаковке честнее не
+    // показывать паллеты и вес совсем, чем посчитать их по первому SKU
+    // и разойтись с файлом, который считает сервер (он считает по каждому SKU).
+    const sameAcross = (field) => {
+      const vals = [...new Set(group.map(p => p[field]).filter(v => v !== null && v !== undefined && v !== ''))];
+      return vals.length === 1 ? vals[0] : null;
+    };
+
     result.push({
       ...first,
       display_key: `group:${normalizeProductName(first.product_name)}`,
       source_skus: group.map(p => p.sku).filter(Boolean),
       is_grouped: true,
       multiplicity: multiplicities.length === 1 ? multiplicities[0] : null,
+      qty_per_box: sameAcross('qty_per_box'),
+      boxes_per_pallet: sameAcross('boxes_per_pallet'),
+      weight_netto: sameAcross('weight_netto'),
+      weight_brutto: sameAcross('weight_brutto'),
       product_id: null,
     });
   }
