@@ -8,10 +8,12 @@
  *   reminder_2h  — за 2 часа до дедлайна, тем кто ещё не сдал;
  *   manual       — закупщик нажал «Напомнить».
  *
- * Отправляем с ящика info@ (account 'info'). Почта ресторанов — @burger-king.by,
- * там стоит MailCleaner: заголовки List-Unsubscribe, которые дефолтный ящик
- * добавляет к системным письмам, он считает признаком рассылки и кладёт письмо
- * в спам. У аккаунта 'info' этих заголовков нет.
+ * Отправляем с ящика order@ (account 'order'). Проверено на живых письмах
+ * 20.07.2026: с info@ письмо уходит в спам к @burger-king.by даже с чистыми
+ * SPF/DKIM и простой вёрсткой, а с order@ доходит. Причина не в домене —
+ * байесовский фильтр их шлюза обучен по конкретному отправителю, а order@
+ * «прогрет» живой перепиской с поставщиками. Дефолтный ящик не годится:
+ * он добавляет List-Unsubscribe, который тот же шлюз считает рассылкой.
  *
  * Письма шлём НЕ в веб-запросе: одна отправка ~0.8 сек, ресторанов под 60.
  * Реальную рассылку делает api/cron_stock_collection_mail.php, веб только
@@ -193,7 +195,10 @@ function scSendCollectionEmails(PDO $pdo, int $collectionId, string $kind, int $
     foreach ($recipients as $r) {
         $mail = scMailBuild($coll, $kind, (string)$r['restaurant_number']);
         try {
-            $res = sendEmail($r['email'], $mail['subject'], $mail['html'], true, ['account' => 'info']);
+            $res = sendEmail($r['email'], $mail['subject'], $mail['html'], true, [
+                'account'  => 'order',
+                'reply_to' => 'order@supply-department.online',
+            ]);
         } catch (Throwable $e) {
             $res = ['success' => false, 'error' => $e->getMessage()];
         }
