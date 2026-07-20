@@ -1977,6 +1977,19 @@ function fmtTime(s) {
 .sc-tag.gray { background: #f0ece6; color: #999; }
 .sc-empty { text-align: center; color: var(--muted); padding: 40px; font-size: 14px; }
 
+/* Срок сдачи остатков: строка в карточке списка и кликабельная плашка
+   в шапке открытого сбора. Просроченный срок — красным. */
+.sc-card-deadline { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.sc-card-deadline.late { color: #C62828; font-weight: 600; }
+.sc-deadline-chip {
+  font-size: 11px; font-weight: 600; color: #6D4C41;
+  background: #FBF6F0; border: 1px solid var(--border); border-radius: 8px;
+  padding: 3px 9px; white-space: nowrap; cursor: pointer;
+  font-family: inherit; transition: all 0.12s;
+}
+.sc-deadline-chip:hover { border-color: var(--orange); color: var(--orange); }
+.sc-deadline-chip.late { background: #FDECEA; border-color: #F5C6C0; color: #C62828; }
+
 /* Missing restaurants */
 .sc-missing {
   background: #FFF8E1; border: 1px solid #FFE082; border-radius: 10px;
@@ -2185,6 +2198,7 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-input.full { width: 100%; box-sizing: border-box; }
 .sc-input.selected { border-color: #A5D6A7; background: #FCFFF9; }
 .sc-input:disabled { background: var(--bg2); color: var(--muted); }
+.sc-field-hint { font-size: 11px; color: var(--muted); line-height: 1.45; margin-top: 6px; }
 
 /* Product card in create modal */
 .sc-product-card {

@@ -4424,7 +4424,9 @@ tr.del-err { background: #fef2f2; }
 .locked-msg { color: #dc2626; font-size: 12px; font-weight: 600; }
 
 /* Buttons */
-.btn { padding: 8px 18px; border-radius: 10px; border: none; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; transition: all 0.18s; }
+/* justify-content обязателен: кнопки часто растягивают (flex:1, width:100%),
+   и без него текст прижимается к левому краю. */
+.btn { padding: 8px 18px; border-radius: 10px; border: none; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.18s; }
 .btn-primary { background: #E76F51; color: white; box-shadow: 0 2px 8px rgba(231,111,81,0.2); }
 .btn-primary:hover:not(:disabled) { background: #b81e00; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(231,111,81,0.25); }
 .btn-primary:active:not(:disabled) { transform: scale(0.98); }
