@@ -2769,9 +2769,12 @@ watch(
   border-radius: var(--tk-r-sm); background: var(--tk-warning-soft); color: var(--tk-warning);
   font-size: var(--tk-fz-md); font-weight: var(--tk-fw-semibold);
 }
-.so-row-skip { background: var(--tk-n-50) !important; }
-.so-row-skip:hover { background: var(--tk-n-100) !important; }
-.so-td-skip-cell { background: var(--tk-n-50); }
+/* «Поставка не нужна» — тоже поданная заявка, но нулевая. Раньше эти строки
+   красились в --tk-n-50, тот же цвет, что и полоски зебры, и на глаз были
+   неотличимы от «Не подано». Берём оттенок темнее. */
+.so-row-skip { background: var(--tk-n-100) !important; }
+.so-row-skip:hover { background: var(--tk-n-200) !important; }
+.so-td-skip-cell { background: var(--tk-n-100); }
 .so-qty-zero { color: var(--tk-text-muted); font-weight: var(--tk-fw-semibold); }
 
 /* ═══ Модалка ═══ */
@@ -3208,7 +3211,7 @@ watch(
   .so-pivot-table .rom-row-submitted .so-td-rest {
     background: linear-gradient(var(--tk-success-soft), var(--tk-success-soft)), var(--tk-bg-card);
   }
-  .so-pivot-table .so-row-skip .so-td-rest { background: var(--tk-n-50) !important; }
+  .so-pivot-table .so-row-skip .so-td-rest { background: var(--tk-n-100) !important; }
 
   /* Настройки: карточки во всю ширину, кнопка сохранения под заголовком. */
   .so-settings-wrap { max-width: none; }
