@@ -37,6 +37,8 @@ if (!$lock['fp']) { echo "Already running\n"; exit; }
 $lockFp = $lock['fp'];
 $killedStalePid = $lock['killed_pid'];
 set_time_limit(180);
+// Бюджет на распознавание сканов за один запуск (крон снаружи ограничен 600 сек).
+$OCR_DEADLINE = time() + 420;
 cronImapTimeouts();
 
 $envFile = '/var/www/bk-calc-secrets/.env';
@@ -270,9 +272,17 @@ foreach ($unseen as $msgNum) {
             $tmpDisk = $ATTACHMENT_DIR . '/tmp_' . bin2hex(random_bytes(6)) . '_' . $safeName;
             if (@file_put_contents($tmpDisk, $att['data']) !== false) {
                 $tmpAttachments[] = ['tmp_disk' => $tmpDisk, 'safe_name' => $safeName];
-                $ocrResult = titOcrExtractPlate($tmpDisk);
-                if (!empty($ocrResult['plates'])) {
-                    foreach ($ocrResult['plates'] as $p) $ocrPlates[] = $p;
+                // Распознавание одного скана — до ~130 сек, а крон снаружи
+                // убивают через 600. Держим запас: письма и вложения сверх
+                // бюджета просто сохраняем, номер впишут руками, а на
+                // следующем запуске времени хватит.
+                if (time() < $OCR_DEADLINE) {
+                    $ocrResult = titOcrExtractPlate($tmpDisk);
+                    if (!empty($ocrResult['plates'])) {
+                        foreach ($ocrResult['plates'] as $p) $ocrPlates[] = $p;
+                    }
+                } else {
+                    error_log('[tit_replies] OCR пропущен по бюджету времени: ' . $safeName);
                 }
             }
         }

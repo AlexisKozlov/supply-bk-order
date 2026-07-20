@@ -113,7 +113,10 @@ function titLooksLikePlate(string $plate): bool
 {
     if ($plate === '') return false;
     if (preg_match('/^[A-Z]{2}\d{4,5}$/', $plate)) return true;
-    if (preg_match('/^\d{4}[A-Z]{2}\d?$/', $plate)) return true;
+    // Новый формат «1234 AB-7» — код региона обязателен. Без него под шаблон
+    // попадает год из накладной с обрывком букв рядом: «09.2022» + «ет» давали
+    // «номер» 2022ET. Все настоящие номера в базе код региона имеют.
+    if (preg_match('/^\d{4}[A-Z]{2}\d$/', $plate)) return true;
     return false;
 }
 

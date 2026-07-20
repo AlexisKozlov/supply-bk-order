@@ -34,7 +34,7 @@ function titWhich(string $bin): ?string
  *
  * Возвращает строку (может быть пустой при ошибке).
  */
-function titOcrImage(string $imagePath): string
+function titOcrImage(string $imagePath, int $targetSide = 3600, int $psm = 11): string
 {
     if (!is_file($imagePath) || !is_readable($imagePath)) return '';
 
@@ -51,12 +51,13 @@ function titOcrImage(string $imagePath): string
     };
     if (!$src) return '';
 
-    // Поднимаем фото с телефона до ~2400px по большой стороне. Tesseract
-    // ловит мелкий текст ТТН только при высоте строки ~30px (≈300 dpi).
-    // На 1600px из 9-12 МП фото буквы получаются по 12-15px → много мусора.
+    // Поднимаем скан до ~3600px по большой стороне. Проверено на реальной ТТН
+    // 740x1068 (≈90 dpi): на 2400px строка «гос. номер AT 7310-7» читалась как
+    // «Make AT F310», на 3600px — точно. Лист А4 при 3600px ≈ 300 dpi, это
+    // рабочий режим Tesseract.
     $maxSide = max($w, $h);
-    if ($maxSide < 2400) {
-        $scale = 2400 / $maxSide;
+    if ($maxSide < $targetSide) {
+        $scale = $targetSide / $maxSide;
         $newW = (int)($w * $scale);
         $newH = (int)($h * $scale);
         $dst = imagecreatetruecolor($newW, $newH);
@@ -70,31 +71,26 @@ function titOcrImage(string $imagePath): string
     // Только grayscale, без жёсткой бинаризации. На фото ТТН свет неровный
     // (тень от руки/стола), и фиксированный порог 140 убивает текст в тёмных
     // зонах — Tesseract отлично работает с серой картинкой.
+    // Только grayscale. Фильтр контраста убран намеренно: на той же ТТН он
+    // размывал тонкие цифры и номер переставал читаться.
     imagefilter($src, IMG_FILTER_GRAYSCALE);
-    // Лёгкий контраст помогает на бледных сканах.
-    imagefilter($src, IMG_FILTER_CONTRAST, -20);
 
     $processed = tempnam(sys_get_temp_dir(), 'tit_ocr_') . '.png';
     imagepng($src, $processed);
     imagedestroy($src);
 
-    // Прогоняем дважды: psm 6 (uniform block) хорошо ловит сплошной текст,
-    // psm 11 (sparse text) — разрозненные надписи в ячейках накладной.
-    // Результаты конкатенируем — парсер плиты потом сам найдёт совпадения.
-    $combined = '';
-    foreach ([6, 11] as $psm) {
-        $outBase = tempnam(sys_get_temp_dir(), 'tit_ocr_out_');
-        @unlink($outBase);
-        $cmd = sprintf('tesseract %s %s -l rus+eng --psm %d 2>/dev/null',
-            escapeshellarg($processed), escapeshellarg($outBase), $psm);
-        exec($cmd, $_, $rc);
-        if (is_file($outBase . '.txt')) {
-            $combined .= ($combined !== '' ? "\n\n" : '') . (string)@file_get_contents($outBase . '.txt');
-            @unlink($outBase . '.txt');
-        }
+    $outBase = tempnam(sys_get_temp_dir(), 'tit_ocr_out_');
+    @unlink($outBase);
+    $cmd = sprintf('tesseract %s %s -l rus+eng --psm %d 2>/dev/null',
+        escapeshellarg($processed), escapeshellarg($outBase), $psm);
+    exec($cmd, $_, $rc);
+    $text = '';
+    if (is_file($outBase . '.txt')) {
+        $text = (string)@file_get_contents($outBase . '.txt');
+        @unlink($outBase . '.txt');
     }
     @unlink($processed);
-    return trim($combined);
+    return trim($text);
 }
 
 /**
@@ -147,24 +143,51 @@ function titOcrExtractPlate(string $path): array
     }
 
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-    $text = '';
+    $imagePath = null;
+    $tmpPng = null;
     if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif'], true)) {
-        $text = titOcrImage($path);
+        $imagePath = $path;
     } elseif ($ext === 'pdf') {
-        $png = titPdfFirstPageToPng($path);
-        if ($png === null) {
+        $tmpPng = titPdfFirstPageToPng($path);
+        if ($tmpPng === null) {
             return ['plates' => [], 'text' => '', 'why' => 'pdf_unsupported'];
         }
-        $text = titOcrImage($png);
-        @unlink($png);
+        $imagePath = $tmpPng;
     } else {
         return ['plates' => [], 'text' => '', 'why' => 'unsupported_format'];
     }
 
+    // Проходы по возрастанию стоимости: psm 11 (разрозненный текст в ячейках
+    // накладной) быстрее psm 6 примерно втрое и на реальных ТТН находит номер
+    // не хуже. Тяжёлый psm 6 запускаем только если номер не нашёлся — так
+    // обычное письмо обрабатывается быстрее, чем раньше, а сложное всё равно
+    // дочитывается. Крон ограничен 600 сек, поэтому проходов ровно два.
+    $text = '';
+    $result = null;
+    foreach ([11, 6] as $psm) {
+        $passText = titOcrImage($imagePath, 3600, $psm);
+        if ($passText === '') continue;
+        $text = $passText;
+        $found = titOcrPlatesFromText($passText);
+        if ($found) { $result = $found; break; }
+    }
+    if ($tmpPng !== null) @unlink($tmpPng);
+
     if ($text === '') {
         return ['plates' => [], 'text' => '', 'why' => 'empty_text'];
     }
+    if ($result === null) {
+        return ['plates' => [], 'text' => $text, 'why' => 'no_plate_found'];
+    }
+    return ['plates' => $result, 'text' => $text, 'why' => 'ok'];
+}
 
+/**
+ * Ищет номера машин в распознанном тексте накладной.
+ * Возвращает список ['plate' => ..., 'raw' => ...] или пустой массив.
+ */
+function titOcrPlatesFromText(string $text): array
+{
     // Сужаем зону поиска: ищем строки с якорями (автомобиль / гос. номер /
     // транспортное средство и т.п.). Если якорь нашёлся — берём кандидатов
     // ТОЛЬКО из этих строк. Это отсекает марки («ATEGO 1823»), номера
@@ -189,9 +212,7 @@ function titOcrExtractPlate(string $path): array
     // где номер может прийти как «АС 6668-5» (с пробелом).
     $searchText = titNormalizePlateSpacing($searchText);
     $candidates = titFindPlateCandidates($searchText);
-    if (!$candidates) {
-        return ['plates' => [], 'text' => $text, 'why' => 'no_plate_found'];
-    }
+    if (!$candidates) return [];
 
     // Уникализируем по нормализованному номеру, оставляем порядок появления.
     $seen = [];
@@ -201,5 +222,5 @@ function titOcrExtractPlate(string $path): array
         $seen[$c['plate']] = true;
         $uniq[] = ['plate' => $c['plate'], 'raw' => $c['raw']];
     }
-    return ['plates' => $uniq, 'text' => $text, 'why' => 'ok'];
+    return $uniq;
 }
