@@ -652,7 +652,7 @@
           <div class="so-notify-head">
             <div>
               <div class="so-section-title" style="margin:0">Получатели итоговой сводки</div>
-              <div class="so-section-hint" style="margin:4px 0 0 0">После дедлайна бот отправит результат только отмеченным сотрудникам этого поставщика.</div>
+              <div class="so-section-hint" style="margin:4px 0 0 0">После дедлайна бот отправит результат только отмеченным сотрудникам. В списке — те, у кого есть доступ к юрлицу этого поставщика и к модулю заявок.</div>
             </div>
             <button class="rom-btn-sm" @click="saveNotifyUsers" :disabled="savingNotifyUsers || loadingNotifyUsers">
               <BurgerSpinner v-if="savingNotifyUsers" size="xs" />
@@ -666,7 +666,7 @@
               <span class="so-notify-user-text">
                 <span class="so-notify-user-name">{{ u.name }}</span>
                 <small v-if="u.display_role">{{ u.display_role }}</small>
-                <small v-if="!u.telegram_chat_id" class="so-notify-muted">нет Telegram</small>
+                <small v-if="!u.has_telegram" class="so-notify-muted">нет Telegram</small>
               </span>
             </label>
           </div>
@@ -1229,6 +1229,9 @@ async function loadSettings() {
   if (!currentSupplierId.value) return;
   // Запоминаем, за чьими настройками пошли — поставщик мог смениться, пока шёл запрос.
   const sid = currentSupplierId.value;
+  // Получатели сводки приезжают этим же запросом, поэтому их индикатор
+  // загрузки живёт здесь.
+  loadingNotifyUsers.value = true;
   try {
     const data = await store.adminGetSettings(sid);
     settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, email_cc_restaurants: 0, default_deadline_time: '14:00:00', pause_message: null, xlsx_drop_empty: 0, xlsx_pallet_metrics: [] };
@@ -1239,27 +1242,19 @@ async function loadSettings() {
     pauseMessage.value = settings.value.pause_message || '';
     deadlineOverrides.value = data.overrides || [];
     notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
+    // Кандидаты приходят вместе с настройками: список зависит от поставщика
+    // (доступ к его юрлицу), поэтому общий справочник пользователей не годится.
+    allNotifyUsers.value = Array.isArray(data.summary_candidates) ? data.summary_candidates : [];
     boxSizeWarnings.value = Array.isArray(data.box_size_warnings) ? data.box_size_warnings : [];
     reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
     reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
     syncWeeklyFromSettings();
     syncMinOrderFromSettings();
     syncXlsxFromSettings();
-    if (!allNotifyUsers.value.length) await loadNotifyUsers();
   } catch (e) {
     // Запрос упал — в settings могли остаться настройки прошлого поставщика.
     // Снимаем метку владельца, чтобы экспорт не собрал файл с чужими опциями.
     settingsLoadedFor.value = null;
-    console.error(e);
-  }
-}
-
-async function loadNotifyUsers() {
-  loadingNotifyUsers.value = true;
-  try {
-    const { data } = await db.rpc('get_users_list_short');
-    allNotifyUsers.value = data || [];
-  } catch (e) {
     console.error(e);
   } finally {
     loadingNotifyUsers.value = false;

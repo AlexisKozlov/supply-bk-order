@@ -640,6 +640,55 @@ function soGetSupplierNotifyUsers($pdo, $supplierId) {
     return $s->fetchAll(PDO::FETCH_COLUMN);
 }
 
+/**
+ * Кто может быть получателем итоговой сводки по этому поставщику.
+ *
+ * Раньше интерфейс показывал вообще всех сотрудников портала — включая тех,
+ * у кого нет доступа ни к юрлицу поставщика, ни к модулю заявок. В списке
+ * оказывались люди из другого юрлица, которым эта сводка не нужна.
+ *
+ * Фильтруем по двум условиям: доступ к юрлицу поставщика и доступ к модулю
+ * «Заявки поставщикам» хотя бы на просмотр. Уже отмеченных получателей
+ * оставляем в списке всегда — иначе сохранение молча снимет тех, кто перестал
+ * подходить под фильтр, и отправка тихо прекратится.
+ *
+ * telegram_chat_id наружу не отдаём — только признак «есть Telegram».
+ */
+function soGetSummaryCandidates($pdo, $supplierId, array $alreadySelected = []) {
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+
+    $supStmt = $pdo->prepare("SELECT legal_entity FROM suppliers WHERE id = ?");
+    $supStmt->execute([$supplierId]);
+    $supplierLe = (string)($supStmt->fetchColumn() ?: '');
+
+    $rows = $pdo->query("
+        SELECT name, display_role, role, legal_entities, permissions,
+               (telegram_chat_id IS NOT NULL AND telegram_chat_id <> '') AS has_telegram
+        FROM users ORDER BY name
+    ")->fetchAll();
+
+    $selected = array_flip($alreadySelected);
+    $out = [];
+    foreach ($rows as $u) {
+        $isSelected = isset($selected[$u['name']]);
+        if (!$isSelected) {
+            if ($supplierLe !== '' && !checkLegalEntityAccess($u, $supplierLe)) continue;
+            if (($u['role'] ?? '') !== 'admin') {
+                $perms = resolvePermissions($u['role'] ?? 'user', $u['permissions'] ?? null, $ROLE_TEMPLATES);
+                $level = $ACCESS_LEVELS[$perms['supplier-orders'] ?? 'none'] ?? 0;
+                if ($level < ($ACCESS_LEVELS['view'] ?? 1)) continue;
+            }
+        }
+        $out[] = [
+            'name'         => $u['name'],
+            'display_role' => $u['display_role'],
+            'has_telegram' => (int)$u['has_telegram'] === 1,
+            'is_selected'  => $isSelected,
+        ];
+    }
+    return $out;
+}
+
 function soAutoLockOrders($pdo, $supplierId, $deliveryDate) {
     $pdo->prepare("
         UPDATE so_orders SET status = 'locked', updated_at = NOW()
@@ -2004,10 +2053,12 @@ if ($soAction === 'admin') {
             error_log('[so settings] box warn failed: ' . $e->getMessage());
         }
 
+        $notifyUsers = soGetSupplierNotifyUsers($pdo, $supplierId);
         soRespond([
             'settings' => $settings,
             'overrides' => $overridesList,
-            'notify_users' => soGetSupplierNotifyUsers($pdo, $supplierId),
+            'notify_users' => $notifyUsers,
+            'summary_candidates' => soGetSummaryCandidates($pdo, $supplierId, $notifyUsers),
             'box_size_warnings' => $boxWarn,
         ]);
     }
