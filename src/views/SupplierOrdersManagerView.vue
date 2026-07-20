@@ -2307,7 +2307,12 @@ async function exportExcel() {
     };
 
     const XLSX = await import('xlsx-js-style');
-    const supplierName = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value))?.short_name || 'Поставщик';
+    // В заголовке листа — полное название поставщика и наше юрлицо-заказчик:
+    // поставщик открывает файл отдельно от письма, и по листу должно быть
+    // понятно, кому заявка и от кого.
+    const supRow = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value)) || null;
+    const supplierName = (supRow?.full_name || '').trim() || supRow?.short_name || 'Поставщик';
+    const fromLegalEntity = (supRow?.legal_entity || '').trim();
     const wb = XLSX.utils.book_new();
 
     // ═══ По одному листу на каждую дату ═══
@@ -2324,6 +2329,7 @@ async function exportExcel() {
       const dateFmt = fmtDateDDMM(date);
       const ws = buildSoOrderSheet(XLSX, {
         supplierName,
+        fromLegalEntity,
         dateFmt,
         products: prods,
         restaurants: rests,

@@ -49,6 +49,7 @@ if (!jsonPath || !outPath) {
 const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 const supplierName = data.supplier_name || 'Поставщик';
 const dateFmt = data.delivery_date_fmt || '';
+const fromLegalEntity = data.from_legal_entity || '';
 // Имя листа Excel не может содержать : \ / ? * [ ] — иначе XLSX.write падает.
 // Чистим их (заменяем на пробел), схлопываем пробелы, обрезаем до 28 символов.
 // Если после чистки пусто — берём запасное имя, лист не может быть безымянным.
@@ -108,6 +109,7 @@ for (const key of Object.keys(rawItems)) {
 // ── Один лист общим модулем; на сервере авто-подача не подсвечивается. ──
 const ws = buildSoOrderSheet(XLSX, {
     supplierName,
+    fromLegalEntity,
     dateFmt,
     products,
     restaurants,

@@ -166,12 +166,16 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
         'items_count' => 0, 'error' => null,
     ];
 
-    $supRow = $pdo->prepare("SELECT short_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
+    $supRow = $pdo->prepare("SELECT short_name, full_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
     $supRow->execute([$supplierId]);
     $sup = $supRow->fetch();
     if (!$sup) { $out['status'] = 'no_schedule'; return $out; }
     $out['supplier'] = $sup;
     $supName = $sup['short_name'];
+    // Полное название — для того, что читает поставщик (заголовок отчёта,
+    // письмо). Имя файла и имя листа остаются короткими: лист в Excel
+    // ограничен 31 знаком и не терпит кавычек, а длинное имя файла неудобно.
+    $supFullName = trim((string)($sup['full_name'] ?? '')) ?: $supName;
     $supplierGroup = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
     $supplierEntities = getEntitiesInGroup($supplierGroup);
     $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
@@ -202,7 +206,7 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     $submittedNums = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
 
     $ordStmt = $pdo->prepare("
-        SELECT o.restaurant_number, oi.sku, oi.product_name,
+        SELECT o.restaurant_number, o.legal_entity, oi.sku, oi.product_name,
                COALESCE(oi.admin_qty, oi.quantity) AS qty
         FROM so_orders o JOIN so_order_items oi ON oi.order_id = o.id
         WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
@@ -211,8 +215,14 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     $ordStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
     $orderRows = $ordStmt->fetchAll();
 
+    // От кого заявка: юрлица ресторанов, реально приславших позиции. В группе
+    // BK_VM это может быть и «Бургер БК», и «Воглия Матта» — тогда перечисляем
+    // оба. Если позиций нет, подписываемся юрлицом из карточки поставщика.
+    $fromEntities = [];
     $productsOrdered = []; $pivot = [];
     foreach ($orderRows as $row) {
+        $le = trim((string)($row['legal_entity'] ?? ''));
+        if ($le !== '' && !in_array($le, $fromEntities, true)) $fromEntities[] = $le;
         $sku = $row['sku'];
         if (!isset($productsOrdered[$sku])) $productsOrdered[$sku] = ['sku' => $sku, 'name' => $row['product_name']];
         $rn = $row['restaurant_number'];
@@ -272,6 +282,10 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     $out['submitted_count'] = count(array_intersect($expectedNums, array_keys($submittedNums)));
     $out['items_count'] = count($orderRows);
     $out['filename'] = "Заявка {$supName} на {$dateFmt}.xlsx";
+    sort($fromEntities);
+    $fromLabel = $fromEntities ? implode(', ', $fromEntities) : trim((string)($sup['legal_entity'] ?? ''));
+    $out['supplier_full_name'] = $supFullName;
+    $out['from_legal_entity'] = $fromLabel;
     $out['products_map'] = $productsOrdered;
     $colTotals = [];
     foreach ($pivot as $rn => $pmap) {
@@ -301,7 +315,8 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     $palletMetrics = $xlsxCfg['xlsx_pallet_metrics'] ?? [];
     if (!is_array($palletMetrics)) $palletMetrics = [];
     $payload = [
-        'supplier_name' => $supName, 'delivery_date_fmt' => $dateFmt, 'sheet_name' => $supName,
+        'supplier_name' => $supFullName, 'delivery_date_fmt' => $dateFmt, 'sheet_name' => $supName,
+        'from_legal_entity' => $fromLabel,
         'products' => $productsOut, 'restaurants' => $restaurantsOut, 'items' => $itemsOut,
         'options' => [
             'dropEmptyRows' => !empty($xlsxCfg['xlsx_drop_empty']),
@@ -526,7 +541,7 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     }
 
     // Адреса
-    $addr = $pdo->prepare("SELECT short_name, email, cc_emails FROM suppliers WHERE id = ?");
+    $addr = $pdo->prepare("SELECT short_name, full_name, email, cc_emails FROM suppliers WHERE id = ?");
     $addr->execute([$supplierId]);
     $s = $addr->fetch();
     $toEmail = trim((string)($s['email'] ?? ''));
@@ -564,7 +579,10 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
         }
     }
 
-    $supName = $s['short_name'];
+    // В теме и тексте письма — полное название, если оно заполнено.
+    $supName = trim((string)($s['full_name'] ?? '')) ?: $s['short_name'];
+    // От чьего имени идёт заявка — юрлица ресторанов, приславших позиции.
+    $fromLegal = trim((string)($sum['from_legal_entity'] ?? ''));
     $dateFmt = $sum['date_fmt'];
     $subject = "Заявки на {$dateFmt} — {$supName}";
     $bodyHtml = renderMailHtml([
@@ -572,6 +590,8 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
         'preview' => "Сводка заявок на {$dateFmt}",
         'intro'   => 'Здравствуйте!',
         'body'    => "<p>Направляем заявки ресторанов на доставку <b>{$dateFmt}</b>.</p>"
+                   . ($fromLegal !== '' ? "<p><b>От кого:</b> " . htmlspecialchars($fromLegal, ENT_QUOTES, 'UTF-8') . "</p>" : '')
+                   . "<p><b>Кому:</b> " . htmlspecialchars($supName, ENT_QUOTES, 'UTF-8') . "</p>"
                    . "<p>Ресторанов: <b>{$sum['submitted_count']}</b> из <b>{$sum['restaurants_count']}</b>. Позиций: <b>{$ic}</b>.</p>"
                    . "<p>Подробности — в приложенном файле Excel.</p>",
         'footer'  => 'Это письмо сформировано автоматически системой отдела закупок.',

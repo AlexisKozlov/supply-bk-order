@@ -8,7 +8,8 @@
  * buildSoOrderSheet(XLSX, opts) -> ws (готовый лист для book_append_sheet)
  *
  * opts:
- *   supplierName  — короткое имя поставщика (для заголовка листа)
+ *   supplierName  — имя поставщика для заголовка листа (полное, если задано)
+ *   fromLegalEntity — от чьего имени заявка (юрлицо-заказчик), для заголовка
  *   dateFmt       — дата доставки в формате ДД.ММ.ГГГГ
  *   products      — массив отображаемых товаров (после buildDisplayProducts):
  *                   { sku, product_name, is_grouped, source_skus,
@@ -24,6 +25,7 @@
  */
 export function buildSoOrderSheet(XLSX, {
   supplierName = 'Поставщик',
+  fromLegalEntity = '',
   dateFmt = '',
   products = [],
   restaurants = [],
@@ -174,7 +176,11 @@ export function buildSoOrderSheet(XLSX, {
   for (const m of metrics) header.push(METRIC_LABELS[m]);
   header.push('Пометка');
 
-  const aoa = [[`Заявка ${supplierName} на ${dateFmt}`], header];
+  // В заголовке видно и кому заявка, и от кого она — поставщик получает файл
+  // отдельно от письма, и по одному листу должно быть понятно, чей это заказ.
+  const titleFrom = String(fromLegalEntity || '').trim();
+  const title = `Заявка ${supplierName} на ${dateFmt}` + (titleFrom ? ` · от ${titleFrom}` : '');
+  const aoa = [[title], header];
   const rowMeta = [];
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
 
