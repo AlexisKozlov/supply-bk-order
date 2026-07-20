@@ -62,6 +62,7 @@ export const ACTIVITY_LABELS = {
   collection_created: 'создал сбор остатков',
   collection_closed: 'закрыл сбор остатков',
   collection_reopened: 'переоткрыл сбор остатков',
+  collection_deadline_set: 'изменил срок сдачи остатков',
   stock_collection_cell_saved: 'заполнил остаток по ячейке',
   // Распределение
   distribution_created: 'создал распределение',

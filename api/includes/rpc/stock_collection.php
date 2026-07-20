@@ -13,6 +13,7 @@
         $name = mb_substr($body['name'] ?? '', 0, 255);
         $products = $body['products'] ?? []; // [{name, sku?, unit}]
         $uname = $authUserName ?: ($body['user_name'] ?? '');
+        $deadlineAt = scNormalizeDeadline($body['deadline_at'] ?? null);
         if (!$le || !$name || empty($products)) respond(['error' => 'Не все параметры указаны'], 400);
         if (!checkLegalEntityAccess($authUser, $le)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         if (count($products) > 5000) respond(['error' => 'Слишком много товаров (макс. 5000)'], 400);
@@ -23,8 +24,8 @@
         try {
             // legal_entity — кто создал (для аудита), legal_entity_group —
             // область видимости (BK+VM делят сборы, PS отдельно).
-            $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, legal_entity_group, name, created_by) VALUES (?, ?, ?, ?)");
-            $s->execute([$le, getEntityGroup($le), $name, $uname]);
+            $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, legal_entity_group, name, deadline_at, created_by) VALUES (?, ?, ?, ?, ?)");
+            $s->execute([$le, getEntityGroup($le), $name, $deadlineAt, $uname]);
             $collId = $pdo->lastInsertId();
             $productCols = ['collection_id', 'product_name', 'product_sku', 'unit'];
             if ($hasPrice) $productCols[] = 'price';
@@ -57,11 +58,17 @@
             error_log('sc_create_collection error: ' . $e->getMessage());
             respond(['error' => 'Ошибка создания сбора'], 500);
         }
-        // Уведомляем рестораны о новом сборе (только Telegram-бот, без публичной ссылки)
+        // Уведомляем рестораны о новом сборе (Telegram-бот + web push, без публичной ссылки)
         scNotifyRestaurants($pdo, $collId, $name, count($products));
+        // Письма уходят фоном: одна отправка ~1 сек, ресторанов под 60 — в
+        // запросе это не удержать. Если фон не стартовал, разошлёт крон.
+        require_once __DIR__ . '/../stock_collection_mail.php';
+        $pdo->prepare("UPDATE stock_collections SET mail_start_requested = 1 WHERE id = ?")->execute([$collId]);
+        $mailPlanned = scMailPendingCount($pdo, (int)$collId, 'start');
+        scMailSpawn((int)$collId, 'start');
 
-        auditLog($pdo, 'collection_created', 'stock_collection', $collId, $uname, ['legal_entity' => $le, 'name' => $name, 'products_count' => count($products)]);
-        respond(['id' => $collId]);
+        auditLog($pdo, 'collection_created', 'stock_collection', $collId, $uname, ['legal_entity' => $le, 'name' => $name, 'products_count' => count($products), 'deadline_at' => $deadlineAt]);
+        respond(['id' => $collId, 'emails_planned' => $mailPlanned]);
     }
 
     // Повторная отправка уведомлений ресторанам о сборе
@@ -78,7 +85,36 @@
         $products->execute([$collId]);
         $cnt = $products->fetchColumn();
         $sent = scNotifyRestaurants($pdo, $collId, $c['name'], $cnt);
-        respond(['success' => true, 'sent' => $sent]);
+        // Письма — фоном, как и при создании сбора.
+        require_once __DIR__ . '/../stock_collection_mail.php';
+        $mailPlanned = scMailPendingCount($pdo, $collId, 'manual');
+        $mailSpawned = $mailPlanned > 0 ? scMailSpawn($collId, 'manual') : true;
+        respond([
+            'success' => true,
+            'sent' => $sent,
+            'emails_planned' => $mailPlanned,
+            'emails_queued' => $mailSpawned,
+        ]);
+    }
+
+    // Изменить срок «заполнить до» у существующего сбора (можно и очистить).
+    if ($fn === 'sc_set_deadline') {
+        requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $collId = intval($body['collection_id'] ?? 0);
+        if (!$collId) respond(['error' => 'collection_id required'], 400);
+        $collCheck = $pdo->prepare("SELECT legal_entity_group, name FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Не найден'], 404);
+        if ($authUser && !checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) {
+            respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
+        $deadlineAt = scNormalizeDeadline($body['deadline_at'] ?? null);
+        $pdo->prepare("UPDATE stock_collections SET deadline_at = ? WHERE id = ?")->execute([$deadlineAt, $collId]);
+        auditLog($pdo, 'collection_deadline_set', 'stock_collection', $collId, $authUserName, [
+            'name' => $collRow['name'], 'deadline_at' => $deadlineAt,
+        ]);
+        respond(['success' => true, 'deadline_at' => $deadlineAt]);
     }
 
     if ($fn === 'sc_save_prices') {

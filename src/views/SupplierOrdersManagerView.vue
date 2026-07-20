@@ -369,7 +369,7 @@
               <td>{{ o.total_qty ? (Number.isInteger(+o.total_qty) ? +o.total_qty : (+o.total_qty).toFixed(2)) : '—' }}</td>
               <td class="rom-td-actions">
                 <button class="rom-btn-sm" @click="viewOrder(o.id)">Открыть</button>
-                <button class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id)">Удалить</button>
+                <button class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id, o.status)">Удалить</button>
               </td>
             </tr>
           </tbody>
@@ -631,6 +631,10 @@
           <label class="so-settings-check" title="Если включено — после дедлайна система сама отправит сводку заявок на почту поставщика">
             <input type="checkbox" :checked="!!settings.auto_email_summary" @change="toggleAutoEmail" />
             <span>Авто-письмо со сводкой поставщику в дедлайн</span>
+          </label>
+          <label class="so-settings-check" title="Рестораны, которые в этот день реально что-то заказали, получат видимую копию письма поставщику">
+            <input type="checkbox" :checked="!!settings.email_cc_restaurants" @change="toggleCcRestaurants" />
+            <span>Ставить рестораны с заявками в копию письма</span>
           </label>
         </div>
 
@@ -911,7 +915,7 @@ const now = ref(Date.now());
 let overviewTimer = null;
 
 // Settings (постоянный режим приёма)
-const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null });
+const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, email_cc_restaurants: 0, default_deadline_time: '14:00:00', pause_message: null });
 // Для какого поставщика реально загружены настройки (id). null — настройки не свои/не загружены.
 const settingsLoadedFor = ref(null);
 const defaultDeadline = ref('14:00');
@@ -1210,7 +1214,7 @@ async function loadSettings() {
   const sid = currentSupplierId.value;
   try {
     const data = await store.adminGetSettings(sid);
-    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, default_deadline_time: '14:00:00', pause_message: null, xlsx_drop_empty: 0, xlsx_pallet_metrics: [] };
+    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, email_cc_restaurants: 0, default_deadline_time: '14:00:00', pause_message: null, xlsx_drop_empty: 0, xlsx_pallet_metrics: [] };
     // Отмечаем владельца настроек только если сервер вернул настоящие настройки.
     // Дефолт-заглушка и ошибка запроса владельца не дают.
     settingsLoadedFor.value = data.settings ? sid : null;
@@ -1249,6 +1253,7 @@ function currentSettingsPayload(overrides = {}) {
     is_accepting_orders: settings.value.is_accepting_orders,
     auto_submit_previous: settings.value.auto_submit_previous ? 1 : 0,
     auto_email_summary: settings.value.auto_email_summary ? 1 : 0,
+    email_cc_restaurants: settings.value.email_cc_restaurants ? 1 : 0,
     default_deadline_time: defaultDeadline.value + ':00',
     pause_message: pauseMessage.value || null,
     ...overrides,
@@ -1283,6 +1288,16 @@ async function toggleAutoEmail(ev) {
   const next = ev.target.checked ? 1 : 0;
   try {
     await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ auto_email_summary: next }));
+    await loadSettings();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  }
+}
+
+async function toggleCcRestaurants(ev) {
+  const next = ev.target.checked ? 1 : 0;
+  try {
+    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ email_cc_restaurants: next }));
     await loadSettings();
   } catch (e) {
     toast.error('Ошибка', e.message);
@@ -2151,8 +2166,12 @@ async function viewOrder(orderId) {
   }
 }
 
-async function deleteOrder(orderId) {
-  const ok = await showConfirm('Удалить заявку?', 'Действие нельзя отменить.', { danger: true, okText: 'Удалить' });
+async function deleteOrder(orderId, status = '') {
+  // День уже закрыт — заявка, скорее всего, ушла поставщику, предупреждаем прямо.
+  const text = status === 'locked'
+    ? 'День уже закрыт, и эта заявка могла попасть в сводку поставщику. Действие нельзя отменить.'
+    : 'Действие нельзя отменить.';
+  const ok = await showConfirm('Удалить заявку?', text, { danger: true, okText: 'Удалить' });
   if (!ok) return;
   try {
     await store.adminDeleteOrder(orderId);

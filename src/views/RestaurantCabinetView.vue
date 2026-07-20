@@ -655,6 +655,9 @@
                 </template>
                 <template v-else>Приём заявок на эту дату закрыт</template>
               </div>
+              <div v-if="supMinOrderValue(sup)" class="sup-minorder-note">
+                Минимальный заказ у поставщика — {{ supFmtNum(supMinOrderValue(sup)) }} {{ supMinOrderUnitLabel(sup) }}
+              </div>
               <div v-if="supProductsLoading[sup.id]" class="mini-loader"><div class="cab-spin"></div></div>
               <template v-else>
                 <SupplierPreviousOrder
@@ -699,6 +702,14 @@
                   <div v-if="supFilledCount(sup.id) > 0" class="submit-summary">
                     <span><strong>{{ supFilledCount(sup.id) }}</strong> поз.</span>
                     <span><strong>{{ supFilledTotal(sup.id) }}</strong> шт.</span>
+                    <span v-if="supMinOrderValue(sup) && supMinOrderTotal(sup) > 0">
+                      <strong>{{ supMinOrderFmt(sup, supMinOrderTotal(sup)) }}</strong> {{ supMinOrderUnitLabel(sup) }}
+                    </span>
+                  </div>
+                  <div v-if="supBelowMinOrder(sup)" class="sup-minorder-warn">
+                    До минимального заказа не хватает
+                    <strong>{{ supMinOrderFmt(sup, supMinOrderValue(sup) - supMinOrderTotal(sup)) }} {{ supMinOrderUnitLabel(sup) }}</strong>.
+                    Заявку не примут — добавьте количество.
                   </div>
                   <div class="submit-buttons-row">
                     <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-danger-outline btn-lg"
@@ -706,7 +717,7 @@
                       Поставка не нужна
                     </button>
                     <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-primary btn-lg"
-                      :disabled="supFilledCount(sup.id) === 0 || supSubmitting[sup.id] || supHasErrors(sup.id)" @click="supHandleSubmit(sup)">
+                      :disabled="supFilledCount(sup.id) === 0 || supSubmitting[sup.id] || supHasErrors(sup.id) || supBelowMinOrder(sup)" @click="supHandleSubmit(sup)">
                       <span v-if="supSubmitting[sup.id]" class="cab-spin cab-spin-sm"></span>
                       {{ supCurrentDateInfo(sup)?.order ? 'Обновить' : 'Отправить' }}
                     </button>
@@ -2566,6 +2577,45 @@ function supHasErrors(supId) { return (supProducts[supId] || []).some(p => supHa
 function supFilledCount(supId) { return Object.values(supQuantities[supId] || {}).filter(v => v > 0).length; }
 function supFilledTotal(supId) { return Object.values(supQuantities[supId] || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0); }
 
+// ═══ Минимальный заказ поставщика ═══
+// Поставщик может требовать минимум на заявку (в кг или штуках). Раньше про
+// него узнавали только из ошибки при отправке — теперь показываем сразу.
+function supMinOrderValue(sup) {
+  const v = parseFloat(sup?.min_order_value);
+  return v > 0 ? v : null;
+}
+function supMinOrderUnitLabel(sup) { return sup?.min_order_unit === 'pieces' ? 'шт' : 'кг'; }
+
+// Итог заявки в единице минимума. Кг считаем из веса коробки, как и сервер:
+// если у товара нет qty_per_box, позицию пропускаем — иначе цифра врала бы.
+function supMinOrderTotal(sup) {
+  if (!supMinOrderValue(sup)) return 0;
+  const byPieces = sup?.min_order_unit === 'pieces';
+  let total = 0;
+  for (const p of supProducts[sup.id] || []) {
+    const qty = parseFloat(supQuantities[sup.id]?.[p.sku]) || 0;
+    if (qty <= 0) continue;
+    if (byPieces) { total += qty; continue; }
+    const perBox = parseFloat(p.qty_per_box) || 0;
+    const wNetto = parseFloat(p.weight_netto) || 0;
+    if (perBox <= 0) continue;
+    total += (qty / perBox) * wNetto / 1000;
+  }
+  return total;
+}
+function supMinOrderFmt(sup, value) {
+  const n = parseFloat(value) || 0;
+  return sup?.min_order_unit === 'pieces' ? String(Math.round(n)) : n.toFixed(1);
+}
+// Недобор — только при итоге больше нуля: пустая заявка и незаполненные веса
+// не должны выглядеть как нарушение (та же логика, что на сервере).
+function supBelowMinOrder(sup) {
+  const min = supMinOrderValue(sup);
+  if (!min) return false;
+  const total = supMinOrderTotal(sup);
+  return total > 0 && total < min - 0.001;
+}
+
 async function supHandleRepeatPrevious(sup) {
   const prev = supPreviousOrders[sup.id];
   if (!prev?.items?.length) return;
@@ -4259,6 +4309,18 @@ onUnmounted(() => {
 .sup-skip-banner strong { font-size: 13px; }
 .sup-skip-icon { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sup-skip-hint { font-size: 11px; opacity: 0.75; }
+
+/* Минимальный заказ поставщика: спокойная подпись сверху и красное
+   предупреждение внизу, когда набрано меньше минимума. */
+.sup-minorder-note {
+  padding: 7px 14px; background: #f8f6f4; border-bottom: 1px solid #EDE8E3;
+  color: #6b625b; font-size: 12px; text-align: center;
+}
+.sup-minorder-warn {
+  padding: 8px 12px; margin-bottom: 8px; border-radius: 8px;
+  background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+  font-size: 12px; line-height: 1.4; text-align: center;
+}
 
 
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }

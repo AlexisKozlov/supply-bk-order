@@ -1211,6 +1211,7 @@ const AUDIT_ACTION_LABELS = {
   // Сбор остатков
   stock_collection_created: 'Создан', collection_created: 'Создан', collection_closed: 'Закрыт',
   collection_reopened: 'Переоткрыт', stock_collection_cell_saved: 'Ячейка остатков',
+  collection_deadline_set: 'Срок сдачи',
   // Залоговые цены
   deposit_price_updated: 'Залоговая цена', deposit_prices_imported: 'Импорт залог. цен',
   // Распределение

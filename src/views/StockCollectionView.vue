@@ -30,6 +30,10 @@
         <div class="sc-card-meta">
           {{ c.created_by || '---' }} · {{ fmtDate(c.created_at) }}
         </div>
+        <div v-if="c.deadline_at" class="sc-card-deadline" :class="{ late: c.status === 'active' && deadlinePassed(c.deadline_at) }">
+          ⏰ до {{ fmtDeadline(c.deadline_at) }}
+          <span v-if="c.status === 'active' && deadlinePassed(c.deadline_at)">· срок вышел</span>
+        </div>
       </div>
     </div>
 
@@ -42,6 +46,18 @@
           <span class="sc-tag" :class="activeCollection.status === 'active' ? 'green' : 'gray'">
             {{ activeCollection.status === 'active' ? 'Активен' : 'Закрыт' }}
           </span>
+          <button
+            class="sc-deadline-chip"
+            :class="{ late: activeCollection.status === 'active' && deadlinePassed(activeCollection.deadline_at) }"
+            @click="openDeadline"
+            title="Изменить срок сдачи"
+          >
+            <template v-if="activeCollection.deadline_at">
+              ⏰ до {{ fmtDeadline(activeCollection.deadline_at) }}
+              <span v-if="activeCollection.status === 'active' && deadlinePassed(activeCollection.deadline_at)">· срок вышел</span>
+            </template>
+            <template v-else>⏰ срок не задан</template>
+          </button>
         </div>
         <div class="sc-detail-actions">
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying" title="Отправит напоминание в Telegram только тем ресторанам, кто ещё не заполнил остатки">
@@ -397,6 +413,30 @@
         </div>
       </div>
 
+      <!-- Deadline modal -->
+      <div v-if="showDeadline" class="modal">
+        <div class="modal-box" style="max-width: 420px;">
+          <div class="sc-modal-head">
+            <h3>Срок сдачи остатков</h3>
+            <button class="sc-x" @click="showDeadline = false">✕</button>
+          </div>
+          <div class="sc-field">
+            <label>Заполнить до</label>
+            <input v-model="deadlineValue" type="datetime-local" class="sc-input full" />
+            <div class="sc-field-hint">
+              Оставьте поле пустым, чтобы убрать срок. Напоминания уходят за сутки
+              и за 2 часа до срока — только тем, кто ещё не сдал.
+            </div>
+          </div>
+          <div class="sc-modal-foot">
+            <button class="sc-btn outline" @click="showDeadline = false">Отмена</button>
+            <button class="sc-btn fill" @click="saveDeadline" :disabled="savingDeadline">
+              {{ savingDeadline ? '...' : 'Сохранить' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Create modal -->
       <div v-if="showCreate" class="modal" @click.self="tryCloseCreate">
         <div class="modal-box" style="max-width: 600px;">
@@ -408,6 +448,15 @@
           <div class="sc-field">
             <label>Название</label>
             <input v-model="newName" type="text" class="sc-input full" :placeholder="'Сбор ' + todayStr"/>
+          </div>
+
+          <div class="sc-field">
+            <label>Заполнить до</label>
+            <input v-model="newDeadline" type="datetime-local" class="sc-input full" />
+            <div class="sc-field-hint">
+              Срок попадёт в письмо и в кабинет ресторана. За сутки и за 2 часа до срока
+              тем, кто не сдал, уйдёт напоминание. Можно очистить — тогда срока не будет.
+            </div>
           </div>
 
           <div class="sc-field">
@@ -645,6 +694,7 @@ const collectionData = ref(null);
 const showCreate = ref(false);
 const creating = ref(false);
 const newName = ref('');
+const newDeadline = ref('');
 const newProducts = ref([makeProductRow()]);
 const canCreate = computed(() => newName.value.trim() && newProducts.value.some(p => p.name.trim() || p.fromDb));
 
@@ -655,6 +705,9 @@ const confirmModal = ref({ show: false, title: '', text: '', btnText: '', danger
 
 // Rename
 const showRename = ref(false);
+const showDeadline = ref(false);
+const deadlineValue = ref('');
+const savingDeadline = ref(false);
 const renameName = ref('');
 
 // Filter & Sort
@@ -836,8 +889,38 @@ async function loadCollections() {
   } finally { loading.value = false; }
 }
 
+// Срок по умолчанию — завтра 10:00. Формат как у input[type=datetime-local].
+function defaultDeadlineValue() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(10, 0, 0, 0);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T10:00`;
+}
+
+// '2026-07-21 10:00:00' (из БД) → '21.07.2026 в 10:00'
+function fmtDeadline(raw) {
+  if (!raw) return '';
+  const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return '';
+  return `${m[3]}.${m[2]}.${m[1]} в ${m[4]}:${m[5]}`;
+}
+
+// Строка из БД → значение для input[type=datetime-local]
+function deadlineToInput(raw) {
+  if (!raw) return '';
+  const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}` : '';
+}
+
+function deadlinePassed(raw) {
+  const v = deadlineToInput(raw);
+  return !!v && new Date(v.replace('T', ' ').replace(/-/g, '/')) < new Date();
+}
+
 function openCreateModal() {
   newName.value = '';
+  newDeadline.value = defaultDeadlineValue();
   newProducts.value = [makeProductRow()];
   showCreate.value = true;
 }
@@ -846,6 +929,7 @@ function duplicateCollection() {
   const products = collectionData.value?.products || [];
   if (!products.length) { toastStore.error('Нет товаров для копирования'); return; }
   newName.value = (activeCollection.value?.name || 'Сбор') + ' (копия)';
+  newDeadline.value = defaultDeadlineValue();
   newProducts.value = products.map(p => ({
     ...makeProductRow(),
     name: p.product_name || '',
@@ -887,11 +971,15 @@ async function createCollection() {
     const { data } = await db.rpc('sc_create_collection', {
       legal_entity: orderStore.settings.legalEntity,
       name: newName.value.trim() || `Сбор ${todayStr}`,
+      deadline_at: newDeadline.value || null,
       products,
       user_name: userStore.currentUser?.name || '',
     });
     if (data?.id) {
-      toastStore.success('Создано', 'Сессия сбора создана');
+      const mails = data.emails_planned || 0;
+      toastStore.success('Создано', mails
+        ? `Сессия сбора создана. Письма уходят ${mails} ${mails === 1 ? 'ресторану' : 'ресторанам'}`
+        : 'Сессия сбора создана');
       showCreate.value = false;
       await loadCollections();
       const coll = collections.value.find(c => c.id === data.id);
@@ -964,10 +1052,15 @@ async function notifyRestaurants() {
   try {
     const { data, error } = await db.rpc('sc_notify_restaurants', { collection_id: activeCollection.value.id })
     if (error) throw new Error(error)
-    if ((data?.sent || 0) === 0) {
-      toastStore.show('Напоминать некому — все уже заполнили или ни у кого нет подписки на Telegram')
+    const tg = data?.sent || 0
+    const mails = data?.emails_planned || 0
+    if (!tg && !mails) {
+      toastStore.show('Напоминать некому — все уже заполнили')
     } else {
-      toastStore.show(`Напоминание отправлено ${data.sent} ${data.sent === 1 ? 'ресторану' : 'ресторанам'}`)
+      const parts = []
+      if (tg) parts.push(`Telegram: ${tg}`)
+      if (mails) parts.push(`писем: ${mails}`)
+      toastStore.show('Напоминание отправлено — ' + parts.join(', '))
     }
   } catch (e) { toastStore.error('Ошибка', e.message || e) }
   finally { notifying.value = false }
@@ -1031,6 +1124,30 @@ async function doDeleteCollection() {
 }
 
 // Rename
+function openDeadline() {
+  deadlineValue.value = deadlineToInput(activeCollection.value?.deadline_at);
+  showDeadline.value = true;
+}
+async function saveDeadline() {
+  savingDeadline.value = true;
+  try {
+    const { data, error } = await db.rpc('sc_set_deadline', {
+      collection_id: activeCollection.value.id,
+      deadline_at: deadlineValue.value || null,
+    });
+    if (error) throw new Error(error);
+    activeCollection.value.deadline_at = data?.deadline_at || null;
+    const c = collections.value.find(x => x.id === activeCollection.value.id);
+    if (c) c.deadline_at = activeCollection.value.deadline_at;
+    showDeadline.value = false;
+    toastStore.success('Сохранено', activeCollection.value.deadline_at
+      ? `Срок: ${fmtDeadline(activeCollection.value.deadline_at)}`
+      : 'Срок убран');
+  } catch (e) {
+    toastStore.error('Ошибка', e.message || 'Не удалось сохранить срок');
+  } finally { savingDeadline.value = false; }
+}
+
 function openRename() {
   renameName.value = activeCollection.value.name;
   showRename.value = true;

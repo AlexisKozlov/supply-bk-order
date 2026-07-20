@@ -615,6 +615,23 @@ function notifyProtocolParticipants($pdo, $protocolId, $topic, $date, $participa
     }
 }
 
+/**
+ * Дедлайн сбора остатков из интерфейса → значение для БД.
+ *
+ * Ждём 'YYYY-MM-DDTHH:MM' или 'YYYY-MM-DD HH:MM' (время минское, как его ввёл
+ * закупщик — MariaDB работает в том же поясе). Пустое или мусор → NULL, дедлайн
+ * необязателен.
+ */
+function scNormalizeDeadline($raw): ?string {
+    $s = trim((string)($raw ?? ''));
+    if ($s === '') return null;
+    $s = str_replace('T', ' ', $s);
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/', $s, $m)) return null;
+    if (!checkdate((int)$m[2], (int)$m[3], (int)$m[1])) return null;
+    if ((int)$m[4] > 23 || (int)$m[5] > 59) return null;
+    return sprintf('%s-%s-%s %s:%s:00', $m[1], $m[2], $m[3], $m[4], $m[5]);
+}
+
 // Уведомление ресторанов о новом сборе остатков.
 // Уведомляются только рестораны той же группы юрлиц, что и сбор (BK_VM или PS).
 function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCount) {
@@ -622,9 +639,11 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     if (!$botToken) return 0;
 
     // Группа сбора → группа подписанных ресторанов (через restaurants.legal_entity_group)
-    $g = $pdo->prepare("SELECT legal_entity_group FROM stock_collections WHERE id = ?");
+    $g = $pdo->prepare("SELECT legal_entity_group, deadline_at FROM stock_collections WHERE id = ?");
     $g->execute([$collectionId]);
-    $group = $g->fetchColumn() ?: 'BK_VM';
+    $collRow = $g->fetch() ?: [];
+    $group = ($collRow['legal_entity_group'] ?? '') ?: 'BK_VM';
+    $deadlineAt = $collRow['deadline_at'] ?? null;
 
     // Подписанные рестораны нужной группы с включёнными уведомлениями о сборах,
     // НО только те, кто ещё ничего не заполнил по этому сбору. Если хоть одна
@@ -650,8 +669,11 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     $text = "📋 <b>Новый сбор остатков</b>\n";
     $text .= "─────────────────────\n";
     $text .= "📝 {$cName}\n";
-    $text .= "📦 Товаров: " . (int)$productsCount . "\n\n";
-    $text .= "Заполните остатки по вашему ресторану:";
+    $text .= "📦 Товаров: " . (int)$productsCount . "\n";
+    if ($deadlineAt && ($dTs = strtotime($deadlineAt))) {
+        $text .= "⏰ Заполнить до " . date('d.m.Y', $dTs) . " в " . date('H:i', $dTs) . "\n";
+    }
+    $text .= "\nЗаполните остатки по вашему ресторану:";
 
     // Заполнить можно в боте или в кабинете. Ссылка в кабинет ведёт СРАЗУ в этот
     // сбор: сборов бывает несколько, и общий раздел открывал только самый новый —

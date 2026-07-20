@@ -2138,7 +2138,7 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
     // Сборы видны на уровне группы юрлиц (BK+VM делят, PS отдельно).
     $where = ["sc.status = 'active'", "sc.legal_entity_group = ?"];
     $params = [$group];
-    $sql = "SELECT sc.id, sc.name, sc.created_at,
+    $sql = "SELECT sc.id, sc.name, sc.created_at, sc.deadline_at,
                 (SELECT COUNT(DISTINCT scd.product_id) FROM stock_collection_data scd
                  JOIN stock_collection_products scp ON scp.id = scd.product_id AND scp.collection_id = sc.id
                  WHERE scd.restaurant_number = ?) as submitted_count,
@@ -2156,6 +2156,7 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
             'id' => (int)$row['id'],
             'name' => $row['name'],
             'created_at' => $row['created_at'],
+            'deadline_at' => $row['deadline_at'],
             'submitted' => ((int)$row['total_products'] > 0) && ((int)$row['submitted_count'] >= (int)$row['total_products']),
             'submitted_count' => (int)$row['submitted_count'],
             'total_products' => (int)$row['total_products'],
@@ -2166,6 +2167,7 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
         'collection' => [
             'id' => (int)$collection['id'],
             'name' => $collection['name'],
+            'deadline_at' => $collection['deadline_at'],
             'submitted' => ((int)$collection['total_products'] > 0) && ((int)$collection['submitted_count'] >= (int)$collection['total_products']),
             'submitted_count' => (int)$collection['submitted_count'],
             'total_products' => (int)$collection['total_products'],
@@ -2183,7 +2185,7 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
     // Сборы видны на уровне группы юрлиц (BK+VM делят, PS отдельно).
     $where = ["sc.status = 'active'", "sc.legal_entity_group = ?"];
     $params = [$group];
-    $sql = "SELECT id, name, created_at FROM stock_collections sc WHERE " . implode(' AND ', $where);
+    $sql = "SELECT id, name, created_at, deadline_at FROM stock_collections sc WHERE " . implode(' AND ', $where);
     if ($collectionId > 0) {
         $sql .= " AND sc.id = ?";
         $params[] = $collectionId;
@@ -2256,6 +2258,7 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
         'collection' => [
             'id' => (int)$coll['id'],
             'name' => $coll['name'],
+            'deadline_at' => $coll['deadline_at'],
         ],
         'products' => $products,
         'values' => $values,

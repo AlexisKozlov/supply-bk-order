@@ -98,7 +98,7 @@ function soNormalizeReminderCsv($input, array $whitelist) {
 
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) {
@@ -129,6 +129,7 @@ function soGetSupplierSettings($pdo, $supplierId) {
         'is_accepting_orders' => 1,
         'auto_submit_previous' => 0,
         'auto_email_summary' => 0,
+        'email_cc_restaurants' => 0,
         'default_deadline_time' => '14:00:00',
         'pause_message' => null,
         // Строки настроек нет → дефолты: все тайминги, только Telegram
@@ -527,6 +528,37 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     $toEmail = trim((string)($s['email'] ?? ''));
     if ($toEmail === '') return ['success' => false, 'skipped' => 'no_email', 'restaurants_count' => $rc, 'items_count' => $ic];
     $ccList = array_values(array_filter(array_map('trim', explode(',', (string)($s['cc_emails'] ?? '')))));
+
+    // Копия ресторанам, если включено в настройках поставщика. Берём только тех,
+    // кто реально что-то заказал на эту дату: отметившие «Поставка не нужна»
+    // (заявка без позиций) в копию не идут.
+    $ccSettings = soGetSupplierSettings($pdo, $supplierId);
+    if (!empty($ccSettings['email_cc_restaurants'])) {
+        // Номер ресторана сам по себе не уникален (у BK_VM и PS номера совпадают),
+        // поэтому группу берём из юрлица заявки и ищем кабинет по паре номер+группа.
+        $ordersSt = $pdo->prepare("
+            SELECT DISTINCT o.restaurant_number, o.legal_entity
+            FROM so_orders o
+            WHERE o.supplier_id = ? AND o.delivery_date = ?
+              AND EXISTS (
+                SELECT 1 FROM so_order_items oi
+                WHERE oi.order_id = o.id AND COALESCE(oi.admin_qty, oi.quantity) > 0
+              )
+        ");
+        $ordersSt->execute([$supplierId, $deliveryDate]);
+        $userSt = $pdo->prepare("
+            SELECT email FROM ro_users
+            WHERE restaurant_number = ? AND legal_entity_group = ?
+              AND is_active = 1 AND email IS NOT NULL AND email <> ''
+        ");
+        foreach ($ordersSt->fetchAll() as $o) {
+            $userSt->execute([$o['restaurant_number'], getEntityGroup($o['legal_entity'] ?? '')]);
+            foreach ($userSt->fetchAll(PDO::FETCH_COLUMN) as $email) {
+                $email = trim((string)$email);
+                if ($email !== '' && !in_array($email, $ccList, true)) $ccList[] = $email;
+            }
+        }
+    }
 
     $supName = $s['short_name'];
     $dateFmt = $sum['date_fmt'];
@@ -1946,13 +1978,14 @@ if ($soAction === 'admin') {
         // частичное сохранение: если ключа нет в теле — сохраняем текущее значение,
         // а не дефолт. Иначе частичный POST (напр. только reminder_*) затирал бы
         // приём заявок, авто-подачу/письмо, текст паузы и дедлайн.
-        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
+        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
         $curStmt->execute([$supplierId]);
         $curRow = $curStmt->fetch(PDO::FETCH_ASSOC);
         // Прежние дефолты — на случай, если строки ещё нет (первое сохранение).
         $curIsAccepting = $curRow !== false ? (int)$curRow['is_accepting_orders'] : 1;
         $curAutoSubmit = $curRow !== false ? (int)$curRow['auto_submit_previous'] : 0;
         $curAutoEmail = $curRow !== false ? (int)$curRow['auto_email_summary'] : 0;
+        $curCcRestaurants = $curRow !== false ? (int)$curRow['email_cc_restaurants'] : 0;
         $curDefaultDl = $curRow !== false ? ($curRow['default_deadline_time'] ?? '14:00:00') : '14:00:00';
         $curPauseMsg = $curRow !== false ? $curRow['pause_message'] : null;
         // Недельный режим: текущие значения (null = режим выключен / строки ещё нет).
@@ -1980,6 +2013,9 @@ if ($soAction === 'admin') {
         $autoEmailSummary = array_key_exists('auto_email_summary', $body)
             ? (!empty($body['auto_email_summary']) ? 1 : 0)
             : $curAutoEmail;
+        $ccRestaurants = array_key_exists('email_cc_restaurants', $body)
+            ? (!empty($body['email_cc_restaurants']) ? 1 : 0)
+            : $curCcRestaurants;
         if (array_key_exists('default_deadline_time', $body)) {
             $defaultDl = $body['default_deadline_time'] ?? '14:00:00';
             if (preg_match('/^(\d{1,2}):(\d{2})$/', $defaultDl, $m)) {
@@ -2050,12 +2086,13 @@ if ($soAction === 'admin') {
             $xlsxPalletCsv = $curXlsxPalletCsv;
         }
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
               auto_submit_previous = VALUES(auto_submit_previous),
               auto_email_summary = VALUES(auto_email_summary),
+              email_cc_restaurants = VALUES(email_cc_restaurants),
               default_deadline_time = VALUES(default_deadline_time),
               pause_message = VALUES(pause_message),
               weekly_deadline_dow = VALUES(weekly_deadline_dow),
@@ -2065,7 +2102,7 @@ if ($soAction === 'admin') {
               xlsx_drop_empty = VALUES(xlsx_drop_empty),
               xlsx_pallet_metrics = VALUES(xlsx_pallet_metrics),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $ccRestaurants, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
 
         // Настройки напоминаний обновляем ТОЛЬКО если ключ реально присутствует в теле
         // (паттерн notify_users): toggle приёма шлёт объект без reminder_* и не должен их обнулять.
@@ -2804,10 +2841,9 @@ if ($soAction === 'admin') {
         if ($sessionUser && !checkLegalEntityAccess($sessionUser, $orderInfo['legal_entity'] ?? '')) {
             soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
-        // Нельзя удалить заблокированную заявку
-        if (($orderInfo['status'] ?? '') === 'locked') {
-            soRespond(['error' => 'Заблокированную заявку удалить нельзя. Сначала снимите блокировку.'], 403);
-        }
+        // Статус 'locked' (день закрыт) удалению не мешает: блокировка нужна,
+        // чтобы после дедлайна заявку не правил ресторан. Закупки — владелец
+        // процесса и удаляют осознанно, предупреждение показывает фронт.
 
         $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
         $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$orderId]);
