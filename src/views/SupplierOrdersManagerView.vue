@@ -806,6 +806,18 @@
             <p class="so-section-hint" style="margin:6px 0 0 0">
               Считается по весам из справочника: у товаров должны быть заполнены вес и штук-в-коробке.
             </p>
+            <div v-if="showBoxSizeWarning" class="so-box-warn">
+              <strong>Проверьте размер коробки в справочнике.</strong>
+              У этих товаров указано «в коробке 1», хотя заказ идёт кратно большему числу —
+              похоже, в справочник попала фасовка, а не коробка. Пока это так, столбцы
+              «Коробок» и «Паллет» посчитаются неверно.
+              <ul class="so-box-warn-list">
+                <li v-for="w in boxSizeWarnings" :key="w.sku">
+                  {{ w.sku }} — {{ w.product_name }}
+                  <span class="so-notify-muted">(кратность {{ Number(w.multiplicity) }}<template v-if="w.unit_of_measure">, {{ w.unit_of_measure }}</template>)</span>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -915,6 +927,11 @@ const now = ref(Date.now());
 let overviewTimer = null;
 
 // Settings (постоянный режим приёма)
+const boxSizeWarnings = ref([]);
+// Предупреждение показываем только когда столбцы коробок/паллет реально включены —
+// на вес нетто/брутто размер коробки не влияет.
+const showBoxSizeWarning = computed(() => boxSizeWarnings.value.length > 0
+  && xlsxPalletMetrics.value.some(m => m === 'boxes' || m === 'pallets'));
 const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, email_cc_restaurants: 0, default_deadline_time: '14:00:00', pause_message: null });
 // Для какого поставщика реально загружены настройки (id). null — настройки не свои/не загружены.
 const settingsLoadedFor = ref(null);
@@ -1222,6 +1239,7 @@ async function loadSettings() {
     pauseMessage.value = settings.value.pause_message || '';
     deadlineOverrides.value = data.overrides || [];
     notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
+    boxSizeWarnings.value = Array.isArray(data.box_size_warnings) ? data.box_size_warnings : [];
     reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
     reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
     syncWeeklyFromSettings();
@@ -3133,6 +3151,15 @@ watch(
 /* «нет Telegram» — справочная пометка, а не предупреждение: жёлтым она
    повторялась в каждой второй карточке и превращалась в шум. */
 .so-notify-muted { color: var(--tk-text-muted) !important; }
+
+/* Предупреждение о неверном размере коробки в справочнике */
+.so-box-warn {
+  margin-top: var(--tk-s-3); padding: 10px 12px; border-radius: 8px;
+  background: #FEF6EC; border: 1px solid #F2C9A0; color: #8A5320;
+  font-size: var(--tk-fz-sm); line-height: var(--tk-lh-base);
+}
+.so-box-warn-list { margin: 6px 0 0; padding-left: 18px; }
+.so-box-warn-list li { margin-bottom: 2px; }
 
 /* Вкладка «Настройки» */
 .so-settings-wrap { display: flex; flex-direction: column; gap: var(--tk-s-4); max-width: 860px; }

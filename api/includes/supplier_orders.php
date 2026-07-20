@@ -232,7 +232,7 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
         $attrSkus = array_keys($productsOrdered);
         $skuPh = implode(',', array_fill(0, count($attrSkus), '?'));
         $attrStmt = $pdo->prepare("
-            SELECT sku, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto
+            SELECT sku, unit_of_measure, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto
             FROM products
             WHERE sku IN ({$skuPh}) AND legal_entity IN ({$entityPh})");
         $attrStmt->execute(array_merge($attrSkus, $supplierEntities));
@@ -242,6 +242,7 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
             // справочника одинаковы, берём первую попавшуюся строку.
             if (!isset($attrMap[$ar['sku']])) {
                 $attrMap[$ar['sku']] = [
+                    'unit_of_measure'  => (string)($ar['unit_of_measure'] ?? ''),
                     'qty_per_box'      => (float)$ar['qty_per_box'],
                     'boxes_per_pallet' => (float)$ar['boxes_per_pallet'],
                     'weight_netto'     => (float)$ar['weight_netto'],
@@ -251,9 +252,12 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
         }
         foreach ($productsOrdered as $sku => &$prod) {
             $a = $attrMap[$sku] ?? [
-                'qty_per_box' => 0, 'boxes_per_pallet' => 0,
+                'unit_of_measure' => '', 'qty_per_box' => 0, 'boxes_per_pallet' => 0,
                 'weight_netto' => 0, 'weight_brutto' => 0,
             ];
+            // Единица измерения нужна в шапке отчёта: без неё непонятно,
+            // в чём стоят цифры — в штуках, килограммах или литрах.
+            $prod['unit_of_measure']  = $a['unit_of_measure'];
             $prod['qty_per_box']      = $a['qty_per_box'];
             $prod['boxes_per_pallet'] = $a['boxes_per_pallet'];
             $prod['weight_netto']     = $a['weight_netto'];
@@ -1961,10 +1965,30 @@ if ($soAction === 'admin') {
             $ov->execute([$supplierId]);
             $overridesList = $ov->fetchAll();
         }
+        // Товары, у которых «в коробке» = 1, а заказ кратен большему числу.
+        // Обычно это значит, что в справочнике описана не коробка, а сама
+        // фасовка — и тогда столбцы «Коробок»/«Паллет» в отчёте врут
+        // (у Камако 180 кг превращались в 180 «коробок»).
+        $boxWarn = [];
+        try {
+            $bw = $pdo->prepare("
+                SELECT DISTINCT t.sku, t.product_name, t.multiplicity, p.unit_of_measure
+                FROM so_templates t
+                JOIN products p ON p.sku = t.sku
+                WHERE t.supplier_id = ? AND t.is_active = 1
+                  AND p.qty_per_box <= 1 AND t.multiplicity > 1
+                ORDER BY t.product_name");
+            $bw->execute([$supplierId]);
+            $boxWarn = $bw->fetchAll();
+        } catch (PDOException $e) {
+            error_log('[so settings] box warn failed: ' . $e->getMessage());
+        }
+
         soRespond([
             'settings' => $settings,
             'overrides' => $overridesList,
             'notify_users' => soGetSupplierNotifyUsers($pdo, $supplierId),
+            'box_size_warnings' => $boxWarn,
         ]);
     }
 

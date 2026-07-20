@@ -68,6 +68,7 @@ const products = (data.products || []).map(p => ({
     sku: p.sku,
     product_name: p.product_name ?? p.name ?? '',
     is_grouped: false,
+    unit_of_measure: p.unit_of_measure,
     qty_per_box: p.qty_per_box,
     boxes_per_pallet: p.boxes_per_pallet,
     weight_netto: p.weight_netto,

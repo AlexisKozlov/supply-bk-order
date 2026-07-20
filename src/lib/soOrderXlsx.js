@@ -156,8 +156,21 @@ export function buildSoOrderSheet(XLSX, {
   };
 
   // ═══ Заголовок таблицы ═══
+  // В шапку товара идёт единица измерения: без неё непонятно, в чём стоят
+  // цифры в столбце — в штуках, килограммах или литрах.
+  // Отдельной строкой, а не через запятую: название часто само содержит
+  // фасовку («Майонез …, 1 кг»), и приписка в конце читалась бы как её часть.
+  const unitLabel = (p) => {
+    const u = String(p.unit_of_measure || '').trim();
+    return u ? `\nед.: ${u}` : '';
+  };
   const header = ['№', 'Адрес'];
-  for (const p of prods) header.push(p.is_grouped ? `${p.product_name}\nSKU ×${p.source_skus.length}` : (p.sku ? `${p.sku}\n${p.product_name}` : p.product_name));
+  for (const p of prods) {
+    const title = p.is_grouped
+      ? `${p.product_name}\nSKU ×${p.source_skus.length}`
+      : (p.sku ? `${p.sku}\n${p.product_name}` : p.product_name);
+    header.push(title + unitLabel(p));
+  }
   for (const m of metrics) header.push(METRIC_LABELS[m]);
   header.push('Пометка');
 
@@ -282,8 +295,33 @@ export function buildSoOrderSheet(XLSX, {
     }
   }
 
-  ws['!cols'] = [{ wch: 8 }, { wch: 32 }, ...Array(prods.length).fill({ wch: 14 }), ...Array(M).fill({ wch: 11 }), { wch: 20 }];
-  ws['!rows'] = [{ hpx: 28 }, { hpx: 42 }];
+  // Ширина столбца товара — по самому длинному слову в его шапке, чтобы
+  // название не резалось посреди слова. Потолок 26 знаков: шире столбцы
+  // делают лист неудобным, остаток дочитывается переносом строки.
+  const PROD_MIN_W = 14, PROD_MAX_W = 26;
+  const prodWidths = [];
+  for (let i = 0; i < prods.length; i++) {
+    const text = String(header[2 + i] || '');
+    const longestWord = text.split(/\s|\n/).reduce((m, w) => Math.max(m, w.length), 0);
+    prodWidths.push(Math.min(PROD_MAX_W, Math.max(PROD_MIN_W, longestWord + 2)));
+  }
+  ws['!cols'] = [
+    { wch: 8 }, { wch: 32 },
+    ...prodWidths.map(w => ({ wch: w })),
+    ...Array(M).fill({ wch: 11 }), { wch: 20 },
+  ];
+
+  // Высота шапки — под реальное число строк переноса при выбранной ширине.
+  // Раньше стояли фиксированные 42px: длинные названия переносились, но
+  // нижние строки обрезались, и товар в отчёте было не опознать.
+  let headerLines = 2;
+  for (let i = 0; i < prods.length; i++) {
+    const w = prodWidths[i];
+    const lines = String(header[2 + i] || '').split('\n')
+      .reduce((sum, part) => sum + Math.max(1, Math.ceil(part.length / w)), 0);
+    headerLines = Math.max(headerLines, lines);
+  }
+  ws['!rows'] = [{ hpx: 28 }, { hpx: Math.min(140, 16 + headerLines * 14) }];
 
   return ws;
 }
