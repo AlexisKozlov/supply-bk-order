@@ -2126,7 +2126,14 @@ async function loadDynamics() {
   .pricing-header-actions { justify-content:space-between; }
   .pricing-header-btns { flex-wrap:wrap; }
 
-  .db-tab { padding:7px 12px; font-size:12px; }
+  /* Вкладки сжимались до наложения, «Динамика цен» уходила за край экрана.
+     Прокручиваем вбок вместо сжатия. */
+  .db-tabs {
+    justify-content:flex-start; flex-wrap:nowrap;
+    overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  }
+  .db-tabs::-webkit-scrollbar { display:none; }
+  .db-tab { padding:7px 12px; font-size:12px; flex:0 0 auto; white-space:nowrap; }
 
   /* Протоколы: карточки вертикально */
   .db-card { flex-direction:column; align-items:stretch; gap:6px; }
@@ -2147,8 +2154,10 @@ async function loadDynamics() {
 /* ═══ MOBILE: 480px — карточный режим ═══ */
 @media (max-width: 480px) {
   .pricing-header-actions { flex-direction:column; align-items:stretch; gap:6px; }
-  .pricing-header-btns { justify-content:stretch; }
-  .pricing-header-btns .btn { flex:1; text-align:center; }
+  /* Было `flex:1` — четыре кнопки растягивались в один ряд и резали
+     подписи («Импорт зал…»). Раскладываем в две колонки. */
+  .pricing-header-btns { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .pricing-header-btns .btn { flex:0 0 auto; width:100%; text-align:center; padding-left:8px; padding-right:8px; }
 
   .rate-control { justify-content:center; }
 

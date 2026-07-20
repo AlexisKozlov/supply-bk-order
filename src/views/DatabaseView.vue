@@ -1012,9 +1012,14 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
   .page-header { flex-wrap: wrap; gap: 8px; }
   .page-header > div { flex-wrap: wrap; width: 100%; }
 
-  /* Tabs compact */
-  .db-tabs { gap: 0; }
-  .db-tab { padding: 8px 12px; font-size: 12px; }
+  /* Tabs compact. Прокручиваем вбок: последняя вкладка («Рецептуры»)
+     обрезалась за краем экрана и была недоступна. */
+  .db-tabs {
+    gap: 0; justify-content: flex-start; flex-wrap: nowrap;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .db-tabs::-webkit-scrollbar { display: none; }
+  .db-tab { padding: 8px 12px; font-size: 12px; flex: 0 0 auto; white-space: nowrap; }
 
   /* Toggle buttons wrap */
   .db-active-toggle { font-size: 11px; padding: 4px 8px; }

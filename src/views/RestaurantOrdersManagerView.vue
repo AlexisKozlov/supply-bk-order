@@ -3935,5 +3935,17 @@ a.rom-menu-item { box-sizing: border-box; }
 @media (max-width: 700px) {
   .rom-audit-row { grid-template-columns: 48px 26px 1fr; }
   .rom-audit-goto { grid-column: 3; justify-self: end; margin-top: 4px; }
+
+  /* Верхняя панель: сетка из четырёх колонок сжимала блоки до нечитаемых
+     обрубков — «ДА/ДО», «СТАТ/ПРИЁ». На телефоне ставим их друг под друга. */
+  .rom-command {
+    grid-template-columns: 1fr;
+    gap: 12px; padding: 12px 14px;
+  }
+
+  /* Шесть счётчиков в ряд на 390px давали по 50px на карточку и резали
+     подписи («под», «коро», «пал»). Две колонки читаются. */
+  .rom-cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .rom-card { padding: 10px 8px; }
 }
 </style>
