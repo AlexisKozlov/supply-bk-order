@@ -3005,6 +3005,13 @@ watch(
 
 .so-pivot-table tbody tr:nth-child(even) { background: var(--tk-n-50); }
 .so-pivot-table tbody tr:hover { background: var(--tk-accent-soft); }
+/* Зелёная подсветка подавших заявку обязана быть сильнее зебры и наведения:
+   иначе серая полоска чётных строк перекрывает её, и зелёными выглядят
+   только нечётные строки — со стороны это читается как случайный набор. */
+.so-pivot-table tbody tr.rom-row-submitted { background: var(--tk-success-soft); }
+.so-pivot-table tbody tr.rom-row-submitted:hover {
+  background: linear-gradient(var(--tk-success-soft), var(--tk-success-soft)), var(--tk-success-soft);
+}
 
 .so-th-rest { min-width: 200px; }
 .so-th-status { min-width: 70px; text-align: center; }
