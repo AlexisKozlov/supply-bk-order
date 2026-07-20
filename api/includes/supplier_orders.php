@@ -546,7 +546,7 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     $s = $addr->fetch();
     $toEmail = trim((string)($s['email'] ?? ''));
     if ($toEmail === '') return ['success' => false, 'skipped' => 'no_email', 'restaurants_count' => $rc, 'items_count' => $ic];
-    $ccList = array_values(array_filter(array_map('trim', explode(',', (string)($s['cc_emails'] ?? '')))));
+    $ccList = soParseEmailList($s['cc_emails'] ?? '');
 
     // Копия ресторанам, если включено в настройках поставщика. Берём только тех,
     // кто реально что-то заказал на эту дату: отметившие «Поставка не нужна»
@@ -585,17 +585,22 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     $fromLegal = trim((string)($sum['from_legal_entity'] ?? ''));
     $dateFmt = $sum['date_fmt'];
     $subject = "Заявки на {$dateFmt} — {$supName}";
-    $bodyHtml = renderMailHtml([
-        'title'   => 'Заявки ресторанов',
-        'preview' => "Сводка заявок на {$dateFmt}",
-        'intro'   => 'Здравствуйте!',
-        'body'    => "<p>Направляем заявки ресторанов на доставку <b>{$dateFmt}</b>.</p>"
-                   . ($fromLegal !== '' ? "<p><b>От кого:</b> " . htmlspecialchars($fromLegal, ENT_QUOTES, 'UTF-8') . "</p>" : '')
-                   . "<p><b>Кому:</b> " . htmlspecialchars($supName, ENT_QUOTES, 'UTF-8') . "</p>"
-                   . "<p>Ресторанов: <b>{$sum['submitted_count']}</b> из <b>{$sum['restaurants_count']}</b>. Позиций: <b>{$ic}</b>.</p>"
-                   . "<p>Подробности — в приложенном файле Excel.</p>",
-        'footer'  => 'Это письмо сформировано автоматически системой отдела закупок.',
-    ]);
+    // ВАЖНО: минимальный HTML, без брендированного шаблона (renderMailHtml).
+    // Письмо теперь уходит и ресторанам на @burger-king.by, а их шлюз
+    // MailCleaner на тяжёлой вёрстке (<style>, таблицы, inline-CSS) даёт плохую
+    // оценку и кладёт письмо в спам. На простом HTML запускается Spamc и
+    // голосует «ham», перебивая байесовский фильтр. Plain text не годится —
+    // без HTML Spamc вообще не стартует.
+    $esc = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    $bodyHtml = "<html><body>"
+              . "<p>Здравствуйте!</p>"
+              . "<p>Направляем заявки ресторанов на доставку {$esc($dateFmt)}.</p>"
+              . ($fromLegal !== '' ? "<p>От кого: {$esc($fromLegal)}</p>" : '')
+              . "<p>Кому: {$esc($supName)}</p>"
+              . "<p>Ресторанов: {$esc($sum['submitted_count'])} из {$esc($sum['restaurants_count'])}. Позиций: {$esc($ic)}.</p>"
+              . "<p>Подробности — в приложенном файле Excel.</p>"
+              . "<p>Отдел закупок</p>"
+              . "</body></html>";
 
     $attachB64 = base64_encode($sum['xlsx']);
     // Лимит вложения 4 МБ (в base64 ~ *1.34).
@@ -654,6 +659,22 @@ function soGetSupplierNotifyUsers($pdo, $supplierId) {
  *
  * telegram_chat_id наружу не отдаём — только признак «есть Telegram».
  */
+/**
+ * Разбирает список адресов «через запятую или точку с запятой» в массив.
+ * Чистит префикс mailto: (в карточке одного поставщика адрес был записан
+ * как «mailto:...» и уходил в письмо мусором) и отбрасывает невалидные.
+ */
+function soParseEmailList($raw): array {
+    $out = [];
+    foreach (preg_split('/[,;\s]+/', (string)$raw) as $part) {
+        $e = trim($part);
+        if ($e === '') continue;
+        $e = preg_replace('/^mailto:/i', '', $e);
+        if (filter_var($e, FILTER_VALIDATE_EMAIL) && !in_array($e, $out, true)) $out[] = $e;
+    }
+    return $out;
+}
+
 function soGetSummaryCandidates($pdo, $supplierId, array $alreadySelected = []) {
     global $ROLE_TEMPLATES, $ACCESS_LEVELS;
 
@@ -2054,8 +2075,13 @@ if ($soAction === 'admin') {
         }
 
         $notifyUsers = soGetSupplierNotifyUsers($pdo, $supplierId);
+        // Постоянная копия писем поставщику — хранится в карточке поставщика,
+        // но управлять ей удобнее здесь, рядом с самими письмами.
+        $ccStmt = $pdo->prepare("SELECT cc_emails FROM suppliers WHERE id = ?");
+        $ccStmt->execute([$supplierId]);
         soRespond([
             'settings' => $settings,
+            'cc_emails' => implode(', ', soParseEmailList($ccStmt->fetchColumn() ?: '')),
             'overrides' => $overridesList,
             'notify_users' => $notifyUsers,
             'summary_candidates' => soGetSummaryCandidates($pdo, $supplierId, $notifyUsers),
@@ -2199,6 +2225,14 @@ if ($soAction === 'admin') {
               updated_by = VALUES(updated_by)")
             ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $ccRestaurants, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
 
+        // Постоянная копия писем: живёт в карточке поставщика (suppliers.cc_emails),
+        // но правится в настройках заявок. Пишем только если ключ реально пришёл.
+        if (array_key_exists('cc_emails', $body)) {
+            $ccClean = soParseEmailList($body['cc_emails']);
+            $pdo->prepare("UPDATE suppliers SET cc_emails = ? WHERE id = ?")
+                ->execute([implode(', ', $ccClean), $supplierId]);
+        }
+
         // Настройки напоминаний обновляем ТОЛЬКО если ключ реально присутствует в теле
         // (паттерн notify_users): toggle приёма шлёт объект без reminder_* и не должен их обнулять.
         // Отдельным UPDATE, чтобы одиночный INSERT…ON DUPLICATE не затирал колонки при их отсутствии.
@@ -2226,10 +2260,13 @@ if ($soAction === 'admin') {
             }
         }
 
+        $ccBack = $pdo->prepare("SELECT cc_emails FROM suppliers WHERE id = ?");
+        $ccBack->execute([$supplierId]);
         soRespond([
             'success' => true,
             'settings' => soGetSupplierSettings($pdo, $supplierId),
             'notify_users' => soGetSupplierNotifyUsers($pdo, $supplierId),
+            'cc_emails' => (string)($ccBack->fetchColumn() ?: ''),
         ]);
     }
 

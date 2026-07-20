@@ -650,6 +650,17 @@
             {{ currentSupplier.email }} <span class="so-notify-muted">(редактируется в карточке поставщика)</span>
           </p>
           <p v-else class="so-section-hint" style="margin:4px 0 0 0">Адрес почты задаётся в карточке поставщика.</p>
+
+          <div style="margin-top:10px">
+            <label class="so-inline-label" for="so-cc-emails">Постоянная копия</label>
+            <input id="so-cc-emails" type="text" v-model="ccEmails" class="rom-input-sm"
+              style="width:100%;box-sizing:border-box;margin-top:4px"
+              placeholder="ivanov@company.by, petrov@company.by" />
+            <p class="so-section-hint" style="margin:6px 0 0 0">
+              Эти адреса получают копию каждого письма со сводкой по этому поставщику.
+              Несколько адресов — через запятую. Копия ресторанам, если она включена, добавляется сверх этих.
+            </p>
+          </div>
         </div>
 
         <!-- Получатели итоговой сводки -->
@@ -913,6 +924,7 @@ let overviewTimer = null;
 
 // Settings (постоянный режим приёма)
 const boxSizeWarnings = ref([]);
+const ccEmails = ref('');
 // Предупреждение показываем только когда столбцы коробок/паллет реально включены —
 // на вес нетто/брутто размер коробки не влияет.
 const showBoxSizeWarning = computed(() => boxSizeWarnings.value.length > 0
@@ -1272,6 +1284,7 @@ async function loadSettings() {
       // (доступ к его юрлицу), поэтому общий справочник пользователей не годится.
       allNotifyUsers.value = Array.isArray(data.summary_candidates) ? data.summary_candidates : [];
       boxSizeWarnings.value = Array.isArray(data.box_size_warnings) ? data.box_size_warnings : [];
+      ccEmails.value = data.cc_emails || '';
       reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
       reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
       syncWeeklyFromSettings();
@@ -1346,6 +1359,15 @@ async function toggleCcRestaurants(ev) {
 
 async function saveDefaultDeadline() {
   await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
+}
+
+// Постоянная копия писем поставщику. Сервер сам чистит список, поэтому
+// возвращённое значение кладём обратно в поле — видно, что именно сохранилось.
+async function saveCcEmails() {
+  const data = await store.adminSaveSettings(currentSupplierId.value, { cc_emails: ccEmails.value });
+  if (data && typeof data.cc_emails === 'string') {
+    await applyRemote(() => { ccEmails.value = data.cc_emails; });
+  }
 }
 
 async function savePauseMessage() {
@@ -1464,6 +1486,7 @@ watch([weeklyEnabled, weeklyDow, weeklyTime], () => autoSave('weekly', saveWeekl
 watch([minOrderValue, minOrderUnit], () => autoSave('minorder', saveMinOrder, 800));
 watch(defaultDeadline, () => autoSave('deadline', saveDefaultDeadline, 800));
 watch(pauseMessage, () => autoSave('pause', savePauseMessage, 1000));
+watch(ccEmails, () => autoSave('cc', saveCcEmails, 1200));
 
 async function loadStatus() {
   if (!currentSupplierId.value) return;

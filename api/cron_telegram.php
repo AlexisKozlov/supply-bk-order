@@ -1593,57 +1593,26 @@ try {
                     }
                 }
 
-                // Формируем данные для Node-генератора
-                $restaurantsOut = [];
-                foreach ($expectedRests as $rest) {
-                    $rn = $rest['number'];
-                    $restaurantsOut[] = [
-                        'number'   => (int)$rn,
-                        'city'     => $rest['city'] ?: '',
-                        'region'   => $rest['region'] ?: '',
-                        'address'  => $rest['address'] ?: '',
-                        'submitted'=> isset($submittedByStatus[$rn]),
-                    ];
-                }
-
-                $itemsOut = new stdClass();
+                // Итоги по товарам — только для подписи к файлу.
                 $colTotals = array_fill_keys(array_column($productsOut, 'sku'), 0);
                 foreach ($pivot as $rn => $pmap) {
                     foreach ($pmap as $sku => $qty) {
-                        $itemsOut->{"{$rn}_{$sku}"} = ['qty' => (float)$qty, 'is_admin' => false];
                         if (isset($colTotals[$sku])) $colTotals[$sku] += (float)$qty;
                     }
                 }
 
-                $payload = [
-                    'supplier_name'      => $supName,
-                    'delivery_date_fmt'  => $dateFmt,
-                    'sheet_name'         => $supName,
-                    'products'           => $productsOut,
-                    'restaurants'        => $restaurantsOut,
-                    'items'              => $itemsOut,
-                ];
-
-                // Временные файлы для обмена с Node
-                $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
-                $tmpXlsx = tempnam(sys_get_temp_dir(), 'so_xlsx_') . '.xlsx';
-                file_put_contents($tmpJson, json_encode($payload, JSON_UNESCAPED_UNICODE));
-
-                $scriptPath = escapeshellarg(__DIR__ . '/../scripts/build_so_order_xlsx.mjs');
-                $cmd = 'node ' . $scriptPath . ' ' . escapeshellarg($tmpJson) . ' ' . escapeshellarg($tmpXlsx) . ' 2>&1';
-                exec($cmd, $outLines, $rc);
-                @unlink($tmpJson);
-
-                if ($rc !== 0 || !file_exists($tmpXlsx)) {
-                    error_log('[cron_telegram] so summary: node generator failed (rc=' . $rc . '): ' . implode("\n", $outLines));
-                    @unlink($tmpXlsx);
+                // Файл собираем той же функцией, что и для письма поставщику.
+                // Раньше крон лепил payload сам и не знал ни настроек отчёта
+                // (коробки/паллеты, «убрать пустые строки»), ни атрибутов
+                // товаров — в Telegram падал файл без учёта настроек.
+                $sumFile = soBuildSummaryXlsx($pdo, $supId, $deliveryDate);
+                if (($sumFile['status'] ?? '') !== 'ok' || empty($sumFile['xlsx'])) {
+                    error_log('[cron_telegram] so summary: xlsx не собран (status='
+                        . ($sumFile['status'] ?? '?') . ', ' . ($sumFile['error'] ?? '') . ')');
                     continue;
                 }
-
-                $xlsxBinary = file_get_contents($tmpXlsx);
-                @unlink($tmpXlsx);
-
-                $filename = "Заявка {$supName} на {$dateFmt}.xlsx";
+                $xlsxBinary = $sumFile['xlsx'];
+                $filename = $sumFile['filename'] ?: "Заявка {$supName} на {$dateFmt}.xlsx";
 
                 $caption = "🧾 <b>Заказ поставщику</b>\n";
                 $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
