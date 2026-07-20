@@ -122,7 +122,6 @@
         <div class="so-detail-actions">
           <label class="so-inline-label">Дедлайн по умолчанию:</label>
           <input type="time" v-model="defaultDeadline" class="rom-input-sm" style="width:100px" />
-          <button class="rom-btn-sm" @click="saveDefaultDeadline" :disabled="!defaultDeadline">Сохранить</button>
           <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
         </div>
       </div>
@@ -601,6 +600,12 @@
     <!-- ═══ TAB: Настройки ═══ -->
     <template v-if="pageTab === 'settings' && currentSupplierId">
       <div class="so-settings-wrap">
+        <!-- Кнопок «Сохранить» больше нет: правки уходят сами, здесь виден статус -->
+        <div class="so-autosave-bar" :class="{ busy: settingsSaving }">
+          <template v-if="settingsSaving">Сохраняем…</template>
+          <template v-else-if="settingsSavedTick">Изменения сохранены</template>
+          <template v-else>Изменения сохраняются автоматически</template>
+        </div>
         <!-- Приём заявок -->
         <div class="so-settings-block">
           <div class="so-section-title" style="margin:0">Приём заявок</div>
@@ -617,7 +622,7 @@
           </div>
           <div v-if="!settings.is_accepting_orders" class="rom-date-row so-paused-note">
             <label>Сообщение для ресторанов:</label>
-            <input type="text" v-model="pauseMessage" @change="savePauseMessage" class="rom-input-sm" style="flex:1;min-width:250px" placeholder="Приём заявок временно приостановлен" />
+            <input type="text" v-model="pauseMessage" class="rom-input-sm" style="flex:1;min-width:250px" placeholder="Приём заявок временно приостановлен" />
           </div>
         </div>
 
@@ -654,10 +659,6 @@
               <div class="so-section-title" style="margin:0">Получатели итоговой сводки</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">После дедлайна бот отправит результат только отмеченным сотрудникам. В списке — те, у кого есть доступ к юрлицу этого поставщика и к модулю заявок.</div>
             </div>
-            <button class="rom-btn-sm" @click="saveNotifyUsers" :disabled="savingNotifyUsers || loadingNotifyUsers">
-              <BurgerSpinner v-if="savingNotifyUsers" size="xs" />
-              <span>{{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить' }}</span>
-            </button>
           </div>
           <div v-if="loadingNotifyUsers" class="rom-loading" style="padding:8px 0"><BurgerSpinner size="sm" text="Загрузка пользователей..." /></div>
           <div v-else class="so-notify-users">
@@ -679,10 +680,6 @@
               <div class="so-section-title" style="margin:0">Напоминания о подаче заявок</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">Бот напомнит ресторанам, не подавшим заявку, в выбранные моменты до дедлайна.</div>
             </div>
-            <button class="rom-btn-sm" @click="saveReminders" :disabled="savingReminders">
-              <BurgerSpinner v-if="savingReminders" size="xs" />
-              <span>{{ savingReminders ? 'Сохранение...' : 'Сохранить' }}</span>
-            </button>
           </div>
 
           <div class="so-reminder-group">
@@ -715,10 +712,6 @@
               <div class="so-section-title" style="margin:0">Недельный режим подачи</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">В недельном режиме дедлайны по дням не применяются: вся неделя доставки (пн–вс) закрывается в выбранный день предыдущей недели в указанное время. Ресторан видит всю открытую неделю сразу.</div>
             </div>
-            <button class="rom-btn-sm" @click="saveWeekly" :disabled="savingWeekly">
-              <BurgerSpinner v-if="savingWeekly" size="xs" />
-              <span>{{ savingWeekly ? 'Сохранение...' : 'Сохранить' }}</span>
-            </button>
           </div>
 
           <label class="so-settings-check" style="margin-top:6px">
@@ -747,10 +740,6 @@
               <div class="so-section-title" style="margin:0">Минимальный заказ</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">Если задан — заявку меньше минимума нельзя отправить (жёсткий блок). Значение 0 или пусто = минимума нет.</div>
             </div>
-            <button class="rom-btn-sm" @click="saveMinOrder" :disabled="savingMinOrder">
-              <BurgerSpinner v-if="savingMinOrder" size="xs" />
-              <span>{{ savingMinOrder ? 'Сохранение...' : 'Сохранить' }}</span>
-            </button>
           </div>
 
           <div class="rom-date-row" style="margin-top:10px;flex-wrap:wrap;gap:12px">
@@ -778,10 +767,6 @@
               <div class="so-section-title" style="margin:0">Отчёт Excel</div>
               <div class="so-section-hint" style="margin:4px 0 0 0">Как выглядит файл заявки, который скачивается и уходит поставщику письмом.</div>
             </div>
-            <button class="rom-btn-sm" @click="saveXlsx" :disabled="savingXlsx">
-              <BurgerSpinner v-if="savingXlsx" size="xs" />
-              <span>{{ savingXlsx ? 'Сохранение...' : 'Сохранить' }}</span>
-            </button>
           </div>
 
           <label class="so-settings-check" style="margin-top:6px">
@@ -940,30 +925,25 @@ const pauseMessage = ref('');
 const deadlineOverrides = ref([]);
 const allNotifyUsers = ref([]);
 const loadingNotifyUsers = ref(false);
-const savingNotifyUsers = ref(false);
 const notifyUsers = ref([]);
 
 // Напоминания о подаче заявок (массивы выбранных таймингов и каналов)
 const reminderOffsets = ref([]);
 const reminderChannels = ref([]);
-const savingReminders = ref(false);
 
 // Недельный режим подачи (вкл/выкл, день недели 1..7, время HH:MM)
 const weeklyEnabled = ref(false);
 const weeklyDow = ref(3);
 const weeklyTime = ref('14:00');
-const savingWeekly = ref(false);
 
 // Минимальный заказ у поставщика (значение и единица кг/штуки)
 const minOrderValue = ref(0);
 const minOrderUnit = ref('kg');
-const savingMinOrder = ref(false);
 
 // Опции Excel-отчёта поставщика: убирать пустые строки и какие показатели
 // паллет/веса выводить (boxes / pallets / netto / brutto).
 const xlsxDropEmpty = ref(false);
 const xlsxPalletMetrics = ref([]);
-const savingXlsx = ref(false);
 
 const weekdayOptions = [
   { value: 1, label: 'Понедельник' },
@@ -1225,6 +1205,49 @@ async function refreshActiveTab() {
   await loadStatus();
 }
 
+// ═══ Автосохранение настроек поставщика ═══
+// Кнопок «Сохранить» в настройках было шесть, и каждая правка требовала
+// отдельного клика. Теперь любое изменение уходит на сервер само: чекбоксы —
+// почти сразу, поля ввода — через паузу после последнего нажатия клавиши.
+//
+// applyingRemote защищает от петли: раскладывая ответ сервера (или настройки
+// другого поставщика), мы меняем те же самые поля, и сторож иначе тут же
+// отправил бы их обратно.
+let applyingRemote = false;
+const autoSaveTimers = {};
+const settingsSaving = ref(false);
+const settingsSavedTick = ref(0);
+
+async function applyRemote(fn) {
+  applyingRemote = true;
+  try { fn(); } finally { await nextTick(); applyingRemote = false; }
+}
+
+// Сохранять можно только когда на экране настройки ИМЕННО текущего поставщика:
+// иначе переключение поставщика (оно тоже меняет поля) улетело бы как правка.
+function autoSaveReady() {
+  return !applyingRemote
+    && !!currentSupplierId.value
+    && settingsLoadedFor.value === currentSupplierId.value;
+}
+
+function autoSave(key, fn, delay = 400) {
+  if (!autoSaveReady()) return;
+  clearTimeout(autoSaveTimers[key]);
+  autoSaveTimers[key] = setTimeout(async () => {
+    if (!autoSaveReady()) return;
+    settingsSaving.value = true;
+    try {
+      await fn();
+      settingsSavedTick.value = Date.now();
+    } catch (e) {
+      toast.error('Не сохранено', e.message);
+    } finally {
+      settingsSaving.value = false;
+    }
+  }, delay);
+}
+
 async function loadSettings() {
   if (!currentSupplierId.value) return;
   // Запоминаем, за чьими настройками пошли — поставщик мог смениться, пока шёл запрос.
@@ -1234,23 +1257,27 @@ async function loadSettings() {
   loadingNotifyUsers.value = true;
   try {
     const data = await store.adminGetSettings(sid);
-    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, email_cc_restaurants: 0, default_deadline_time: '14:00:00', pause_message: null, xlsx_drop_empty: 0, xlsx_pallet_metrics: [] };
-    // Отмечаем владельца настроек только если сервер вернул настоящие настройки.
-    // Дефолт-заглушка и ошибка запроса владельца не дают.
-    settingsLoadedFor.value = data.settings ? sid : null;
-    defaultDeadline.value = (settings.value.default_deadline_time || '14:00:00').substring(0, 5);
-    pauseMessage.value = settings.value.pause_message || '';
-    deadlineOverrides.value = data.overrides || [];
-    notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
-    // Кандидаты приходят вместе с настройками: список зависит от поставщика
-    // (доступ к его юрлицу), поэтому общий справочник пользователей не годится.
-    allNotifyUsers.value = Array.isArray(data.summary_candidates) ? data.summary_candidates : [];
-    boxSizeWarnings.value = Array.isArray(data.box_size_warnings) ? data.box_size_warnings : [];
-    reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
-    reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
-    syncWeeklyFromSettings();
-    syncMinOrderFromSettings();
-    syncXlsxFromSettings();
+    // Раскладываем всё разом под защитой applyRemote: эти же поля слушает
+    // автосохранение, и без защиты загрузка выглядела бы как правка.
+    await applyRemote(() => {
+      settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, auto_email_summary: 0, email_cc_restaurants: 0, default_deadline_time: '14:00:00', pause_message: null, xlsx_drop_empty: 0, xlsx_pallet_metrics: [] };
+      // Отмечаем владельца настроек только если сервер вернул настоящие настройки.
+      // Дефолт-заглушка и ошибка запроса владельца не дают.
+      settingsLoadedFor.value = data.settings ? sid : null;
+      defaultDeadline.value = (settings.value.default_deadline_time || '14:00:00').substring(0, 5);
+      pauseMessage.value = settings.value.pause_message || '';
+      deadlineOverrides.value = data.overrides || [];
+      notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
+      // Кандидаты приходят вместе с настройками: список зависит от поставщика
+      // (доступ к его юрлицу), поэтому общий справочник пользователей не годится.
+      allNotifyUsers.value = Array.isArray(data.summary_candidates) ? data.summary_candidates : [];
+      boxSizeWarnings.value = Array.isArray(data.box_size_warnings) ? data.box_size_warnings : [];
+      reminderOffsets.value = Array.isArray(settings.value.reminder_offsets) ? [...settings.value.reminder_offsets] : [];
+      reminderChannels.value = Array.isArray(settings.value.reminder_channels) ? [...settings.value.reminder_channels] : [];
+      syncWeeklyFromSettings();
+      syncMinOrderFromSettings();
+      syncXlsxFromSettings();
+    });
   } catch (e) {
     // Запрос упал — в settings могли остаться настройки прошлого поставщика.
     // Снимаем метку владельца, чтобы экспорт не собрал файл с чужими опциями.
@@ -1318,55 +1345,33 @@ async function toggleCcRestaurants(ev) {
 }
 
 async function saveDefaultDeadline() {
-  try {
-    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
-    toast.success('Сохранено', 'Дедлайн по умолчанию обновлён');
-    await loadSettings();
-  } catch (e) {
-    toast.error('Ошибка', e.message);
-  }
+  await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
 }
 
 async function savePauseMessage() {
-  try {
-    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
-  } catch (e) {
-    toast.error('Ошибка', e.message);
-  }
+  await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
 }
 
 async function saveNotifyUsers() {
-  savingNotifyUsers.value = true;
-  try {
-    const data = await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ notify_users: notifyUsers.value }));
+  const data = await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ notify_users: notifyUsers.value }));
+  await applyRemote(() => {
     notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
-    toast.success('Сохранено', 'Получатели обновлены');
-  } catch (e) {
-    toast.error('Ошибка', e.message);
-  } finally {
-    savingNotifyUsers.value = false;
-  }
+  });
 }
 
 // Сохранение напоминаний — ОТДЕЛЬНЫЙ запрос только с ключами reminder_*,
 // чтобы бэкенд обновил именно их и не тронул прочие настройки.
 async function saveReminders() {
-  savingReminders.value = true;
-  try {
-    const data = await store.adminSaveSettings(currentSupplierId.value, {
-      reminder_offsets: [...reminderOffsets.value],
-      reminder_channels: [...reminderChannels.value],
-    });
-    if (data && data.settings) {
+  const data = await store.adminSaveSettings(currentSupplierId.value, {
+    reminder_offsets: [...reminderOffsets.value],
+    reminder_channels: [...reminderChannels.value],
+  });
+  if (data && data.settings) {
+    await applyRemote(() => {
       settings.value = data.settings;
       reminderOffsets.value = Array.isArray(data.settings.reminder_offsets) ? [...data.settings.reminder_offsets] : [];
       reminderChannels.value = Array.isArray(data.settings.reminder_channels) ? [...data.settings.reminder_channels] : [];
-    }
-    toast.success('Сохранено', 'Настройки напоминаний обновлены');
-  } catch (e) {
-    toast.error('Ошибка', e.message);
-  } finally {
-    savingReminders.value = false;
+    });
   }
 }
 
@@ -1388,21 +1393,15 @@ function syncWeeklyFromSettings() {
 // Сохранение недельного режима — ОТДЕЛЬНЫЙ запрос только с ключами weekly_*,
 // чтобы бэкенд обновил именно их и не тронул прочие настройки.
 async function saveWeekly() {
-  savingWeekly.value = true;
-  try {
-    const payload = weeklyEnabled.value
-      ? { weekly_deadline_dow: Number(weeklyDow.value), weekly_deadline_time: weeklyTime.value }
-      : { weekly_deadline_dow: null };
-    const data = await store.adminSaveSettings(currentSupplierId.value, payload);
-    if (data && data.settings) {
+  const payload = weeklyEnabled.value
+    ? { weekly_deadline_dow: Number(weeklyDow.value), weekly_deadline_time: weeklyTime.value }
+    : { weekly_deadline_dow: null };
+  const data = await store.adminSaveSettings(currentSupplierId.value, payload);
+  if (data && data.settings) {
+    await applyRemote(() => {
       settings.value = data.settings;
       syncWeeklyFromSettings();
-    }
-    toast.success('Сохранено', 'Недельный режим обновлён');
-  } catch (e) {
-    toast.error('Ошибка', e.message);
-  } finally {
-    savingWeekly.value = false;
+    });
   }
 }
 
@@ -1417,23 +1416,16 @@ function syncMinOrderFromSettings() {
 // Сохранение минимального заказа — ОТДЕЛЬНЫЙ запрос только с ключами min_order_*,
 // чтобы бэкенд обновил именно их и не тронул прочие настройки.
 async function saveMinOrder() {
-  savingMinOrder.value = true;
-  try {
-    const val = Number(minOrderValue.value);
-    const payload = {
-      min_order_value: val > 0 ? val : null,
-      min_order_unit: minOrderUnit.value,
-    };
-    const data = await store.adminSaveSettings(currentSupplierId.value, payload);
-    if (data && data.settings) {
+  const val = Number(minOrderValue.value);
+  const data = await store.adminSaveSettings(currentSupplierId.value, {
+    min_order_value: val > 0 ? val : null,
+    min_order_unit: minOrderUnit.value,
+  });
+  if (data && data.settings) {
+    await applyRemote(() => {
       settings.value = data.settings;
       syncMinOrderFromSettings();
-    }
-    toast.success('Сохранено', 'Минимальный заказ обновлён');
-  } catch (e) {
-    toast.error('Ошибка', e.message);
-  } finally {
-    savingMinOrder.value = false;
+    });
   }
 }
 
@@ -1449,23 +1441,29 @@ function syncXlsxFromSettings() {
 // Сохранение опций Excel-отчёта — ОТДЕЛЬНЫЙ запрос только с ключами xlsx_*,
 // чтобы бэкенд обновил именно их и не тронул прочие настройки.
 async function saveXlsx() {
-  savingXlsx.value = true;
-  try {
-    const data = await store.adminSaveSettings(currentSupplierId.value, {
-      xlsx_drop_empty: xlsxDropEmpty.value ? 1 : 0,
-      xlsx_pallet_metrics: [...xlsxPalletMetrics.value],
-    });
-    if (data && data.settings) {
+  const data = await store.adminSaveSettings(currentSupplierId.value, {
+    xlsx_drop_empty: xlsxDropEmpty.value ? 1 : 0,
+    xlsx_pallet_metrics: [...xlsxPalletMetrics.value],
+  });
+  if (data && data.settings) {
+    await applyRemote(() => {
       settings.value = data.settings;
       syncXlsxFromSettings();
-    }
-    toast.success('Сохранено', 'Настройки отчёта обновлены');
-  } catch (e) {
-    toast.error('Ошибка', e.message);
-  } finally {
-    savingXlsx.value = false;
+    });
   }
 }
+
+// ═══ Сторожа автосохранения ═══
+// Чекбоксы и списки сохраняем быстро, поля ввода — с паузой, чтобы не слать
+// запрос на каждую набранную цифру. Каждый блок шлёт свой запрос (как и
+// раньше по кнопке), поэтому одна правка не затирает соседние настройки.
+watch(notifyUsers, () => autoSave('notify', saveNotifyUsers), { deep: true });
+watch([reminderOffsets, reminderChannels], () => autoSave('reminders', saveReminders), { deep: true });
+watch([xlsxDropEmpty, xlsxPalletMetrics], () => autoSave('xlsx', saveXlsx), { deep: true });
+watch([weeklyEnabled, weeklyDow, weeklyTime], () => autoSave('weekly', saveWeekly, 800));
+watch([minOrderValue, minOrderUnit], () => autoSave('minorder', saveMinOrder, 800));
+watch(defaultDeadline, () => autoSave('deadline', saveDefaultDeadline, 800));
+watch(pauseMessage, () => autoSave('pause', savePauseMessage, 1000));
 
 async function loadStatus() {
   if (!currentSupplierId.value) return;
@@ -3154,6 +3152,13 @@ watch(
 .so-notify-muted { color: var(--tk-text-muted) !important; }
 
 /* Предупреждение о неверном размере коробки в справочнике */
+.so-autosave-bar {
+  font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
+  padding: 6px 10px; margin-bottom: var(--tk-s-3);
+  background: var(--tk-bg-subtle, #F7F5F2); border-radius: 6px;
+}
+.so-autosave-bar.busy { color: #2E7D32; }
+
 .so-box-warn {
   margin-top: var(--tk-s-3); padding: 10px 12px; border-radius: 8px;
   background: #FEF6EC; border: 1px solid #F2C9A0; color: #8A5320;
