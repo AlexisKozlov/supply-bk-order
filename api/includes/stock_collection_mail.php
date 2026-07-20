@@ -148,28 +148,23 @@ function scMailBuild(array $coll, string $kind, string $restaurantNumber): array
             break;
     }
 
-    $body = '<p style="margin:0 0 14px;">Ресторан <strong>№' . $esc($restNum) . '</strong></p>'
-          . '<p style="margin:0 0 6px;"><strong>Сбор:</strong> ' . $esc($name) . '</p>'
-          . '<p style="margin:0 0 6px;"><strong>Позиций к заполнению:</strong> ' . $count . '</p>';
-
+    // ВАЖНО: минимальный HTML, без брендированного шаблона (renderMailHtml)
+    // и без inline-стилей. Адреса ресторанов — на @burger-king.by, их шлюз
+    // MailCleaner на тяжёлой вёрстке ставит в теме «{Spam?}» и уносит письмо
+    // в спам. На простом HTML запускается Spamc и голосует «ham».
+    // Plain text не подходит: без HTML Spamc вообще не стартует.
+    $html  = '<html><body>';
+    $html .= '<p>' . $esc($intro) . '</p>';
+    $html .= '<p>Ресторан №' . $esc($restNum) . '</p>';
+    $html .= '<p>Сбор: ' . $esc($name) . '</p>';
+    $html .= '<p>Позиций к заполнению: ' . $count . '</p>';
     if ($deadline !== '') {
-        // Срок — главное в письме, поэтому отдельным заметным блоком.
-        $body .= '<p style="margin:18px 0 6px;padding:14px 16px;background:#FDF1EC;border-left:4px solid #E76F51;'
-               . 'border-radius:8px;font-size:17px;color:#333333;">'
-               . '<strong>Заполнить до ' . $esc($deadline) . '</strong></p>';
+        $html .= '<p>Заполнить до ' . $esc($deadline) . '</p>';
     }
-
-    $body .= '<p style="margin:18px 0 0;">Заполнить можно в кабинете ресторана по кнопке ниже '
-           . 'или в Telegram-боте отдела закупок.</p>';
-
-    $html = renderMailHtml([
-        'title'   => 'Сбор остатков',
-        'preview' => $deadline !== '' ? ('Заполнить до ' . $deadline) : $name,
-        'intro'   => $intro,
-        'body'    => $body,
-        'cta'     => ['url' => $link, 'text' => 'Заполнить остатки'],
-        'footer'  => 'Письмо отправлено кабинету ресторана автоматически. Если остатки уже сданы, письмо можно не учитывать.',
-    ]);
+    $html .= '<p>Заполнить можно в кабинете ресторана: ' . $esc($link) . '</p>';
+    $html .= '<p>Либо в Telegram-боте отдела закупок.</p>';
+    $html .= '<p>Отдел закупок</p>';
+    $html .= '</body></html>';
 
     return ['subject' => $subject, 'html' => $html];
 }
