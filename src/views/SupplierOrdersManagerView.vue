@@ -918,7 +918,7 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
-import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
 import { buildSoOrderSheet } from '@/lib/soOrderXlsx.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -2248,19 +2248,30 @@ async function importFromProducts() {
       toast.warning('Поставщик не выбран', 'Не удалось определить поставщика');
       return;
     }
+    // Справочник карточек общий для группы БК+ВМ: карточки Камако лежат под
+    // «Бургер БК», и фильтр по одному юрлицу (ВМ) не находил ничего. Берём по
+    // ГРУППЕ юрлиц и убираем дубли по SKU (один SKU может быть в двух юрлицах).
     const { data, error } = await db.from('products')
-      .select('id,sku,name,multiplicity')
+      .select('id,sku,name,multiplicity,legal_entity')
       .eq('supplier', supplierName)
-      .eq('legal_entity', templateLe.value)
+      .in('legal_entity', getEntityGroup(templateLe.value))
       .eq('is_active', 1)
       .order('name')
-      .limit(500);
+      .limit(1000);
     if (error) throw new Error(error);
-    const products = data || [];
-    if (!products.length) {
+    const rows = data || [];
+    if (!rows.length) {
       toast.warning('Нет товаров', 'У этого поставщика нет товаров в справочнике');
       return;
     }
+    // Дедуп по SKU, предпочитая карточку выбранного юрлица.
+    const bySku = new Map();
+    for (const p of rows) {
+      const sku = String(p.sku || '').trim();
+      if (!sku) continue;
+      if (!bySku.has(sku) || p.legal_entity === templateLe.value) bySku.set(sku, p);
+    }
+    const products = [...bySku.values()];
     templates.value = products.map((p, i) => ({
       product_id: p.product_id || p.id || '',
       sku: p.sku,
@@ -2268,6 +2279,9 @@ async function importFromProducts() {
       sort_order: i * 10,
       multiplicity: p.multiplicity || null,
       min_qty: p.min_qty || null,
+      note: '',
+      vis_regions: [],
+      vis_restaurants: [],
     }));
   } catch (e) {
     toast.error('Ошибка', e.message);
