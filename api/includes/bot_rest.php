@@ -1766,6 +1766,10 @@ function restNotifSettings($chatId, $msgId) {
         $btns[] = [['text' => "{$icon} {$s['label']}", 'callback_data' => "rest_notif_toggle_{$s['field']}"]];
     }
 
+    $text .= "\n<i>«Напоминания о заявках» — общий выключатель по всем поставщикам.\n";
+    $text .= "Тонкая настройка (по каждому поставщику, дням доставки и получателям) —\n";
+    $text .= "в кабинете ресторана: раздел «Напоминания».</i>";
+
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
