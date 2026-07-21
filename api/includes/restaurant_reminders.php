@@ -254,10 +254,13 @@ if ($subpoint === 'list' && $method === 'GET') {
     }
     if ($portIds) {
         $ph = implode(',', array_fill(0, count($portIds), '?'));
-        // подписки
+        // Подписки — ТОЛЬКО настроенные в новой модели (cron_managed=1). Легаси
+        // (=0) крон игнорирует, поэтому и в карточке их не показываем: subscription
+        // остаётся null → карточка показывает дефолт «включено, все дни» (как и
+        // работает крон). Так карточка = реальному состоянию, по умолчанию всё вкл.
         $subSt = $pdo->prepare("SELECT id, supplier_id, is_enabled, telegram_enabled, reminder_days
                                 FROM restaurant_reminder_subscriptions
-                                WHERE restaurant_id = ? AND supplier_id IN ($ph)");
+                                WHERE restaurant_id = ? AND supplier_id IN ($ph) AND cron_managed = 1");
         $subSt->execute(array_merge([$rrRestPk], $portIds));
         $subIdBySup = [];
         foreach ($subSt->fetchAll() as $r) {
