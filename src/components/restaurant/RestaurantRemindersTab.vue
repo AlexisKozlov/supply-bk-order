@@ -609,9 +609,12 @@ async function toggleKegTg(tgId, checked) {
 async function saveSubscription(group, patch) {
   saving[group.supplier_id] = true;
   try {
+    // is_enabled по ТЕКУЩЕМУ эффективному состоянию (isEnabled учитывает дефолт
+    // «включено» у портальных без подписки) — иначе смена дней/канала случайно
+    // выключала бы напоминания (создавалась запись is_enabled=0).
     const payload = {
       supplier_id: group.supplier_id,
-      is_enabled: group.subscription?.is_enabled ? 1 : 0,
+      is_enabled: isEnabled(group) ? 1 : 0,
       portal_enabled: group.subscription?.portal_enabled ? 1 : 0,
       telegram_enabled: group.subscription?.telegram_enabled ? 1 : 0,
       ...patch,
