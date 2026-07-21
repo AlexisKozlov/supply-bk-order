@@ -12,10 +12,14 @@
     <template v-else>
       <!-- Toolbar -->
       <div class="sfv-toolbar">
-        <div class="sfv-period-toggle">
-          <button :class="{ active: period === 7 }" @click="period = 7">7 дней</button>
-          <button :class="{ active: period === 14 }" @click="period = 14">14 дней</button>
-          <button :class="{ active: period === 30 }" @click="period = 30">30 дней</button>
+        <div class="sfv-period-toggle" title="За какой период считать средний расход (продажи в день)">
+          <button v-for="d in [7, 14, 30, 60, 90]" :key="d" :class="{ active: periodMode === 'quick' && period === d }" @click="setQuickPeriod(d)">{{ d }} дн</button>
+          <button :class="{ active: periodMode === 'custom' }" @click="enableCustomPeriod" title="Задать свой диапазон дат">Свой</button>
+        </div>
+        <div v-if="periodMode === 'custom'" class="sfv-period-custom">
+          <input type="date" v-model="customFrom" class="sfv-input sfv-date" :max="customTo || undefined" />
+          <span class="sfv-date-dash">—</span>
+          <input type="date" v-model="customTo" class="sfv-input sfv-date" :min="customFrom || undefined" />
         </div>
         <div class="sfv-period-toggle" title="Единица отображения. На расчёт не влияет.">
           <button :class="{ active: unitMode === 'pieces' }" @click="unitMode = 'pieces'">шт/кг</button>
@@ -443,6 +447,36 @@ const expiredOpen = ref(false)    // развёрнута ли секция «П
 const noSalesOpen = ref(false)    // развёрнута ли секция «Нет продаж»
 const sortKey = ref('days-asc')
 const period = ref(7)
+const periodMode = ref('quick')   // 'quick' (кнопки дней) | 'custom' (свой диапазон дат)
+const customFrom = ref('')
+const customTo = ref('')
+function setQuickPeriod(d) { period.value = d; periodMode.value = 'quick' }
+// При первом входе в «Свой» подставляем последние 30 дней до последней продажи.
+function enableCustomPeriod() {
+  periodMode.value = 'custom'
+  if (!customFrom.value || !customTo.value) {
+    const ld = lastSaleDate.value
+    if (ld) {
+      customTo.value = ld
+      const f = new Date(ld + 'T12:00:00'); f.setDate(f.getDate() - 29)
+      customFrom.value = toLocalDateStr(f)
+    }
+  }
+}
+
+// Окно расчёта среднего расхода: {cutoffStr, endStr, label}.
+// Быстрый режим — последние N дней до последней даты продаж. Свой режим —
+// заданный диапазон дат (при неполном вводе откатываемся на быстрый).
+const periodWindow = computed(() => {
+  const ld = lastSaleDate.value
+  if (periodMode.value === 'custom' && customFrom.value && customTo.value && customFrom.value <= customTo.value) {
+    return { cutoffStr: customFrom.value, endStr: customTo.value, label: `${shortDate(customFrom.value)} — ${shortDate(customTo.value)}` }
+  }
+  if (!ld) return { cutoffStr: '', endStr: null, label: '' }
+  const ldDate = new Date(ld + 'T12:00:00')
+  const c = new Date(ldDate); c.setDate(c.getDate() - (period.value - 1))
+  return { cutoffStr: toLocalDateStr(c), endStr: null, label: `последние ${period.value} дн` }
+})
 const expanded = ref(null)
 const unitMode = ref('pieces')    // 'pieces' | 'boxes' — только отображение, расчёт не меняется
 const isBoxes = computed(() => unitMode.value === 'boxes')
@@ -468,7 +502,7 @@ async function loadData() {
   try {
     const entity = orderStore.settings.legalEntity
 
-    let pq = db.from('products').select('sku, name, analog_group, supplier, category, unit_of_measure, qty_per_box, weight_netto')
+    let pq = db.from('products').select('sku, name, analog_group, supplier, category, unit_of_measure, qty_per_box')
     pq = applyEntityGroupFilter(pq, entity)
     const { data: products } = await pq
     productsData.value = products || []
@@ -598,39 +632,20 @@ const forecastRows = computed(() => {
   horizonEnd.setHours(23, 59, 59, 999)
   const monthOf = (dateStr) => (dateStr || '').slice(0, 7)
 
-  // Единицы в «сроках годности» и «остатке» не всегда совпадают.
-  // Найдено 21.07.2026: у весовых/объёмных товаров stock_malling меряет в
-  // УПАКОВКАХ, а analysis_data.stock — в кг/л. Пример: сыр 51360_1 — остаток
-  // 1285 кг, а в сроках 3570 упаковок по 360 г (3570 × 0.36 = 1285 кг). Из-за
-  // этого прогноз вычитал продажи (кг) из упаковок и порча вылезала больше
-  // остатка. Единого коэффициента НЕТ, поэтому решаем ПО SKU: для кг/л
-  // пробуем перевести упаковки в базовую единицу (× вес_нетто/1000) и берём
-  // тот вариант, что ближе к остатку из analysis. Для «шт» и для товаров, где
-  // сроки годности — лишь часть остатка (таких большинство), ничего не трогаем.
-  const skuMallingTotal = {}
-  for (const e of expiryData.value) {
-    if (!e.product_name) continue
-    const s = e.product_name.split(/\s+/)[0]
-    skuMallingTotal[s] = (skuMallingTotal[s] || 0) + (parseFloat(e.quantity) || 0)
-  }
-  const skuStockTotal = {}
-  for (const a of analysisData.value) {
-    skuStockTotal[a.sku] = (skuStockTotal[a.sku] || 0) + (parseFloat(a.stock) || 0)
-  }
+  // Единицы «сроков годности» и «остатка» разные.
+  // Правило (подтверждено пользователем и данными 21.07.2026): в stock_malling
+  // количество ВСЕГДА в учётной единице хранения (коробка/упаковка), а
+  // analysis_data.stock и продажи — в базовой единице (шт/кг/л). Чтобы свести,
+  // умножаем на содержимое учётной единицы — products.qty_per_box.
+  //   • пирожки 67428: 173 коробки × 36 = 6228 шт (= остаток);
+  //   • сыр 51360_1: 3570 упаковок × 0.36 = 1285.2 кг (= остаток).
+  // Так сходятся 134 из 155 товаров. Раньше прогноз вычитал продажи (шт/кг) из
+  // коробок — и «сгорит» вылезало больше остатка. Если qty_per_box не задан
+  // (или 0) — множитель 1 (товар уже в базовой единице).
   const skuUnitFactor = {}
-  for (const s in skuMallingTotal) {
-    const p = skuProduct.get(s)
-    let f = 1
-    const wn = p ? parseFloat(p.weight_netto) || 0 : 0
-    const u = p ? p.unit_of_measure : ''
-    if ((u === 'кг' || u === 'л') && wn > 0) {
-      const conv = wn / 1000
-      const A = skuStockTotal[s] || 0
-      const M = skuMallingTotal[s]
-      // Переводим в базовую единицу, только если так БЛИЖЕ к остатку.
-      if (A > 0 && Math.abs(M * conv - A) < Math.abs(M - A)) f = conv
-    }
-    skuUnitFactor[s] = f
+  for (const [s, p] of skuProduct) {
+    const qpb = parseFloat(p.qty_per_box) || 0
+    skuUnitFactor[s] = qpb > 0 ? qpb : 1
   }
 
   const groupExpiry = {} // group → { total, expiring30, ..., lots: [{...}], nearestDays }
@@ -681,13 +696,10 @@ const forecastRows = computed(() => {
 
   const ld = lastSaleDate.value
   if (!ld) return []
-  const ldDate = new Date(ld + 'T12:00:00')
-  const p = period.value
 
-  // Cutoff for selected period
-  const cutoffDate = new Date(ldDate)
-  cutoffDate.setDate(cutoffDate.getDate() - (p - 1))
-  const cutoffStr = toLocalDateStr(cutoffDate)
+  // Окно расчёта расхода: быстрый период (N дней) или свой диапазон дат.
+  const { cutoffStr, endStr } = periodWindow.value
+  if (!cutoffStr) return []
 
   const allGroups = new Set([...Object.keys(groupStock), ...Object.keys(groupSales)])
   const rows = []
@@ -698,8 +710,8 @@ const forecastRows = computed(() => {
     const allDates = Object.keys(dailySales).sort()
     if (allDates.length === 0 && stock <= 0) continue
 
-    // Period-filtered dates & values
-    const periodDates = allDates.filter(d => d >= cutoffStr)
+    // Period-filtered dates & values (свой режим ограничен и сверху endStr)
+    const periodDates = allDates.filter(d => d >= cutoffStr && (!endStr || d <= endStr))
     const periodValues = periodDates.map(d => dailySales[d])
 
     // Average: предпочитаем реализацию, fallback на расход из analysis_data
@@ -1114,13 +1126,10 @@ const expiredReport = computed(() => {
 })
 
 const periodLabel = computed(() => {
-  const ld = lastSaleDate.value
-  if (!ld) return ''
-  const end = new Date(ld + 'T12:00:00')
-  const start = new Date(end)
-  start.setDate(start.getDate() - (period.value - 1))
-  const fmt = d => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`
-  return `${fmt(start)} – ${fmt(end)}`
+  const w = periodWindow.value
+  if (!w.cutoffStr) return ''
+  const endStr = w.endStr || lastSaleDate.value
+  return `${shortDate(w.cutoffStr)} – ${shortDate(endStr)}`
 })
 
 // ═══ Display helpers ═══
@@ -1235,6 +1244,9 @@ function sparkColor(r) {
 .sfv-period-toggle { display: flex; background: var(--card); border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; }
 .sfv-period-toggle button { padding: 5px 12px; border: none; background: none; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
 .sfv-period-toggle button.active { background: var(--bk-brown); color: #fff; }
+.sfv-period-custom { display: inline-flex; align-items: center; gap: 6px; }
+.sfv-date { padding: 4px 8px; font-size: 12px; }
+.sfv-date-dash { color: var(--text-muted); }
 .sfv-period-toggle button:hover:not(.active) { background: var(--hover); }
 
 /* Toolbar */
