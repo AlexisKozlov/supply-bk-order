@@ -222,34 +222,68 @@ if ($subpoint === 'list' && $method === 'GET') {
     }
     unset($g);
 
-    // ─── Портальные поставщики (so_enabled=1) ─────────────────────────────
-    // У них напоминания шлёт основной модуль (крон), подписки как у локальных
-    // нет. Ресторану даём один переключатель «Напоминать о заявке» — он пишет
-    // общий с закупками флаг so_reminder_mutes (есть запись = выключено).
-    $portalStmt = $pdo->prepare("
-        SELECT DISTINCT ss.supplier_id, s.short_name AS supplier_name,
-               EXISTS(SELECT 1 FROM so_reminder_mutes m
-                      WHERE m.supplier_id = ss.supplier_id AND m.restaurant_id = ?) AS muted
+    // ─── Портальные поставщики (so_enabled=1): та же модель подписок ───
+    $portSched = $pdo->prepare("
+        SELECT ss.supplier_id, ss.order_day, ss.delivery_day,
+               s.short_name AS supplier_name,
+               sd.deadline_time AS deadline_override
         FROM supplier_schedules ss
         JOIN suppliers s ON s.id = ss.supplier_id
-        WHERE ss.restaurant_id = ? AND ss.is_active = 1
-          AND s.is_active = 1 AND s.so_enabled = 1
-        ORDER BY s.short_name
+        LEFT JOIN supplier_schedule_deadlines sd
+               ON sd.supplier_id = ss.supplier_id AND sd.restaurant_id = ss.restaurant_id AND sd.order_day = ss.order_day
+        WHERE ss.restaurant_id = ? AND ss.is_active = 1 AND s.is_active = 1 AND s.so_enabled = 1
+        ORDER BY s.short_name, ss.order_day
     ");
-    $portalStmt->execute([$rrRestPk, $rrRestPk]);
-    foreach ($portalStmt->fetchAll() as $r) {
+    $portSched->execute([$rrRestPk]);
+    $portRows = $portSched->fetchAll();
+    $portIds = [];
+    foreach ($portRows as $r) {
         $sid = $r['supplier_id'];
-        if (isset($bySupplier[$sid])) continue;
-        $bySupplier[$sid] = [
-            'supplier_id'     => $sid,
-            'supplier_name'   => $r['supplier_name'],
-            'so_enabled'      => true,
-            'reminder_muted'  => (int)$r['muted'] === 1,
-            'days'            => [],
-            'subscription'    => null,
-            'selected_tg_ids' => [],
-            'temp_period'     => null,
+        if (!isset($bySupplier[$sid])) {
+            $bySupplier[$sid] = [
+                'supplier_id' => $sid, 'supplier_name' => $r['supplier_name'],
+                'so_enabled' => true, 'days' => [], 'subscription' => null,
+                'selected_tg_ids' => [], 'temp_period' => null, 'reminder_muted' => false,
+            ];
+            $portIds[] = $sid;
+        }
+        $bySupplier[$sid]['days'][] = [
+            'order_day' => (int)$r['order_day'], 'delivery_day' => (int)$r['delivery_day'],
+            'deadline_override' => $r['deadline_override'],
         ];
+    }
+    if ($portIds) {
+        $ph = implode(',', array_fill(0, count($portIds), '?'));
+        // подписки
+        $subSt = $pdo->prepare("SELECT id, supplier_id, is_enabled, telegram_enabled, reminder_days
+                                FROM restaurant_reminder_subscriptions
+                                WHERE restaurant_id = ? AND supplier_id IN ($ph)");
+        $subSt->execute(array_merge([$rrRestPk], $portIds));
+        $subIdBySup = [];
+        foreach ($subSt->fetchAll() as $r) {
+            $bySupplier[$r['supplier_id']]['subscription'] = [
+                'is_enabled' => (int)$r['is_enabled'] === 1,
+                'telegram_enabled' => (int)$r['telegram_enabled'] === 1,
+                'reminder_days' => $r['reminder_days'] === null ? null : (int)$r['reminder_days'],
+            ];
+            $subIdBySup[(int)$r['id']] = $r['supplier_id'];
+        }
+        if ($subIdBySup) {
+            $sph = implode(',', array_fill(0, count($subIdBySup), '?'));
+            $tgSt = $pdo->prepare("SELECT subscription_id, ro_tg_sub_id FROM restaurant_reminder_tg_subscribers
+                                   WHERE subscription_id IN ($sph) AND is_active = 1");
+            $tgSt->execute(array_keys($subIdBySup));
+            foreach ($tgSt->fetchAll() as $r) {
+                $sid = $subIdBySup[(int)$r['subscription_id']] ?? null;
+                if ($sid) $bySupplier[$sid]['selected_tg_ids'][] = (int)$r['ro_tg_sub_id'];
+            }
+        }
+        // жёсткий выключатель закупок
+        $mSt = $pdo->prepare("SELECT supplier_id FROM so_reminder_mutes WHERE restaurant_id = ? AND supplier_id IN ($ph)");
+        $mSt->execute(array_merge([$rrRestPk], $portIds));
+        foreach ($mSt->fetchAll(PDO::FETCH_COLUMN) as $sid) {
+            if (isset($bySupplier[$sid])) $bySupplier[$sid]['reminder_muted'] = true;
+        }
     }
 
     // ─── Основная поставка ────────────────────────────────────────────────
