@@ -468,7 +468,7 @@ async function loadData() {
   try {
     const entity = orderStore.settings.legalEntity
 
-    let pq = db.from('products').select('sku, name, analog_group, supplier, category, unit_of_measure, qty_per_box')
+    let pq = db.from('products').select('sku, name, analog_group, supplier, category, unit_of_measure, qty_per_box, weight_netto')
     pq = applyEntityGroupFilter(pq, entity)
     const { data: products } = await pq
     productsData.value = products || []
@@ -597,6 +597,42 @@ const forecastRows = computed(() => {
   const horizonEnd = new Date(today.getFullYear(), today.getMonth() + 3, 0)
   horizonEnd.setHours(23, 59, 59, 999)
   const monthOf = (dateStr) => (dateStr || '').slice(0, 7)
+
+  // Единицы в «сроках годности» и «остатке» не всегда совпадают.
+  // Найдено 21.07.2026: у весовых/объёмных товаров stock_malling меряет в
+  // УПАКОВКАХ, а analysis_data.stock — в кг/л. Пример: сыр 51360_1 — остаток
+  // 1285 кг, а в сроках 3570 упаковок по 360 г (3570 × 0.36 = 1285 кг). Из-за
+  // этого прогноз вычитал продажи (кг) из упаковок и порча вылезала больше
+  // остатка. Единого коэффициента НЕТ, поэтому решаем ПО SKU: для кг/л
+  // пробуем перевести упаковки в базовую единицу (× вес_нетто/1000) и берём
+  // тот вариант, что ближе к остатку из analysis. Для «шт» и для товаров, где
+  // сроки годности — лишь часть остатка (таких большинство), ничего не трогаем.
+  const skuMallingTotal = {}
+  for (const e of expiryData.value) {
+    if (!e.product_name) continue
+    const s = e.product_name.split(/\s+/)[0]
+    skuMallingTotal[s] = (skuMallingTotal[s] || 0) + (parseFloat(e.quantity) || 0)
+  }
+  const skuStockTotal = {}
+  for (const a of analysisData.value) {
+    skuStockTotal[a.sku] = (skuStockTotal[a.sku] || 0) + (parseFloat(a.stock) || 0)
+  }
+  const skuUnitFactor = {}
+  for (const s in skuMallingTotal) {
+    const p = skuProduct.get(s)
+    let f = 1
+    const wn = p ? parseFloat(p.weight_netto) || 0 : 0
+    const u = p ? p.unit_of_measure : ''
+    if ((u === 'кг' || u === 'л') && wn > 0) {
+      const conv = wn / 1000
+      const A = skuStockTotal[s] || 0
+      const M = skuMallingTotal[s]
+      // Переводим в базовую единицу, только если так БЛИЖЕ к остатку.
+      if (A > 0 && Math.abs(M * conv - A) < Math.abs(M - A)) f = conv
+    }
+    skuUnitFactor[s] = f
+  }
+
   const groupExpiry = {} // group → { total, expiring30, ..., lots: [{...}], nearestDays }
 
   for (const e of expiryData.value) {
@@ -609,7 +645,7 @@ const forecastRows = computed(() => {
     if (!p || !p.analog_group) continue
     const g = p.analog_group
     if (!groupExpiry[g]) groupExpiry[g] = { total: 0, expired: 0, expiring7: 0, expiring14: 0, expiring30: 0, lots: [], nearestDays: Infinity, nearestDate: '' }
-    const qty = parseFloat(e.quantity) || 0
+    const qty = (parseFloat(e.quantity) || 0) * (skuUnitFactor[sku] || 1)
     const exp = new Date(e.expiry_date + 'T00:00:00')
     const daysToExpiry = Math.floor((exp - today) / 86400000)
     groupExpiry[g].total += qty
