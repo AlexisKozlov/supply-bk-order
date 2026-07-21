@@ -147,7 +147,7 @@
                     </div>
                   </td>
                   <td class="sa-col-act">
-                    <button v-if="item._added" class="sa-row-del" @click="removeItem(item)" aria-label="Удалить позицию">
+                    <button v-if="item._added" class="sa-row-del" @click="removeItem(item)" aria-label="Удалить товар">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                     </button>
                   </td>
@@ -165,7 +165,7 @@
         <!-- Итоги + сохранение -->
         <div class="sa-card sa-submit">
           <div v-if="multErrorsCount" class="sa-alert sa-alert--err">
-            {{ multErrorsCount }} {{ plural(multErrorsCount, 'позиция','позиции','позиций') }} с неверной кратностью — исправьте перед сохранением.
+            {{ multErrorsCount }} {{ plural(multErrorsCount, 'товар','товара','товаров') }} с неверной кратностью — исправьте перед сохранением.
           </div>
 
           <input
@@ -179,7 +179,7 @@
             <div class="sa-totals">
               <div class="sa-total">
                 <span class="sa-total-num">{{ totalItems }}</span>
-                <span class="sa-total-lbl">{{ plural(totalItems, 'позиция','позиции','позиций') }}</span>
+                <span class="sa-total-lbl">{{ plural(totalItems, 'товар','товара','товаров') }}</span>
               </div>
               <div class="sa-total">
                 <span class="sa-total-num">{{ totalQty }}</span>
@@ -215,7 +215,7 @@
         <div class="sa-success-stats">
           <div class="sa-success-stat">
             <span class="sa-success-num">{{ successStats.items }}</span>
-            <span class="sa-success-lbl">позиций</span>
+            <span class="sa-success-lbl">товаров</span>
           </div>
           <div class="sa-success-div"></div>
           <div class="sa-success-stat">
@@ -277,7 +277,7 @@
           <button class="sa-modal-close" @click="catalogModalOpen = false" aria-label="Закрыть">&times;</button>
         </div>
         <div class="sa-modal-body">
-          <p class="sa-modal-hint">Поиск по всему каталогу товаров — для позиций, которых нет в шаблоне.</p>
+          <p class="sa-modal-hint">Поиск по всему каталогу товаров — для товаров, которых нет в шаблоне.</p>
           <label class="sa-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             <input v-model="catalogSearch" type="text" placeholder="Поиск по каталогу" @input="doCatalogSearch" ref="catalogSearchInput" />
@@ -320,7 +320,7 @@
 
           <div v-if="exportInvalidRows.length" class="sa-alert sa-alert--warn">
             <strong>{{ exportInvalidRows.length }}</strong>
-            {{ plural(exportInvalidRows.length, 'позиция','позиции','позиций') }}
+            {{ plural(exportInvalidRows.length, 'товар','товара','товаров') }}
             без корректного 9-значного внешнего кода — они не загрузятся в 1С УТ.
           </div>
 
@@ -330,7 +330,7 @@
           <div v-for="g in exportGroups" :key="g.category" class="sa-export-group">
             <div class="sa-export-group-head">
               <span class="sa-export-group-title">Заявка — {{ g.category }}</span>
-              <span class="sa-dim">{{ g.rows.length }} {{ plural(g.rows.length, 'позиция','позиции','позиций') }}</span>
+              <span class="sa-dim">{{ g.rows.length }} {{ plural(g.rows.length, 'товар','товара','товаров') }}</span>
               <button class="sa-btn sa-btn--primary sa-btn--sm" @click="copyGroup(g.category)">Копировать заявку</button>
             </div>
             <div class="sa-export">

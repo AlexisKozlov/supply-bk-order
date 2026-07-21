@@ -26,7 +26,7 @@
             </div>
             <div class="hist-card-meta">
               <span v-if="Number(order.item_count) > 0" class="hist-meta-pill">
-                {{ order.item_count }} поз. · {{ order.total_qty }} {{ order.source === 'delivery' ? 'кор.' : 'шт.' }}
+                {{ order.item_count }} {{ pluralGoods(order.item_count) }} · {{ order.total_qty }} {{ order.source === 'delivery' ? 'кор.' : 'шт.' }}
               </span>
               <span v-else class="hist-meta-skip">Поставка не нужна</span>
               <span v-if="order.submitted_at" class="hist-card-time">{{ fmtDateTime(order.submitted_at) }}</span>
@@ -58,6 +58,15 @@ const props = defineProps({
 });
 
 defineEmits(['load-more', 'open']);
+
+// «1 товар», «2 товара», «5 товаров»
+function pluralGoods(n) {
+  const num = Number(n) || 0;
+  const m10 = num % 10, m100 = num % 100;
+  if (m10 === 1 && m100 !== 11) return 'товар';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'товара';
+  return 'товаров';
+}
 
 const filter = ref('all');
 

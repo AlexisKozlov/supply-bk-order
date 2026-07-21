@@ -1,7 +1,7 @@
 <template>
   <div v-if="previousOrder" class="spo-block" :class="variantClass">
     <div class="spo-head" @click="$emit('update:expanded', !expanded)">
-      <span>📋 Ваша предыдущая заявка от {{ formatDate(previousOrder.delivery_date) }} — {{ previousOrder.items?.length || 0 }} поз.</span>
+      <span>📋 Ваша предыдущая заявка от {{ formatDate(previousOrder.delivery_date) }} — {{ countLabel }}</span>
       <span class="spo-toggle">{{ expanded ? '▲ скрыть' : '▼ показать' }}</span>
     </div>
     <div v-if="expanded" class="spo-body">
@@ -33,6 +33,19 @@ const props = defineProps({
 defineEmits(['update:expanded', 'repeat']);
 
 const variantClass = computed(() => 'spo-' + props.variant);
+
+// «3 товара» с правильным склонением; пустая заявка = «Поставка не нужна»
+// (её подают отметкой «Поставка не нужна», товаров в ней нет — «0 товаров»
+// сбивало с толку).
+const countLabel = computed(() => {
+  const n = props.previousOrder?.items?.length || 0;
+  if (!n) return 'поставка не нужна';
+  const forms = ['товар', 'товара', 'товаров'];
+  const m10 = n % 10, m100 = n % 100;
+  const word = (m10 === 1 && m100 !== 11) ? forms[0]
+    : (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) ? forms[1] : forms[2];
+  return `${n} ${word}`;
+});
 </script>
 
 <style scoped>
