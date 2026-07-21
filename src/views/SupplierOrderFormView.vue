@@ -37,7 +37,7 @@
         <div class="ro-success-icon">&#10003;</div>
         <h2 class="ro-success-title">Заявка отправлена!</h2>
         <p class="ro-success-date">{{ selectedSupplier?.name }} — доставка {{ formatDate(selectedDeliveryDate) }}</p>
-        <p class="ro-success-stats">{{ successInfo.total_items }} поз., {{ successInfo.total_qty }} шт.</p>
+        <p class="ro-success-stats">{{ successInfo.total_items }} товаров, {{ successInfo.total_qty }} шт.</p>
         <div class="ro-success-actions">
           <button class="ro-submit-btn" @click="showSuccess = false">Назад к поставщикам</button>
         </div>
@@ -91,7 +91,7 @@
               </div>
               <div class="so-history-info">
                 <span class="so-history-date">Доставка: {{ formatDate(o.delivery_date) }}</span>
-                <span v-if="Number(o.item_count) > 0" class="so-history-qty">{{ o.item_count }} поз., {{ fmtNum(o.total_qty) }} шт.</span>
+                <span v-if="Number(o.item_count) > 0" class="so-history-qty">{{ o.item_count }} товаров, {{ fmtNum(o.total_qty) }} шт.</span>
                 <span v-else class="so-history-skip">Поставка не нужна</span>
               </div>
               <div class="so-history-sub">Подано: {{ o.submitted_at ? formatDateTime(o.submitted_at) : '—' }}</div>
@@ -203,7 +203,7 @@
             <!-- Submit -->
             <div v-if="currentDateInfo?.deadline_status === 'open'" class="ro-submit-area">
               <div class="ro-submit-summary">
-                {{ filledCount }} поз., {{ filledTotal }} шт.
+                {{ filledCount }} товаров, {{ filledTotal }} шт.
               </div>
               <!-- Минимальный заказ поставщика: живой итог + подсветка недобора -->
               <div
@@ -483,7 +483,7 @@ async function handleRepeatPrevious() {
     }
   }
   if (skipped > 0) {
-    showInfo('Готово', `Скопировано позиций: ${applied}.\nПропущено (нет в шаблоне): ${skipped}.`, 'success');
+    showInfo('Готово', `Скопировано товаров: ${applied}.\nПропущено (нет в шаблоне): ${skipped}.`, 'success');
   }
 }
 

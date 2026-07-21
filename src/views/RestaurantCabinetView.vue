@@ -321,7 +321,7 @@
                 <span class="dash-order-date">{{ fmtDate(order.delivery_date) }}</span>
               </div>
               <div class="dash-order-right">
-                <span>{{ order.item_count }} поз.</span>
+                <span>{{ order.item_count }} {{ pluralPositions(order.item_count) }}</span>
                 <span class="dash-order-status" :class="'st-' + order.status">{{ statusLabel(order.status) }}</span>
               </div>
             </div>
@@ -434,7 +434,7 @@
             <div class="cab-success-stats">
               <div class="cab-success-stat-item">
                 <div class="cab-success-stat-num">{{ delTotalItems }}</div>
-                <div class="cab-success-stat-lbl">позиций</div>
+                <div class="cab-success-stat-lbl">товаров</div>
               </div>
               <div class="cab-success-stat-divider"></div>
               <div class="cab-success-stat-item">
@@ -518,7 +518,7 @@
                 class="btn btn-sm"
                 :class="delOnlyFilled ? 'btn-primary' : 'btn-outline'"
                 :disabled="delTotalItems === 0"
-                :title="delTotalItems === 0 ? 'Сначала заполните хотя бы одну позицию' : 'Показать только товары с количеством'"
+                :title="delTotalItems === 0 ? 'Сначала заполните хотя бы один товар' : 'Показать только товары с количеством'"
                 @click="delOnlyFilled = !delOnlyFilled"
               >
                 Только заполненные
@@ -584,7 +584,7 @@
               </div>
               <div class="submit-bottom">
                 <div v-if="delTotalItems > 0" class="submit-summary">
-                  <span><strong>{{ delTotalItems }}</strong> поз.</span>
+                  <span><strong>{{ delTotalItems }}</strong> {{ pluralPositions(delTotalItems) }}</span>
                   <span><strong>{{ delTotalQty }}</strong> кор.</span>
                   <button v-if="delCanSubmit || delCanEdit" class="btn btn-sm btn-danger-outline" @click="delClearOrder">Очистить</button>
                 </div>
@@ -604,7 +604,7 @@
             <div v-if="delPreviousOrders.length && !delExistingOrder && (delCanSubmit || delCanEdit)" class="repeat-section">
               <div class="repeat-title">Повторить предыдущий заказ:</div>
               <button v-for="po in delPreviousOrders" :key="po.id" class="repeat-btn" @click="delHandleRepeat(po.id)">
-                {{ fmtDate(po.delivery_date) }} — {{ po.item_count }} поз., {{ po.total_qty }} кор.
+                {{ fmtDate(po.delivery_date) }} — {{ po.item_count }} {{ pluralPositions(po.item_count) }}, {{ po.total_qty }} кор.
               </button>
             </div>
           </div>
@@ -701,9 +701,10 @@
                 <div class="submit-area">
                   <div v-if="supHasErrors(sup.id)" class="error-msg">Исправьте количество</div>
                   <div v-if="supFilledCount(sup.id) > 0" class="submit-summary">
-                    <span><strong>{{ supFilledCount(sup.id) }}</strong> поз.</span>
+                    <span><strong>{{ supFilledCount(sup.id) }}</strong> {{ pluralPositions(supFilledCount(sup.id)) }}</span>
                     <span><strong>{{ supFilledTotal(sup.id) }}</strong> шт.</span>
-                    <span v-if="supMinOrderValue(sup) && supMinOrderTotal(sup) > 0">
+                    <!-- Итог по минимуму — только в кг: в штуках он совпал бы с «шт.» выше. -->
+                    <span v-if="supMinOrderValue(sup) && sup.min_order_unit === 'kg' && supMinOrderTotal(sup) > 0">
                       <strong>{{ supMinOrderFmt(sup, supMinOrderTotal(sup)) }}</strong> {{ supMinOrderUnitLabel(sup) }}
                     </span>
                   </div>
@@ -795,7 +796,7 @@
                 </div>
               </div>
             </div>
-            <div v-else class="cab-empty-card"><p>Нет позиций — поставка не нужна</p></div>
+            <div v-else class="cab-empty-card"><p>Нет товаров — поставка не нужна</p></div>
           </template>
         </div>
       </div>
@@ -1433,7 +1434,7 @@
         <div v-if="!supSuccessInfo.skipped" class="cab-success-stats">
           <div class="cab-success-stat-item">
             <div class="cab-success-stat-num">{{ supSuccessInfo.total_items }}</div>
-            <div class="cab-success-stat-lbl">позиций</div>
+            <div class="cab-success-stat-lbl">товаров</div>
           </div>
           <div class="cab-success-stat-divider"></div>
           <div class="cab-success-stat-item">
@@ -2130,7 +2131,7 @@ function pluralRu(n, forms) {
   if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return forms[1];
   return forms[2];
 }
-function pluralPositions(n) { return pluralRu(n, ['позиция', 'позиции', 'позиций']); }
+function pluralPositions(n) { return pluralRu(n, ['товар', 'товара', 'товаров']); }
 function pluralBoxes(n) { return pluralRu(n, ['коробка', 'коробки', 'коробок']); }
 function delRefreshMultiplicityErrors() { for (const item of delOrderItems.value) delCheckMultiplicity(item); }
 
@@ -2350,7 +2351,7 @@ async function delHandleSubmit() {
     quantity: i.quantity,
     comment: i.comment || '',
   }));
-  if (!items.length) { delSubmitError.value = 'Добавьте хотя бы одну позицию'; return; }
+  if (!items.length) { delSubmitError.value = 'Добавьте хотя бы один товар'; return; }
   // Подтверждение с конкретными цифрами — заказ уходит на склад,
   // отменить нельзя, можно только отредактировать до edit_until.
   const isUpdate = !!delExistingOrder.value;
@@ -2665,7 +2666,7 @@ async function supHandleRepeatPrevious(sup) {
   }
   supIsSkipOrder[sup.id] = false;
   if (skipped > 0) {
-    showInfo('Готово', `Скопировано позиций: ${applied}. Пропущено (нет в шаблоне): ${skipped}.`, 'info');
+    showInfo('Готово', `Скопировано товаров: ${applied}. Пропущено (нет в шаблоне): ${skipped}.`, 'info');
   }
 }
 
