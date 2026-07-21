@@ -839,6 +839,9 @@
                 <span v-if="c.submitted" class="sc-list-badge done">Сдан</span>
                 <span v-else class="sc-list-badge">Не сдан</span>
                 <span class="sc-list-count">Заполнено {{ c.submitted_count }} из {{ c.total_products }}</span>
+                <span v-if="c.deadline_at" class="sc-list-deadline" :class="{ late: !c.submitted && stockDeadlinePassed(c.deadline_at) }">
+                  до {{ fmtStockDeadline(c.deadline_at) }}<span v-if="!c.submitted && stockDeadlinePassed(c.deadline_at)"> · срок вышел</span>
+                </span>
               </div>
               <div class="sc-list-item-bar">
                 <div
@@ -868,6 +871,11 @@
             <em>{{ stockCollection.collections.length }}</em>
           </button>
           <h2 class="sc-head-title">{{ stockCollection.collection?.name }}</h2>
+          <p v-if="stockCollection.collection?.deadline_at" class="sc-head-deadline"
+             :class="{ late: stockDeadlinePassed(stockCollection.collection.deadline_at) }">
+            Заполнить до {{ fmtStockDeadline(stockCollection.collection.deadline_at) }}
+            <span v-if="stockDeadlinePassed(stockCollection.collection.deadline_at)">— срок вышел</span>
+          </p>
           <p class="sc-head-sub">
             <span v-if="stockLastSubmittedAt">Последнее сохранение: {{ fmtDateTime(stockLastSubmittedAt) }}</span>
             <span v-else>Если товара нет — поставьте 0.</span>
@@ -2499,6 +2507,23 @@ function supUpdateDeadlineTimers() {
 function supplierBadge(sup) { if (!sup.is_accepting_orders) return { text: 'пауза', type: 'pause' }; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
 function supCurrentDateInfo(sup) { if (!supSelectedDates[sup.id]) return null; return sup.available_dates?.find(d => d.delivery_date === supSelectedDates[sup.id]); }
 function formatDeadline(dl) { if (!dl) return ''; const [date, time] = dl.split(' '); const d = new Date(date + 'T00:00:00'); const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' }); return (time || '') + ', ' + label; }
+
+// Срок сдачи сбора остатков: '2026-07-21 09:00:00' → '21 июл, 09:00'.
+function fmtStockDeadline(raw) {
+  if (!raw) return '';
+  const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (!m) return '';
+  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00`);
+  const day = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  return `${day}, ${m[4]}:${m[5]}`;
+}
+// Срок уже прошёл?
+function stockDeadlinePassed(raw) {
+  if (!raw) return false;
+  const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (!m) return false;
+  return new Date(m[1], +m[2] - 1, m[3], m[4], m[5]) < new Date();
+}
 
 async function supSelectDate(sup, dateInfo) {
   const nextRequestId = (supLoadRequestId[sup.id] || 0) + 1;
@@ -4629,6 +4654,8 @@ tr.del-err { background: #fef2f2; }
 }
 .sc-list-badge.done { background: #ECFDF5; color: #16A34A; }
 .sc-list-count { color: #8b7355; font-size: 12px; font-weight: 600; }
+.sc-list-deadline { color: #8b7355; font-size: 12px; font-weight: 600; }
+.sc-list-deadline.late { color: #C62828; }
 .sc-list-item-bar { height: 5px; border-radius: 999px; background: #F0E5D6; overflow: hidden; }
 .sc-list-item-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #F4A261, #E76F51); }
 .sc-list-item.done .sc-list-item-fill { background: #16A34A; }
@@ -4638,6 +4665,9 @@ tr.del-err { background: #fef2f2; }
 .sc-head { background: #fff; border: 1px solid #EDE8E3; border-radius: 14px; padding: 16px 18px; }
 .sc-head-title { margin: 0 0 4px; color: #2C1A12; font-size: 18px; font-weight: 700; }
 .sc-head-sub { margin: 0; color: #8b7355; font-size: 13px; }
+.sc-head-deadline { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: #6D4C41;
+  display: inline-block; padding: 4px 10px; background: #FBF6F0; border-radius: 8px; }
+.sc-head-deadline.late { color: #C62828; background: #FDECEA; }
 .sc-head-warn { margin: 8px 0 0; color: #B45309; font-size: 13px; font-weight: 600; }
 .sc-back-btn {
   display: inline-flex; align-items: center; gap: 7px;
