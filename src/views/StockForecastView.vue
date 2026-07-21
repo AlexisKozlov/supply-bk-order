@@ -32,7 +32,7 @@
         </select>
         <select v-model="filterExpiry" class="sfv-input sfv-select" title="Фильтр по сроку годности на складе">
           <option value="">Любой срок годности</option>
-          <option value="spoil">Не успеют продать</option>
+          <option value="spoil">Риск просрочки (3 мес.)</option>
           <option value="expired">Есть просрочка</option>
           <option value="d7">Истекает ≤ 7 дней</option>
           <option value="d14">Истекает ≤ 14 дней</option>
@@ -64,8 +64,11 @@
         <span v-if="filterAlert" class="sfv-kpi-clear" @click="filterAlert = ''">✕ сбросить</span>
 
         <span class="sfv-kpi-divider"></span>
-        <span v-if="expiryKpi.hasSpoil" class="sfv-kpi-item sfv-kpi-exp7" title="Прогноз: не успеют продать до срока годности при текущих продажах" @click="filterExpiry = filterExpiry === 'spoil' ? '' : 'spoil'">
-          Не успеют продать: <b>{{ expiryKpi.spoilText }}</b> <span class="sfv-kpi-sub">в {{ expiryKpi.spoilGroups }} гр.</span>
+        <span v-if="expiryKpi.hasSpoil" class="sfv-kpi-item sfv-kpi-exp7" title="Прогноз на 3 месяца: не успеют продать до срока годности при текущем темпе продаж" @click="filterExpiry = filterExpiry === 'spoil' ? '' : 'spoil'">
+          Риск просрочки за 3 мес.: <b>{{ expiryKpi.spoilText }}</b> <span class="sfv-kpi-sub">в {{ expiryKpi.spoilGroups }} гр.</span>
+        </span>
+        <span v-if="expiryKpi.hasNoSales" class="sfv-kpi-item sfv-kpi-nosales" title="Срок годности истекает в ближайшие 3 месяца, но продаж нет — оценить вручную">
+          Нет продаж: <b>{{ expiryKpi.noSalesText }}</b> <span class="sfv-kpi-sub">в {{ expiryKpi.noSalesGroups }} гр.</span>
         </span>
         <span v-if="expiryKpi.hasExpired" class="sfv-kpi-item sfv-kpi-expired" title="Уже просроченный / заблокированный товар (состоявшийся убыток)" @click="filterExpiry = filterExpiry === 'expired' ? '' : 'expired'">
           Просрочено: <b>{{ expiryKpi.expiredText }}</b> <span class="sfv-kpi-sub">в {{ expiryKpi.expiredGroups }} гр.</span>
@@ -75,33 +78,59 @@
         <span class="sfv-kpi-period">Данные: {{ periodLabel }}</span>
       </div>
 
-      <!-- Прогноз порчи: не успеют продать до срока -->
+      <!-- Прогноз порчи по месяцам: не успеют продать до срока -->
       <div v-if="spoilReport.length" class="sfv-report">
         <div class="sfv-report-head" @click="reportOpen = !reportOpen">
           <span class="sfv-report-chevron" :class="{ open: reportOpen }">&#9656;</span>
-          <span class="sfv-report-title">⚠ Прогноз порчи</span>
+          <span class="sfv-report-title">⚠ Риск просрочки — 3 месяца</span>
           <span class="sfv-report-sum">
-            не успеют продать до срока ≈ <b>{{ expiryKpi.spoilText }}</b>
+            рискуем просрочить ≈ <b>{{ expiryKpi.spoilText }}</b>
             в {{ spoilReport.length }} {{ spoilReport.length === 1 ? 'группе' : 'группах' }}
           </span>
           <span class="sfv-report-toggle">{{ reportOpen ? 'свернуть' : 'показать' }}</span>
         </div>
         <div v-if="reportOpen" class="sfv-report-body">
-          <div class="sfv-spoil-row sfv-spoil-head">
-            <span class="sfv-sr-name">Группа</span>
-            <span class="sfv-sr-qty">Сгорит ≈</span>
-            <span class="sfv-sr-date">К дате</span>
-            <span class="sfv-sr-avg">Продажи/день</span>
-            <span class="sfv-sr-stock">Остаток</span>
+          <div class="sfv-month-row sfv-month-head">
+            <span class="sfv-mr-name">Группа</span>
+            <span v-for="m in forecastMonths" :key="'h'+m.key" class="sfv-mr-num">{{ m.label }}</span>
+            <span class="sfv-mr-total">Всего</span>
           </div>
-          <div v-for="(s, i) in spoilReport" :key="'spoil'+i" class="sfv-spoil-row" @click="toggleExpand(s.group)">
+          <div v-for="(s, i) in spoilReport" :key="'spoil'+i" class="sfv-month-row" @click="toggleExpand(s.group)">
+            <span class="sfv-mr-name" :title="s.group">{{ s.group }}<span v-if="s.supplier" class="sfv-rr-group">{{ s.supplier }}</span></span>
+            <span v-for="m in forecastMonths" :key="'c'+m.key" class="sfv-mr-num" :class="{ 'sfv-mr-zero': !(s.byMonth[m.key] > 0.05) }">
+              {{ s.byMonth[m.key] > 0.05 ? dispQty(s.byMonth[m.key], s.qpb) : '—' }}
+            </span>
+            <span class="sfv-mr-total sfv-exp-warn">{{ dispQty(s.qty, s.qpb) }} {{ unitLbl(s.unit, s.qpb) }}</span>
+          </div>
+          <div class="sfv-report-foot">Оценка по текущему темпу продаж, партии FEFO (ближний срок — первым). Без учёта будущих поставок и запасов у ресторанов.</div>
+        </div>
+      </div>
+
+      <!-- Нет продаж: срок истекает, но темп неизвестен — оценить вручную -->
+      <div v-if="noSalesReport.length" class="sfv-report sfv-report-nosales">
+        <div class="sfv-report-head" @click="noSalesOpen = !noSalesOpen">
+          <span class="sfv-report-chevron" :class="{ open: noSalesOpen }">&#9656;</span>
+          <span class="sfv-report-title">Нет продаж — оценить вручную</span>
+          <span class="sfv-report-sum">
+            <b>{{ expiryKpi.noSalesText }}</b> без движения, срок в 3 месяца
+            в {{ noSalesReport.length }} {{ noSalesReport.length === 1 ? 'группе' : 'группах' }}
+          </span>
+          <span class="sfv-report-toggle">{{ noSalesOpen ? 'свернуть' : 'показать' }}</span>
+        </div>
+        <div v-if="noSalesOpen" class="sfv-report-body">
+          <div class="sfv-ns-row sfv-ns-head">
+            <span>Группа</span>
+            <span>Остаток в риске</span>
+            <span>Ближайший срок</span>
+            <span>Всего остаток</span>
+          </div>
+          <div v-for="(s, i) in noSalesReport" :key="'ns'+i" class="sfv-ns-row" @click="toggleExpand(s.group)">
             <span class="sfv-sr-name" :title="s.group">{{ s.group }}<span v-if="s.supplier" class="sfv-rr-group">{{ s.supplier }}</span></span>
-            <span class="sfv-sr-qty sfv-exp-warn">{{ dispQty(s.qty, s.qpb) }} {{ unitLbl(s.unit, s.qpb) }}</span>
-            <span class="sfv-sr-date">{{ s.date ? shortDate(s.date) : '—' }}</span>
-            <span class="sfv-sr-avg">{{ dispQty(s.avg, s.qpb) }}</span>
-            <span class="sfv-sr-stock">{{ dispQty(s.stock, s.qpb) }}</span>
+            <span>{{ dispQty(s.qty, s.qpb) }} {{ unitLbl(s.unit, s.qpb) }}</span>
+            <span>{{ s.date ? shortDate(s.date) : '—' }}</span>
+            <span>{{ dispQty(s.stock, s.qpb) }}</span>
           </div>
-          <div class="sfv-report-foot">Оценка по текущему темпу продаж. Без учёта будущих поставок и запасов у ресторанов.</div>
+          <div class="sfv-report-foot">По этим товарам продаж нет — темп неизвестен, порчу автоматически не считаем. Решение о списании/перемещении — вручную.</div>
         </div>
       </div>
 
@@ -411,6 +440,7 @@ const filterAlert = ref('')
 const filterExpiry = ref('')      // '', 'expired', 'd7', 'd14', 'd30', 'ok'
 const reportOpen = ref(false)     // развёрнута ли сводка «Прогноз порчи»
 const expiredOpen = ref(false)    // развёрнута ли секция «Просрочено»
+const noSalesOpen = ref(false)    // развёрнута ли секция «Нет продаж»
 const sortKey = ref('days-asc')
 const period = ref(7)
 const expanded = ref(null)
@@ -555,6 +585,18 @@ const forecastRows = computed(() => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const curGroupCode = getEntityGroupCode(orderStore.settings.legalEntity)
+
+  // Горизонт прогноза — ближайшие 3 месяца, помесячно. monthKeys = ['YYYY-MM', ...]
+  // текущего месяца и двух следующих. Всё, что просрочится позже, в риск не берём —
+  // это не «ближайшая» угроза. horizonEnd — последний день третьего месяца.
+  const monthKeys = []
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth() + i, 1)
+    monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  const horizonEnd = new Date(today.getFullYear(), today.getMonth() + 3, 0)
+  horizonEnd.setHours(23, 59, 59, 999)
+  const monthOf = (dateStr) => (dateStr || '').slice(0, 7)
   const groupExpiry = {} // group → { total, expiring30, ..., lots: [{...}], nearestDays }
 
   for (const e of expiryData.value) {
@@ -717,10 +759,13 @@ const forecastRows = computed(() => {
     let expiryRisk = ''
     let effectiveStock = stock
     let expiredQty = 0          // уже просрочено / заблокировано — отдельный, уже состоявшийся убыток
-    let projectedSpoil = 0      // прогноз: НЕ успеют продать до срока годности (FEFO по текущим продажам)
+    let projectedSpoil = 0      // прогноз порчи в горизонте 3 месяцев (FEFO по текущим продажам)
     let spoilDate = ''          // ближайшая дата, к которой начинается прогнозируемая порча
     let goodNearestDays = Infinity
     let goodNearestDate = ''
+    const spoilByMonth = {}     // 'YYYY-MM' → сколько сгорит в этом месяце
+    let noSalesQty = 0          // остаток в горизонте у товара БЕЗ продаж (спрогнозировать нельзя)
+    let noSalesNearest = ''
     if (exp) {
       expiredQty = exp.expired
       const unusable = exp.expired + exp.expiring7
@@ -729,21 +774,41 @@ const forecastRows = computed(() => {
       else if (exp.expiring7 > 0) expiryRisk = 'week'
       else if (exp.expiring14 > 0) expiryRisk = 'soon'
 
-      // FEFO-прогноз порчи: продаём avg/день, сначала партии с ближайшим сроком.
-      // Что не успеет продаться к своей дате «годен до» — прогнозируемая порча.
-      let prevCum = 0
-      for (const l of exp.lots) {
-        if (l.daysToExpiry < 0) continue   // уже просрочено — отдельной строкой
-        if (l.daysToExpiry < goodNearestDays) { goodNearestDays = l.daysToExpiry; goodNearestDate = l.date }
-        const cumI = prevCum + l.qty
-        const cap = avg * l.daysToExpiry   // сколько всего можно продать к дате этого лота
-        const soldThisLot = Math.min(cap, cumI) - Math.min(cap, prevCum)
-        const spoil = Math.max(0, l.qty - soldThisLot)
-        if (spoil > 0.05 && !spoilDate) spoilDate = l.date
-        projectedSpoil += spoil
-        prevCum = cumI
+      if (avg > 0) {
+        // FEFO-прогноз порчи: продаём avg/день, сначала партии с ближайшим сроком.
+        // Что не успеет продаться к своей дате «годен до» — прогнозируемая порча.
+        // Считаем только партии в горизонте 3 месяцев: партии на потом FEFO не
+        // мешают (они позже в очереди), и «ближайшим риском» не являются.
+        let prevCum = 0
+        for (const l of exp.lots) {
+          if (l.daysToExpiry < 0) continue   // уже просрочено — отдельной строкой
+          if (l.daysToExpiry < goodNearestDays) { goodNearestDays = l.daysToExpiry; goodNearestDate = l.date }
+          const cumI = prevCum + l.qty
+          const cap = avg * l.daysToExpiry   // сколько всего можно продать к дате этого лота
+          const soldThisLot = Math.min(cap, cumI) - Math.min(cap, prevCum)
+          const spoil = Math.max(0, l.qty - soldThisLot)
+          prevCum = cumI
+          const mk = monthOf(l.date)
+          if (!monthKeys.includes(mk)) continue   // за пределами 3 месяцев — не показываем
+          if (spoil > 0.05 && !spoilDate) spoilDate = l.date
+          spoilByMonth[mk] = (spoilByMonth[mk] || 0) + spoil
+          projectedSpoil += spoil
+        }
+        projectedSpoil = Math.round(projectedSpoil * 10) / 10
+      } else {
+        // Продаж (и расхода) нет — темп неизвестен, честно спрогнозировать
+        // нельзя. Такой товар не раздуваем в цифрах, а выносим отдельным
+        // списком «нет продаж — оценить вручную»: показываем остаток, у
+        // которого срок истекает в горизонте, и ближайшую дату.
+        for (const l of exp.lots) {
+          if (l.daysToExpiry < 0) continue
+          if (l.daysToExpiry < goodNearestDays) { goodNearestDays = l.daysToExpiry; goodNearestDate = l.date }
+          if (!monthKeys.includes(monthOf(l.date))) continue
+          noSalesQty += l.qty
+          if (!noSalesNearest) noSalesNearest = l.date
+        }
+        noSalesQty = Math.round(noSalesQty * 10) / 10
       }
-      projectedSpoil = Math.round(projectedSpoil * 10) / 10
     }
     const effectiveDaysLeft = avg > 0 ? effectiveStock / avg : (effectiveStock > 0 ? Infinity : 0)
 
@@ -754,7 +819,8 @@ const forecastRows = computed(() => {
       skuBreakdown, supplier, category, unit, qpb,
       periodDates, periodValues,
       expiry: exp, expiryRisk, effectiveStock, effectiveDaysLeft,
-      expiredQty, projectedSpoil, spoilDate,
+      expiredQty, projectedSpoil, spoilDate, spoilByMonth,
+      noSalesQty, noSalesNearest,
       nearestExpiryDays: exp ? exp.nearestDays : Infinity,
       nearestExpiryDate: exp ? exp.nearestDate : '',
       goodNearestDays, goodNearestDate,
@@ -908,12 +974,27 @@ const kpi = computed(() => {
   return { red, yellow, ok }
 })
 
+// Три месяца горизонта прогноза: [{ key:'2026-07', label:'июль' }, ...].
+// Тот же расчёт monthKeys, что в forecastRows, чтобы заголовки и цифры совпадали.
+const forecastMonths = computed(() => {
+  const t = new Date(); t.setHours(0, 0, 0, 0)
+  const out = []
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(t.getFullYear(), t.getMonth() + i, 1)
+    out.push({
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      label: d.toLocaleDateString('ru-RU', { month: 'long' }),
+    })
+  }
+  return out
+})
+
 // Сводка по риску порчи. Суммы разбиваем по единицам измерения —
 // штуки и килограммы складывать нельзя.
 const expiryKpi = computed(() => {
-  const spoilByUnit = {}, expiredByUnit = {}
-  let expiredGroups = 0, spoilGroups = 0
-  let spoilBoxes = 0, expiredBoxes = 0   // суммы в коробках (через qpb группы)
+  const spoilByUnit = {}, expiredByUnit = {}, noSalesByUnit = {}
+  let expiredGroups = 0, spoilGroups = 0, noSalesGroups = 0
+  let spoilBoxes = 0, expiredBoxes = 0, noSalesBoxes = 0   // суммы в коробках (через qpb группы)
   for (const r of forecastRows.value) {
     const u = r.unit || 'ед.'
     if (r.expiredQty > 0) {
@@ -926,13 +1007,20 @@ const expiryKpi = computed(() => {
       spoilBoxes += cvt(r.projectedSpoil, r.qpb)
       spoilGroups++
     }
+    if (r.noSalesQty > 0) {
+      noSalesByUnit[u] = (noSalesByUnit[u] || 0) + r.noSalesQty
+      noSalesBoxes += cvt(r.noSalesQty, r.qpb)
+      noSalesGroups++
+    }
   }
   return {
     spoilText: isBoxes.value ? (fmtNum(spoilBoxes) + ' кор.') : fmtByUnit(spoilByUnit),
     expiredText: isBoxes.value ? (fmtNum(expiredBoxes) + ' кор.') : fmtByUnit(expiredByUnit),
-    expiredGroups, spoilGroups,
+    noSalesText: isBoxes.value ? (fmtNum(noSalesBoxes) + ' кор.') : fmtByUnit(noSalesByUnit),
+    expiredGroups, spoilGroups, noSalesGroups,
     hasSpoil: spoilGroups > 0,
     hasExpired: expiredGroups > 0,
+    hasNoSales: noSalesGroups > 0,
   }
 })
 
@@ -942,16 +1030,34 @@ function fmtByUnit(map) {
   return parts.join(', ')
 }
 
-// Прогноз порчи: какие группы НЕ успеют распродать до срока и сколько ≈
+// Прогноз порчи по месяцам: какие группы НЕ успеют распродать до срока и
+// сколько ≈ в каждом из ближайших 3 месяцев.
 const spoilReport = computed(() => {
   const out = []
   for (const r of forecastRows.value) {
     if (r.projectedSpoil > 0) {
       out.push({
         group: r.group, supplier: r.supplier, unit: r.unit, qpb: r.qpb,
-        qty: r.projectedSpoil, date: r.spoilDate || r.goodNearestDate,
+        qty: r.projectedSpoil, byMonth: r.spoilByMonth || {},
+        date: r.spoilDate || r.goodNearestDate,
         avg: r.avg, stock: r.stock,
         daysToExpiry: r.goodNearestDays,
+      })
+    }
+  }
+  out.sort((a, b) => b.qty - a.qty)
+  return out
+})
+
+// Товары без продаж, у которых срок годности истекает в горизонте — темп
+// продаж неизвестен, спрогнозировать порчу нельзя, нужна ручная оценка.
+const noSalesReport = computed(() => {
+  const out = []
+  for (const r of forecastRows.value) {
+    if (r.noSalesQty > 0) {
+      out.push({
+        group: r.group, supplier: r.supplier, unit: r.unit, qpb: r.qpb,
+        qty: r.noSalesQty, date: r.noSalesNearest || r.goodNearestDate, stock: r.stock,
       })
     }
   }
@@ -1145,6 +1251,25 @@ function sparkColor(r) {
 .sfv-sr-avg { text-align: right; color: var(--text-muted); }
 .sfv-sr-stock { text-align: right; color: var(--text-muted); }
 .sfv-report-foot { margin-top: 6px; font-size: 10px; color: var(--text-muted); font-style: italic; }
+
+/* Помесячная таблица прогноза: Группа | мес1 | мес2 | мес3 | Всего */
+.sfv-month-row { display: grid; grid-template-columns: minmax(0, 2.4fr) 1fr 1fr 1fr 90px; gap: 8px; align-items: center; padding: 4px 0; font-size: 12px; border-bottom: 1px solid #F2DEDE; cursor: pointer; }
+.sfv-month-row:hover:not(.sfv-month-head) { background: #FFF0EC; }
+.sfv-month-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); font-weight: 700; cursor: default; }
+.sfv-mr-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfv-mr-num { text-align: right; font-variant-numeric: tabular-nums; }
+.sfv-mr-num.sfv-mr-zero { color: var(--border); }
+.sfv-mr-total { text-align: right; font-weight: 700; }
+
+/* Секция «Нет продаж» — жёлтая, отделена от красного прогноза */
+.sfv-report-nosales { border-color: #F5D9A0; background: #FFFBF0; }
+.sfv-kpi-nosales { color: #B7791F; }
+.sfv-ns-row { display: grid; grid-template-columns: minmax(0, 2.4fr) 110px 90px 90px; gap: 8px; align-items: center; padding: 4px 0; font-size: 12px; border-bottom: 1px solid #F3E8CE; cursor: pointer; }
+.sfv-ns-row span:not(.sfv-sr-name):not(.sfv-rr-group) { text-align: right; }
+.sfv-ns-row span:nth-child(3) { text-align: center; }
+.sfv-ns-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); font-weight: 700; cursor: default; }
+.sfv-ns-head span:nth-child(3) { text-align: center; }
+.sfv-ns-row:hover:not(.sfv-ns-head) { background: #FCF3DE; }
 
 /* Секция «Просрочено» — нейтральный серый, чтобы не путать с прогнозом */
 .sfv-report-expired { border-color: var(--border); background: var(--card); }
