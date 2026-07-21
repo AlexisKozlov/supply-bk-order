@@ -176,6 +176,27 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  // Привязанные Telegram-аккаунты ресторана и кто из них выбран получателем
+  // напоминаний конкретно этого поставщика.
+  async function adminGetReminderRecipients(supplierId, restaurantId) {
+    const params = new URLSearchParams({ supplier_id: supplierId, restaurant_id: restaurantId });
+    const data = await api(`admin/reminder-recipients?${params}`);
+    return { accounts: data.accounts || [], hasSubscription: !!data.has_subscription };
+  }
+
+  // Вкл/выкл одного Telegram-аккаунта как получателя напоминаний поставщика
+  async function adminSetReminderRecipient(supplierId, restaurantId, roTgSubId, selected) {
+    return api('admin/reminder-recipient', {
+      method: 'POST',
+      body: JSON.stringify({
+        supplier_id: supplierId,
+        restaurant_id: restaurantId,
+        ro_tg_sub_id: roTgSubId,
+        selected: selected ? 1 : 0,
+      }),
+    });
+  }
+
   async function adminSaveSchedules(supplierId, schedules, temporarySchedule = null) {
     return api('admin/schedules', {
       method: 'POST',
@@ -280,6 +301,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminUpdateOrder, adminDeleteOrder,
     adminGetSettings, adminSaveSettings,
     adminGetSchedules, adminSaveSchedules, adminSetReminderMute,
+    adminGetReminderRecipients, adminSetReminderRecipient,
     adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
     adminGetTemplates, adminSaveTemplates, adminGetRestaurantsDirectory,
     adminUpdateQty, adminGetExport, adminSendSummary, adminSendSummaryEmail, adminRemindUnsubmitted,

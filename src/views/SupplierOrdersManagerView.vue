@@ -425,27 +425,60 @@
                   <th class="so-grid-rest">Ресторан</th>
                   <th v-for="d in 7" :key="d" class="so-grid-day">{{ daysShort[d] }}</th>
                   <th class="so-grid-day" title="Напоминания о подаче заявки этому ресторану. Выкл — крон не шлёт напоминания «заявка не подана» по этому поставщику.">Напом.</th>
+                  <th class="so-grid-day" title="Кто из привязанных Telegram-аккаунтов ресторана получает напоминания о подаче заявки этому поставщику.">Аккаунты</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in filteredScheduleRestaurants" :key="r.id">
-                  <td class="so-grid-rest-cell">
-                    <span class="so-grid-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
-                    <span class="so-grid-addr">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
-                  </td>
-                  <td v-for="d in 7" :key="d" class="so-grid-check" @click="toggleScheduleDay(r, d)">
-                    <input type="checkbox" :checked="!!scheduleGrid[r.id]?.[d]" @click.stop="toggleScheduleDay(r, d)" />
-                  </td>
-                  <td class="so-grid-check">
-                    <button
-                      class="so-rem-toggle"
-                      :class="scheduleMuted.has(r.id) ? 'off' : 'on'"
-                      :disabled="remMuteSaving.has(r.id)"
-                      @click="toggleReminderMute(r)"
-                      :title="scheduleMuted.has(r.id) ? 'Напоминания выключены — включить' : 'Напоминания включены — выключить'"
-                    >{{ scheduleMuted.has(r.id) ? 'выкл' : 'вкл' }}</button>
-                  </td>
-                </tr>
+                <template v-for="r in filteredScheduleRestaurants" :key="r.id">
+                  <tr>
+                    <td class="so-grid-rest-cell">
+                      <span class="so-grid-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
+                      <span class="so-grid-addr">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
+                    </td>
+                    <td v-for="d in 7" :key="d" class="so-grid-check" @click="toggleScheduleDay(r, d)">
+                      <input type="checkbox" :checked="!!scheduleGrid[r.id]?.[d]" @click.stop="toggleScheduleDay(r, d)" />
+                    </td>
+                    <td class="so-grid-check">
+                      <button
+                        class="so-rem-toggle"
+                        :class="scheduleMuted.has(r.id) ? 'off' : 'on'"
+                        :disabled="remMuteSaving.has(r.id)"
+                        @click="toggleReminderMute(r)"
+                        :title="scheduleMuted.has(r.id) ? 'Напоминания выключены — включить' : 'Напоминания включены — выключить'"
+                      >{{ scheduleMuted.has(r.id) ? 'выкл' : 'вкл' }}</button>
+                    </td>
+                    <td class="so-grid-check">
+                      <button class="rom-btn-sm so-accounts-btn" @click="toggleRecipients(r)">
+                        {{ expandedRecipients.has(r.id) ? 'Скрыть' : 'Аккаунты' }}
+                      </button>
+                    </td>
+                  </tr>
+                  <tr v-if="expandedRecipients.has(r.id)" class="so-recipients-row">
+                    <td colspan="10" class="so-recipients-cell">
+                      <div v-if="recipientsLoading.has(r.id)" class="so-recipients-loading">
+                        <BurgerSpinner size="xs" text="Загрузка..." />
+                      </div>
+                      <div v-else-if="!recipientsData[r.id]?.accounts?.length" class="so-recipients-empty">
+                        Нет привязанных Telegram-аккаунтов
+                      </div>
+                      <div v-else class="so-recipients-list">
+                        <label v-for="acc in recipientsData[r.id].accounts" :key="acc.ro_tg_sub_id" class="so-recipient-item">
+                          <input
+                            type="checkbox"
+                            :checked="acc.selected"
+                            :disabled="recipientSaving.has(r.id + ':' + acc.ro_tg_sub_id)"
+                            @change="toggleRecipient(r, acc)"
+                          />
+                          <span>{{ acc.name || acc.username || ('#' + acc.ro_tg_sub_id) }}</span>
+                          <span v-if="acc.username" class="so-recipient-username">@{{ acc.username }}</span>
+                        </label>
+                        <p v-if="scheduleMuted.has(r.id)" class="so-recipients-hint">
+                          Напоминания для этого ресторана выключены (переключатель «Напом.» слева) — выбор получателей пока не действует.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -1802,6 +1835,10 @@ async function loadSchedules() {
     schedules.value = result.schedules;
     scheduleMuted.clear();
     for (const id of (result.mutedRestaurantIds || [])) scheduleMuted.add(Number(id));
+    // Данные по аккаунтам-получателям относятся к конкретному поставщику —
+    // при смене поставщика сбрасываем, чтобы не показать чужие данные.
+    expandedRecipients.clear();
+    for (const key of Object.keys(recipientsData)) delete recipientsData[key];
     temporarySchedule.value = result.temporarySchedule || null;
     temporaryDateFrom.value = result.temporarySchedule?.date_from || '';
     temporaryDateTo.value = result.temporarySchedule?.date_to || '';
@@ -1950,6 +1987,49 @@ async function toggleReminderMute(r) {
     toast.error('Ошибка', e.message);
   } finally {
     remMuteSaving.delete(r.id);
+  }
+}
+
+// ═══ Получатели напоминаний по конкретным Telegram-аккаунтам ═══
+// id ресторанов, у которых сейчас раскрыт список аккаунтов
+const expandedRecipients = reactive(new Set());
+const recipientsLoading = reactive(new Set());
+// restaurantId -> { accounts: [...] }
+const recipientsData = reactive({});
+// ключи "restaurantId:roTgSubId" — какой чекбокс сейчас сохраняется
+const recipientSaving = reactive(new Set());
+
+async function toggleRecipients(r) {
+  if (expandedRecipients.has(r.id)) {
+    expandedRecipients.delete(r.id);
+    return;
+  }
+  expandedRecipients.add(r.id);
+  if (recipientsData[r.id]) return;
+  recipientsLoading.add(r.id);
+  try {
+    const result = await store.adminGetReminderRecipients(currentSupplierId.value, r.id);
+    recipientsData[r.id] = { accounts: result.accounts };
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+    expandedRecipients.delete(r.id);
+  } finally {
+    recipientsLoading.delete(r.id);
+  }
+}
+
+async function toggleRecipient(r, acc) {
+  const key = `${r.id}:${acc.ro_tg_sub_id}`;
+  if (recipientSaving.has(key)) return;
+  const nextSelected = !acc.selected;
+  recipientSaving.add(key);
+  try {
+    await store.adminSetReminderRecipient(currentSupplierId.value, r.id, acc.ro_tg_sub_id, nextSelected);
+    acc.selected = nextSelected;
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    recipientSaving.delete(key);
   }
 }
 
@@ -3124,6 +3204,26 @@ watch(
 .so-rem-toggle.on { background: var(--tk-success-soft); color: var(--tk-success); }
 .so-rem-toggle.off { background: var(--tk-n-100); color: var(--tk-text-muted); }
 .so-rem-toggle:disabled { opacity: 0.5; cursor: default; }
+.so-accounts-btn { font-size: var(--tk-fz-xs); padding: 3px 10px; }
+
+/* ═══ Получатели напоминаний по аккаунтам (подстрока в сетке графиков) ═══ */
+.so-recipients-row td { padding: 0 !important; }
+.so-recipients-cell {
+  background: var(--tk-n-50); padding: var(--tk-s-3) var(--tk-s-4) !important;
+  text-align: left !important; border-top: 1px dashed var(--tk-border);
+}
+.so-recipients-loading { display: flex; justify-content: center; padding: var(--tk-s-2); }
+.so-recipients-empty { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
+.so-recipients-list { display: flex; flex-wrap: wrap; gap: var(--tk-s-2) var(--tk-s-4); align-items: center; }
+.so-recipient-item {
+  display: flex; align-items: center; gap: 6px; font-size: var(--tk-fz-sm);
+  color: var(--tk-text); cursor: pointer; user-select: none;
+}
+.so-recipient-item input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--tk-accent); }
+.so-recipient-username { color: var(--tk-text-muted); font-size: var(--tk-fz-xs); }
+.so-recipients-hint {
+  flex: 1 0 100%; margin: var(--tk-s-1) 0 0; font-size: var(--tk-fz-xs); color: var(--tk-warning);
+}
 
 /* ═══ Сессии ═══ */
 .so-sessions-list { display: flex; flex-direction: column; gap: var(--tk-s-2); }

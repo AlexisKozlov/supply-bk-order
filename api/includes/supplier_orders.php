@@ -3112,6 +3112,120 @@ if ($soAction === 'admin') {
         soRespond(['success' => true, 'muted' => $muted]);
     }
 
+    // --- Получатели напоминаний по конкретным Telegram-аккаунтам ресторана ---
+    if ($adminAction === 'reminder-recipients' && $method === 'GET') {
+        $supplierId = $_GET['supplier_id'] ?? '';
+        $restaurantId = (int)($_GET['restaurant_id'] ?? 0);
+        if (!$supplierId || !$restaurantId) soRespond(['error' => 'Не указан поставщик или ресторан'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+
+        $rest = $pdo->prepare("SELECT number, legal_entity_group FROM restaurants WHERE id = ?");
+        $rest->execute([$restaurantId]);
+        $restRow = $rest->fetch();
+        if (!$restRow) soRespond(['error' => 'Ресторан не найден'], 404);
+        $restGroup = $restRow['legal_entity_group'] ?: 'BK_VM';
+
+        // Подписка на пару поставщик+ресторан (может ещё не существовать)
+        $subStmt = $pdo->prepare("SELECT id FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ?");
+        $subStmt->execute([$restaurantId, $supplierId]);
+        $subId = $subStmt->fetchColumn();
+
+        $selectedIds = [];
+        if ($subId) {
+            $selStmt = $pdo->prepare("SELECT ro_tg_sub_id FROM restaurant_reminder_tg_subscribers WHERE subscription_id = ? AND is_active = 1");
+            $selStmt->execute([$subId]);
+            $selectedIds = array_map('intval', $selStmt->fetchAll(PDO::FETCH_COLUMN));
+        }
+
+        // Верифицированные Telegram-аккаунты, привязанные к этому ресторану.
+        $accStmt = $pdo->prepare("
+            SELECT id, first_name, username, chat_id, notify_so_reminders
+            FROM ro_telegram_subs
+            WHERE restaurant_number = ? AND legal_entity_group = ?
+              AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+            ORDER BY first_name, username
+        ");
+        $accStmt->execute([$restRow['number'], $restGroup]);
+
+        $accounts = [];
+        foreach ($accStmt->fetchAll() as $row) {
+            $accId = (int)$row['id'];
+            $accounts[] = [
+                'ro_tg_sub_id' => $accId,
+                'name' => $row['first_name'] ?: '',
+                'username' => $row['username'] ?: '',
+                'has_telegram' => !empty($row['chat_id']),
+                'notify_so_reminders' => (int)$row['notify_so_reminders'] === 1,
+                'selected' => in_array($accId, $selectedIds, true),
+            ];
+        }
+
+        soRespond(['accounts' => $accounts, 'has_subscription' => (bool)$subId]);
+    }
+
+    // --- Переключить конкретного получателя (аккаунт) для напоминаний ресторана+поставщика ---
+    if ($adminAction === 'reminder-recipient' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        $restaurantId = (int)($body['restaurant_id'] ?? 0);
+        $roTgSubId = (int)($body['ro_tg_sub_id'] ?? 0);
+        $selected = !empty($body['selected']);
+        if (!$supplierId || !$restaurantId || !$roTgSubId) soRespond(['error' => 'Не указан поставщик, ресторан или аккаунт'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+
+        $rest = $pdo->prepare("SELECT number, legal_entity_group FROM restaurants WHERE id = ?");
+        $rest->execute([$restaurantId]);
+        $restRow = $rest->fetch();
+        if (!$restRow) soRespond(['error' => 'Ресторан не найден'], 404);
+        $restGroup = $restRow['legal_entity_group'] ?: 'BK_VM';
+
+        // Аккаунт должен принадлежать этому ресторану и быть верифицирован
+        $own = $pdo->prepare("
+            SELECT 1 FROM ro_telegram_subs
+            WHERE id = ? AND restaurant_number = ? AND legal_entity_group = ?
+              AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+        ");
+        $own->execute([$roTgSubId, $restRow['number'], $restGroup]);
+        if (!$own->fetchColumn()) soRespond(['error' => 'Аккаунт не принадлежит этому ресторану'], 403);
+
+        $updatedBy = resolveActorName($pdo, $sessionUser);
+
+        // Находим или создаём подписку на пару ресторан+поставщик.
+        $sub = $pdo->prepare("SELECT id FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ?");
+        $sub->execute([$restaurantId, $supplierId]);
+        $subId = $sub->fetchColumn();
+        if (!$subId) {
+            $pdo->prepare("
+                INSERT INTO restaurant_reminder_subscriptions
+                    (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, cron_managed, updated_at, updated_by)
+                VALUES (?, ?, 1, 1, 1, 1, NOW(), ?)
+            ")->execute([$restaurantId, $supplierId, $updatedBy]);
+            $subId = (int)$pdo->lastInsertId();
+        } else {
+            // Закупщик вручную настраивает получателей — это «новая настройка»,
+            // крон должен её учитывать (cron_managed=1), канал Telegram включён.
+            $pdo->prepare("
+                UPDATE restaurant_reminder_subscriptions
+                SET cron_managed = 1, telegram_enabled = 1, updated_at = NOW(), updated_by = ?
+                WHERE id = ?
+            ")->execute([$updatedBy, $subId]);
+        }
+
+        if ($selected) {
+            $pdo->prepare("
+                INSERT INTO restaurant_reminder_tg_subscribers (subscription_id, ro_tg_sub_id, is_active)
+                VALUES (?, ?, 1)
+                ON DUPLICATE KEY UPDATE is_active = 1
+            ")->execute([$subId, $roTgSubId]);
+        } else {
+            $pdo->prepare("
+                UPDATE restaurant_reminder_tg_subscribers SET is_active = 0
+                WHERE subscription_id = ? AND ro_tg_sub_id = ?
+            ")->execute([$subId, $roTgSubId]);
+        }
+
+        soRespond(['success' => true, 'selected' => $selected]);
+    }
+
     // --- Сохранение графиков ---
     if ($adminAction === 'schedules' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
