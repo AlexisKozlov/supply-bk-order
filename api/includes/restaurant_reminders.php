@@ -18,6 +18,14 @@ if ($endpoint !== 'restaurant-reminders') return;
 // от поставщика. В БД больше не используется — reminder_kind ENUM сделал это явно.
 const MAIN_DELIVERY_SUPPLIER_ID = '00000000-0000-0000-0000-000000000000';
 
+// Включён ли день доставки в маске напоминаний. NULL/0 маска → все дни.
+function rrDayEnabled($mask, int $deliveryDow): bool {
+    if ($mask === null || $mask === '') return true;
+    $mask = (int)$mask;
+    if ($mask === 0) return false; // явно снято всё
+    return ($mask & (1 << ($deliveryDow - 1))) !== 0;
+}
+
 function rrRespond($data, $code = 200) {
     http_response_code($code);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
