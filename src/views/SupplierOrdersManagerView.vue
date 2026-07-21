@@ -538,9 +538,10 @@
               <tr>
                 <th style="width:50px">Порядок</th>
                 <th>Товар</th>
-                <th style="width:220px">Каталог</th>
+                <th style="width:200px">Каталог</th>
                 <th style="width:80px">Кратность</th>
                 <th style="width:80px">Мин. кол-во</th>
+                <th style="width:120px">Доступ</th>
                 <th style="width:40px"></th>
               </tr>
             </thead>
@@ -552,6 +553,7 @@
                     <input v-model="t.sku" class="rom-input-sm so-template-sku-input" placeholder="SKU" />
                     <input v-model="t.product_name" class="rom-input-sm so-template-name-input" placeholder="Название товара" />
                   </div>
+                  <input v-model="t.note" class="rom-input-sm so-tpl-note-input" placeholder="Примечание (видят рестораны)" />
                 </td>
                 <td class="so-tpl-cat">
                   <!-- Статус связи с карточкой каталога -->
@@ -588,12 +590,53 @@
                 </td>
                 <td><input type="number" v-model.number="t.multiplicity" class="rom-input-sm" style="width:70px" min="0" step="0.01" placeholder="—" /></td>
                 <td><input type="number" v-model.number="t.min_qty" class="rom-input-sm" style="width:70px" min="0" step="0.01" placeholder="—" /></td>
+                <td>
+                  <button class="rom-btn-sm" :class="{ 'so-tpl-access-on': (t.vis_regions?.length || t.vis_restaurants?.length) }" @click="openAccessModal(idx)">
+                    {{ (t.vis_regions?.length || t.vis_restaurants?.length) ? ('Ограничен: ' + ((t.vis_regions?.length || 0) + (t.vis_restaurants?.length || 0))) : 'Все' }}
+                  </button>
+                </td>
                 <td><button class="rom-btn-sm rom-btn-danger" @click="templates.splice(idx, 1)">✕</button></td>
               </tr>
             </tbody>
           </table>
         </div>
         <p class="so-schedule-count">Товаров: {{ templates.length }}</p>
+      </div>
+
+      <!-- Окно выбора доступа товара -->
+      <div v-if="accessModal.open" class="rom-modal-overlay" @click.self="closeAccessModal">
+        <div class="rom-modal so-access-modal">
+          <div class="rom-modal-header">
+            <h3>Кому виден товар</h3>
+            <button class="rom-modal-close" @click="closeAccessModal">✕</button>
+          </div>
+          <div class="rom-modal-body">
+            <p class="so-section-hint" style="margin:0 0 10px">
+              Ничего не выбрано — товар видят <b>все</b>. Отметьте регионы или рестораны, чтобы показывать его <b>только им</b>.
+            </p>
+            <div class="so-access-block">
+              <div class="so-access-title">Регионы</div>
+              <label v-for="rg in accessDirectory.regions" :key="'rg'+rg" class="so-settings-check">
+                <input type="checkbox" :value="rg" v-model="accessModal.regions" />
+                <span>{{ rg }}</span>
+              </label>
+            </div>
+            <div class="so-access-block">
+              <div class="so-access-title">Рестораны</div>
+              <input v-model="accessRestSearch" class="rom-input-sm" style="width:100%;box-sizing:border-box;margin-bottom:6px" placeholder="Поиск по номеру или адресу" />
+              <div class="so-access-rest-list">
+                <label v-for="r in accessFilteredRestaurants" :key="'r'+r.number" class="so-settings-check">
+                  <input type="checkbox" :value="String(r.number)" v-model="accessModal.restaurants" />
+                  <span>№{{ r.number }} · {{ r.region }}<span v-if="r.address" class="so-notify-muted"> · {{ r.address }}</span></span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="rom-modal-foot">
+            <button class="rom-btn-sm" @click="clearAccess">Сбросить (всем)</button>
+            <button class="rom-btn-sm rom-btn-primary" @click="applyAccessModal">Готово</button>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -2032,6 +2075,40 @@ async function loadTemplates() {
   }
 }
 
+// ═══ Окно доступности товара по регионам/ресторанам ═══
+const accessModal = ref({ open: false, idx: null, regions: [], restaurants: [] });
+const accessDirectory = ref({ restaurants: [], regions: [] });
+const accessRestSearch = ref('');
+const accessFilteredRestaurants = computed(() => {
+  const q = accessRestSearch.value.trim().toLowerCase();
+  const list = accessDirectory.value.restaurants;
+  if (!q) return list;
+  return list.filter(r => String(r.number).includes(q) || String(r.address || '').toLowerCase().includes(q) || String(r.region || '').toLowerCase().includes(q));
+});
+async function openAccessModal(idx) {
+  const t = templates.value[idx];
+  accessRestSearch.value = '';
+  accessModal.value = {
+    open: true, idx,
+    regions: [...(t.vis_regions || [])],
+    restaurants: [...(t.vis_restaurants || [])].map(String),
+  };
+  if (!accessDirectory.value.restaurants.length) {
+    try { accessDirectory.value = await store.adminGetRestaurantsDirectory(currentSupplierId.value); }
+    catch (e) { toast.error('Ошибка', e.message); }
+  }
+}
+function applyAccessModal() {
+  const t = templates.value[accessModal.value.idx];
+  if (t) {
+    t.vis_regions = [...accessModal.value.regions];
+    t.vis_restaurants = [...accessModal.value.restaurants];
+  }
+  accessModal.value.open = false;
+}
+function clearAccess() { accessModal.value.regions = []; accessModal.value.restaurants = []; }
+function closeAccessModal() { accessModal.value.open = false; }
+
 function addManualTemplateRow() {
   templates.value.push({
     product_id: null,
@@ -2040,6 +2117,9 @@ function addManualTemplateRow() {
     sort_order: templates.value.length * 10,
     multiplicity: null,
     min_qty: null,
+    note: '',
+    vis_regions: [],
+    vis_restaurants: [],
   });
 }
 
@@ -2057,6 +2137,9 @@ function addTemplateProduct(p) {
     sort_order: templates.value.length * 10,
     multiplicity: p.multiplicity || null,
     min_qty: p.min_qty || null,
+    note: '',
+    vis_regions: [],
+    vis_restaurants: [],
   });
   templateProductSearch.value = '';
   templateProductResults.value = [];
@@ -2851,6 +2934,14 @@ watch(
   display: flex; justify-content: space-between; align-items: center;
   padding: var(--tk-s-4) var(--tk-s-5); border-bottom: 1px solid var(--tk-border);
 }
+/* Примечание товара и кнопка доступа в редакторе шаблона */
+.so-tpl-note-input { width: 100%; box-sizing: border-box; margin-top: 4px; font-size: 12px; }
+.so-tpl-access-on { background: #FEF6EC !important; border-color: #F2C9A0 !important; color: #8A5320 !important; }
+.so-access-modal .rom-modal-body { display: flex; flex-direction: column; gap: 14px; }
+.so-access-block { border: 1px solid var(--tk-border); border-radius: 8px; padding: 10px 12px; }
+.so-access-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.so-access-rest-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.rom-modal-foot { display: flex; justify-content: space-between; gap: 10px; padding: 12px var(--tk-s-5) var(--tk-s-5); }
 .rom-modal-header h3 { margin: 0; font-size: var(--tk-fz-h1); color: var(--tk-text); }
 .rom-modal-close {
   background: none; border: none; cursor: pointer;

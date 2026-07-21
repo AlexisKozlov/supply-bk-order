@@ -207,6 +207,12 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  async function adminGetRestaurantsDirectory(supplierId) {
+    const params = new URLSearchParams({ supplier_id: supplierId });
+    const data = await api(`admin/restaurants-directory?${params}`);
+    return { restaurants: data.restaurants || [], regions: data.regions || [] };
+  }
+
   async function adminGetTemplates(supplierId, legalEntity) {
     const params = new URLSearchParams({ supplier_id: supplierId });
     if (legalEntity) params.set('legal_entity', legalEntity);
@@ -266,7 +272,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminGetSettings, adminSaveSettings,
     adminGetSchedules, adminSaveSchedules,
     adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
-    adminGetTemplates, adminSaveTemplates,
+    adminGetTemplates, adminSaveTemplates, adminGetRestaurantsDirectory,
     adminUpdateQty, adminGetExport, adminSendSummary, adminSendSummaryEmail, adminRemindUnsubmitted,
   };
 });

@@ -56,6 +56,27 @@ function soGetRestaurantSession($pdo) {
     return $user;
 }
 
+/**
+ * Загружает ограничения доступности товаров шаблона.
+ * Возвращает map: template_id → ['regions' => [...], 'restaurants' => [...]].
+ * Товары без строк в so_template_visibility в карту НЕ попадают (видны всем).
+ */
+function soLoadTemplateVisibility($pdo, array $templateIds): array {
+    $ids = array_values(array_unique(array_map('intval', $templateIds)));
+    if (!$ids) return [];
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $st = $pdo->prepare("SELECT template_id, scope_type, scope_value FROM so_template_visibility WHERE template_id IN ($ph)");
+    $st->execute($ids);
+    $map = [];
+    foreach ($st->fetchAll() as $r) {
+        $tid = (int)$r['template_id'];
+        if (!isset($map[$tid])) $map[$tid] = ['regions' => [], 'restaurants' => []];
+        if ($r['scope_type'] === 'region') $map[$tid]['regions'][] = (string)$r['scope_value'];
+        else $map[$tid]['restaurants'][] = (string)$r['scope_value'];
+    }
+    return $map;
+}
+
 // Белые списки напоминаний (строго фиксированы; порядок = порядок отображения)
 function soReminderOffsetWhitelist() { return ['evening', '3h', '2h', '1h', '30m', 'expired']; }
 function soReminderChannelWhitelist() { return ['tg', 'push']; }
@@ -1284,7 +1305,7 @@ if ($soAction === 'products' && $method === 'GET' && $soParam1) {
     $s = $pdo->prepare("
         SELECT t.id, t.product_id, t.sku, t.product_name, t.sort_order,
                COALESCE(t.multiplicity, p.multiplicity) as multiplicity,
-               t.min_qty,
+               t.min_qty, t.note,
                p.qty_per_box, p.unit_of_measure, p.weight_netto
         FROM so_templates t
         LEFT JOIN products p ON p.id = t.product_id
@@ -1293,6 +1314,24 @@ if ($soAction === 'products' && $method === 'GET' && $soParam1) {
     ");
     $s->execute([$supplierId, $le]);
     $products = $s->fetchAll();
+
+    // Фильтр доступности: товар с ограничением видят только рестораны своего
+    // региона или поимённо выбранные. Без ограничения — видят все.
+    if ($products) {
+        $tplIds = array_column($products, 'id');
+        $visByTpl = soLoadTemplateVisibility($pdo, $tplIds);
+        if ($visByTpl) {
+            $restRegion = (string)($rest['region'] ?? '');
+            $restNum = (string)($rest['restaurant_number'] ?? '');
+            $products = array_values(array_filter($products, function ($p) use ($visByTpl, $restRegion, $restNum) {
+                $vis = $visByTpl[$p['id']] ?? null;
+                if (!$vis) return true; // нет ограничений — виден всем
+                if (in_array($restRegion, $vis['regions'], true)) return true;
+                if (in_array($restNum, $vis['restaurants'], true)) return true;
+                return false;
+            }));
+        }
+    }
 
     soRespond(['products' => $products]);
 }
@@ -3456,6 +3495,22 @@ if ($soAction === 'admin') {
     }
 
     // --- Шаблоны товаров ---
+    // Справочник ресторанов группы поставщика — для окна выбора доступности товара.
+    if ($adminAction === 'restaurants-directory' && $method === 'GET') {
+        $supplierId = $_GET['supplier_id'] ?? '';
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        $supRow = $pdo->prepare("SELECT legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
+        $supRow->execute([$supplierId]);
+        $sup = $supRow->fetch();
+        if (!$sup) soRespond(['error' => 'Поставщик не найден'], 404);
+        $group = ($sup['legal_entity_group'] ?? '') ?: getEntityGroup($sup['legal_entity'] ?? '');
+        $rs = $pdo->prepare("SELECT number, region, city, address FROM restaurants WHERE active = 1 AND legal_entity_group = ? ORDER BY region, CAST(number AS UNSIGNED)");
+        $rs->execute([$group]);
+        $rows = $rs->fetchAll();
+        $regions = array_values(array_unique(array_filter(array_map(fn($r) => (string)$r['region'], $rows))));
+        soRespond(['restaurants' => $rows, 'regions' => $regions]);
+    }
+
     if ($adminAction === 'templates' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
         $le = $_GET['legal_entity'] ?? '';
@@ -3483,7 +3538,13 @@ if ($soAction === 'admin') {
         // флаг связи к int, чтобы фронт (v-else-if="t.linked") корректно различал
         // 0/1 (строка "0" в JS истинна и ломала бы индикатор «нет карточки»).
         $tplRows = $s->fetchAll();
-        foreach ($tplRows as &$tplRow) { $tplRow['linked'] = (int)$tplRow['linked']; }
+        $visByTpl = soLoadTemplateVisibility($pdo, array_column($tplRows, 'id'));
+        foreach ($tplRows as &$tplRow) {
+            $tplRow['linked'] = (int)$tplRow['linked'];
+            $vis = $visByTpl[(int)$tplRow['id']] ?? ['regions' => [], 'restaurants' => []];
+            $tplRow['vis_regions'] = $vis['regions'];
+            $tplRow['vis_restaurants'] = $vis['restaurants'];
+        }
         unset($tplRow);
         soRespond(['templates' => $tplRows]);
     }
@@ -3536,15 +3597,17 @@ if ($soAction === 'admin') {
                 ->execute([$supplierId, $le]);
 
             $upsert = $pdo->prepare("
-                INSERT INTO so_templates (supplier_id, legal_entity, product_id, sku, product_name, sort_order, multiplicity, min_qty, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                INSERT INTO so_templates (supplier_id, legal_entity, product_id, sku, product_name, sort_order, multiplicity, min_qty, note, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON DUPLICATE KEY UPDATE product_name = VALUES(product_name), sort_order = VALUES(sort_order),
-                  multiplicity = VALUES(multiplicity), min_qty = VALUES(min_qty), is_active = 1, product_id = VALUES(product_id)
+                  multiplicity = VALUES(multiplicity), min_qty = VALUES(min_qty), note = VALUES(note), is_active = 1, product_id = VALUES(product_id)
             ");
 
+            $skuVisibility = []; // sku → [['region'|'restaurant', value], ...]
             foreach ($items as $i => $item) {
                 $mult = isset($item['multiplicity']) && $item['multiplicity'] !== '' ? (float)$item['multiplicity'] : null;
                 $minQty = isset($item['min_qty']) && $item['min_qty'] !== '' ? (float)$item['min_qty'] : null;
+                $note = isset($item['note']) ? (mb_substr(trim((string)$item['note']), 0, 500) ?: null) : null;
                 // Переданный product_id уважаем; иначе подставляем найденный по SKU; иначе null.
                 $pid = $item['product_id'] ?? null;
                 $itemSku = trim((string)($item['sku'] ?? ''));
@@ -3560,13 +3623,43 @@ if ($soAction === 'admin') {
                     $item['sort_order'] ?? ($i * 10),
                     $mult,
                     $minQty,
+                    $note,
                 ]);
+                // Доступность собираем по SKU — id строки узнаем после upsert.
+                if ($itemSku !== '') {
+                    $regions = array_values(array_filter(array_map('strval', (array)($item['vis_regions'] ?? []))));
+                    $rests   = array_values(array_filter(array_map('strval', (array)($item['vis_restaurants'] ?? []))));
+                    $pairs = [];
+                    foreach (array_unique($regions) as $rg) $pairs[] = ['region', mb_substr($rg, 0, 100)];
+                    foreach (array_unique($rests) as $rn)   $pairs[] = ['restaurant', mb_substr($rn, 0, 100)];
+                    $skuVisibility[$itemSku] = $pairs;
+                }
                 $count++;
             }
 
             // Физически удаляем SKU, выпавшие из шаблона.
+            // Их visibility уходит каскадом (FK ON DELETE CASCADE).
             $pdo->prepare("DELETE FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 0")
                 ->execute([$supplierId, $le]);
+
+            // Доступность: перезаписываем по каждому SKU. Узнаём id строк шаблона
+            // после upsert и заменяем их строки в so_template_visibility.
+            if ($skuVisibility) {
+                $idSt = $pdo->prepare("SELECT id, sku FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1");
+                $idSt->execute([$supplierId, $le]);
+                $delVis = $pdo->prepare("DELETE FROM so_template_visibility WHERE template_id = ?");
+                $insVis = $pdo->prepare("INSERT IGNORE INTO so_template_visibility (template_id, scope_type, scope_value) VALUES (?, ?, ?)");
+                foreach ($idSt->fetchAll() as $row) {
+                    $sku = (string)$row['sku'];
+                    if (!array_key_exists($sku, $skuVisibility)) continue;
+                    $tid = (int)$row['id'];
+                    $delVis->execute([$tid]);
+                    foreach ($skuVisibility[$sku] as $pair) {
+                        if ($pair[1] === '') continue;
+                        $insVis->execute([$tid, $pair[0], $pair[1]]);
+                    }
+                }
+            }
 
             $pdo->commit();
         } catch (Throwable $e) {

@@ -688,6 +688,7 @@
                         <span class="inline-ui-icon" v-html="cabIconSvg.edit"></span>
                         {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).original) }} → {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).edited) }}
                       </span>
+                      <span v-if="p.note" class="item-note">{{ p.note }}</span>
                     </div>
                     <div class="item-input">
                       <input type="number" class="item-qty" :class="{ 'item-qty-err': supHasError(sup.id, p) }"
@@ -4567,6 +4568,8 @@ tr.del-err { background: #fef2f2; }
 .item-name { font-size: 14px; font-weight: 500; color: #502314; }
 .item-hint { font-size: 10px; color: #2563eb; background: #eff6ff; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
 .item-hint-warn { color: #92400e; background: #fef3c7; }
+/* Примечание закупок к товару — своей строкой под названием */
+.item-note { flex-basis: 100%; font-size: 12px; color: #8b7355; line-height: 1.35; }
 .item-edit-mark { font-size: 10px; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; font-weight: 700; cursor: help; white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
 .inline-ui-icon { width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .inline-ui-icon svg { width: 12px; height: 12px; stroke-width: 2.4; }
