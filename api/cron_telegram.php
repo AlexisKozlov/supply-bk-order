@@ -55,6 +55,15 @@ $method = null;
 $uri = '';
 require_once __DIR__ . '/includes/supplier_orders.php';
 
+// Включён ли день доставки в маске напоминаний подписки. NULL/пусто → все дни,
+// 0 → явно снято всё. Та же логика, что rrDayEnabled в restaurant_reminders.php.
+function rrDayEnabledPhp($mask, int $deliveryDow): bool {
+    if ($mask === null || $mask === '') return true;
+    $mask = (int)$mask;
+    if ($mask === 0) return false;
+    return ($mask & (1 << ($deliveryDow - 1))) !== 0;
+}
+
 // TTL одноразовых токенов входа в кабинет ресторана (синхронизировано с helpers.php).
 if (!defined('RO_AUTH_TOKEN_TTL_MINUTES')) define('RO_AUTH_TOKEN_TTL_MINUTES', 10);
 
@@ -893,6 +902,44 @@ try {
         $muteStmt->execute([$supId]);
         foreach ($muteStmt->fetchAll(PDO::FETCH_COLUMN) as $mid) $mutedRests[(int)$mid] = true;
 
+        // Единая модель: подписки ресторана на напоминания этого поставщика.
+        // Есть подписка → уважаем вкл/выкл, маску дней и выбранных получателей
+        // Telegram. НЕТ подписки → прежнее поведение (все notify_so_reminders,
+        // все дни) — обратная совместимость, никого не отключаем молча.
+        $subByRest = [];
+        $subStmt = $pdo->prepare("SELECT id, restaurant_id, is_enabled, telegram_enabled, reminder_days
+                                  FROM restaurant_reminder_subscriptions WHERE supplier_id = ?");
+        $subStmt->execute([$supId]);
+        $subRows = $subStmt->fetchAll();
+        if ($subRows) {
+            $subIds = array_map(fn($r) => (int)$r['id'], $subRows);
+            // Выбранные рестораном получатели → chat_id. Требуем verified +
+            // notify_so_reminders=1 (глобальный мастер-флаг в боте) + не заблокирован.
+            $recByRest = [];
+            $rph = implode(',', array_fill(0, count($subIds), '?'));
+            $recStmt = $pdo->prepare("
+                SELECT rrs.restaurant_id, ts.chat_id
+                FROM restaurant_reminder_tg_subscribers t
+                JOIN restaurant_reminder_subscriptions rrs ON rrs.id = t.subscription_id
+                JOIN ro_telegram_subs ts ON ts.id = t.ro_tg_sub_id
+                WHERE t.subscription_id IN ($rph) AND t.is_active = 1
+                  AND ts.notify_so_reminders = 1
+                  AND (ts.verified_at IS NOT NULL OR (ts.must_reverify_by IS NOT NULL AND ts.must_reverify_by > NOW()))
+                  AND (ts.tg_blocked_at IS NULL OR ts.tg_blocked_at < NOW() - INTERVAL 30 DAY)
+            ");
+            $recStmt->execute($subIds);
+            foreach ($recStmt->fetchAll() as $r) $recByRest[(int)$r['restaurant_id']][] = (int)$r['chat_id'];
+            foreach ($subRows as $r) {
+                $rid = (int)$r['restaurant_id'];
+                $subByRest[$rid] = [
+                    'enabled'    => (int)$r['is_enabled'] === 1,
+                    'days'       => $r['reminder_days'] === null ? null : (int)$r['reminder_days'],
+                    'tg_enabled' => (int)$r['telegram_enabled'] === 1,
+                    'chat_ids'   => $recByRest[$rid] ?? [],
+                ];
+            }
+        }
+
         // Все расписания поставщика: ресторан + дни заказа/доставки
         $schStmt = $pdo->prepare("
             SELECT ss.restaurant_id, ss.order_day, ss.delivery_day,
@@ -950,7 +997,7 @@ try {
                 // отправит, а web-push уйдёт (push работает как самостоятельный канал).
                 // Дефолт (только 'tg', push выключен) → поведение идентично прежнему.
                 if (empty($cids) && !$pushEnabled) continue;
-                $byRest[$rn] = ['chat_ids' => $cids, 'group' => $grp, 'schedule' => []];
+                $byRest[$rn] = ['chat_ids' => $cids, 'group' => $grp, 'schedule' => [], 'restaurant_id' => (int)$s['restaurant_id']];
             }
             $byRest[$rn]['schedule'][] = [
                 'order_day' => (int)$s['order_day'],
@@ -1015,6 +1062,24 @@ try {
             }
 
             if (!$nextDelivery) continue;
+
+            // Подписка ресторана (единая модель). Нет подписки → как раньше.
+            //
+            // ВНИМАНИЕ (переходный период): в БД есть ЛЕГАСИ-подписки на
+            // портальных поставщиков (созданы, когда портальные были в этой
+            // модели), с выбранными получателями и telegram_enabled=0/1. Их
+            // нельзя применять к рассылке без явного согласия — иначе живой
+            // крон молча сузит/выключит напоминания реальным ресторанам.
+            // Поэтому сейчас применяем ТОЛЬКО маску дней (у всех легаси она
+            // NULL = все дни, эффекта нет). Включение on/off и сужения
+            // получателей — после решения по легаси-данным (см. escalation).
+            $sub = $subByRest[(int)($info['restaurant_id'] ?? 0)] ?? null;
+            if ($sub) {
+                if (!rrDayEnabledPhp($sub['days'], $nextDelivery['dow'])) continue; // день не выбран
+                // TODO(unify): после чистки/подтверждения легаси включить:
+                //   if (!$sub['enabled']) continue;
+                //   $chatIds = $sub['tg_enabled'] ? $sub['chat_ids'] : [];
+            }
 
             $deliveryDate = $nextDelivery['date'];
             $minutesLeft = $nextDelivery['minutesLeft'];
