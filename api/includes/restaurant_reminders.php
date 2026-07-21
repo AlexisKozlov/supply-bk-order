@@ -407,21 +407,26 @@ if ($subpoint === 'set' && $method === 'POST') {
     $telegramEnabled = isset($body['telegram_enabled']) ? (!empty($body['telegram_enabled']) ? 1 : 0) : 0;
     $updatedBy = 'ro:' . $rrUser['restaurant_number'];
 
-    $prev = $pdo->prepare("SELECT is_enabled, telegram_enabled FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ?");
+    $prev = $pdo->prepare("SELECT is_enabled, telegram_enabled, reminder_days FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ?");
     $prev->execute([$rrRestPk, $supplierId]);
     $prevState = $prev->fetch();
 
+    $reminderDays = array_key_exists('reminder_days', $body)
+        ? ($body['reminder_days'] === null ? null : (int)$body['reminder_days'])
+        : ($prevState['reminder_days'] ?? null);
+
     $pdo->prepare("
         INSERT INTO restaurant_reminder_subscriptions
-            (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, updated_at, updated_by)
-        VALUES (?, ?, ?, ?, ?, NOW(), ?)
+            (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, reminder_days, updated_at, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)
         ON DUPLICATE KEY UPDATE
             is_enabled = VALUES(is_enabled),
             portal_enabled = VALUES(portal_enabled),
             telegram_enabled = VALUES(telegram_enabled),
+            reminder_days = VALUES(reminder_days),
             updated_at = NOW(),
             updated_by = VALUES(updated_by)
-    ")->execute([$rrRestPk, $supplierId, $isEnabled, $portalEnabled, $telegramEnabled, $updatedBy]);
+    ")->execute([$rrRestPk, $supplierId, $isEnabled, $portalEnabled, $telegramEnabled, $reminderDays, $updatedBy]);
 
     auditLog($pdo, 'reminder_sub_toggled', 'restaurant_reminder_subscriptions', $rrRestPk, $updatedBy,
         ['supplier_id' => $supplierId, 'restaurant_number' => $rrUser['restaurant_number']],
