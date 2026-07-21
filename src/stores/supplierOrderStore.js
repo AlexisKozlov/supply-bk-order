@@ -164,7 +164,16 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
       schedules: data.schedules || [],
       temporarySchedule: data.temporary_schedule || null,
       deadlineRules: data.deadline_rules || [],
+      mutedRestaurantIds: data.muted_restaurant_ids || [],
     };
+  }
+
+  // Вкл/выкл напоминаний о заявках для ресторана (по конкретному поставщику)
+  async function adminSetReminderMute(supplierId, restaurantId, muted) {
+    return api('admin/reminder-mute', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId, restaurant_id: restaurantId, muted: muted ? 1 : 0 }),
+    });
   }
 
   async function adminSaveSchedules(supplierId, schedules, temporarySchedule = null) {
@@ -270,7 +279,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminGetStatus, adminGetOverview, adminGetOrders, adminGetOrder,
     adminUpdateOrder, adminDeleteOrder,
     adminGetSettings, adminSaveSettings,
-    adminGetSchedules, adminSaveSchedules,
+    adminGetSchedules, adminSaveSchedules, adminSetReminderMute,
     adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
     adminGetTemplates, adminSaveTemplates, adminGetRestaurantsDirectory,
     adminUpdateQty, adminGetExport, adminSendSummary, adminSendSummaryEmail, adminRemindUnsubmitted,

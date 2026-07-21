@@ -3087,7 +3087,29 @@ if ($soAction === 'admin') {
         $lvStmt = $pdo->prepare("SELECT MAX(updated_at) FROM supplier_schedules WHERE supplier_id = ?");
         $lvStmt->execute([$supplierId]);
         $lockVersion = $lvStmt->fetchColumn() ?: null;
-        soRespond(['schedules' => $schedules, 'temporary_schedule' => $temporarySchedule, 'deadline_rules' => $dr->fetchAll(), 'lockVersion' => $lockVersion]);
+        // Рестораны с выключенными напоминаниями по заявкам у этого поставщика.
+        $muteStmt = $pdo->prepare("SELECT restaurant_id FROM so_reminder_mutes WHERE supplier_id = ?");
+        $muteStmt->execute([$supplierId]);
+        $mutedIds = array_map('intval', $muteStmt->fetchAll(PDO::FETCH_COLUMN));
+        soRespond(['schedules' => $schedules, 'temporary_schedule' => $temporarySchedule, 'deadline_rules' => $dr->fetchAll(), 'lockVersion' => $lockVersion, 'muted_restaurant_ids' => $mutedIds]);
+    }
+
+    // --- Переключить напоминания о заявках для ресторана (по поставщику) ---
+    if ($adminAction === 'reminder-mute' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        $restaurantId = (int)($body['restaurant_id'] ?? 0);
+        $muted = !empty($body['muted']);
+        if (!$supplierId || !$restaurantId) soRespond(['error' => 'Не указан поставщик или ресторан'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        if ($muted) {
+            $by = resolveActorName($pdo, $sessionUser);
+            $pdo->prepare("INSERT IGNORE INTO so_reminder_mutes (supplier_id, restaurant_id, created_by) VALUES (?, ?, ?)")
+                ->execute([$supplierId, $restaurantId, $by]);
+        } else {
+            $pdo->prepare("DELETE FROM so_reminder_mutes WHERE supplier_id = ? AND restaurant_id = ?")
+                ->execute([$supplierId, $restaurantId]);
+        }
+        soRespond(['success' => true, 'muted' => $muted]);
     }
 
     // --- Сохранение графиков ---

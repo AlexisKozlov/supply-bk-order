@@ -424,6 +424,7 @@
                 <tr>
                   <th class="so-grid-rest">Ресторан</th>
                   <th v-for="d in 7" :key="d" class="so-grid-day">{{ daysShort[d] }}</th>
+                  <th class="so-grid-day" title="Напоминания о подаче заявки этому ресторану. Выкл — крон не шлёт напоминания «заявка не подана» по этому поставщику.">Напом.</th>
                 </tr>
               </thead>
               <tbody>
@@ -434,6 +435,15 @@
                   </td>
                   <td v-for="d in 7" :key="d" class="so-grid-check" @click="toggleScheduleDay(r, d)">
                     <input type="checkbox" :checked="!!scheduleGrid[r.id]?.[d]" @click.stop="toggleScheduleDay(r, d)" />
+                  </td>
+                  <td class="so-grid-check">
+                    <button
+                      class="so-rem-toggle"
+                      :class="scheduleMuted.has(r.id) ? 'off' : 'on'"
+                      :disabled="remMuteSaving.has(r.id)"
+                      @click="toggleReminderMute(r)"
+                      :title="scheduleMuted.has(r.id) ? 'Напоминания выключены — включить' : 'Напоминания включены — выключить'"
+                    >{{ scheduleMuted.has(r.id) ? 'выкл' : 'вкл' }}</button>
                   </td>
                 </tr>
               </tbody>
@@ -1790,6 +1800,8 @@ async function loadSchedules() {
   try {
     const result = await store.adminGetSchedules(currentSupplierId.value);
     schedules.value = result.schedules;
+    scheduleMuted.clear();
+    for (const id of (result.mutedRestaurantIds || [])) scheduleMuted.add(Number(id));
     temporarySchedule.value = result.temporarySchedule || null;
     temporaryDateFrom.value = result.temporarySchedule?.date_from || '';
     temporaryDateTo.value = result.temporarySchedule?.date_to || '';
@@ -1816,6 +1828,9 @@ async function loadSchedules() {
 // ═══ Schedule grid ═══
 const scheduleRestaurants = ref([]);
 const scheduleGrid = reactive({});
+// id ресторанов с выключенными напоминаниями по текущему поставщику
+const scheduleMuted = reactive(new Set());
+const remMuteSaving = reactive(new Set());
 const temporaryScheduleGrid = reactive({});
 const savingScheduleGrid = ref(false);
 const savingTemporarySchedule = ref(false);
@@ -1921,6 +1936,21 @@ function toggleScheduleDay(restaurant, dow) {
 function toggleTemporaryScheduleDay(restaurant, dow) {
   if (!temporaryScheduleGrid[restaurant.id]) temporaryScheduleGrid[restaurant.id] = {};
   temporaryScheduleGrid[restaurant.id][dow] = !temporaryScheduleGrid[restaurant.id][dow];
+}
+
+// Вкл/выкл напоминаний по заявкам для ресторана — сохраняется сразу.
+async function toggleReminderMute(r) {
+  if (remMuteSaving.has(r.id)) return;
+  const nextMuted = !scheduleMuted.has(r.id);
+  remMuteSaving.add(r.id);
+  try {
+    await store.adminSetReminderMute(currentSupplierId.value, r.id, nextMuted);
+    if (nextMuted) scheduleMuted.add(r.id); else scheduleMuted.delete(r.id);
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    remMuteSaving.delete(r.id);
+  }
 }
 
 async function saveScheduleGrid() {
@@ -3090,6 +3120,10 @@ watch(
 .so-grid-check { cursor: pointer; transition: background var(--tk-anim-fast); user-select: none; }
 .so-grid-check:hover { background: var(--tk-accent-soft); }
 .so-grid-check input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--tk-accent); }
+.so-rem-toggle { border: none; border-radius: 6px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.so-rem-toggle.on { background: var(--tk-success-soft); color: var(--tk-success); }
+.so-rem-toggle.off { background: var(--tk-n-100); color: var(--tk-text-muted); }
+.so-rem-toggle:disabled { opacity: 0.5; cursor: default; }
 
 /* ═══ Сессии ═══ */
 .so-sessions-list { display: flex; flex-direction: column; gap: var(--tk-s-2); }

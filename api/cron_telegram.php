@@ -886,6 +886,13 @@ try {
         $tgEnabled   = in_array('tg', $remChannels, true);
         $pushEnabled = in_array('push', $remChannels, true);
 
+        // Рестораны, которым напоминания по этому поставщику ВЫКЛЮЧЕНЫ вручную
+        // (закупщик снял переключатель в «Графиках»). Ключ — restaurant_id.
+        $mutedRests = [];
+        $muteStmt = $pdo->prepare("SELECT restaurant_id FROM so_reminder_mutes WHERE supplier_id = ?");
+        $muteStmt->execute([$supId]);
+        foreach ($muteStmt->fetchAll(PDO::FETCH_COLUMN) as $mid) $mutedRests[(int)$mid] = true;
+
         // Все расписания поставщика: ресторан + дни заказа/доставки
         $schStmt = $pdo->prepare("
             SELECT ss.restaurant_id, ss.order_day, ss.delivery_day,
@@ -930,6 +937,8 @@ try {
               AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
         ");
         foreach ($schRows as $s) {
+            // Ресторан с выключенными напоминаниями по этому поставщику — пропускаем целиком.
+            if (!empty($mutedRests[(int)$s['restaurant_id']])) continue;
             $rn = $s['restaurant_number'];
             if (!isset($byRest[$rn])) {
                 $grp = $s['legal_entity_group'] ?: 'BK_VM';
