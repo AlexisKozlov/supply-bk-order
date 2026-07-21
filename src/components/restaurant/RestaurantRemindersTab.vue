@@ -164,61 +164,21 @@
         </article>
 
         <!-- Поставщики через портал -->
-        <h3 v-if="portalGroups.length" class="rrt-group-title">Через портал</h3>
+        <h3 v-if="portalGroups.length" class="rrt-group-title">Заявки поставщикам (портал)</h3>
         <article v-for="g in portalGroups" :key="'p-' + g.supplier_id" class="rrt-card">
           <header class="rrt-head">
             <div class="rrt-head-info">
               <h4 class="rrt-name">{{ g.supplier_name }}</h4>
               <span class="rrt-tag rrt-tag-so">портал</span>
             </div>
-            <label class="rrt-toggle" :title="isEnabled(g) ? 'Выключить напоминания' : 'Включить напоминания'">
-              <input type="checkbox" :checked="isEnabled(g)" :disabled="saving[g.supplier_id]" @change="onToggleEnabled(g, $event.target.checked)" />
+            <label class="rrt-toggle" :title="!g.reminder_muted ? 'Выключить напоминания о заявке' : 'Включить напоминания о заявке'">
+              <input type="checkbox" :checked="!g.reminder_muted" :disabled="saving[g.supplier_id]" @change="onTogglePortal(g, $event.target.checked)" />
               <span class="rrt-toggle-slider"></span>
             </label>
           </header>
-
-          <div v-if="g.temp_period" class="rrt-temp-badge" :title="`Действует временный график с ${formatTempDate(g.temp_period.date_from)} по ${formatTempDate(g.temp_period.date_to)}`">
-            Временный график по {{ formatTempDate(g.temp_period.date_to) }}
-          </div>
-          <div class="rrt-schedule">
-            <span v-for="d in g.days" :key="d.order_day + '-' + d.delivery_day" class="rrt-day">
-              <span class="rrt-day-from">{{ weekdayShort(d.order_day) }} {{ effectiveDeadlineTime(g, d) }}</span>
-              <span class="rrt-day-arrow">→</span>
-              <span class="rrt-day-to">{{ weekdayShort(d.delivery_day) }}</span>
-            </span>
-          </div>
-
-          <div v-if="isEnabled(g)" class="rrt-body">
-            <label class="rrt-checkbox" :class="{ 'is-disabled': !availableTg.length }">
-              <input type="checkbox" :checked="g.subscription?.telegram_enabled" :disabled="!availableTg.length" @change="onChannelChange(g, 'telegram', $event.target.checked)" />
-              <span>Дублировать в Telegram</span>
-            </label>
-
-            <button v-if="g.subscription?.telegram_enabled && availableTg.length"
-                    type="button"
-                    class="rrt-tg-chip"
-                    :class="{ 'is-empty': !(g.selected_tg_ids || []).length, 'is-open': expandedTg.has(g.supplier_id) }"
-                    @click="toggleTgPanel(g.supplier_id)">
-              <span>{{ recipientsLabel(g.selected_tg_ids) }}</span>
-              <span class="rrt-tg-chip-arrow">▾</span>
-            </button>
-          </div>
-
-          <div v-if="isEnabled(g) && g.subscription?.telegram_enabled && availableTg.length && expandedTg.has(g.supplier_id)" class="rrt-tg">
-            <div class="rrt-tg-list">
-              <label v-for="u in availableTg" :key="u.id" class="rrt-tg-item" :class="{ 'is-selected': isSelected(g, u.id) }">
-                <input type="checkbox"
-                       :checked="isSelected(g, u.id)"
-                       :disabled="savingTg[g.supplier_id]"
-                       @change="toggleTg(g, u.id, $event.target.checked)" />
-                <div class="rrt-tg-info">
-                  <span class="rrt-tg-name">{{ u.name }}</span>
-                  <span v-if="u.username" class="rrt-tg-username">{{ u.username }}</span>
-                </div>
-              </label>
-            </div>
-            <p class="rrt-tg-hint">Если никого не отметить — сообщения в Telegram не уйдут.</p>
-          </div>
+          <p class="rrt-portal-hint">
+            {{ g.reminder_muted ? 'Напоминания о подаче заявки выключены.' : 'Напоминаем, если заявка не подана к дедлайну.' }}
+          </p>
         </article>
 
         <!-- Локальные поставщики -->
@@ -596,6 +556,23 @@ function onToggleEnabled(group, checked) {
   saveSubscription(group, { is_enabled: checked ? 1 : 0 });
 }
 
+// Портальный поставщик: вкл/выкл напоминания о заявке (флаг so_reminder_mutes).
+async function onTogglePortal(group, checked) {
+  const muted = !checked;
+  saving[group.supplier_id] = true;
+  try {
+    await roFetch('/api/restaurant-reminders/so-mute', {
+      method: 'POST',
+      body: { supplier_id: group.supplier_id, muted: muted ? 1 : 0 },
+    });
+    group.reminder_muted = muted;
+  } catch (e) {
+    toast.error(e.message || 'Ошибка');
+  } finally {
+    saving[group.supplier_id] = false;
+  }
+}
+
 function onChannelChange(group, channel, checked) {
   const patch = {};
   if (channel === 'portal') patch.portal_enabled = checked ? 1 : 0;
@@ -641,6 +618,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .rrt { padding: 12px 4px 24px; }
+.rrt-portal-hint { margin: 6px 0 0; font-size: 12px; color: #8b7355; line-height: 1.4; }
 .rrt-loading, .rrt-empty { padding: 28px 16px; color: #777; text-align: center; }
 .rrt-empty p { margin: 6px 0; line-height: 1.5; }
 

@@ -214,6 +214,36 @@ if ($subpoint === 'list' && $method === 'GET') {
     }
     unset($g);
 
+    // ─── Портальные поставщики (so_enabled=1) ─────────────────────────────
+    // У них напоминания шлёт основной модуль (крон), подписки как у локальных
+    // нет. Ресторану даём один переключатель «Напоминать о заявке» — он пишет
+    // общий с закупками флаг so_reminder_mutes (есть запись = выключено).
+    $portalStmt = $pdo->prepare("
+        SELECT DISTINCT ss.supplier_id, s.short_name AS supplier_name,
+               EXISTS(SELECT 1 FROM so_reminder_mutes m
+                      WHERE m.supplier_id = ss.supplier_id AND m.restaurant_id = ?) AS muted
+        FROM supplier_schedules ss
+        JOIN suppliers s ON s.id = ss.supplier_id
+        WHERE ss.restaurant_id = ? AND ss.is_active = 1
+          AND s.is_active = 1 AND s.so_enabled = 1
+        ORDER BY s.short_name
+    ");
+    $portalStmt->execute([$rrRestPk, $rrRestPk]);
+    foreach ($portalStmt->fetchAll() as $r) {
+        $sid = $r['supplier_id'];
+        if (isset($bySupplier[$sid])) continue;
+        $bySupplier[$sid] = [
+            'supplier_id'     => $sid,
+            'supplier_name'   => $r['supplier_name'],
+            'so_enabled'      => true,
+            'reminder_muted'  => (int)$r['muted'] === 1,
+            'days'            => [],
+            'subscription'    => null,
+            'selected_tg_ids' => [],
+            'temp_period'     => null,
+        ];
+    }
+
     // ─── Основная поставка ────────────────────────────────────────────────
     // Расписание из delivery_schedule (только строки, где закупка задала
     // дедлайн подачи заявки) + подписка ресторана + выбранные TG-получатели.
@@ -360,6 +390,27 @@ if ($subpoint === 'set' && $method === 'POST') {
     );
 
     rrRespond(['success' => true]);
+}
+
+// Портальный поставщик: ресторан вкл/выкл напоминания о заявке (общий с
+// закупками флаг so_reminder_mutes).
+if ($subpoint === 'so-mute' && $method === 'POST') {
+    $supplierId = trim((string)($body['supplier_id'] ?? ''));
+    if (!$supplierId) rrRespond(['error' => 'supplier_id обязателен'], 400);
+    $check = $pdo->prepare("SELECT 1 FROM supplier_schedules WHERE restaurant_id = ? AND supplier_id = ? LIMIT 1");
+    $check->execute([$rrRestPk, $supplierId]);
+    if (!$check->fetchColumn()) rrRespond(['error' => 'У ресторана нет расписания с этим поставщиком'], 404);
+
+    $muted = !empty($body['muted']);
+    $by = 'ro:' . $rrUser['restaurant_number'];
+    if ($muted) {
+        $pdo->prepare("INSERT IGNORE INTO so_reminder_mutes (supplier_id, restaurant_id, created_by) VALUES (?, ?, ?)")
+            ->execute([$supplierId, $rrRestPk, $by]);
+    } else {
+        $pdo->prepare("DELETE FROM so_reminder_mutes WHERE supplier_id = ? AND restaurant_id = ?")
+            ->execute([$supplierId, $rrRestPk]);
+    }
+    rrRespond(['success' => true, 'muted' => $muted]);
 }
 
 if ($subpoint === 'tg-set' && $method === 'POST') {
