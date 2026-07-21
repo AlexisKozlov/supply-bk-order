@@ -417,9 +417,10 @@ if ($subpoint === 'set' && $method === 'POST') {
 
     $pdo->prepare("
         INSERT INTO restaurant_reminder_subscriptions
-            (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, reminder_days, updated_at, updated_by)
-        VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)
+            (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, reminder_days, cron_managed, updated_at, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), ?)
         ON DUPLICATE KEY UPDATE
+            cron_managed = 1,
             is_enabled = VALUES(is_enabled),
             portal_enabled = VALUES(portal_enabled),
             telegram_enabled = VALUES(telegram_enabled),

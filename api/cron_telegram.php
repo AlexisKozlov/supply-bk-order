@@ -906,9 +906,12 @@ try {
         // Есть подписка → уважаем вкл/выкл, маску дней и выбранных получателей
         // Telegram. НЕТ подписки → прежнее поведение (все notify_so_reminders,
         // все дни) — обратная совместимость, никого не отключаем молча.
+        // Только подписки, настроенные в новой единой модели (cron_managed=1).
+        // Легаси-строки (=0) крон НЕ применяет — мягкий переход, поведение
+        // как раньше, пока ресторан/закупщик заново не настроит.
         $subByRest = [];
         $subStmt = $pdo->prepare("SELECT id, restaurant_id, is_enabled, telegram_enabled, reminder_days
-                                  FROM restaurant_reminder_subscriptions WHERE supplier_id = ?");
+                                  FROM restaurant_reminder_subscriptions WHERE supplier_id = ? AND cron_managed = 1");
         $subStmt->execute([$supId]);
         $subRows = $subStmt->fetchAll();
         if ($subRows) {
@@ -1063,22 +1066,15 @@ try {
 
             if (!$nextDelivery) continue;
 
-            // Подписка ресторана (единая модель). Нет подписки → как раньше.
-            //
-            // ВНИМАНИЕ (переходный период): в БД есть ЛЕГАСИ-подписки на
-            // портальных поставщиков (созданы, когда портальные были в этой
-            // модели), с выбранными получателями и telegram_enabled=0/1. Их
-            // нельзя применять к рассылке без явного согласия — иначе живой
-            // крон молча сузит/выключит напоминания реальным ресторанам.
-            // Поэтому сейчас применяем ТОЛЬКО маску дней (у всех легаси она
-            // NULL = все дни, эффекта нет). Включение on/off и сужения
-            // получателей — после решения по легаси-данным (см. escalation).
+            // Подписка ресторана (единая модель, только cron_managed=1).
+            // Нет управляемой подписки → прежнее поведение (все notify_so_reminders,
+            // все дни) — обратная совместимость.
             $sub = $subByRest[(int)($info['restaurant_id'] ?? 0)] ?? null;
             if ($sub) {
+                if (!$sub['enabled']) continue;                                     // ресторан выключил
                 if (!rrDayEnabledPhp($sub['days'], $nextDelivery['dow'])) continue; // день не выбран
-                // TODO(unify): после чистки/подтверждения легаси включить:
-                //   if (!$sub['enabled']) continue;
-                //   $chatIds = $sub['tg_enabled'] ? $sub['chat_ids'] : [];
+                // Получатели Telegram — только выбранные (если включён TG-канал).
+                $chatIds = $sub['tg_enabled'] ? $sub['chat_ids'] : [];
             }
 
             $deliveryDate = $nextDelivery['date'];
