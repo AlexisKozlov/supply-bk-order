@@ -165,20 +165,73 @@
 
         <!-- Поставщики через портал -->
         <h3 v-if="portalGroups.length" class="rrt-group-title">Заявки поставщикам (портал)</h3>
-        <article v-for="g in portalGroups" :key="'p-' + g.supplier_id" class="rrt-card">
+        <article v-for="g in portalGroups" :key="'p-' + g.supplier_id" class="rrt-card" :class="{ 'is-muted': g.reminder_muted }">
           <header class="rrt-head">
             <div class="rrt-head-info">
               <h4 class="rrt-name">{{ g.supplier_name }}</h4>
               <span class="rrt-tag rrt-tag-so">портал</span>
             </div>
-            <label class="rrt-toggle" :title="!g.reminder_muted ? 'Выключить напоминания о заявке' : 'Включить напоминания о заявке'">
-              <input type="checkbox" :checked="!g.reminder_muted" :disabled="saving[g.supplier_id]" @change="onTogglePortal(g, $event.target.checked)" />
+            <label class="rrt-toggle" :title="isEnabled(g) ? 'Выключить напоминания' : 'Включить напоминания'">
+              <input type="checkbox" :checked="isEnabled(g)" :disabled="g.reminder_muted || saving[g.supplier_id]" @change="onToggleEnabled(g, $event.target.checked)" />
               <span class="rrt-toggle-slider"></span>
             </label>
           </header>
-          <p class="rrt-portal-hint">
-            {{ g.reminder_muted ? 'Напоминания о подаче заявки выключены.' : 'Напоминаем, если заявка не подана к дедлайну.' }}
-          </p>
+
+          <div v-if="g.reminder_muted" class="rrt-muted-banner">
+            Отдел закупок выключил напоминания
+          </div>
+
+          <div class="rrt-schedule">
+            <span v-for="d in g.days" :key="d.order_day + '-' + d.delivery_day" class="rrt-day">
+              <span class="rrt-day-from">{{ weekdayShort(d.order_day) }} {{ effectiveDeadlineTime(g, d) }}</span>
+              <span class="rrt-day-arrow">→</span>
+              <span class="rrt-day-to">{{ weekdayShort(d.delivery_day) }}</span>
+            </span>
+          </div>
+
+          <div v-if="isEnabled(g)" class="rrt-portal-days">
+            <label v-for="dow in portalUniqueDays(g)" :key="'pd-' + g.supplier_id + '-' + dow"
+                   class="rrt-daycheck" :class="{ 'is-on': portalDayOn(g, dow) }">
+              <input type="checkbox"
+                     :checked="portalDayOn(g, dow)"
+                     :disabled="g.reminder_muted || saving[g.supplier_id]"
+                     @change="togglePortalDay(g, dow)" />
+              <span>{{ weekdayShort(dow) }}</span>
+            </label>
+          </div>
+
+          <div v-if="isEnabled(g)" class="rrt-body">
+            <label class="rrt-checkbox" :class="{ 'is-disabled': !availableTg.length || g.reminder_muted }">
+              <input type="checkbox" :checked="g.subscription?.telegram_enabled" :disabled="!availableTg.length || g.reminder_muted" @change="onChannelChange(g, 'telegram', $event.target.checked)" />
+              <span>Дублировать в Telegram</span>
+            </label>
+
+            <button v-if="g.subscription?.telegram_enabled && availableTg.length"
+                    type="button"
+                    class="rrt-tg-chip"
+                    :class="{ 'is-empty': !(g.selected_tg_ids || []).length, 'is-open': expandedTg.has(g.supplier_id) }"
+                    :disabled="g.reminder_muted"
+                    @click="toggleTgPanel(g.supplier_id)">
+              <span>{{ recipientsLabel(g.selected_tg_ids) }}</span>
+              <span class="rrt-tg-chip-arrow">▾</span>
+            </button>
+          </div>
+
+          <div v-if="isEnabled(g) && g.subscription?.telegram_enabled && availableTg.length && expandedTg.has(g.supplier_id)" class="rrt-tg">
+            <div class="rrt-tg-list">
+              <label v-for="u in availableTg" :key="'p-tg-' + u.id" class="rrt-tg-item" :class="{ 'is-selected': isSelected(g, u.id) }">
+                <input type="checkbox"
+                       :checked="isSelected(g, u.id)"
+                       :disabled="savingTg[g.supplier_id] || g.reminder_muted"
+                       @change="toggleTg(g, u.id, $event.target.checked)" />
+                <div class="rrt-tg-info">
+                  <span class="rrt-tg-name">{{ u.name }}</span>
+                  <span v-if="u.username" class="rrt-tg-username">{{ u.username }}</span>
+                </div>
+              </label>
+            </div>
+            <p class="rrt-tg-hint">Если никого не отметить — сообщения в Telegram не уйдут.</p>
+          </div>
         </article>
 
         <!-- Локальные поставщики -->
@@ -323,12 +376,40 @@ function effectiveDeadlineTime(group, day) {
   return dflt ? fmtTime(dflt.deadline_time) : '';
 }
 
+// Локальные поставщики по умолчанию выключены, пока ресторан сам не включит.
+// Портальные (so_enabled=1) по умолчанию включены — так уже работали
+// автоматические напоминания через основной модуль до этой карточки.
 function isEnabled(group) {
-  return !!group.subscription?.is_enabled;
+  if (group.subscription) return !!group.subscription.is_enabled;
+  return !!group.so_enabled;
 }
 
 function isSelected(group, tgId) {
   return (group.selected_tg_ids || []).includes(tgId);
+}
+
+// ─── Портальные карточки: галочки по дням доставки ───
+// Уникальные дни доставки поставщика (delivery_day 1..7), в порядке Пн..Вс.
+function portalUniqueDays(group) {
+  const set = new Set((group.days || []).map(d => d.delivery_day));
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+// День включён, если подписки ещё нет (дефолт — все дни) или явной маски нет (reminder_days=null — тоже все дни).
+function portalDayOn(group, dow) {
+  const sub = group.subscription;
+  if (!sub || sub.reminder_days === null || sub.reminder_days === undefined) return true;
+  return !!(sub.reminder_days & (1 << (dow - 1)));
+}
+
+function togglePortalDay(group, dow) {
+  const days = portalUniqueDays(group);
+  let mask = 0;
+  for (const d of days) {
+    const on = d === dow ? !portalDayOn(group, dow) : portalDayOn(group, d);
+    if (on) mask |= (1 << (d - 1));
+  }
+  saveSubscription(group, { reminder_days: mask });
 }
 
 // Группировка карточек: «через портал» vs «локальные»
@@ -542,6 +623,8 @@ async function saveSubscription(group, patch) {
       is_enabled: !!payload.is_enabled,
       portal_enabled: !!payload.portal_enabled,
       telegram_enabled: !!payload.telegram_enabled,
+      // reminder_days шлём только для портальных карточек (галочки по дням) — сохраняем как есть.
+      ...(Object.prototype.hasOwnProperty.call(patch, 'reminder_days') ? { reminder_days: payload.reminder_days } : {}),
     };
     return true;
   } catch (e) {
@@ -554,23 +637,6 @@ async function saveSubscription(group, patch) {
 
 function onToggleEnabled(group, checked) {
   saveSubscription(group, { is_enabled: checked ? 1 : 0 });
-}
-
-// Портальный поставщик: вкл/выкл напоминания о заявке (флаг so_reminder_mutes).
-async function onTogglePortal(group, checked) {
-  const muted = !checked;
-  saving[group.supplier_id] = true;
-  try {
-    await roFetch('/api/restaurant-reminders/so-mute', {
-      method: 'POST',
-      body: { supplier_id: group.supplier_id, muted: muted ? 1 : 0 },
-    });
-    group.reminder_muted = muted;
-  } catch (e) {
-    toast.error(e.message || 'Ошибка');
-  } finally {
-    saving[group.supplier_id] = false;
-  }
 }
 
 function onChannelChange(group, channel, checked) {
@@ -618,7 +684,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .rrt { padding: 12px 4px 24px; }
-.rrt-portal-hint { margin: 6px 0 0; font-size: 12px; color: #8b7355; line-height: 1.4; }
 .rrt-loading, .rrt-empty { padding: 28px 16px; color: #777; text-align: center; }
 .rrt-empty p { margin: 6px 0; line-height: 1.5; }
 
@@ -687,6 +752,28 @@ onBeforeUnmount(() => {
   display: flex; flex-direction: column; gap: 10px;
 }
 .rrt-card-main { border-color: #c4e6c8; background: linear-gradient(180deg, #f4faf5 0%, #ffffff 100%); }
+.rrt-card.is-muted { border-color: #f5c2c2; }
+
+/* ─── Плашка «отдел закупок выключил напоминания» ─── */
+.rrt-muted-banner {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fdecea; color: #c62828; border: 1px solid #f5c2c2;
+  font-size: 12.5px; font-weight: 600; line-height: 1.4;
+}
+
+/* ─── Галочки по дням доставки (портальные карточки) ─── */
+.rrt-portal-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.rrt-daycheck {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: #8a9aab;
+  background: #f1f4f8; border: 1px solid transparent;
+  cursor: pointer; user-select: none; transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.rrt-daycheck input { margin: 0; }
+.rrt-daycheck.is-on { background: #e7f5e8; color: #2e7d32; border-color: #c4e6c8; }
+.rrt-daycheck input:disabled { cursor: not-allowed; }
 
 .rrt-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .rrt-head-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
