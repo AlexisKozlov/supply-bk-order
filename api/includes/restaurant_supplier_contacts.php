@@ -86,8 +86,20 @@ function rscNormalizePhone($raw) {
     $hasPlus = ($s[0] === '+');
     $digits = preg_replace('/\D+/', '', $s);
     if ($digits === '') return null;
-    // Если первая цифра 8 и длина 11 (РФ-стиль) — конвертим в +7
-    if (!$hasPlus && strlen($digits) === 11 && $digits[0] === '8') {
+    // Белорусская запись «8 029 123-45-67» / «80291234567» — это +375 29...,
+    // а не +7. Проверяем ДО российского правила, иначе номер молча уезжал в РФ.
+    if (!$hasPlus && strlen($digits) === 11 && substr($digits, 0, 2) === '80') {
+        $digits = '375' . substr($digits, 2);
+        $hasPlus = true;
+    }
+    // Местный белорусский номер без кода страны: «029 123 45 67» / «291234567».
+    elseif (!$hasPlus && in_array(strlen($digits), [9, 10], true)
+            && in_array(substr($digits, strlen($digits) - 9, 2), ['25', '29', '33', '44'], true)) {
+        $digits = '375' . substr($digits, strlen($digits) - 9);
+        $hasPlus = true;
+    }
+    // Первая цифра 8 и длина 11 (РФ-стиль) — конвертим в +7
+    elseif (!$hasPlus && strlen($digits) === 11 && $digits[0] === '8') {
         $digits = '7' . substr($digits, 1);
         $hasPlus = true;
     }
@@ -105,8 +117,10 @@ function rscNormalizeTelegram($raw) {
     if ($raw === null) return null;
     $s = trim((string)$raw);
     if ($s === '') return null;
-    // Убираем известные обёртки URL
-    $s = preg_replace('#^https?://t\.me/#i', '', $s);
+    // Убираем известные обёртки URL. Схема необязательна: «t.me/name» люди
+    // копируют чаще, чем полный https-адрес, а раньше такой ввод превращался
+    // в мусор вида «tmename».
+    $s = preg_replace('#^(?:https?://)?(?:www\.)?t\.me/#i', '', $s);
     $s = preg_replace('#^tg://resolve\?domain=#i', '', $s);
     $s = preg_replace('#^tg://resolve\?phone=#i', '', $s);
     // Если похоже на телефон (есть + или большинство символов — цифры) — нормализуем как телефон
@@ -192,7 +206,14 @@ function rscNormalizeContactFields($body) {
         return ['ok' => false, 'error' => 'Неверный формат email'];
     }
 
+    // Telegram — единственное поле, которое раньше молча превращалось в NULL
+    // при непонятном вводе (например, кириллица: username в Telegram только
+    // латиницей). Сохранение «проходило», а поле оставалось пустым — со стороны
+    // это выглядело как «изменения не применяются». Теперь честно ругаемся.
     $telegram = rscNormalizeTelegram($body['telegram'] ?? null);
+    if (!empty(trim((string)($body['telegram'] ?? ''))) && $telegram === null) {
+        return ['ok' => false, 'error' => 'Неверный Telegram: укажите @username латиницей (буквы, цифры, _) или номер телефона'];
+    }
     $whatsapp = rscNormalizePhone($body['whatsapp'] ?? null);
     if (!empty($body['whatsapp']) && $whatsapp === null) {
         return ['ok' => false, 'error' => 'Неверный формат WhatsApp (ожидается номер телефона)'];

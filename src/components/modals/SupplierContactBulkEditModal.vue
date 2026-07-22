@@ -32,7 +32,7 @@
           <div class="bem-row">
             <label class="bem-field">
               <span>Группа юрлиц</span>
-              <select v-model="form.group" @change="reload">
+              <select v-model="form.group" @change="onGroupChange">
                 <option value="BK_VM">БК + Воглия Матта</option>
                 <option value="PS">Пицца Стар</option>
               </select>
@@ -315,8 +315,20 @@ async function reload() {
 
 function onKindChange() {
   contacts.value = [];
+  form.supplierId = '';
   if (form.kind === 'external') loadSuppliers();
   else reload();
+}
+
+// При смене группы юрлиц список поставщиков обязан перезагрузиться: раньше
+// вызывался только reload(), и в выпадашке оставались поставщики прежней
+// группы. Выбранный «Камако» оказывался БК-шным, а контакты заведены под
+// ПС-шным — модалка показывала «контактов нет ни в одном ресторане».
+async function onGroupChange() {
+  contacts.value = [];
+  form.supplierId = '';
+  if (form.kind === 'external') await loadSuppliers();
+  else await reload();
 }
 
 async function applyGroup(g) {
