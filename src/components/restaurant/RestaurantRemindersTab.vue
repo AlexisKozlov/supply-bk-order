@@ -172,13 +172,13 @@
               <span class="rrt-tag rrt-tag-so">портал</span>
             </div>
             <label class="rrt-toggle" :title="isEnabled(g) ? 'Выключить напоминания' : 'Включить напоминания'">
-              <input type="checkbox" :checked="isEnabled(g)" :disabled="g.reminder_muted || saving[g.supplier_id]" @change="onToggleEnabled(g, $event.target.checked)" />
+              <input type="checkbox" :checked="isEnabled(g)" :disabled="saving[g.supplier_id]" @change="onToggleEnabled(g, $event.target.checked)" />
               <span class="rrt-toggle-slider"></span>
             </label>
           </header>
 
           <div v-if="g.reminder_muted" class="rrt-muted-banner">
-            Отдел закупок выключил напоминания
+            Напоминания выключил отдел закупок. Можно включить обратно переключателем.
           </div>
 
           <div class="rrt-schedule">
@@ -230,7 +230,7 @@
                 </div>
               </label>
             </div>
-            <p class="rrt-tg-hint">Если никого не отметить — сообщения в Telegram не уйдут.</p>
+            <p class="rrt-tg-hint">Если никого не отметить — напоминания получают все привязанные аккаунты ресторана.</p>
           </div>
         </article>
 
@@ -380,8 +380,15 @@ function effectiveDeadlineTime(group, day) {
 // Портальные (so_enabled=1) по умолчанию включены — так уже работали
 // автоматические напоминания через основной модуль до этой карточки.
 function isEnabled(group) {
+  // Портальные: состояние ОДНО и общее с отделом закупок. Выключить мог любой из
+  // двух (закупки — reminder_muted, ресторан — своя подписка), включить тоже может
+  // любой. Поэтому «включено» = не заглушено И подписка не выключена.
+  if (group.so_enabled) {
+    if (group.reminder_muted) return false;
+    return group.subscription ? !!group.subscription.is_enabled : true;
+  }
   if (group.subscription) return !!group.subscription.is_enabled;
-  return !!group.so_enabled;
+  return false;
 }
 
 function isSelected(group, tgId) {
@@ -638,7 +645,27 @@ async function saveSubscription(group, patch) {
   }
 }
 
-function onToggleEnabled(group, checked) {
+async function onToggleEnabled(group, checked) {
+  // Портальный поставщик: переключатель общий с отделом закупок. Включение
+  // снимает и «глушилку» закупок, и выключение в своей подписке.
+  if (group.so_enabled) {
+    saving[group.supplier_id] = true;
+    try {
+      await roFetch('/api/restaurant-reminders/so-mute', {
+        method: 'POST',
+        body: { supplier_id: group.supplier_id, muted: checked ? 0 : 1 },
+      });
+      group.reminder_muted = !checked;
+      if (group.subscription) group.subscription.is_enabled = checked;
+    } catch (e) {
+      toast.error(e.message || 'Ошибка');
+      return;
+    } finally {
+      saving[group.supplier_id] = false;
+    }
+    if (checked && group.subscription) await saveSubscription(group, { is_enabled: 1 });
+    return;
+  }
   saveSubscription(group, { is_enabled: checked ? 1 : 0 });
 }
 

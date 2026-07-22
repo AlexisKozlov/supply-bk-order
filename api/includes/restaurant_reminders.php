@@ -460,6 +460,11 @@ if ($subpoint === 'so-mute' && $method === 'POST') {
     } else {
         $pdo->prepare("DELETE FROM so_reminder_mutes WHERE supplier_id = ? AND restaurant_id = ?")
             ->execute([$supplierId, $rrRestPk]);
+        // Своя подписка тоже могла быть выключена — включаем, чтобы состояние
+        // переключателя совпадало с реальной рассылкой и с видом у закупок.
+        $pdo->prepare("UPDATE restaurant_reminder_subscriptions SET is_enabled = 1
+                        WHERE supplier_id = ? AND restaurant_id = ? AND cron_managed = 1")
+            ->execute([$supplierId, $rrRestPk]);
     }
     rrRespond(['success' => true, 'muted' => $muted]);
 }
