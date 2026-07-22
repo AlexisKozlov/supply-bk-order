@@ -24,7 +24,7 @@
 
         <div class="modal-row-2">
           <div class="modal-field">
-            <span class="modal-field-label">Штук в коробке</span>
+            <span class="modal-field-label" title="Учётная единица отгрузки: сколько базовых единиц в одной учётной упаковке отгрузки (коробка, мешок, ящик).">Уч. ед. отгрузки</span>
             <input v-model.number="form.qty_per_box" type="number" placeholder="0" />
           </div>
           <div class="modal-field">
@@ -159,7 +159,7 @@ async function submit() {
   if (!form.value.name) { toast.error('Введите наименование', ''); return; }
   if (!form.value.sku)  { toast.error('Введите артикул', ''); return; }
   if (!form.value.supplier) { toast.error('Выберите поставщика', ''); return; }
-  if (!form.value.qty_per_box || form.value.qty_per_box <= 0) { toast.error('Введите штук в коробке', ''); return; }
+  if (!form.value.qty_per_box || form.value.qty_per_box <= 0) { toast.error('Укажите учётную единицу отгрузки', ''); return; }
   if (!form.value.boxes_per_pallet || form.value.boxes_per_pallet <= 0) { toast.error('Введите коробок на паллете', ''); return; }
 
   saving.value = true;

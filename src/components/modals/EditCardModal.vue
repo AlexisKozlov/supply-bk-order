@@ -53,7 +53,7 @@
         <!-- Упаковка -->
         <div class="modal-row-2" style="grid-template-columns: 1fr 1fr 1fr;">
           <div class="modal-field">
-            <span class="modal-field-label">Штук в коробке*</span>
+            <span class="modal-field-label" title="Учётная единица отгрузки: сколько базовых единиц в одной учётной упаковке отгрузки (коробка, мешок, ящик). Например: 24 шт в коробке, 10 кг в мешке.">Уч. ед. отгрузки*</span>
             <input v-model.number="form.qty_per_box" type="number" placeholder="0" />
           </div>
           <div class="modal-field">
@@ -300,7 +300,7 @@ async function onSupplierCreated() {
 // Подписи полей для аудит-лога
 const FIELD_LABELS = {
   name: 'Наименование', sku: 'Артикул', supplier: 'Поставщик',
-  qty_per_box: 'Штук в коробке', boxes_per_pallet: 'Коробок на паллете',
+  qty_per_box: 'Учётная единица отгрузки', boxes_per_pallet: 'Коробок на паллете',
   multiplicity: 'Кратность', unit_of_measure: 'Ед. измерения',
   analog_group: 'Группа аналогов', is_active: 'Активность', is_traceable: 'Прослеживаемость', category: 'Хранение',
   weight_netto: 'Нетто (г)', weight_brutto: 'Брутто (г)', external_code: 'Внешний код', gtin: 'GTIN',
@@ -309,7 +309,7 @@ const FIELD_LABELS = {
 async function save() {
   if (saving.value) return;
   if (!form.value.name) { toast.error('Введите наименование', ''); return; }
-  if (!form.value.qty_per_box || form.value.qty_per_box <= 0) { toast.error('Введите штук в коробке', ''); return; }
+  if (!form.value.qty_per_box || form.value.qty_per_box <= 0) { toast.error('Укажите учётную единицу отгрузки', ''); return; }
   saving.value = true;
   try {
     const payload = {

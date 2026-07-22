@@ -209,7 +209,7 @@ const importFields = [
   { key: 'external_code', label: 'Внешний код' },
   { key: 'gtin', label: 'GTIN / штрихкод' },
   { key: 'unit_of_measure', label: 'Ед. измерения' },
-  { key: 'qty_per_box', label: 'Штук в коробке' },
+  { key: 'qty_per_box', label: 'Учётная единица отгрузки' },
   { key: 'boxes_per_pallet', label: 'Коробок на паллете' },
   { key: 'multiplicity', label: 'Кратность' },
   { key: 'analog_group', label: 'Группа аналогов' },

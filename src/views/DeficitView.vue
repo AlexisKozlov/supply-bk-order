@@ -144,7 +144,7 @@
             </div>
 
             <div class="dfc-field">
-              <label>Штук в коробке</label>
+              <label>Учётная единица отгрузки</label>
               <input v-model.number="qtyPerBox" type="number" min="1" class="dfc-num-input w80"/>
             </div>
 
