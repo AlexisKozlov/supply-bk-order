@@ -21,3 +21,4 @@ api/health_state.json
 .gstack/
 __pycache__/
 public/releases/*.exe
+api/disk_state.json
