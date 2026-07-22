@@ -72,7 +72,7 @@
           </div>
           <div class="db-card-meta">
             <span>{{ p.supplier || '—' }}</span>
-            <span>{{ p.qty_per_box || '?' }} {{ p.unit_of_measure || 'шт' }}/кор</span>
+            <span :title="'Учётная единица отгрузки: ' + (p.qty_per_box || '?') + ' ' + (p.unit_of_measure || 'шт') + ' в упаковке'">{{ p.qty_per_box || '?' }} {{ p.unit_of_measure || 'шт' }}/уч.ед.</span>
             <span v-if="p.boxes_per_pallet">{{ p.boxes_per_pallet }}/пал</span>
             <span v-if="p.multiplicity > 1">×{{ p.multiplicity }}</span>
             <span v-if="p.is_traceable == 1" class="db-card-traceable-badge">прослеж.</span>
@@ -420,7 +420,7 @@ const INCOMPLETE_FIELDS = [
   ['supplier', 'поставщик'],
   ['unit_of_measure', 'ед.изм.'],
   ['category', 'хранение'],
-  ['qty_per_box', 'шт/кор'],
+  ['qty_per_box', 'уч.ед. отгрузки'],
   ['boxes_per_pallet', 'кор/пал'],
   ['multiplicity', 'кратность'],
   ['weight_netto', 'нетто'],
