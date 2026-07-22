@@ -19,7 +19,10 @@
         $description = $body['description'] ?? null;
         $le = $body['legal_entity'] ?? '';
         $statusInput = $body['status'] ?? 'draft';
-        $allowedStatuses = ['draft', 'in_progress', 'completed', 'cancelled'];
+        // Список синхронизирован с фронтендом (TendersView.vue / TenderDetailView.vue).
+        // Раньше здесь были in_progress/cancelled, которых на фронте нет, из-за чего
+        // выбор «Сбор предложений»/«Оценка»/«Согласование» падал с 400 и статус «не менялся».
+        $allowedStatuses = ['draft', 'collecting', 'evaluation', 'approval', 'completed'];
         if (!in_array($statusInput, $allowedStatuses, true)) respond(['error' => 'Недопустимый статус'], 400);
         $deadline = $body['deadline'] ?? null;
         $winnerSupplierInput = $body['winner_supplier'] ?? null;
