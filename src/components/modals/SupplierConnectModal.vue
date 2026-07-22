@@ -110,8 +110,24 @@
 
         <!-- Шаг 4: дедлайны -->
         <div v-else-if="step === 3" class="scm-pane">
-          <p class="scm-hint">Для каждого дня доставки укажите день и время дедлайна подачи заявки. Если поле выключено — заявки на этот день приниматься не будут.</p>
-          <div class="scm-deadlines">
+          <label class="scm-switch-big" style="font-size:14px">
+            <input type="checkbox" v-model="weekly.enabled" />
+            <span>Недельный режим подачи</span>
+          </label>
+          <div v-if="weekly.enabled" class="scm-deadline-row" style="flex-wrap:wrap">
+            <span>Неделя доставки закрывается в</span>
+            <select v-model.number="weekly.dow" class="scm-input scm-input-sm">
+              <option v-for="d in [1,2,3,4,5,6,7]" :key="d" :value="d">{{ daysShort[d] }}</option>
+            </select>
+            <span>предыдущей недели в</span>
+            <input type="time" v-model="weekly.time" class="scm-input scm-input-sm" />
+            <span>· показывать недель:</span>
+            <input type="number" v-model.number="weekly.weeks" class="scm-input scm-input-sm" style="width:70px" min="1" max="12" step="1" />
+          </div>
+          <p v-if="weekly.enabled" class="scm-hint">Вся неделя доставки (пн–вс) закрывается в выбранный день предыдущей недели. Дедлайны по дням ниже не применяются. «Показывать недель» — сколько ближайших недель видит ресторан (по умолчанию 1).</p>
+
+          <p class="scm-hint" v-if="!weekly.enabled">Для каждого дня доставки укажите день и время дедлайна подачи заявки. Если поле выключено — заявки на этот день приниматься не будут.</p>
+          <div class="scm-deadlines" v-if="!weekly.enabled">
             <div v-for="dow in activeDeliveryDays" :key="dow" class="scm-deadline-row">
               <div class="scm-deadline-label">
                 <b>{{ daysFull[dow] }}</b>
@@ -148,10 +164,41 @@
             <label>Сообщение на время паузы <small>(необязательно)</small></label>
             <textarea v-model="acceptance.pause_message" rows="3" class="scm-input" placeholder="Например: Заявки не принимаем до 20.04 по техническим причинам"></textarea>
           </div>
+
+          <label class="scm-switch" style="margin-left:0">
+            <input type="checkbox" v-model="acceptance.auto_submit_previous" />
+            <span>Авто-подача предыдущей заявки, если ресторан не подал к дедлайну</span>
+          </label>
+
+          <div class="scm-field">
+            <label>Минимальный заказ <small>(необязательно)</small></label>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <input type="number" v-model.number="minOrder.value" class="scm-input scm-input-sm" style="width:120px" min="0" step="0.01" placeholder="нет" />
+              <select v-model="minOrder.unit" class="scm-input scm-input-sm">
+                <option value="kg">килограммы</option>
+                <option value="pieces">штуки</option>
+              </select>
+            </div>
+            <small style="color:#8b7355">Если задан — ресторан не сможет подать заявку меньше этого объёма.</small>
+          </div>
         </div>
 
-        <!-- Шаг 6: подписчики уведомлений -->
+        <!-- Шаг 6: письма и уведомления -->
         <div v-else-if="step === 5" class="scm-pane">
+          <label class="scm-switch" style="margin-left:0">
+            <input type="checkbox" v-model="emailCfg.auto_email_summary" />
+            <span>Автоматически отправлять сводку поставщику на email после дедлайна</span>
+          </label>
+          <div class="scm-field" v-if="emailCfg.auto_email_summary">
+            <label>Постоянная копия писем (cc) <small>(необязательно, через запятую)</small></label>
+            <input type="text" v-model="emailCfg.cc_emails" class="scm-input" placeholder="manager@company.by, buyer@company.by" />
+          </div>
+          <label class="scm-switch" style="margin-left:0" v-if="emailCfg.auto_email_summary">
+            <input type="checkbox" v-model="emailCfg.email_cc_restaurants" />
+            <span>Ставить в копию рестораны, подавшие заявку на этот день</span>
+          </label>
+          <hr style="border:none;border-top:1px solid #eee;margin:6px 0" />
+
           <p class="scm-hint">Сотрудники отдела закупок, которые получают в Telegram сводку после дедлайна (Excel со всеми заявками ресторанов).</p>
           <div v-if="loadingUsers" class="scm-loading"><BurgerSpinner text="Загрузка пользователей..." /></div>
           <div v-else class="scm-users">
@@ -322,9 +369,19 @@ function syncDeadlinesFromSchedule() {
 // ═══ Шаг 5: режим приёма ═══
 const acceptance = reactive({
   is_accepting_orders: true,
+  auto_submit_previous: false,
   default_deadline_time: '14:00',
   pause_message: '',
 });
+
+// Недельный режим подачи (альтернатива дедлайнам по дням)
+const weekly = reactive({ enabled: false, dow: 3, time: '14:00', weeks: 1 });
+
+// Минимальный заказ у поставщика
+const minOrder = reactive({ value: null, unit: 'kg' });
+
+// Письма поставщику
+const emailCfg = reactive({ auto_email_summary: false, email_cc_restaurants: false, cc_emails: '' });
 
 // ═══ Шаг 6: уведомления ═══
 const allUsers = ref([]);
@@ -387,16 +444,21 @@ async function submit() {
       });
     }
 
-    // Дедлайны — только для дней, где активно
+    // Дедлайны по дням — только когда недельный режим ВЫКЛ (иначе он приоритетнее
+    // и правила по дням только путали бы, как это было у ПРЦ).
     const deadlineRules = [];
-    for (const [dow, rule] of Object.entries(deadlineRulesMap)) {
-      if (!rule.active) continue;
-      deadlineRules.push({
-        delivery_dow: parseInt(dow, 10),
-        deadline_dow: rule.deadline_dow,
-        deadline_time: rule.deadline_time.length === 5 ? rule.deadline_time + ':00' : rule.deadline_time,
-      });
+    if (!weekly.enabled) {
+      for (const [dow, rule] of Object.entries(deadlineRulesMap)) {
+        if (!rule.active) continue;
+        deadlineRules.push({
+          delivery_dow: parseInt(dow, 10),
+          deadline_dow: rule.deadline_dow,
+          deadline_time: rule.deadline_time.length === 5 ? rule.deadline_time + ':00' : rule.deadline_time,
+        });
+      }
     }
+
+    const minVal = (minOrder.value !== null && minOrder.value !== '' && Number(minOrder.value) > 0) ? Number(minOrder.value) : null;
 
     const payload = {
       supplier_id: supplierId.value,
@@ -405,10 +467,19 @@ async function submit() {
       deadline_rules: deadlineRules,
       acceptance: {
         is_accepting_orders: acceptance.is_accepting_orders ? 1 : 0,
+        auto_submit_previous: acceptance.auto_submit_previous ? 1 : 0,
         default_deadline_time: acceptance.default_deadline_time.length === 5 ? acceptance.default_deadline_time + ':00' : acceptance.default_deadline_time,
         pause_message: acceptance.pause_message || null,
+        weekly_deadline_dow: weekly.enabled ? Number(weekly.dow) : null,
+        weekly_deadline_time: weekly.enabled ? weekly.time : null,
+        weekly_weeks_ahead: weekly.enabled ? Math.max(1, Number(weekly.weeks || 1)) : 1,
+        min_order_value: minVal,
+        min_order_unit: minOrder.unit,
+        auto_email_summary: emailCfg.auto_email_summary ? 1 : 0,
+        email_cc_restaurants: emailCfg.email_cc_restaurants ? 1 : 0,
       },
       notify_users: notifyUsers.value,
+      cc_emails: emailCfg.cc_emails || '',
     };
 
     const res = await soStore.adminRegisterSupplier(payload);

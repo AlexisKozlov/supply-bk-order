@@ -132,7 +132,20 @@ export function buildSoOrderSheet(XLSX, {
     bpp: num(p.boxes_per_pallet),
     wn: num(p.weight_netto),
     wb: num(p.weight_brutto),
+    mult: num(p.multiplicity),
   }));
+
+  // Физический размер коробки/лотка для колонок «Коробок»/«Паллет».
+  // Если учётная единица (qty_per_box) задана как настоящая коробка (>1) —
+  // берём её. Если карточка штучная (учётная единица = 1), коробки нет в
+  // учёте, но физически товар едет лотком — тогда берём кратность
+  // (сколько штук в коробке физически). Вес считаем отдельно по qty_per_box,
+  // т.к. вес хранится на одну учётную единицу и при qpb=1 уже верен per-штука.
+  const boxDivisor = (a) => {
+    if (!isNaN(a.qpb) && a.qpb > 1) return a.qpb;
+    if (!isNaN(a.mult) && a.mult > 1) return a.mult;
+    return a.qpb;
+  };
 
   // Итоги показателей по массиву штук на товар (штуки → коробки → паллеты/вес).
   // Товары без атрибутов дают вклад 0. Всё линейно по штукам, поэтому сумму
@@ -142,12 +155,19 @@ export function buildSoOrderSheet(XLSX, {
     for (let pi = 0; pi < prods.length; pi++) {
       const a = prodAttrs[pi];
       const pieces = piecesArr[pi] || 0;
-      if (isNaN(a.qpb) || a.qpb <= 0) continue;
-      const boxes = pieces / a.qpb;
-      acc.boxes += boxes;
-      if (!isNaN(a.bpp) && a.bpp > 0) acc.pallets += boxes / a.bpp;
-      if (!isNaN(a.wn) && a.wn > 0) acc.netto += boxes * a.wn / 1000;
-      if (!isNaN(a.wb) && a.wb > 0) acc.brutto += boxes * a.wb / 1000;
+      // Коробок/Паллет — по физическому размеру коробки (qty_per_box или кратность)
+      const bd = boxDivisor(a);
+      if (!isNaN(bd) && bd > 0) {
+        const boxes = pieces / bd;
+        acc.boxes += boxes;
+        if (!isNaN(a.bpp) && a.bpp > 0) acc.pallets += boxes / a.bpp;
+      }
+      // Вес — по учётной единице (qty_per_box): вес хранится на одну учётную единицу
+      if (!isNaN(a.qpb) && a.qpb > 0) {
+        const wboxes = pieces / a.qpb;
+        if (!isNaN(a.wn) && a.wn > 0) acc.netto += wboxes * a.wn / 1000;
+        if (!isNaN(a.wb) && a.wb > 0) acc.brutto += wboxes * a.wb / 1000;
+      }
     }
     return acc;
   };
@@ -240,11 +260,14 @@ export function buildSoOrderSheet(XLSX, {
     for (let pi = 0; pi < prods.length; pi++) {
       const a = prodAttrs[pi];
       const pieces = totalPieces[pi] || 0;
-      const boxes = (!isNaN(a.qpb) && a.qpb > 0) ? pieces / a.qpb : null;
+      // Коробок/Паллет — по физической коробке; вес — по учётной единице (qty_per_box).
+      const bd = boxDivisor(a);
+      const boxes = (!isNaN(bd) && bd > 0) ? pieces / bd : null;
+      const wboxes = (!isNaN(a.qpb) && a.qpb > 0) ? pieces / a.qpb : null;
       perProd.boxes.push(boxes === null ? '' : round(boxes, 2));
       perProd.pallets.push((boxes !== null && !isNaN(a.bpp) && a.bpp > 0) ? round(boxes / a.bpp, 2) : '');
-      perProd.netto.push((boxes !== null && !isNaN(a.wn) && a.wn > 0) ? round(boxes * a.wn / 1000, 1) : '');
-      perProd.brutto.push((boxes !== null && !isNaN(a.wb) && a.wb > 0) ? round(boxes * a.wb / 1000, 1) : '');
+      perProd.netto.push((wboxes !== null && !isNaN(a.wn) && a.wn > 0) ? round(wboxes * a.wn / 1000, 1) : '');
+      perProd.brutto.push((wboxes !== null && !isNaN(a.wb) && a.wb > 0) ? round(wboxes * a.wb / 1000, 1) : '');
     }
     const pushInfoRow = (label, values) => {
       const row = [label, ''];

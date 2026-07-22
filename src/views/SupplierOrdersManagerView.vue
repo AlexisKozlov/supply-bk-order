@@ -246,8 +246,8 @@
                     <span v-if="isSkipOrder(r)" class="rom-status st-skip" title="Ресторан отметил, что поставка не нужна">
                       Не нужна
                     </span>
-                    <span v-else class="rom-status" :class="'st-' + (r.order_status || 'none')">
-                      {{ statusLabel(r.order_status) }}
+                    <span v-else class="rom-status" :class="restStatusClass(r)" :title="restStatusTitle(r)">
+                      {{ restStatusLabel(r) }}
                     </span>
                     <span v-if="isAutoSubmitted(r)" class="so-auto-badge" :title="autoSubmitTitle(r)">
                       АВТО-ПОДАЧА
@@ -475,6 +475,9 @@
                         <p v-if="scheduleMuted.has(r.id)" class="so-recipients-hint">
                           Напоминания для этого ресторана выключены (переключатель «Напом.» слева) — выбор получателей пока не действует.
                         </p>
+                        <p v-else-if="!recipientsData[r.id].accounts.some(a => a.selected)" class="so-recipients-hint">
+                          Никто не отмечен — напоминания получают все привязанные аккаунты ресторана.
+                        </p>
                       </div>
                     </td>
                   </tr>
@@ -589,7 +592,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(t, idx) in templates" :key="idx">
+              <tr v-for="(t, idx) in templates" :key="idx" :class="{ 'so-tpl-row-disabled': t.order_disabled }">
                 <td><input type="number" v-model.number="t.sort_order" class="rom-input-sm" style="width:50px" /></td>
                 <td>
                   <div class="so-template-product-cell">
@@ -597,6 +600,10 @@
                     <input v-model="t.product_name" class="rom-input-sm so-template-name-input" placeholder="Название товара" />
                   </div>
                   <input v-model="t.note" class="rom-input-sm so-tpl-note-input" placeholder="Примечание (видят рестораны)" />
+                  <label class="so-tpl-disable-toggle" :title="t.order_disabled ? 'Товар полностью скрыт из заявок ресторанов и бота. Включите, чтобы снова разрешить заказ.' : 'Полностью убрать товар из заявок (рестораны и бот его не увидят). В шаблоне останется.'">
+                    <input type="checkbox" v-model="t.order_disabled" :true-value="1" :false-value="0" />
+                    <span>Отключён для заказа</span>
+                  </label>
                 </td>
                 <td class="so-tpl-cat">
                   <!-- Статус связи с карточкой каталога -->
@@ -827,6 +834,13 @@
               Время:
               <input type="time" v-model="weeklyTime" class="rom-input-sm" />
             </label>
+            <label style="display:flex;align-items:center;gap:6px">
+              Показывать недель:
+              <input type="number" v-model.number="weeklyWeeksAhead" class="rom-input-sm" style="width:70px" min="1" max="12" step="1" />
+            </label>
+          </div>
+          <div v-if="weeklyEnabled" class="so-section-hint" style="margin:6px 0 0 0">
+            Сколько ближайших недель доставки видит ресторан для заказа. По умолчанию 1 — только ближайшая открытая неделя; следующая появится, когда у текущей пройдёт дедлайн.
           </div>
         </div>
 
@@ -852,8 +866,11 @@
               </select>
             </label>
           </div>
-          <p v-if="minOrderUnit === 'kg'" class="so-section-hint" style="margin:8px 0 0 0">
-            Единица «килограммы» работает по весам из справочника: у товаров поставщика должны быть заполнены вес и штук-в-коробке.
+          <p v-if="!(Number(minOrderValue) > 0)" class="so-section-hint" style="margin:8px 0 0 0">
+            Минимум не задан — рестораны могут подавать заявку на любое количество. Единица сохранится и будет применена, как только вы впишете сумму минимума.
+          </p>
+          <p v-else-if="minOrderUnit === 'kg'" class="so-section-hint" style="margin:8px 0 0 0">
+            Единица «килограммы» работает по весам из справочника: у товаров поставщика должны быть заполнены вес и учётная единица отгрузки.
           </p>
         </div>
 
@@ -993,6 +1010,11 @@ const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');
 const selectedDate = ref('');
 const selectedDeadline = ref('');
+// ISO-время дедлайна выбранной даты — для «живого» пересчёта статуса (как в обзоре).
+const selectedDeadlineAt = ref('');
+// Состояние приёма на выбранную дату: 'open' | 'closed' (сервер считает по
+// дедлайну с учётом переносов и принудительного закрытия дня).
+const selectedDeadlineStatus = ref('');
 const stats = ref({ total: 0, submitted: 0, pending: 0 });
 const restaurants = ref([]);
 const weekDates = ref([]);
@@ -1033,6 +1055,8 @@ const reminderChannels = ref([]);
 const weeklyEnabled = ref(false);
 const weeklyDow = ref(3);
 const weeklyTime = ref('14:00');
+// Недельный режим: сколько ближайших недель доставки показывать ресторану
+const weeklyWeeksAhead = ref(1);
 
 // Минимальный заказ у поставщика (значение и единица кг/штуки)
 const minOrderValue = ref(0);
@@ -1487,6 +1511,7 @@ async function saveReminders() {
 // PDO может вернуть dow строкой — приводим к Number.
 function syncWeeklyFromSettings() {
   const dow = settings.value.weekly_deadline_dow;
+  weeklyWeeksAhead.value = Math.max(1, Number(settings.value.weekly_weeks_ahead || 1));
   if (dow != null && dow !== '') {
     weeklyEnabled.value = true;
     weeklyDow.value = Number(dow);
@@ -1502,7 +1527,7 @@ function syncWeeklyFromSettings() {
 // чтобы бэкенд обновил именно их и не тронул прочие настройки.
 async function saveWeekly() {
   const payload = weeklyEnabled.value
-    ? { weekly_deadline_dow: Number(weeklyDow.value), weekly_deadline_time: weeklyTime.value }
+    ? { weekly_deadline_dow: Number(weeklyDow.value), weekly_deadline_time: weeklyTime.value, weekly_weeks_ahead: Math.max(1, Number(weeklyWeeksAhead.value || 1)) }
     : { weekly_deadline_dow: null };
   const data = await store.adminSaveSettings(currentSupplierId.value, payload);
   if (data && data.settings) {
@@ -1568,7 +1593,7 @@ async function saveXlsx() {
 watch(notifyUsers, () => autoSave('notify', saveNotifyUsers), { deep: true });
 watch([reminderOffsets, reminderChannels], () => autoSave('reminders', saveReminders), { deep: true });
 watch([xlsxDropEmpty, xlsxPalletMetrics], () => autoSave('xlsx', saveXlsx), { deep: true });
-watch([weeklyEnabled, weeklyDow, weeklyTime], () => autoSave('weekly', saveWeekly, 800));
+watch([weeklyEnabled, weeklyDow, weeklyTime, weeklyWeeksAhead], () => autoSave('weekly', saveWeekly, 800));
 watch([minOrderValue, minOrderUnit], () => autoSave('minorder', saveMinOrder, 800));
 watch(defaultDeadline, () => autoSave('deadline', saveDefaultDeadline, 800));
 watch(pauseMessage, () => autoSave('pause', savePauseMessage, 1000));
@@ -1587,6 +1612,8 @@ async function loadStatus() {
     if (data.settings) settings.value = data.settings;
     if (data.date) selectedDate.value = data.date;
     selectedDeadline.value = data.deadline || '';
+    selectedDeadlineAt.value = data.deadline_at || '';
+    selectedDeadlineStatus.value = data.deadline_status || '';
   } catch (e) {
     console.error(e);
   } finally {
@@ -2228,6 +2255,7 @@ function addManualTemplateRow() {
     multiplicity: null,
     min_qty: null,
     note: '',
+    order_disabled: 0,
     vis_regions: [],
     vis_restaurants: [],
   });
@@ -2248,6 +2276,7 @@ function addTemplateProduct(p) {
     multiplicity: p.multiplicity || null,
     min_qty: p.min_qty || null,
     note: '',
+    order_disabled: 0,
     vis_regions: [],
     vis_restaurants: [],
   });
@@ -2746,6 +2775,38 @@ function copyLink() {
   toast.success('Скопировано', url);
 }
 
+// Приём на выбранную дату закрыт: дедлайн прошёл или день закрыт вручную.
+// Статус с сервера — снимок на момент загрузки. Дополнительно пересчитываем по
+// «живому» времени (now тикает раз в минуту), чтобы после прохождения дедлайна
+// строки без заявки сразу читались как «Закрыто», без перезагрузки страницы.
+const dayIsClosed = computed(() => {
+  if (isDateForcedClosed(selectedDate.value)) return true;
+  if (selectedDeadlineStatus.value === 'closed') return true;
+  if (selectedDeadlineAt.value) {
+    const dl = Date.parse(selectedDeadlineAt.value);
+    if (!isNaN(dl) && now.value >= dl) return true;
+  }
+  return false;
+});
+
+// Статус ресторана в таблице приёма. Пока приём открыт — «Не подано» (ещё ждём).
+// После закрытия дня ждать уже нечего: показываем «Закрыто», как и у тех, кто
+// подал, — чтобы статусы у закупок и у ресторана читались одинаково.
+function restStatusLabel(r) {
+  if (!r.order_status && dayIsClosed.value) return 'Закрыто';
+  return statusLabel(r.order_status);
+}
+
+function restStatusClass(r) {
+  if (!r.order_status && dayIsClosed.value) return 'st-locked so-st-closed-empty';
+  return 'st-' + (r.order_status || 'none');
+}
+
+function restStatusTitle(r) {
+  if (!r.order_status && dayIsClosed.value) return 'Приём закрыт — заявка так и не была подана';
+  return '';
+}
+
 function statusLabel(s) {
   if (s === 'submitted') return 'Подано';
   if (s === 'edited') return 'Изменён';
@@ -3024,6 +3085,9 @@ watch(
 /* «Не подано» — обычное состояние дня, а не ошибка: нейтральный чип. */
 .st-none { background: var(--tk-n-100); color: var(--tk-text-secondary); }
 .st-locked { background: var(--tk-warning-soft); color: var(--tk-warning); }
+/* «Закрыто», но заявки так и не было — приглушённый вариант, чтобы в таблице
+   было видно, кто подал до закрытия, а кто нет. */
+.so-st-closed-empty { background: var(--tk-n-100); color: var(--tk-text-muted); }
 .st-skip { background: var(--tk-n-100); color: var(--tk-text-muted); }
 .so-auto-badge {
   display: inline-flex; align-items: center; margin-left: var(--tk-s-2); padding: 2px 6px;
@@ -3060,6 +3124,12 @@ watch(
 }
 /* Примечание товара и кнопка доступа в редакторе шаблона */
 .so-tpl-note-input { width: 100%; box-sizing: border-box; margin-top: 4px; font-size: 12px; }
+.so-tpl-disable-toggle { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: #8A5320; cursor: pointer; user-select: none; }
+.so-tpl-disable-toggle input { cursor: pointer; }
+.so-tpl-row-disabled td { opacity: 0.55; }
+.so-tpl-row-disabled td:first-child,
+.so-tpl-row-disabled .so-tpl-disable-toggle { opacity: 1; }
+.so-tpl-row-disabled .so-tpl-disable-toggle { color: #B3261E; font-weight: 600; }
 .so-tpl-access-on { background: #FEF6EC !important; border-color: #F2C9A0 !important; color: #8A5320 !important; }
 .so-access-modal .rom-modal-body { display: flex; flex-direction: column; gap: 14px; }
 .so-access-block { border: 1px solid var(--tk-border); border-radius: 8px; padding: 10px 12px; }

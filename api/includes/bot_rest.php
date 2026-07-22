@@ -228,7 +228,7 @@ function soEsc($v) {
 }
 
 function soGetSupplierSettingsBot($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message, weekly_deadline_dow, weekly_weeks_ahead FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) {
@@ -239,6 +239,8 @@ function soGetSupplierSettingsBot($pdo, $supplierId) {
         'is_accepting_orders' => 1,
         'default_deadline_time' => '14:00:00',
         'pause_message' => null,
+        'weekly_deadline_dow' => null,
+        'weekly_weeks_ahead' => 1,
     ];
 }
 
@@ -296,7 +298,14 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
     $today->setTime(0, 0, 0);
     $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
 
-    // Идём по датам доставки на 15 дней вперёд; для каждой берём ЭФФЕКТИВНЫЙ график
+    // Горизонт: обычно 15 дней. В недельном режиме дедлайн стоит на предыдущей
+    // неделе, поэтому чтобы охватить N ближайших недель доставки — берём запас.
+    $wDow = $settings['weekly_deadline_dow'] ?? null;
+    $isWeeklyHorizon = ($wDow !== null && $wDow !== '' && (int)$wDow >= 1 && (int)$wDow <= 7);
+    $wAhead = max(1, (int)($settings['weekly_weeks_ahead'] ?? 1));
+    $horizonDays = $isWeeklyHorizon ? min(60, ($wAhead + 2) * 7) : 15;
+
+    // Идём по датам доставки вперёд; для каждой берём ЭФФЕКТИВНЫЙ график
     // (учитывает временный период поставщика), чтобы для дат внутри периода
     // использовались временные дни, а не основные.
     $availableDates = [];
@@ -307,7 +316,7 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
         WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ?
         LIMIT 1
     ");
-    for ($i = 0; $i < 15; $i++) {
+    for ($i = 0; $i < $horizonDays; $i++) {
         $dObj = (clone $today)->modify("+{$i} days");
         $deliveryDate = $dObj->format('Y-m-d');
         $deliveryDow = (int)$dObj->format('N');
@@ -352,12 +361,43 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
 
     // Формируем итоговый список: до 2 «открытых/с заказом» дат + 1 ближайший закрытый
     // без заявки (для информации: «приём уже прошёл»).
+    // Недельный режим: показываем даты первых N недель доставки (настройка
+    // weekly_weeks_ahead). Обычный режим — до 2 ближайших открытых дат.
+    $weeklyDow = $settings['weekly_deadline_dow'] ?? null;
+    $isWeekly = ($weeklyDow !== null && $weeklyDow !== '' && (int)$weeklyDow >= 1 && (int)$weeklyDow <= 7);
+    $weeksAhead = max(1, (int)($settings['weekly_weeks_ahead'] ?? 1));
     $openDates = [];
     $closedInfoDate = null;
+
+    // Квоту недель тратят только ОТКРЫТЫЕ недели. Неделя с уже прошедшим
+    // дедлайном остаётся видна (там лежит поданная заявка), но слот не
+    // занимает — иначе после дедлайна следующая неделя не открывалась.
+    $weekMonday = function ($dateStr) {
+        $dt = new DateTime($dateStr);
+        $n = (int)$dt->format('N');
+        return (clone $dt)->modify('-' . ($n - 1) . ' days')->format('Y-m-d');
+    };
+    $allowedWeeks = [];
+    if ($isWeekly) {
+        foreach ($availableDates as $d) {
+            if ($d['deadline_status'] === 'closed') continue;
+            $monday = $weekMonday($d['delivery_date']);
+            if (isset($allowedWeeks[$monday])) continue;
+            if (count($allowedWeeks) >= $weeksAhead) break;
+            $allowedWeeks[$monday] = true;
+        }
+    }
+
     foreach ($availableDates as $d) {
         $isClosedEmpty = ($d['deadline_status'] === 'closed') && empty($d['order']);
         if ($isClosedEmpty) {
             if ($closedInfoDate === null) $closedInfoDate = $d;
+        } elseif ($isWeekly) {
+            // Закрытая с заявкой — показываем всегда; открытую — только если её
+            // неделя попала в квоту.
+            if ($d['deadline_status'] === 'closed' || isset($allowedWeeks[$weekMonday($d['delivery_date'])])) {
+                $openDates[] = $d;
+            }
         } else {
             if (count($openDates) < 2) $openDates[] = $d;
         }
@@ -690,6 +730,25 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
         return;
     }
 
+    // Показываем только те рестораны, у которых с этим поставщиком реально есть
+    // график. Иначе при подписке на рестораны разных юрлиц (например Бургер БК и
+    // Пицца Стар одним аккаунтом) в списке появлялся «чужой» ресторан, и на нём
+    // бот отвечал «график поставок не настроен».
+    $schRests = $pdo->prepare("
+        SELECT DISTINCT r.number
+        FROM supplier_schedules ss
+        JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+        WHERE ss.supplier_id = ? AND ss.is_active = 1
+    ");
+    $schRests->execute([$supplierId]);
+    $withSchedule = array_map('intval', $schRests->fetchAll(PDO::FETCH_COLUMN));
+    $subs = array_values(array_filter($subs, fn($s) => in_array((int)$s['restaurant_number'], $withSchedule, true)));
+    $restNums = array_column($subs, 'restaurant_number');
+
+    if (!$restNums) {
+        editMessage($chatId, $msgId, "📦 <b>" . soEsc($supName) . "</b>\n\nУ ваших ресторанов нет графика поставок с этим поставщиком.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+        return;
+    }
     if (count($restNums) === 1) {
         soOrderSelectDay($chatId, $msgId, $supplierId, $restNums[0]);
         return;
@@ -746,7 +805,12 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
         // Закрытый день без заявки — показываем только для информации (без ввода).
         if ($isClosed && !$hasOrder) {
             $btnLabel = '⏱ Приём завершён — ' . $dayLabel;
-            $btns[] = [['text' => $btnLabel, 'callback_data' => "soord_closed_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+            // Кнопка только показывает всплывающее «приём завершён» — ни поставщик,
+            // ни дата ей не нужны. Держим callback коротким: у Telegram жёсткий
+            // лимит 64 байта, и с UUID + 4-значным номером ресторана (Пицца Стар)
+            // строка выходила за него — телеграм отбрасывал ВСЮ клавиатуру, и меню
+            // «не нажималось».
+            $btns[] = [['text' => $btnLabel, 'callback_data' => 'soord_closed']];
         } else {
             $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
         }
@@ -803,7 +867,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $le = $rest['legal_entity'];
 
     // Загружаем товары из шаблона (с учётом юрлица)
-    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1 ORDER BY sort_order, product_name");
+    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1 AND order_disabled = 0 ORDER BY sort_order, product_name");
     $tpl->execute([$supplierId, $le]);
     $products = $tpl->fetchAll();
 
@@ -1876,7 +1940,10 @@ function corrEsc($s) { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 // Если $cbId передан — отвечает на callback с причиной отказа.
 function corrCheckBotAccess($pdo, $chatId, $corrIds, $cbId = null) {
     global $ROLE_TEMPLATES, $ACCESS_LEVELS;
-    $st = $pdo->prepare("SELECT id, name, role, permissions FROM users WHERE telegram_chat_id = ?");
+    // legal_entities ОБЯЗАТЕЛЬНА: checkLegalEntityGroupAccess() читает именно её.
+    // Без неё проверка группы юрлиц падала у всех, кроме админов («нет доступа
+    // к группе юр. лиц» при взятии корректировки в работу).
+    $st = $pdo->prepare("SELECT id, name, role, permissions, legal_entities FROM users WHERE telegram_chat_id = ?");
     $st->execute([$chatId]);
     $user = $st->fetch();
     if (!$user) {

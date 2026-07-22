@@ -119,7 +119,7 @@ function soNormalizeReminderCsv($input, array $whitelist) {
 
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) {
@@ -131,6 +131,8 @@ function soGetSupplierSettings($pdo, $supplierId) {
             ? (int)$row['weekly_deadline_dow'] : null;
         $row['weekly_deadline_time'] = !empty($row['weekly_deadline_time'])
             ? substr($row['weekly_deadline_time'], 0, 5) : null;
+        // Недельный режим: сколько недель показывать ресторану (>=1, дефолт 1)
+        $row['weekly_weeks_ahead'] = max(1, (int)($row['weekly_weeks_ahead'] ?? 1));
         // Минимальный заказ: value → float|null (0/NULL = минимума нет);
         // при заданном value>0 и пустом unit трактуем как 'kg'.
         $mv = (isset($row['min_order_value']) && $row['min_order_value'] !== null && $row['min_order_value'] !== '')
@@ -159,6 +161,7 @@ function soGetSupplierSettings($pdo, $supplierId) {
         // Недельный режим по умолчанию выключен
         'weekly_deadline_dow' => null,
         'weekly_deadline_time' => null,
+        'weekly_weeks_ahead' => 1,
         // Минимальный заказ по умолчанию не задан
         'min_order_value' => null,
         'min_order_unit' => null,
@@ -263,7 +266,7 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
         $attrSkus = array_keys($productsOrdered);
         $skuPh = implode(',', array_fill(0, count($attrSkus), '?'));
         $attrStmt = $pdo->prepare("
-            SELECT sku, unit_of_measure, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto
+            SELECT sku, unit_of_measure, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto, multiplicity
             FROM products
             WHERE sku IN ({$skuPh}) AND legal_entity IN ({$entityPh})");
         $attrStmt->execute(array_merge($attrSkus, $supplierEntities));
@@ -278,13 +281,14 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
                     'boxes_per_pallet' => (float)$ar['boxes_per_pallet'],
                     'weight_netto'     => (float)$ar['weight_netto'],
                     'weight_brutto'    => (float)$ar['weight_brutto'],
+                    'multiplicity'     => (float)$ar['multiplicity'],
                 ];
             }
         }
         foreach ($productsOrdered as $sku => &$prod) {
             $a = $attrMap[$sku] ?? [
                 'unit_of_measure' => '', 'qty_per_box' => 0, 'boxes_per_pallet' => 0,
-                'weight_netto' => 0, 'weight_brutto' => 0,
+                'weight_netto' => 0, 'weight_brutto' => 0, 'multiplicity' => 0,
             ];
             // Единица измерения нужна в шапке отчёта: без неё непонятно,
             // в чём стоят цифры — в штуках, килограммах или литрах.
@@ -293,6 +297,9 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
             $prod['boxes_per_pallet'] = $a['boxes_per_pallet'];
             $prod['weight_netto']     = $a['weight_netto'];
             $prod['weight_brutto']    = $a['weight_brutto'];
+            // Кратность = физический размер коробки/лотка (для колонок «Коробок»/
+            // «Паллет», когда учётная единица штучная = 1). См. soOrderXlsx.js.
+            $prod['multiplicity']     = $a['multiplicity'];
         }
         unset($prod);
     }
@@ -793,9 +800,11 @@ function soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers) {
 }
 
 // Контракт сохранён: ['status' => 'open'|'closed', 'deadline' => 'Y-m-d HH:MM'|null, 'forced_closed'? => true]
+// deadline_at — ISO-8601 с офсетом (для «живого» отсчёта на фронте), либо null у forced_closed.
 function soCheckDeadline($pdo, $supplierId, $deliveryDate) {
     $r = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
     $out = ['status' => $r['status'], 'deadline' => $r['deadline_str']];
+    $out['deadline_at'] = !empty($r['deadline_dt']) ? $r['deadline_dt']->format(DateTime::ATOM) : null;
     if (!empty($r['forced_closed'])) $out['forced_closed'] = true;
     return $out;
 }
@@ -1146,7 +1155,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $ph = implode(',', array_fill(0, count($supplierIds), '?'));
 
     // 2. Настройки всех поставщиков — один запрос
-    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
+    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
     $settingsRows->execute($supplierIds);
     $settingsMap = [];
     foreach ($settingsRows->fetchAll() as $r) {
@@ -1165,7 +1174,21 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $tz = new DateTimeZone('Europe/Minsk');
     $today = (new DateTime('now', $tz))->setTime(0, 0, 0);
     $rangeStart = $today->format('Y-m-d');
-    $rangeEnd = (clone $today)->modify('+21 days')->format('Y-m-d');
+    // Горизонт по умолчанию 21 день. В недельном режиме показываем N ближайших
+    // недель доставки — расширяем горизонт, чтобы эти недели поместились
+    // (дедлайн недели стоит на предыдущей неделе, поэтому запас +2 недели).
+    $maxWeeksAhead = 0;
+    foreach ($settingsMap as $sset) {
+        $wd = $sset['weekly_deadline_dow'] ?? null;
+        if ($wd !== null && $wd !== '' && (int)$wd >= 1 && (int)$wd <= 7) {
+            $wa = (int)($sset['weekly_weeks_ahead'] ?? 1);
+            if ($wa < 1) $wa = 1;
+            if ($wa > $maxWeeksAhead) $maxWeeksAhead = $wa;
+        }
+    }
+    $horizonDays = 21;
+    if ($maxWeeksAhead > 0) $horizonDays = max(21, ($maxWeeksAhead + 2) * 7);
+    $rangeEnd = (clone $today)->modify("+{$horizonDays} days")->format('Y-m-d');
     $overParams = array_merge($supplierIds, [$rangeStart, $rangeEnd]);
     $overRows = $pdo->prepare("SELECT supplier_id, delivery_date, deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id IN ({$ph}) AND delivery_date BETWEEN ? AND ?");
     $overRows->execute($overParams);
@@ -1264,12 +1287,40 @@ if ($soAction === 'suppliers' && $method === 'GET') {
                 return true;
             }));
             usort($availableDates, fn($a, $b) => strcmp($a['delivery_date'], $b['delivery_date']));
-            // В недельном режиме подачи показываем все открытые даты недели (в пределах горизонта),
-            // иначе — только три ближайшие доступные даты.
+            // Обычный режим — три ближайшие доступные даты.
+            // Недельный режим — только N ближайших недель доставки (настройка
+            // weekly_weeks_ahead, по умолчанию 1). Закрытые даты уже отфильтрованы
+            // выше, поэтому первой идёт ближайшая ОТКРЫТАЯ неделя; следующая
+            // покажется автоматически, когда у текущей пройдёт дедлайн.
             $rawDowShow = $settings['weekly_deadline_dow'] ?? null;
             $isWeeklyMode = ($rawDowShow !== null && $rawDowShow !== '' && (int)$rawDowShow >= 1 && (int)$rawDowShow <= 7);
             if (!$isWeeklyMode) {
                 $availableDates = array_slice($availableDates, 0, 3);
+            } else {
+                $weeksAhead = (int)($settings['weekly_weeks_ahead'] ?? 1);
+                if ($weeksAhead < 1) $weeksAhead = 1;
+                // Квоту недель тратят только ОТКРЫТЫЕ недели. Неделя с уже
+                // прошедшим дедлайном остаётся в списке (ресторан видит свою
+                // поданную заявку), но слот не занимает — иначе после дедлайна
+                // следующая неделя не открывалась вовсе.
+                $weekMonday = function ($dateStr) use ($tz) {
+                    $dt = new DateTime($dateStr, $tz);
+                    $n = (int)$dt->format('N');
+                    return (clone $dt)->modify('-' . ($n - 1) . ' days')->format('Y-m-d');
+                };
+                $allowedWeeks = [];
+                foreach ($availableDates as $d) {
+                    if (($d['deadline_status'] ?? '') === 'closed') continue;
+                    $monday = $weekMonday($d['delivery_date']);
+                    if (isset($allowedWeeks[$monday])) continue;
+                    if (count($allowedWeeks) >= $weeksAhead) break;
+                    $allowedWeeks[$monday] = true;
+                }
+                $availableDates = array_values(array_filter($availableDates, function ($d) use ($allowedWeeks, $weekMonday) {
+                    // Закрытые сюда доходят только с уже поданной заявкой — показываем.
+                    if (($d['deadline_status'] ?? '') === 'closed') return true;
+                    return isset($allowedWeeks[$weekMonday($d['delivery_date'])]);
+                }));
             }
         }
 
@@ -1309,7 +1360,7 @@ if ($soAction === 'products' && $method === 'GET' && $soParam1) {
                p.qty_per_box, p.unit_of_measure, p.weight_netto
         FROM so_templates t
         LEFT JOIN products p ON p.id = t.product_id
-        WHERE t.supplier_id = ? AND t.legal_entity = ? AND t.is_active = 1
+        WHERE t.supplier_id = ? AND t.legal_entity = ? AND t.is_active = 1 AND t.order_disabled = 0
         ORDER BY t.sort_order, t.product_name
     ");
     $s->execute([$supplierId, $le]);
@@ -1461,7 +1512,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
 
     // Валидация кратности и минимума по шаблону поставщика
     if (!empty($items)) {
-        $tplCheck = $pdo->prepare("SELECT sku, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1");
+        $tplCheck = $pdo->prepare("SELECT sku, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1 AND order_disabled = 0");
         $tplCheck->execute([$supplierId, $rest['legal_entity']]);
         $tplMap = [];
         foreach ($tplCheck->fetchAll() as $t) {
@@ -1977,17 +2028,47 @@ if ($soAction === 'admin') {
             $autoSubmitFlag = !empty($acceptance['auto_submit_previous']) ? 1 : 0;
             $defaultDeadline = $acceptance['default_deadline_time'] ?? '14:00:00';
             $pauseMessage    = $acceptance['pause_message'] ?? null;
+            // Недельный режим (dow 1..7 иначе NULL; time HH:MM→HH:MM:00 иначе NULL; недель ≥1)
+            $wDowRaw = $acceptance['weekly_deadline_dow'] ?? null;
+            $regWeeklyDow = ($wDowRaw !== null && $wDowRaw !== '' && (int)$wDowRaw >= 1 && (int)$wDowRaw <= 7) ? (int)$wDowRaw : null;
+            $wTimeRaw = $acceptance['weekly_deadline_time'] ?? null;
+            $regWeeklyTime = (is_string($wTimeRaw) && preg_match('/^(\d{1,2}):(\d{2})$/', $wTimeRaw, $mwt))
+                ? sprintf('%02d:%02d:00', (int)$mwt[1], (int)$mwt[2]) : null;
+            $regWeeksAhead = max(1, min(12, (int)($acceptance['weekly_weeks_ahead'] ?? 1)));
+            // Минимальный заказ (value>0 иначе NULL; unit белый список; при value>0 и пустом unit → kg)
+            $mvRaw = $acceptance['min_order_value'] ?? null;
+            $regMinValue = ($mvRaw !== null && $mvRaw !== '' && (float)$mvRaw > 0) ? (float)$mvRaw : null;
+            $muRaw = $acceptance['min_order_unit'] ?? null;
+            $regMinUnit = in_array($muRaw, ['kg', 'pieces'], true) ? $muRaw : null;
+            if ($regMinValue !== null && $regMinUnit === null) $regMinUnit = 'kg';
+            // Письма поставщику
+            $autoEmailFlag = !empty($acceptance['auto_email_summary']) ? 1 : 0;
+            $ccRestFlag    = !empty($acceptance['email_cc_restaurants']) ? 1 : 0;
             $pdo->prepare("
-                INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, updated_by)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     is_accepting_orders = VALUES(is_accepting_orders),
                     auto_submit_previous = VALUES(auto_submit_previous),
+                    auto_email_summary = VALUES(auto_email_summary),
+                    email_cc_restaurants = VALUES(email_cc_restaurants),
                     default_deadline_time = VALUES(default_deadline_time),
                     pause_message = VALUES(pause_message),
+                    weekly_deadline_dow = VALUES(weekly_deadline_dow),
+                    weekly_deadline_time = VALUES(weekly_deadline_time),
+                    weekly_weeks_ahead = VALUES(weekly_weeks_ahead),
+                    min_order_value = VALUES(min_order_value),
+                    min_order_unit = VALUES(min_order_unit),
                     updated_at = NOW(),
                     updated_by = VALUES(updated_by)
-            ")->execute([$supplierId, $acceptingFlag, $autoSubmitFlag, $defaultDeadline, $pauseMessage, $updatedBy]);
+            ")->execute([$supplierId, $acceptingFlag, $autoSubmitFlag, $autoEmailFlag, $ccRestFlag, $defaultDeadline, $pauseMessage, $regWeeklyDow, $regWeeklyTime, $regWeeksAhead, $regMinValue, $regMinUnit, $updatedBy]);
+
+            // Постоянная копия писем поставщику (suppliers.cc_emails) — если передана.
+            if (array_key_exists('cc_emails', $body)) {
+                $ccClean = soParseEmailList($body['cc_emails']);
+                $pdo->prepare("UPDATE suppliers SET cc_emails = ? WHERE id = ?")
+                    ->execute([implode(', ', $ccClean), $supplierId]);
+            }
 
             // 3) Расписание (деактивируем старые, вставляем новые)
             $pdo->prepare("UPDATE supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")
@@ -2094,10 +2175,12 @@ if ($soAction === 'admin') {
             $ov->execute([$supplierId]);
             $overridesList = $ov->fetchAll();
         }
-        // Товары, у которых «в коробке» = 1, а заказ кратен большему числу.
-        // Обычно это значит, что в справочнике описана не коробка, а сама
-        // фасовка — и тогда столбцы «Коробок»/«Паллет» в отчёте врут
-        // (у Камако 180 кг превращались в 180 «коробок»).
+        // Предупреждение о размере коробки. Раньше срабатывало на «учётная
+        // единица = 1 при кратности > 1» — но это штатный случай штучной
+        // карточки: физический размер коробки берётся из кратности, и колонки
+        // «Коробок»/«Паллет» считаются корректно (см. soOrderXlsx.js, boxDivisor).
+        // Поэтому предупреждаем только когда размер коробки взять НЕОТКУДА —
+        // и учётная единица ≤ 1, и кратность ≤ 1 (тогда «коробок» = штуки).
         $boxWarn = [];
         try {
             $bw = $pdo->prepare("
@@ -2105,7 +2188,8 @@ if ($soAction === 'admin') {
                 FROM so_templates t
                 JOIN products p ON p.sku = t.sku
                 WHERE t.supplier_id = ? AND t.is_active = 1
-                  AND p.qty_per_box <= 1 AND t.multiplicity > 1
+                  AND p.qty_per_box <= 1 AND (t.multiplicity IS NULL OR t.multiplicity <= 1)
+                  AND p.boxes_per_pallet > 1
                 ORDER BY t.product_name");
             $bw->execute([$supplierId]);
             $boxWarn = $bw->fetchAll();
@@ -2138,7 +2222,7 @@ if ($soAction === 'admin') {
         // частичное сохранение: если ключа нет в теле — сохраняем текущее значение,
         // а не дефолт. Иначе частичный POST (напр. только reminder_*) затирал бы
         // приём заявок, авто-подачу/письмо, текст паузы и дедлайн.
-        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
+        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
         $curStmt->execute([$supplierId]);
         $curRow = $curStmt->fetch(PDO::FETCH_ASSOC);
         // Прежние дефолты — на случай, если строки ещё нет (первое сохранение).
@@ -2152,6 +2236,7 @@ if ($soAction === 'admin') {
         $curWeeklyDow = ($curRow !== false && isset($curRow['weekly_deadline_dow']) && $curRow['weekly_deadline_dow'] !== null && $curRow['weekly_deadline_dow'] !== '')
             ? (int)$curRow['weekly_deadline_dow'] : null;
         $curWeeklyTime = ($curRow !== false && !empty($curRow['weekly_deadline_time'])) ? $curRow['weekly_deadline_time'] : null;
+        $curWeeklyWeeksAhead = ($curRow !== false && isset($curRow['weekly_weeks_ahead'])) ? max(1, (int)$curRow['weekly_weeks_ahead']) : 1;
         // Минимальный заказ: текущие значения (null = минимума нет / строки ещё нет).
         $curMinValue = ($curRow !== false && isset($curRow['min_order_value']) && $curRow['min_order_value'] !== null && $curRow['min_order_value'] !== '')
             ? (float)$curRow['min_order_value'] : null;
@@ -2209,6 +2294,13 @@ if ($soAction === 'admin') {
         } else {
             $weeklyTime = $curWeeklyTime;
         }
+        // Недельный режим: сколько недель показывать ресторану (>=1, дефолт 1).
+        if (array_key_exists('weekly_weeks_ahead', $body)) {
+            $wwa = (int)$body['weekly_weeks_ahead'];
+            $weeklyWeeksAhead = $wwa >= 1 ? min($wwa, 12) : 1;
+        } else {
+            $weeklyWeeksAhead = $curWeeklyWeeksAhead;
+        }
 
         // Минимальный заказ (партиал-безопасно, как остальные базовые поля):
         //   value — число ≥0; ''/null/0 → NULL (минимум выключен).
@@ -2228,8 +2320,8 @@ if ($soAction === 'admin') {
         }
         // При заданном пороге, но пустой единице — по умолчанию килограммы.
         if ($minValue !== null && $minValue > 0 && $minUnit === null) $minUnit = 'kg';
-        // Порога нет → единица не хранится.
-        if ($minValue === null) $minUnit = null;
+        // Единицу храним и без порога: закупщик может сначала выбрать «штуки», а
+        // сумму задать позже. Раньше её тут обнуляло, и выбор откатывался в «кг».
 
         // Опции Excel-отчёта (партиал-безопасно, тем же паттерном $curRow-мержа, что и min_order_*):
         //   xlsx_drop_empty     — 0/1; нет ключа → текущее значение.
@@ -2246,8 +2338,8 @@ if ($soAction === 'admin') {
             $xlsxPalletCsv = $curXlsxPalletCsv;
         }
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
               auto_submit_previous = VALUES(auto_submit_previous),
@@ -2257,12 +2349,13 @@ if ($soAction === 'admin') {
               pause_message = VALUES(pause_message),
               weekly_deadline_dow = VALUES(weekly_deadline_dow),
               weekly_deadline_time = VALUES(weekly_deadline_time),
+              weekly_weeks_ahead = VALUES(weekly_weeks_ahead),
               min_order_value = VALUES(min_order_value),
               min_order_unit = VALUES(min_order_unit),
               xlsx_drop_empty = VALUES(xlsx_drop_empty),
               xlsx_pallet_metrics = VALUES(xlsx_pallet_metrics),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $ccRestaurants, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $ccRestaurants, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $weeklyWeeksAhead, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
 
         // Постоянная копия писем: живёт в карточке поставщика (suppliers.cc_emails),
         // но правится в настройках заявок. Пишем только если ключ реально пришёл.
@@ -2479,7 +2572,7 @@ if ($soAction === 'admin') {
             if ($attrSkus) {
                 $skuPh = implode(',', array_fill(0, count($attrSkus), '?'));
                 $attrStmt = $pdo->prepare("
-                    SELECT sku, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto
+                    SELECT sku, qty_per_box, boxes_per_pallet, weight_netto, weight_brutto, multiplicity
                     FROM products
                     WHERE sku IN ({$skuPh}) AND legal_entity IN ({$entityPh})");
                 $attrStmt->execute(array_merge($attrSkus, $supplierEntities));
@@ -2492,6 +2585,7 @@ if ($soAction === 'admin') {
                             'boxes_per_pallet' => (float)$ar['boxes_per_pallet'],
                             'weight_netto'     => (float)$ar['weight_netto'],
                             'weight_brutto'    => (float)$ar['weight_brutto'],
+                            'multiplicity'     => (float)$ar['multiplicity'],
                         ];
                     }
                 }
@@ -2500,12 +2594,13 @@ if ($soAction === 'admin') {
                 $sku = (string)($prod['sku'] ?? '');
                 $a = $attrMap[$sku] ?? [
                     'qty_per_box' => 0, 'boxes_per_pallet' => 0,
-                    'weight_netto' => 0, 'weight_brutto' => 0,
+                    'weight_netto' => 0, 'weight_brutto' => 0, 'multiplicity' => 0,
                 ];
                 $prod['qty_per_box']      = $a['qty_per_box'];
                 $prod['boxes_per_pallet'] = $a['boxes_per_pallet'];
                 $prod['weight_netto']     = $a['weight_netto'];
                 $prod['weight_brutto']    = $a['weight_brutto'];
+                $prod['multiplicity']     = $a['multiplicity'];
             }
             unset($prod);
         }
@@ -2529,6 +2624,7 @@ if ($soAction === 'admin') {
             'settings' => $settings,
             'date' => $date,
             'deadline' => $deadlineInfo['deadline'],
+            'deadline_at' => $deadlineInfo['deadline_at'] ?? null,
             'deadline_status' => $deadlineInfo['status'],
             'restaurants' => $restaurants,
             'products' => $products,
@@ -3088,8 +3184,16 @@ if ($soAction === 'admin') {
         $lvStmt->execute([$supplierId]);
         $lockVersion = $lvStmt->fetchColumn() ?: null;
         // Рестораны с выключенными напоминаниями по заявкам у этого поставщика.
-        $muteStmt = $pdo->prepare("SELECT restaurant_id FROM so_reminder_mutes WHERE supplier_id = ?");
-        $muteStmt->execute([$supplierId]);
+        // Выключить мог как закупщик (so_reminder_mutes), так и сам ресторан в
+        // кабинете (подписка cron_managed с is_enabled=0). Показываем ОДНО общее
+        // состояние — иначе статусы у закупок и у ресторана расходились бы.
+        $muteStmt = $pdo->prepare("
+            SELECT restaurant_id FROM so_reminder_mutes WHERE supplier_id = ?
+            UNION
+            SELECT restaurant_id FROM restaurant_reminder_subscriptions
+             WHERE supplier_id = ? AND cron_managed = 1 AND is_enabled = 0
+        ");
+        $muteStmt->execute([$supplierId, $supplierId]);
         $mutedIds = array_map('intval', $muteStmt->fetchAll(PDO::FETCH_COLUMN));
         soRespond(['schedules' => $schedules, 'temporary_schedule' => $temporarySchedule, 'deadline_rules' => $dr->fetchAll(), 'lockVersion' => $lockVersion, 'muted_restaurant_ids' => $mutedIds]);
     }
@@ -3107,6 +3211,11 @@ if ($soAction === 'admin') {
                 ->execute([$supplierId, $restaurantId, $by]);
         } else {
             $pdo->prepare("DELETE FROM so_reminder_mutes WHERE supplier_id = ? AND restaurant_id = ?")
+                ->execute([$supplierId, $restaurantId]);
+            // Ресторан мог выключить напоминания у себя в кабинете — включаем и там,
+            // иначе переключатель у закупок встал бы в «вкл», а рассылки бы не было.
+            $pdo->prepare("UPDATE restaurant_reminder_subscriptions SET is_enabled = 1
+                            WHERE supplier_id = ? AND restaurant_id = ? AND cron_managed = 1")
                 ->execute([$supplierId, $restaurantId]);
         }
         soRespond(['success' => true, 'muted' => $muted]);
@@ -3677,6 +3786,7 @@ if ($soAction === 'admin') {
         $visByTpl = soLoadTemplateVisibility($pdo, array_column($tplRows, 'id'));
         foreach ($tplRows as &$tplRow) {
             $tplRow['linked'] = (int)$tplRow['linked'];
+            $tplRow['order_disabled'] = (int)($tplRow['order_disabled'] ?? 0);
             $vis = $visByTpl[(int)$tplRow['id']] ?? ['regions' => [], 'restaurants' => []];
             $tplRow['vis_regions'] = $vis['regions'];
             $tplRow['vis_restaurants'] = $vis['restaurants'];
@@ -3733,10 +3843,11 @@ if ($soAction === 'admin') {
                 ->execute([$supplierId, $le]);
 
             $upsert = $pdo->prepare("
-                INSERT INTO so_templates (supplier_id, legal_entity, product_id, sku, product_name, sort_order, multiplicity, min_qty, note, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                INSERT INTO so_templates (supplier_id, legal_entity, product_id, sku, product_name, sort_order, multiplicity, min_qty, note, order_disabled, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON DUPLICATE KEY UPDATE product_name = VALUES(product_name), sort_order = VALUES(sort_order),
-                  multiplicity = VALUES(multiplicity), min_qty = VALUES(min_qty), note = VALUES(note), is_active = 1, product_id = VALUES(product_id)
+                  multiplicity = VALUES(multiplicity), min_qty = VALUES(min_qty), note = VALUES(note),
+                  order_disabled = VALUES(order_disabled), is_active = 1, product_id = VALUES(product_id)
             ");
 
             $skuVisibility = []; // sku → [['region'|'restaurant', value], ...]
@@ -3744,6 +3855,7 @@ if ($soAction === 'admin') {
                 $mult = isset($item['multiplicity']) && $item['multiplicity'] !== '' ? (float)$item['multiplicity'] : null;
                 $minQty = isset($item['min_qty']) && $item['min_qty'] !== '' ? (float)$item['min_qty'] : null;
                 $note = isset($item['note']) ? (mb_substr(trim((string)$item['note']), 0, 500) ?: null) : null;
+                $orderDisabled = !empty($item['order_disabled']) ? 1 : 0;
                 // Переданный product_id уважаем; иначе подставляем найденный по SKU; иначе null.
                 $pid = $item['product_id'] ?? null;
                 $itemSku = trim((string)($item['sku'] ?? ''));
@@ -3760,6 +3872,7 @@ if ($soAction === 'admin') {
                     $mult,
                     $minQty,
                     $note,
+                    $orderDisabled,
                 ]);
                 // Доступность собираем по SKU — id строки узнаем после upsert.
                 if ($itemSku !== '') {

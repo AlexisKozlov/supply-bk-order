@@ -2564,7 +2564,8 @@ if (isset($input['callback_query'])) {
         soOrderShowProducts($chatId, $msgId, $m[1], $m[2], $m[3]);
         exit;
     }
-    if (preg_match('/^soord_closed_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
+    // Короткий вариант + старый длинный (у кого-то мог остаться в открытом чате).
+    if ($data === 'soord_closed' || preg_match('/^soord_closed_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data)) {
         answerCallback($cb['id'], 'Приём заявок на этот день уже завершён', true);
         exit;
     }
