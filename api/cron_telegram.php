@@ -1073,8 +1073,15 @@ try {
             if ($sub) {
                 if (!$sub['enabled']) continue;                                     // ресторан выключил
                 if (!rrDayEnabledPhp($sub['days'], $nextDelivery['dow'])) continue; // день не выбран
-                // Получатели Telegram — только выбранные (если включён TG-канал).
-                $chatIds = $sub['tg_enabled'] ? $sub['chat_ids'] : [];
+                // Получатели Telegram. Явно выбранные — только им. Никого не
+                // выбрали → шлём всем подписчикам ресторана (дефолт портальных
+                // «получают все»), иначе включённый TG-канал молча никому не
+                // отправлял бы. Полностью выключить TG можно флагом telegram_enabled.
+                if (!$sub['tg_enabled']) {
+                    $chatIds = [];
+                } elseif (!empty($sub['chat_ids'])) {
+                    $chatIds = $sub['chat_ids'];
+                }
             }
 
             $deliveryDate = $nextDelivery['date'];
@@ -1475,8 +1482,9 @@ try {
 }
 
 // ═══ ЗАЯВКИ ПОСТАВЩИКАМ (so_*): итоговая сводка отделу закупок после дедлайна ═══
-// После прохождения дедлайна (не более 20 мин назад) шлём сводку только тем,
-// кто подписан на конкретного поставщика.
+// Шлём сводку только подписчикам конкретного поставщика и только если дедлайн
+// прошёл не слишком давно (см. SO_SUMMARY_MAX_LATE_MINUTES).
+define('SO_SUMMARY_MAX_LATE_MINUTES', 12 * 60);
 try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
@@ -1494,7 +1502,7 @@ try {
 
     foreach ($suppliers as $sup) {
         $subsStmt = $pdo->prepare("
-            SELECT u.name, u.telegram_chat_id
+            SELECT u.name, u.telegram_chat_id, sss.created_at AS subscribed_at
             FROM so_supplier_summary_subscribers sss
             JOIN users u ON u.name = sss.user_name
             WHERE sss.supplier_id = ?
@@ -1572,6 +1580,30 @@ try {
                 $dup->execute([$dedupKey]);
                 if ($dup->fetch()) continue;
 
+                // Верхняя граница опоздания. Раньше её не было вовсе: крон смотрит
+                // на 15 дней вперёд, и при подключении нового поставщика (или после
+                // долгого простоя крона) в чат разом улетал залп «никто не подал
+                // заявку» за уже прошедшие дни. Ключ дедупа всё равно пишем, чтобы
+                // просроченная сводка не выстрелила позже.
+                if ($minutesSince > SO_SUMMARY_MAX_LATE_MINUTES) {
+                    $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+                        ->execute([$dedupKey]);
+                    continue;
+                }
+
+                // Подписчики, актуальные именно для этой даты: тот, кто подписался
+                // уже ПОСЛЕ дедлайна, не получает сводку задним числом.
+                $dateSubs = array_values(array_filter($subs, function ($s) use ($deadline) {
+                    if (empty($s['subscribed_at'])) return true;
+                    $ts = strtotime($s['subscribed_at']);
+                    return $ts === false || $ts <= $deadline->getTimestamp();
+                }));
+                if (!$dateSubs) {
+                    $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+                        ->execute([$dedupKey]);
+                    continue;
+                }
+
                 $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'number'))));
                 $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
 
@@ -1629,7 +1661,7 @@ try {
                     $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
                     $sentCheck = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary_sent' AND notification_key = ? AND chat_id = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
                     $successCount = 0;
-                    foreach ($subs as $sub) {
+                    foreach ($dateSubs as $sub) {
                         $sentCheck->execute([$dedupKey, $sub['telegram_chat_id']]);
                         if ($sentCheck->fetch()) {
                             $successCount++;
@@ -1643,7 +1675,7 @@ try {
                             $successCount++;
                         }
                     }
-                    if ($successCount >= count($subs)) {
+                    if ($successCount >= count($dateSubs)) {
                         $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
                             ->execute([$dedupKey]);
                     }
@@ -1709,7 +1741,7 @@ try {
                 $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
                 $sentCheck = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary_sent' AND notification_key = ? AND chat_id = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
                 $successCount = 0;
-                foreach ($subs as $sub) {
+                foreach ($dateSubs as $sub) {
                     $sentCheck->execute([$dedupKey, $sub['telegram_chat_id']]);
                     if ($sentCheck->fetch()) {
                         $successCount++;
@@ -1724,7 +1756,7 @@ try {
                     }
                 }
 
-                if ($successCount >= count($subs)) {
+                if ($successCount >= count($dateSubs)) {
                     $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
                         ->execute([$dedupKey]);
                 }
