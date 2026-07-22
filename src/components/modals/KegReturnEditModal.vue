@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('close')">
+    <div class="modal" @click.self="tryClose">
       <div class="modal-box kr-edit-modal">
         <div class="modal-header">
           <h2>Заявка на возврат кег</h2>
-          <button class="modal-close" @click="$emit('close')">✕</button>
+          <button class="modal-close" @click="tryClose">✕</button>
         </div>
 
         <div v-if="loading" class="kr-em-loading">Загрузка...</div>
@@ -183,6 +183,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { KEG_NOT_RETURNED_REASONS } from '@/components/restaurant/keg/kegHelpers.js';
@@ -213,6 +214,12 @@ const nrComment = ref('');
 const nrReasons = KEG_NOT_RETURNED_REASONS;
 const kegQties = ref({});
 const bsoError = ref('');
+
+// Правки накладной не теряем молча при закрытии.
+const { saveSnapshot, tryClose } = useCloseGuard(
+  () => ({ form: form.value, kegQties: kegQties.value }),
+  () => emit('close')
+);
 const photoUrl = ref('');
 const photoName = ref('');
 
@@ -319,6 +326,7 @@ async function loadData() {
     loadError.value = e.message;
   } finally {
     loading.value = false;
+    saveSnapshot();
   }
 }
 

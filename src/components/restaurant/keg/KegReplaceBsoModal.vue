@@ -68,6 +68,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
+import { confirmDiscard } from '@/composables/useFormDirty.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { BSO_REASONS, maskBsoSeries, maskBsoNumber } from './kegHelpers.js';
 
@@ -108,8 +109,10 @@ function onNumberInput(e) {
   if (e.target.value !== filtered) e.target.value = filtered;
 }
 
-function onClose() {
+async function onClose() {
   if (props.saving) return;
+  const filled = newSeries.value.trim() || newNumber.value.trim() || reasonOther.value.trim();
+  if (filled && !(await confirmDiscard())) return;
   emit('close');
 }
 

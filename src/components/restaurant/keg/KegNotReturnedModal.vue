@@ -28,6 +28,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue';
+import { confirmDiscard } from '@/composables/useFormDirty.js';
 import { KEG_NOT_RETURNED_REASONS } from './kegHelpers.js';
 
 const props = defineProps({
@@ -60,7 +61,9 @@ function onConfirm() {
   if (!canConfirm.value) return;
   emit('confirm', buildReason());
 }
-function onCancel() {
+async function onCancel() {
+  // Введённая причина не пропадает молча.
+  if ((preset.value || comment.value.trim()) && !(await confirmDiscard())) return;
   emit('cancel');
 }
 </script>

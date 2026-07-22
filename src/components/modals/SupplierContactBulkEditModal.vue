@@ -175,6 +175,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { appConfirm } from '@/lib/appDialogs.js';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const emit = defineEmits(['updated', 'deleted', 'close']);
 
@@ -242,7 +243,14 @@ function buildGroups(contactsList) {
   return arr;
 }
 
-watch(contacts, (list) => { groups.value = buildGroups(list || []); }, { immediate: true });
+// Правки лежат в g.edit каждой карточки. Снимок пересобираем при каждой
+// перезагрузке списка; выбор ресторанов (selectedIds) за «изменения» не считаем.
+const { saveSnapshot, tryClose } = useCloseGuard(
+  () => groups.value.map(g => { const { selectedIds, ...rest } = g.edit; return rest; }),
+  () => emit('close')
+);
+
+watch(contacts, (list) => { groups.value = buildGroups(list || []); saveSnapshot(); }, { immediate: true });
 
 function countSelected(g) {
   return g.edit.selectedIds.length;
@@ -414,7 +422,7 @@ function ruEnding(n) {
 }
 
 function close() {
-  emit('close');
+  tryClose();
 }
 
 onMounted(() => loadSuppliers());

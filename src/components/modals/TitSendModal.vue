@@ -1,9 +1,9 @@
 <template>
-  <div class="tsm-overlay" @click.self="emit('close')">
+  <div class="tsm-overlay" @click.self="tryClose">
     <div class="tsm-modal">
       <header>
         <h2>Превью и отправка охране</h2>
-        <button @click="emit('close')">✕</button>
+        <button @click="tryClose">✕</button>
       </header>
 
       <div class="tsm-body" v-if="loaded">
@@ -87,7 +87,7 @@
       <div v-else class="tsm-loading">Загружаем превью…</div>
 
       <footer v-if="loaded">
-        <button class="ghost" @click="emit('close')">Назад</button>
+        <button class="ghost" @click="tryClose">Назад</button>
         <div style="flex:1"></div>
         <button class="ghost" @click="downloadXlsx">Скачать xlsx</button>
         <button class="ghost" @click="openInMyOutlook" title="Откроется ваш почтовый клиент с готовым черновиком. Файл xlsx скачается — прикрепите его и отправьте.">✉ Открыть в моей почте</button>
@@ -102,6 +102,7 @@ import { ref, computed, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { appConfirm, appAlert } from '@/lib/appDialogs.js';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const props = defineProps({ id: { type: Number, required: true } });
 const emit = defineEmits(['close', 'sent']);
@@ -124,6 +125,12 @@ const mailBody = ref('');
 const supplierName = ref('');
 const deliveryDate = ref('');
 const legalEntity = ref('');
+
+// Правленый текст письма и добавленные получатели не теряем молча.
+const { saveSnapshot, tryClose } = useCloseGuard(() => ({
+  subject: mailSubject.value, body: mailBody.value,
+  checked: checked.value, extra: extraRecipients.value, draft: extraInput.value,
+}), () => emit('close'));
 
 function buildDefaultSubject() {
   return 'Заявка на пропуск — ' + (supplierName.value || '—') + ' — ' + (deliveryDate.value || '');
@@ -202,6 +209,7 @@ async function loadAll() {
     // Дефолтные тема и тело — пользователь может править прямо в модалке
     resetMail();
     loaded.value = true;
+    saveSnapshot();
   } catch (e) { error.value = e.message || 'Ошибка'; }
 }
 

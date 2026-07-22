@@ -84,6 +84,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 
@@ -133,6 +134,12 @@ const activeDays = computed(() => {
   }
   return n;
 });
+
+// Закрытие с несохранённым графиком — только через подтверждение.
+const { saveSnapshot, tryClose } = useCloseGuard(
+  () => ({ dateFrom: dateFrom.value, dateTo: dateTo.value, grid, deadlineRules }),
+  () => emit('close')
+);
 
 function authHeaders(extra = {}) {
   const h = { ...extra };
@@ -199,6 +206,7 @@ async function load() {
     error.value = e.message || 'Не удалось загрузить временный график';
   } finally {
     loading.value = false;
+    saveSnapshot();
   }
 }
 
@@ -285,7 +293,7 @@ async function removePeriod() {
 
 function close() {
   if (saving.value) return;
-  emit('close');
+  tryClose();
 }
 
 onMounted(load);

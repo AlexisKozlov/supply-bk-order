@@ -209,6 +209,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
+import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -577,6 +578,9 @@ function dayWord(n) {
 // ─── Дефолтные дедлайны (модалка) ───
 const defaultsModal = ref({ show: false, supplier_id: '', supplier_name: '', rules: [], original: [], saving: false });
 
+// Правила дедлайнов не теряем молча.
+const defaultsGuard = useDirtySnapshot();
+
 function openDefaultsModal(supplier) {
   if (!supplier) return;
   const rules = defaults.value[supplier.id] || [];
@@ -594,8 +598,12 @@ function openDefaultsModal(supplier) {
     original: rules.map(d => Number(d.delivery_dow)),
     saving: false,
   };
+  defaultsGuard.mark(defaultsModal.value);
 }
-function closeDefaultsModal() { defaultsModal.value.show = false; }
+async function closeDefaultsModal() {
+  if (!(await defaultsGuard.confirmClose(defaultsModal.value))) return;
+  defaultsModal.value.show = false;
+}
 function addDefaultRule() {
   const used = new Set(defaultsModal.value.rules.map(r => r.delivery_dow));
   const free = WEEKDAYS_NUM.find(d => !used.has(d)) || 1;
@@ -654,6 +662,7 @@ async function saveDefaults() {
   }
   defaultsModal.value.saving = false;
   toast.success('Дефолтные дедлайны сохранены');
+  defaultsGuard.mark(defaultsModal.value); // сохранено — закрываем без вопроса
   closeDefaultsModal();
   await loadData();
 }

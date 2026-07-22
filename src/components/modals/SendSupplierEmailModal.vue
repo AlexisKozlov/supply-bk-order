@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('cancel')">
+    <div class="modal" @click.self="tryClose">
       <div class="modal-box send-email-modal">
         <div class="modal-header">
           <h2><BkIcon name="mail" size="sm"/> Отправка заявки по email</h2>
-          <button class="modal-close" @click="$emit('cancel')"><BkIcon name="close" size="sm"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
         </div>
 
         <div class="send-row">
@@ -38,7 +38,7 @@
         </div>
 
         <div class="modal-actions">
-          <button class="btn secondary" @click="$emit('cancel')">Отмена</button>
+          <button class="btn secondary" @click="tryClose">Отмена</button>
           <button class="btn primary" @click="submit" :disabled="sending">
             <BurgerSpinner v-if="sending" size="xs" />
             <span>{{ sending ? 'Отправка…' : 'Отправить' }}</span>
@@ -52,6 +52,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const props = defineProps({
   to: { type: String, required: true },
@@ -65,6 +66,13 @@ const emit = defineEmits(['send', 'cancel']);
 const ccList = ref([...(props.initialCc || [])]);
 const newEmail = ref('');
 const addError = ref('');
+
+// Правки списка копий не теряем молча.
+const { saveSnapshot, tryClose } = useCloseGuard(
+  () => ({ cc: ccList.value, draft: newEmail.value }),
+  () => emit('cancel')
+);
+saveSnapshot();
 
 const selfLc = computed(() => (props.selfEmail || '').toLowerCase());
 function isSelfEmail(e) {

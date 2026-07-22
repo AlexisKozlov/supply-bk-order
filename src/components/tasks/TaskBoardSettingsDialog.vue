@@ -89,6 +89,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue';
+import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { useTasksStore } from '../../stores/tasksStore';
 import TaskIcon from './TaskIcon.vue';
 import ColorPalette from './ColorPalette.vue';
@@ -127,18 +128,24 @@ function syncFromBoard() {
   };
 }
 
+// Настройки доски применяются только по «Сохранить» — молча не теряем.
+const settingsGuard = useDirtySnapshot();
+
 watch(() => props.modelValue, (open) => {
   if (open) {
     syncFromBoard();
+    settingsGuard.mark(draft.value);
     store.fetchUsers();
   }
 });
 
-function close() {
+async function close() {
+  if (!(await settingsGuard.confirmClose(draft.value))) return;
   emit('update:modelValue', false);
 }
 
 async function save() {
+  settingsGuard.mark(draft.value); // сохраняем — закрытие уже без вопроса
   if (!store.board) { close(); return; }
   saving.value = true;
   try {

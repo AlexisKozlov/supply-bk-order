@@ -1,9 +1,9 @@
 <template>
-  <div class="tum-overlay" @click.self="emit('close')">
+  <div class="tum-overlay" @click.self="tryClose">
     <div class="tum-modal">
       <header>
         <h2>Письма без привязки</h2>
-        <button @click="emit('close')">✕</button>
+        <button @click="tryClose">✕</button>
       </header>
       <div class="tum-body">
         <p class="tum-hint">Эти ответы поставщиков пришли по email, но система не смогла привязать их к заявкам автоматически. Привяжите вручную — данные подтянутся в нужную заявку.</p>
@@ -66,6 +66,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const emit = defineEmits(['close']);
 
@@ -73,6 +74,9 @@ const rows = ref([]);
 const candidateRequests = ref([]);
 const loading = ref(false);
 const linkChoice = reactive({});
+
+// Выбранная, но ещё не применённая привязка письма — тоже несохранённое.
+const { saveSnapshot, tryClose } = useCloseGuard(() => linkChoice, () => emit('close'));
 
 const formatDate = (d) => d ? d.split('-').reverse().join('.') : '';
 const formatDateTime = (dt) => {
@@ -93,7 +97,10 @@ async function reload() {
     ]);
     rows.value = unm.data?.rows || [];
     candidateRequests.value = (list.data?.rows || []).filter(r => r.status !== 'SENT' && r.status !== 'CANCELLED');
-  } finally { loading.value = false; }
+  } finally {
+    loading.value = false;
+    saveSnapshot(); // список обновлён — считаем текущий выбор исходным
+  }
 }
 
 async function linkEmail(emailId) {

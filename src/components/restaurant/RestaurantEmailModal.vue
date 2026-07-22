@@ -67,6 +67,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
+import { confirmDiscard } from '@/composables/useFormDirty.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -105,9 +106,10 @@ const canSubmit = computed(() => {
   return true;
 });
 
-function close() {
+async function close() {
   if (loading.value) return;
   if (props.mandatory) return; // нельзя закрыть, пока не сохранили
+  if (email.value.trim() && !(await confirmDiscard())) return;
   show.value = false;
   emit('update:modelValue', false);
 }

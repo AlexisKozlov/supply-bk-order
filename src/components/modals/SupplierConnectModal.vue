@@ -230,6 +230,7 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroupCode } from '@/lib/legalEntities.js';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const emit = defineEmits(['close', 'connected']);
 const soStore = useSupplierOrderStore();
@@ -492,11 +493,21 @@ async function submit() {
   } finally { saving.value = false; }
 }
 
-function tryClose() { emit('close'); }
+// Мастер подключения — самая длинная форма в проекте. Закрытие с набранными
+// данными (график, товары, дедлайны, настройки приёма) только с подтверждением.
+const { saveSnapshot, tryClose } = useCloseGuard(() => ({
+  supplierId: supplierId.value,
+  scheduleGrid,
+  templatesByEntity,
+  deadlineRulesMap,
+  acceptance, weekly, minOrder, emailCfg,
+  notifyUsers: notifyUsers.value,
+}), () => emit('close'));
 
 onMounted(() => {
   ensureActiveTplEntity();
   loadAvailable();
+  saveSnapshot();
 });
 </script>
 

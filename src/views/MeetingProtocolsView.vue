@@ -62,11 +62,11 @@
     <div v-else class="mp-empty">Протоколов пока нет</div>
 
     <!-- Модалка серий -->
-    <div v-if="showSeriesModal" class="mp-overlay" @click.self="showSeriesModal = false">
+    <div v-if="showSeriesModal" class="mp-overlay" @click.self="closeSeriesModal">
       <div class="mp-modal">
         <div class="mp-modal-header">
           <h2>Форматы совещаний</h2>
-          <button class="mp-modal-close" @click="showSeriesModal = false">&times;</button>
+          <button class="mp-modal-close" @click="closeSeriesModal">&times;</button>
         </div>
         <div class="mp-modal-body">
           <div v-for="s in seriesList" :key="s.id" class="mp-series-row">
@@ -105,6 +105,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
+import { confirmDiscard } from '@/composables/useFormDirty.js';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -182,6 +183,14 @@ async function loadSeries() {
 function openProtocol(id) { router.push({ name: 'protocol-detail', params: { id } }); }
 
 function createProtocol() { router.push({ name: 'protocol-detail', params: { id: 'new' } }); }
+
+// Заполненная форма формата совещания не пропадает молча.
+async function closeSeriesModal() {
+  const f = seriesForm.value;
+  const filled = (f.name || '').trim() || (f.agendaText || '').trim();
+  if (filled && !(await confirmDiscard())) return;
+  showSeriesModal.value = false;
+}
 
 function editSeries(s) {
   editingSeriesId.value = s.id;

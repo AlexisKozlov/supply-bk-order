@@ -120,6 +120,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const props = defineProps({
   restaurant: { type: Object, required: true },
@@ -149,6 +150,9 @@ const form = reactive({
   tags: [],
   is_primary: false,
 });
+
+// Закрытие с несохранёнными правками — только через подтверждение.
+const { saveSnapshot, tryClose } = useCloseGuard(form, () => emit('close'));
 
 function phonesFromContact(c) {
   if (c && Array.isArray(c.phones) && c.phones.length) {
@@ -183,6 +187,7 @@ watch(() => props.contact, (c) => {
     form.is_primary = false;
   }
   error.value = '';
+  saveSnapshot();
 }, { immediate: true });
 
 // Контакт может быть пустым (без имени и без полей). Разрешаем сохранение, если
@@ -228,7 +233,7 @@ function removeTag(i) {
 
 function close() {
   if (saving.value) return;
-  emit('close');
+  tryClose();
 }
 
 async function save() {

@@ -89,11 +89,11 @@
 
     <!-- Адреса бухгалтерии для писем «Не сдана» -->
     <Teleport v-if="notifyOpen" to="body">
-      <div class="modal" @click.self="notifyOpen = false">
+      <div class="modal" @click.self="closeNotify">
         <div class="modal-box kr-notify-modal">
           <div class="modal-header">
             <h2>Письма бухгалтерии</h2>
-            <button class="modal-close" @click="notifyOpen = false">✕</button>
+            <button class="modal-close" @click="closeNotify">✕</button>
           </div>
           <div class="kr-notify-body">
             <p class="kr-notify-hint">
@@ -108,7 +108,7 @@
             </template>
           </div>
           <div class="modal-actions" style="justify-content:flex-end;gap:8px">
-            <button class="btn" @click="notifyOpen = false" :disabled="notifySaving">Отмена</button>
+            <button class="btn" @click="closeNotify" :disabled="notifySaving">Отмена</button>
             <button class="btn primary" @click="saveNotify" :disabled="notifySaving || notifyLoading">
               {{ notifySaving ? 'Сохранение...' : 'Сохранить' }}
             </button>
@@ -256,6 +256,7 @@
 
 <script setup>
 import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
+import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 
@@ -285,6 +286,15 @@ const notifyLoading = ref(false);
 const notifySaving = ref(false);
 const notifyError = ref('');
 
+// Список адресов бухгалтерии не теряем молча.
+const notifyGuard = useDirtySnapshot();
+
+async function closeNotify() {
+  if (notifySaving.value) return;
+  if (!(await notifyGuard.confirmClose({ emails: notifyEmails.value }))) return;
+  notifyOpen.value = false;
+}
+
 async function openNotify() {
   notifyOpen.value = true;
   notifyError.value = '';
@@ -297,6 +307,7 @@ async function openNotify() {
   } catch (e) {
     notifyError.value = e.message;
   } finally {
+    notifyGuard.mark({ emails: notifyEmails.value });
     notifyLoading.value = false;
   }
 }
@@ -494,6 +505,9 @@ async function exportExcel() {
   } catch (e) { error.value = e.message; }
 }
 
+// Ручные правки маршрутизации в импорте не теряем молча.
+const importGuard = useDirtySnapshot();
+
 function openImport() {
   importPreview.value = [];
   importAvailable.value = [];
@@ -502,9 +516,11 @@ function openImport() {
   importError.value = '';
   importFile.value = null;
   importOpen.value = true;
+  importGuard.mark({ overrides: importOverrides.value });
 }
 
-function closeImport() {
+async function closeImport() {
+  if (!(await importGuard.confirmClose({ overrides: importOverrides.value }))) return;
   importOpen.value = false;
   importPreview.value = [];
   importAvailable.value = [];
@@ -594,6 +610,7 @@ async function commitImport() {
       onUploadPct: p => { importUploadPct.value = p; },
       onUploadDone: () => { importPhase.value = 'processing'; },
     });
+    importGuard.mark({ overrides: importOverrides.value }); // применено — без вопроса
     closeImport();
     await loadList();
   } catch (e) {

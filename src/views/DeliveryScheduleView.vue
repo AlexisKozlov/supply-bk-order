@@ -398,6 +398,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -671,6 +672,8 @@ function cancelNoteEdit() {
 
 // ═══ Дедлайн подачи заявки на основную поставку ═══
 const editingDeadline = ref(null);
+// Правки дедлайна доставки не теряем молча.
+const deadlineGuard = useDirtySnapshot();
 let savingDeadline = false;
 
 function startDeadlineEdit(restaurant, day) {
@@ -700,6 +703,7 @@ function startDeadlineEdit(restaurant, day) {
     reminderTimes,
     hadValue: !!current,
   };
+  deadlineGuard.mark(editingDeadline.value);
 }
 
 async function saveDeadlineEdit() {
@@ -730,7 +734,8 @@ async function clearDeadlineEdit() {
   }
 }
 
-function cancelDeadlineEdit() {
+async function cancelDeadlineEdit() {
+  if (!(await deadlineGuard.confirmClose(editingDeadline.value))) return;
   editingDeadline.value = null;
 }
 

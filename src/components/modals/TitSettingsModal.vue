@@ -1,9 +1,9 @@
 <template>
-  <div class="tss-overlay" @click.self="$emit('close')">
+  <div class="tss-overlay" @click.self="tryClose">
     <div class="tss-modal">
       <header class="tss-head">
         <h2>Получатели охраны</h2>
-        <button class="tss-close" @click="$emit('close')" title="Закрыть">✕</button>
+        <button class="tss-close" @click="tryClose" title="Закрыть">✕</button>
       </header>
 
       <div class="tss-body">
@@ -33,7 +33,7 @@
       </div>
 
       <footer class="tss-foot">
-        <button class="tss-btn ghost" @click="$emit('close')">Отмена</button>
+        <button class="tss-btn ghost" @click="tryClose">Отмена</button>
         <div style="flex:1"></div>
         <button class="tss-btn primary" @click="save" :disabled="saving || loading">{{ saving ? 'Сохраняем…' : 'Сохранить' }}</button>
       </footer>
@@ -45,12 +45,19 @@
 import { ref, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { appAlert } from '@/lib/appDialogs.js';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const emit = defineEmits(['close']);
 const list = ref([]);
 const input = ref('');
 const loading = ref(true);
 const saving = ref(false);
+
+// Незакрытый список получателей не теряем молча.
+const { saveSnapshot, tryClose } = useCloseGuard(
+  () => ({ list: list.value, draft: input.value }),
+  () => emit('close')
+);
 
 const isEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
@@ -64,6 +71,7 @@ async function load() {
     await appAlert('Не удалось загрузить настройки: ' + (e.message || e), { type: 'error' });
   } finally {
     loading.value = false;
+    saveSnapshot();
   }
 }
 

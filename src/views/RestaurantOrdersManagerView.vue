@@ -981,11 +981,11 @@
     </div>
 
     <!-- Deadline extend modal -->
-    <div v-if="showDeadlineModal" class="rom-modal-overlay" @click.self="showDeadlineModal = false">
+    <div v-if="showDeadlineModal" class="rom-modal-overlay" @click.self="closeDeadlineModal">
       <div class="rom-modal" style="max-width:380px">
         <div class="rom-modal-header">
           <h2>Продлить дедлайн</h2>
-          <button class="rom-modal-close" @click="showDeadlineModal = false">&times;</button>
+          <button class="rom-modal-close" @click="closeDeadlineModal">&times;</button>
         </div>
         <div class="rom-modal-body">
           <p style="font-size:13px; color:#8b7355; margin-bottom:14px">
@@ -1002,7 +1002,7 @@
             </label>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px">
-            <button class="rom-btn" @click="showDeadlineModal = false">Отмена</button>
+            <button class="rom-btn" @click="closeDeadlineModal">Отмена</button>
             <button class="rom-btn rom-btn-primary" @click="saveDeadlineExtend" :disabled="deadlineSaving">
               <BurgerSpinner v-if="deadlineSaving" size="xs" />
               <span>{{ deadlineSaving ? 'Сохранение...' : 'Продлить' }}</span>
@@ -1192,6 +1192,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue';
+import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -2100,11 +2101,21 @@ async function handleToggleDate(open) {
   }
 }
 
+// Введённые времена дедлайна не теряем молча.
+const deadlineGuard = useDirtySnapshot();
+
 function handleExtendDeadline() {
   if (!session.value) return;
   deadlineSoft.value = '14:00';
   deadlineHard.value = '17:00';
   showDeadlineModal.value = true;
+  deadlineGuard.mark({ soft: deadlineSoft.value, hard: deadlineHard.value });
+}
+
+async function closeDeadlineModal() {
+  if (deadlineSaving.value) return;
+  if (!(await deadlineGuard.confirmClose({ soft: deadlineSoft.value, hard: deadlineHard.value }))) return;
+  showDeadlineModal.value = false;
 }
 
 async function saveDeadlineExtend() {

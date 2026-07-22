@@ -973,6 +973,7 @@
 
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
@@ -2222,6 +2223,9 @@ const accessFilteredRestaurants = computed(() => {
   if (!q) return list;
   return list.filter(r => String(r.number).includes(q) || String(r.address || '').toLowerCase().includes(q) || String(r.region || '').toLowerCase().includes(q));
 });
+// Выбор регионов/ресторанов не теряем молча — правило по всем окнам проекта.
+const accessGuard = useDirtySnapshot();
+
 async function openAccessModal(idx) {
   const t = templates.value[idx];
   accessRestSearch.value = '';
@@ -2230,6 +2234,7 @@ async function openAccessModal(idx) {
     regions: [...(t.vis_regions || [])],
     restaurants: [...(t.vis_restaurants || [])].map(String),
   };
+  accessGuard.mark(accessModal.value);
   if (!accessDirectory.value.restaurants.length) {
     try { accessDirectory.value = await store.adminGetRestaurantsDirectory(currentSupplierId.value); }
     catch (e) { toast.error('Ошибка', e.message); }
@@ -2244,7 +2249,10 @@ function applyAccessModal() {
   accessModal.value.open = false;
 }
 function clearAccess() { accessModal.value.regions = []; accessModal.value.restaurants = []; }
-function closeAccessModal() { accessModal.value.open = false; }
+async function closeAccessModal() {
+  if (!(await accessGuard.confirmClose(accessModal.value))) return;
+  accessModal.value.open = false;
+}
 
 function addManualTemplateRow() {
   templates.value.push({

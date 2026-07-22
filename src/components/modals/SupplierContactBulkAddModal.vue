@@ -171,6 +171,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const props = defineProps({
   restaurants: { type: Array, default: () => [] }, // из manager-overview
@@ -196,6 +197,14 @@ const form = reactive({
   tags: [],
   is_primary: false,
 });
+
+// Предупреждаем только о потере введённых данных контакта — выбор поставщика,
+// группы и списка ресторанов «несохранёнными изменениями» не считаем.
+const { saveSnapshot, tryClose } = useCloseGuard(() => ({
+  name: form.name, role: form.role, phones: form.phones, email: form.email,
+  telegram: form.telegram, whatsapp: form.whatsapp, viber: form.viber,
+  notes: form.notes, tags: form.tags, is_primary: form.is_primary,
+}), () => emit('close'));
 
 function addPhone() {
   if (form.phones.length >= 5) return;
@@ -324,7 +333,7 @@ function ruEnding(n) {
 
 function close() {
   if (saving.value) return;
-  emit('close');
+  tryClose();
 }
 
 async function apply() {
@@ -373,7 +382,7 @@ async function apply() {
   }
 }
 
-onMounted(() => loadSuppliers());
+onMounted(() => { saveSnapshot(); loadSuppliers(); });
 </script>
 
 <style scoped>

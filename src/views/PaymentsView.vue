@@ -132,6 +132,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useDirtySnapshot } from '@/composables/useFormDirty.js'
 import { useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { useOrderStore } from '@/stores/orderStore.js'
@@ -293,6 +294,9 @@ const canSubmitAdd = computed(() =>
   addModal.value.legalEntity && addModal.value.supplier && addModal.value.deliveryDate
 )
 
+// Форма добавления оплаты не закрывается молча с введёнными данными.
+const addGuard = useDirtySnapshot()
+
 function openAddModal() {
   const today = new Date().toISOString().slice(0, 10)
   addModal.value = {
@@ -307,9 +311,11 @@ function openAddModal() {
     saving: false,
     error: '',
   }
+  addGuard.mark(addModal.value)
 }
-function closeAddModal() {
+async function closeAddModal() {
   if (addModal.value.saving) return
+  if (!(await addGuard.confirmClose(addModal.value))) return
   addModal.value.show = false
 }
 function clearSupplier() {
