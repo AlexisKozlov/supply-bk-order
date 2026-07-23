@@ -1550,6 +1550,27 @@ try {
                         'city'    => $er['city'] ?? '',
                     ];
                 }
+                // Рестораны с фактической заявкой на эту дату, которых нет в графике
+                // (довоз или иное расхождение). Без них их заявки выпадали из сводки
+                // и итогов — закупщик видел заниженные цифры (например 150 вместо 342).
+                $ordRestStmt = $pdo->prepare("
+                    SELECT DISTINCT o.restaurant_number, r.region, r.city, r.address
+                    FROM so_orders o
+                    LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.legal_entity_group = ?
+                    WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+                      AND o.legal_entity IN ({$entityPh})");
+                $ordRestStmt->execute(array_merge([$supplierGroup, $supId, $deliveryDate], $supplierEntities));
+                foreach ($ordRestStmt->fetchAll() as $orr) {
+                    $num = (string)$orr['restaurant_number'];
+                    if (isset($seenNums[$num])) continue;
+                    $seenNums[$num] = true;
+                    $expectedRests[] = [
+                        'number'  => $orr['restaurant_number'],
+                        'region'  => $orr['region'] ?? '',
+                        'address' => $orr['address'] ?? '',
+                        'city'    => $orr['city'] ?? '',
+                    ];
+                }
                 if (!$expectedRests) continue;
                 usort($expectedRests, function ($a, $b) {
                     $rc = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));

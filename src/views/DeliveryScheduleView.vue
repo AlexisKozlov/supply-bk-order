@@ -233,7 +233,7 @@
               class="ds-col-item"
               @dblclick="isEditing && startEditRestaurant(item)"
             >
-              <span class="ds-col-item-num">{{ item.number }}</span>
+              <span class="ds-col-item-num">{{ formatRestaurantNumber(item.number) }}</span>
               <div class="ds-col-item-content">
                 <span class="ds-col-item-addr">{{ item.address }}</span>
                 <div class="ds-col-item-lines">
@@ -267,7 +267,7 @@
           </div>
           <div class="ds-modal-body">
             <div class="ds-edit-info">
-              <span class="ds-edit-num">{{ cardEditing.restaurant.number }}</span>
+              <span class="ds-edit-num">{{ formatRestaurantNumber(cardEditing.restaurant.number) }}</span>
               {{ cardEditing.restaurant.address }}
             </div>
             <div class="ds-edit-day">{{ cardEditing.dayLabel }}</div>
@@ -304,7 +304,7 @@
           </div>
           <div class="ds-modal-body">
             <div class="ds-edit-info">
-              <span class="ds-edit-num">{{ editingDeadline.restaurantNumber }}</span>
+              <span class="ds-edit-num">{{ formatRestaurantNumber(editingDeadline.restaurantNumber) }}</span>
               {{ editingDeadline.restaurantAddress }}
             </div>
             <div class="ds-edit-day">Поставка: {{ editingDeadline.dayLabel }}</div>
@@ -398,6 +398,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';

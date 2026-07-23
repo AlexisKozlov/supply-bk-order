@@ -20,7 +20,7 @@
             >
               <option :value="0">— выберите ресторан —</option>
               <option v-for="r in eligibleRestaurants" :key="r.id" :value="r.id">
-                №{{ r.number }} {{ r.city || '' }}{{ r.address ? ', ' + r.address : '' }}
+                {{ formatRestaurantNumber(r.number) }} {{ r.city || '' }}{{ r.address ? ', ' + r.address : '' }}
               </option>
             </select>
             <div v-if="!eligibleRestaurants.length" class="kr-cm-hint kr-cm-hint-warn">
@@ -201,6 +201,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { buildAvailableDates, calcDeadlineMs, maskBsoSeries, maskBsoNumber } from '@/components/restaurant/keg/kegHelpers.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 

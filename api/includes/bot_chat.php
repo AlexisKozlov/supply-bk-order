@@ -48,7 +48,7 @@ function chatInputMode($chatId, $msgId, $restNum) {
     tgStateSet($chatId, 'chat', ['rest' => $restNum], 3600);
 
     $text = "💬 <b>Сообщение в отдел закупок</b>\n";
-    $text .= "🏪 Ресторан <b>{$restNum}</b>\n";
+    $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "─────────────────────\n";
     $text .= "Напишите сообщение. Можно отправить текст или фото.\n";
     $text .= "Каждое сообщение будет доставлено.";
@@ -121,7 +121,7 @@ function chatShowHistory($chatId, $msgId, $restNum) {
     $convId = $st->fetchColumn();
 
     if (!$convId) {
-        editMessage($chatId, $msgId, "💬 <b>Ресторан {$restNum}</b>\n\nНет сообщений.", ['inline_keyboard' => [
+        editMessage($chatId, $msgId, "💬 <b>Ресторан " . formatRestaurantNumber($restNum) . "</b>\n\nНет сообщений.", ['inline_keyboard' => [
             [['text' => '◂ Назад', 'callback_data' => 'chat_start']],
         ]]);
         return;
@@ -131,7 +131,7 @@ function chatShowHistory($chatId, $msgId, $restNum) {
     $st->execute([$convId]);
     $msgs = array_reverse($st->fetchAll());
 
-    $text = "💬 <b>Переписка: ресторан {$restNum}</b>\n";
+    $text = "💬 <b>Переписка: ресторан " . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "─────────────────────\n\n";
 
     if (!$msgs) {
@@ -166,7 +166,7 @@ function chatNotifyPurchasers($pdo, $restNum, $senderName, $preview) {
     if (!$recipients) return;
 
     $preview = mb_substr($preview, 0, 200);
-    $text = "💬 Сообщение от ресторана <b>" . chatEsc((string)$restNum) . "</b> (" . chatEsc($senderName) . "):\n" . chatEsc($preview);
+    $text = "💬 Сообщение от ресторана <b>" . formatRestaurantNumber($restNum) . "</b> (" . chatEsc($senderName) . "):\n" . chatEsc($preview);
 
     foreach ($recipients as $r) {
         tgClientSend($r['telegram_chat_id'], $text, ['timeout' => 5, 'pdo' => $pdo]);

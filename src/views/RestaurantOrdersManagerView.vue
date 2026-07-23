@@ -167,7 +167,7 @@
                     'rom-row-clickable': r.order_id,
                   }"
                   @click="r.order_id && viewOrder(r.order_id)">
-                <td class="rom-td-num">{{ r.number }}</td>
+                <td class="rom-td-num">{{ formatRestaurantNumber(r.number) }}</td>
                 <td class="rom-td-rest">
                   <span class="rom-cell-rest-city">{{ r.city }}</span><span v-if="r.address">, </span><span class="rom-cell-rest-addr">{{ r.address }}</span>
                 </td>
@@ -924,7 +924,7 @@
               <div v-if="utOverwriteMode === 'selected'" class="rom-ut-select-list">
                 <label v-for="r in utImportPreview.skipped_existing" :key="r.restaurant_number" class="rom-ut-select-row">
                   <input type="checkbox" :value="r.restaurant_number" v-model="utSelectedOverwriteRestaurants" />
-                  <span>Ресторан №{{ r.restaurant_number }}</span>
+                  <span>Ресторан {{ formatRestaurantNumber(r.restaurant_number) }}</span>
                   <em>{{ r.items_count }} поз.</em>
                 </label>
               </div>
@@ -958,7 +958,7 @@
               <div v-if="utImportPreview.skipped_existing.length" class="rom-ut-section">
                 <h3>{{ utOverwriteMode === 'none' ? 'Будут пропущены, потому что заявка уже есть' : 'Найдены существующие заявки' }}</h3>
                 <div class="rom-ut-chips">
-                  <span v-for="r in utImportPreview.skipped_existing" :key="r.restaurant_number" class="rom-ut-chip">№{{ r.restaurant_number }}</span>
+                  <span v-for="r in utImportPreview.skipped_existing" :key="r.restaurant_number" class="rom-ut-chip">{{ formatRestaurantNumber(r.restaurant_number) }}</span>
                 </div>
               </div>
             </div>
@@ -1099,7 +1099,7 @@
                         <label v-for="r in filteredExportRestaurants" :key="r.number"
                           class="rom-exp-select-item" :class="{ selected: exportFilterRestaurants.has(r.number) }">
                           <input type="checkbox" :checked="exportFilterRestaurants.has(r.number)" @change="toggleExportFilter('restaurants', r.number)" />
-                          <span style="font-weight:700; min-width:30px">{{ r.number }}</span>
+                          <span style="font-weight:700; min-width:30px">{{ formatRestaurantNumber(r.number) }}</span>
                           <span style="flex:1; color:#502314">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
                           <span style="font-size:10px; color:#8b7355">{{ r.region }}</span>
                         </label>

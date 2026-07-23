@@ -38,6 +38,15 @@ export function buildSoOrderSheet(XLSX, {
   const prods = products || [];
   const rests = restaurants || [];
 
+  // Отображение номера ресторана: ПС (в БД 1001+) показываем как 'PS01'..'PS52',
+  // БК (<1000) — как есть. Дублирует formatRestaurantNumber из legalEntities.js,
+  // но этот модуль намеренно без импортов (работает и в Node, и в браузере).
+  const fmtRestNum = (n) => {
+    const num = parseInt(n, 10);
+    if (!Number.isFinite(num) || num <= 0) return n == null ? '' : String(n);
+    return num >= 1000 ? 'PS' + String(num - 1000).padStart(2, '0') : String(num);
+  };
+
   // ═══ Стили (определяем один раз) ═══
   const border = { top: { style: 'thin', color: { rgb: 'BDBDBD' } }, bottom: { style: 'thin', color: { rgb: 'BDBDBD' } }, left: { style: 'thin', color: { rgb: 'BDBDBD' } }, right: { style: 'thin', color: { rgb: 'BDBDBD' } } };
   const titleStyle = { font: { bold: true, sz: 14, name: 'Calibri', color: { rgb: '2E7D32' } }, alignment: { horizontal: 'left', vertical: 'center' } };
@@ -213,7 +222,7 @@ export function buildSoOrderSheet(XLSX, {
     for (let i = 0; i < group.length; i++) {
       const r = group[i];
       const isSubmitted = isSubmittedRest(r);
-      const row = [r.number, r.address || ''];
+      const row = [fmtRestNum(r.number), r.address || ''];
       const piecesArr = [];
       for (const p of prods) { if (!isSubmitted) { row.push(0); piecesArr.push(0); continue; } const v = getQty(r, p); const q = v ? v.qty : 0; row.push(q); piecesArr.push(q); }
       if (M) {

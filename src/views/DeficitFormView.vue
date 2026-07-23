@@ -15,7 +15,7 @@
           <select v-model="selectedRestaurant" class="deficit-form-select">
             <option value="">Выберите ресторан</option>
             <option v-for="r in restaurants" :key="r.number" :value="r.number">
-              {{ r.number }} — {{ r.address || r.city || '' }}
+              {{ formatRestaurantNumber(r.number) }} — {{ r.address || r.city || '' }}
             </option>
           </select>
         </div>
@@ -63,6 +63,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 

@@ -132,10 +132,10 @@
         <div class="so-date-nav">
           <button v-for="wd in weekDates" :key="wd.date"
             class="rom-btn-sm"
-            :class="{ 'so-date-active': selectedDate === wd.date, 'so-day-closed-btn': isDateForcedClosed(wd.date) }"
+            :class="{ 'so-date-active': selectedDate === wd.date, 'so-day-closed-btn': isDateForcedClosed(wd.date), 'so-date-adhoc': wd.is_adhoc }"
             @click="selectedDate = wd.date; loadStatus()"
-            :title="isDateForcedClosed(wd.date) ? 'День закрыт' : ''">
-            {{ wd.day_name }} {{ formatDateShort(wd.date) }}
+            :title="wd.is_adhoc ? 'Внеплановая дата (довоз)' : (isDateForcedClosed(wd.date) ? 'День закрыт' : '')">
+            {{ wd.day_name }} {{ formatDateShort(wd.date) }}<span v-if="wd.is_adhoc" class="so-adhoc-tag">довоз</span>
           </button>
         </div>
         <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
@@ -201,6 +201,9 @@
               {{ sendingSummaryEmail ? 'Отправка…' : 'На почту поставщику' }}
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
+            <button class="rom-btn rom-btn-primary" @click="openAdhocModal" title="Создать внеплановую заявку (довоз) для ресторана на любую дату вне графика">
+              + Довоз
+            </button>
             <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
               Копировать не подавших
             </button>
@@ -252,6 +255,7 @@
                     <span v-if="isAutoSubmitted(r)" class="so-auto-badge" :title="autoSubmitTitle(r)">
                       АВТО-ПОДАЧА
                     </span>
+                    <span v-if="r.is_adhoc" class="so-adhoc-tag" title="Внеплановая заявка (довоз)">довоз</span>
                   </td>
                   <td v-for="p in displayProducts" :key="p.display_key"
                     class="so-td-qty"
@@ -677,7 +681,7 @@
               <div class="so-access-rest-list">
                 <label v-for="r in accessFilteredRestaurants" :key="'r'+r.number" class="so-settings-check">
                   <input type="checkbox" :value="String(r.number)" v-model="accessModal.restaurants" />
-                  <span>№{{ r.number }} · {{ r.region }}<span v-if="r.address" class="so-notify-muted"> · {{ r.address }}</span></span>
+                  <span>{{ formatRestaurantNumber(r.number, r.legal_entity_group) }} · {{ r.region }}<span v-if="r.address" class="so-notify-muted"> · {{ r.address }}</span></span>
                 </label>
               </div>
             </div>
@@ -689,6 +693,53 @@
         </div>
       </div>
     </template>
+
+    <!-- ═══ Окно: внеплановая заявка (довоз) ═══ -->
+    <div v-if="adhoc.open" class="rom-modal-overlay" @click.self="adhoc.open = false">
+      <div class="rom-modal so-adhoc-modal">
+        <div class="rom-modal-header">
+          <h3>Внеплановая заявка (довоз)</h3>
+          <button class="rom-modal-close" @click="adhoc.open = false">✕</button>
+        </div>
+        <div class="rom-modal-body">
+          <p class="so-section-hint" style="margin:0 0 10px">Заявка на дату <b>вне графика</b>. Попадёт поставщику в сводку, Excel и на почту; ресторан увидит её в кабинете и получит уведомление.</p>
+          <div class="rom-date-row" style="flex-wrap:wrap;gap:12px">
+            <label style="display:flex;align-items:center;gap:6px">Ресторан:
+              <select v-model="adhoc.restaurant" class="rom-select">
+                <option value="">— выберите —</option>
+                <option v-for="r in adhoc.restaurants" :key="r.number" :value="r.number">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }} — {{ r.city || r.region }}{{ r.address ? ', ' + r.address : '' }}</option>
+              </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px">Дата доставки:
+              <input type="date" v-model="adhoc.date" class="rom-input-sm" />
+            </label>
+            <label style="display:flex;align-items:center;gap:6px">Дедлайн правки:
+              <input type="datetime-local" v-model="adhoc.deadline" class="rom-input-sm" />
+            </label>
+          </div>
+          <p class="so-section-hint" style="margin:6px 0">Дедлайн не задан — заявка сразу финальная (ресторан только видит). Задан — ресторан может править до него.</p>
+          <div v-if="adhoc.loadingTpl" class="rom-loading"><BurgerSpinner text="Загрузка товаров..." /></div>
+          <div v-else-if="!adhoc.products.length" class="rom-empty">Нет товаров в шаблоне поставщика.</div>
+          <div v-else class="rom-table-wrap" style="max-height:340px;overflow:auto">
+            <table class="rom-table">
+              <thead><tr><th>Товар</th><th style="width:130px">Количество</th></tr></thead>
+              <tbody>
+                <tr v-for="p in adhoc.products" :key="p.sku">
+                  <td style="text-align:left"><span style="color:var(--text-muted);font-size:11px;font-weight:700">{{ p.sku }}</span> {{ p.product_name }}</td>
+                  <td><input type="number" v-model.number="adhoc.qty[p.sku]" class="rom-input-sm" min="0" step="0.001" placeholder="0" style="width:110px" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="rom-modal-foot">
+          <button class="rom-btn-sm" @click="adhoc.open = false">Отмена</button>
+          <button class="rom-btn-sm rom-btn-primary" @click="submitAdhoc" :disabled="adhoc.saving || !adhoc.restaurant || !adhoc.date">
+            {{ adhoc.saving ? 'Создание…' : 'Создать довоз' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- ═══ TAB: Настройки ═══ -->
     <template v-if="pageTab === 'settings' && currentSupplierId">
@@ -2254,6 +2305,62 @@ async function closeAccessModal() {
   accessModal.value.open = false;
 }
 
+// ═══ Внеплановая заявка (довоз) ═══
+const adhoc = reactive({ open: false, restaurants: [], products: [], qty: {}, restaurant: '', date: '', deadline: '', loadingTpl: false, saving: false });
+async function openAdhocModal() {
+  if (!currentSupplierId.value) return;
+  adhoc.open = true;
+  adhoc.restaurant = '';
+  adhoc.date = selectedDate.value || '';
+  adhoc.deadline = '';
+  adhoc.qty = {};
+  adhoc.products = [];
+  adhoc.loadingTpl = true;
+  try {
+    if (!adhoc.restaurants.length) {
+      const dir = await store.adminGetRestaurantsDirectory(currentSupplierId.value);
+      adhoc.restaurants = dir.restaurants || [];
+    }
+    const le = orderStore.settings.legalEntity;
+    const tpl = await store.adminGetTemplates(currentSupplierId.value, le);
+    // Только активные, не отключённые для заказа
+    adhoc.products = (tpl || []).filter(t => !t.order_disabled && String(t.sku || '').trim());
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    adhoc.loadingTpl = false;
+  }
+}
+async function submitAdhoc() {
+  if (!adhoc.restaurant || !adhoc.date) return;
+  const items = adhoc.products
+    .map(p => ({ sku: p.sku, product_id: p.product_id || null, product_name: p.product_name, qty: Number(adhoc.qty[p.sku]) || 0 }))
+    .filter(it => it.qty > 0);
+  if (!items.length) { toast.warning('Пусто', 'Впишите количество хотя бы одному товару'); return; }
+  adhoc.saving = true;
+  try {
+    const res = await store.adminCreateAdhocOrder({
+      supplier_id: currentSupplierId.value,
+      restaurant_number: adhoc.restaurant,
+      delivery_date: adhoc.date,
+      deadline: adhoc.deadline || null,
+      items,
+    });
+    if (res && res.error) { toast.error('Ошибка', res.error); return; }
+    toast.success('Довоз создан', res.editable ? 'Ресторан может скорректировать до дедлайна' : 'Заявка финальная, ресторан её видит');
+    const createdDate = adhoc.date;
+    adhoc.open = false;
+    // Переключаемся на дату довоза и обновляем — чтобы он сразу был виден в «Приёме».
+    if (pageTab.value !== 'status') pageTab.value = 'status';
+    selectedDate.value = createdDate;
+    await loadStatus();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    adhoc.saving = false;
+  }
+}
+
 function addManualTemplateRow() {
   templates.value.push({
     product_id: null,
@@ -3102,6 +3209,12 @@ watch(
   border-radius: var(--tk-r-sm); background: var(--tk-warning-soft); color: var(--tk-warning);
   font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold);
 }
+.so-adhoc-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 10px;
+  background: #EDE7F6; color: #5E35B1; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.3px; vertical-align: middle;
+}
+.so-date-adhoc { border-color: #B39DDB !important; }
 .so-auto-detail {
   display: inline-block; margin: var(--tk-s-1) 0 var(--tk-s-2); padding: 6px var(--tk-s-3);
   border-radius: var(--tk-r-sm); background: var(--tk-warning-soft); color: var(--tk-warning);

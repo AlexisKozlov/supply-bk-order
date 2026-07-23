@@ -784,7 +784,7 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
 
     $btns = [];
-    $text = "📦 <b>" . soEsc($supName) . "</b> — Ресторан " . soEsc($restNum) . "\n\nВыберите день доставки:\n";
+    $text = "📦 <b>" . soEsc($supName) . "</b> — Ресторан " . formatRestaurantNumber($restNum) . "\n\nВыберите день доставки:\n";
 
     foreach ($botData['available_dates'] as $dateInfo) {
         $deliveryDate = $dateInfo['delivery_date'];
@@ -833,10 +833,24 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     }
 
     // Куда вести «Назад» — зависит от того, сколько уровней над нами развёрнуто.
+    // ВАЖНО: считаем не все подписки, а только МОИ рестораны, у которых есть
+    // график с ЭТИМ поставщиком (именно их показывает soOrderSelectRest). Если
+    // таких >1 — был шаг «выбор ресторана», возвращаемся туда (soord_sup). Если
+    // ровно 1 — soOrderSelectRest автопроваливается обратно на этот же экран дня
+    // (та же клавиатура → Telegram «message not modified» → «Назад» не реагирует),
+    // поэтому ведём на уровень ВЫШЕ: к выбору поставщика или в меню.
     $subs = botGetSubscribedRestaurants($pdo, $chatId);
-    $restCount = count($subs);
+    $backSchStmt = $pdo->prepare("
+        SELECT DISTINCT r.number
+        FROM supplier_schedules ss
+        JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+        WHERE ss.supplier_id = ? AND ss.is_active = 1
+    ");
+    $backSchStmt->execute([$supplierId]);
+    $backWithSched = array_map('intval', $backSchStmt->fetchAll(PDO::FETCH_COLUMN));
+    $myRestsForSup = array_filter($subs, fn($s) => in_array((int)$s['restaurant_number'], $backWithSched, true));
     $supCount = soBotCountAccessibleSoSuppliers($pdo, $chatId);
-    if ($restCount > 1) {
+    if (count($myRestsForSup) > 1) {
         // Был промежуточный шаг «выбор ресторана» — возвращаемся туда
         $backCb = "soord_sup_" . substr($supplierId, 0, 36);
     } elseif ($supCount > 1) {
@@ -916,7 +930,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
 
     $text = "📦 <b>" . soEsc($supName) . "</b>\n";
     $text .= "🏢 " . soEsc($le) . "\n";
-    $text .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
+    $text .= "Ресторан: <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "Доставка: <b>{$dateLabel}</b>\n\n";
 
     // Показываем текущую заявку, если есть
@@ -1043,7 +1057,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $deliveryFmt = (new DateTime($deliveryDate))->format('d.m.Y');
     $confirmText = "🚫 <b>Поставка не нужна</b>\n\n";
     $confirmText .= "Поставщик: <b>" . soEsc($supName) . "</b>\n";
-    $confirmText .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
+    $confirmText .= "Ресторан: <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $confirmText .= "Дата: <b>{$deliveryFmt}</b>\n\n";
     $confirmText .= "<i>Отдел закупок увидит, что на эту дату ваш ресторан ничего не заказывает.</i>";
 
@@ -1164,7 +1178,7 @@ function soOrderProcessInput($chatId, $text) {
 
     $totalQty = array_sum(array_column($items, 'quantity'));
     $confirmText = "✅ <b>Заявка " . soEsc($supName) . " отправлена!</b>\n\n";
-    $confirmText .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
+    $confirmText .= "Ресторан: <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $confirmText .= "Доставка: <b>{$deliveryDate}</b>\n";
     $confirmText .= "Позиций: <b>{$matched}</b>, всего: <b>{$totalQty}</b>\n\n";
     foreach ($items as $it) { $confirmText .= "• " . soEsc($it['product_name']) . ": <b>{$it['quantity']}</b>\n"; }
@@ -2168,12 +2182,12 @@ function corrShowDelivery($chatId, $msgId, $restNum) {
     global $pdo;
     $deliveries = corrGetNextDeliveries($pdo, $restNum);
     if (!$deliveries) {
-        editMessage($chatId, $msgId, "✏️ <b>Ресторан {$restNum}</b>\n\nНет доступных дат для корректировки.\nДедлайн на ближайшую поставку уже прошёл.", ['inline_keyboard' => [
+        editMessage($chatId, $msgId, "✏️ <b>Ресторан " . formatRestaurantNumber($restNum) . "</b>\n\nНет доступных дат для корректировки.\nДедлайн на ближайшую поставку уже прошёл.", ['inline_keyboard' => [
             [['text' => '◂ Назад', 'callback_data' => 'corr_start']],
         ]]);
         return;
     }
-    $text = "✏️ <b>Ресторан {$restNum}</b>\n\nНа какую дату доставки корректировка?";
+    $text = "✏️ <b>Ресторан " . formatRestaurantNumber($restNum) . "</b>\n\nНа какую дату доставки корректировка?";
     $btns = [];
     foreach ($deliveries as $d) {
         $btns[] = [['text' => "📅 {$d['date_fmt']} (до {$d['deadline_fmt']})", 'callback_data' => "corr_date_{$restNum}_{$d['date']}"]];
@@ -2202,7 +2216,7 @@ function corrStartInput($chatId, $msgId, $restNum, $deliveryDate) {
     // TTL 30 минут — раньше /tmp проверял filemtime > 1800; теперь то же через expires_at.
     tgStateSet($chatId, 'corr', ['mode' => 'corr_items', 'state' => $state], 1800);
 
-    $text = "✏️ <b>Ресторан {$restNum}</b> | {$found['date_fmt']}\n";
+    $text = "✏️ <b>Ресторан " . formatRestaurantNumber($restNum) . "</b> | {$found['date_fmt']}\n";
     $text .= "⏰ Дедлайн: {$found['deadline_fmt']}\n";
 
     if ($existing) {

@@ -367,9 +367,8 @@
           <div class="sc-prices-list">
             <div v-for="p in pricesEditor.items" :key="p.product_id" class="sc-prices-row">
               <div class="sc-prices-name">
-                <div>{{ p.product_name }}</div>
+                <div><span v-if="p.product_sku" class="sc-inline-sku">{{ p.product_sku }}</span> {{ p.product_name }}</div>
                 <div class="sc-prices-sub">
-                  <span v-if="p.product_sku">{{ p.product_sku }} · </span>
                   <span>за {{ unitLabel(p.unit) }}</span>
                 </div>
               </div>
@@ -467,9 +466,8 @@
               <!-- Search / selected state -->
               <div v-if="p.fromDb" class="sc-product-selected">
                 <div class="sc-product-selected-info">
-                  <div class="sc-product-selected-name">{{ p.name }}</div>
+                  <div class="sc-product-selected-name"><span v-if="p.sku" class="sc-inline-sku">{{ p.sku }}</span> {{ p.name }}</div>
                   <div class="sc-product-selected-meta">
-                    <span v-if="p.sku">{{ p.sku }}</span>
                     <span v-if="p.supplier">{{ p.supplier }}</span>
                   </div>
                 </div>
@@ -491,10 +489,9 @@
                     class="sc-drop-item"
                     @click="pickProduct(i, r)"
                   >
-                    <div class="sc-drop-name">{{ r.name }}</div>
+                    <div class="sc-drop-name"><span class="sc-inline-sku">{{ r.sku }}</span> {{ r.name }}</div>
                     <div class="sc-drop-meta">
-                      {{ r.sku }}
-                      <template v-if="r.supplier"> · {{ r.supplier }}</template>
+                      <template v-if="r.supplier">{{ r.supplier }}</template>
                       <template v-if="r.qty_per_box"> · {{ r.qty_per_box }} шт/кор</template>
                     </div>
                   </div>
@@ -582,10 +579,7 @@
               <div v-else class="sc-product-search">
                 <div v-if="p._fromDb" class="sc-product-selected">
                   <div class="sc-product-selected-info">
-                    <div class="sc-product-selected-name">{{ p.product_name }}</div>
-                    <div class="sc-product-selected-meta">
-                      <span v-if="p.product_sku">{{ p.product_sku }}</span>
-                    </div>
+                    <div class="sc-product-selected-name"><span v-if="p.product_sku" class="sc-inline-sku">{{ p.product_sku }}</span> {{ p.product_name }}</div>
                   </div>
                   <button class="sc-btn sm outline" @click="p._fromDb = false; p._searchQuery = ''; p.product_name = ''; p.product_sku = '';">Изменить</button>
                 </div>
@@ -605,10 +599,9 @@
                       class="sc-drop-item"
                       @click="pickEditProduct(i, r)"
                     >
-                      <div class="sc-drop-name">{{ r.name }}</div>
+                      <div class="sc-drop-name"><span class="sc-inline-sku">{{ r.sku }}</span> {{ r.name }}</div>
                       <div class="sc-drop-meta">
-                        {{ r.sku }}
-                        <template v-if="r.supplier"> · {{ r.supplier }}</template>
+                        <template v-if="r.supplier">{{ r.supplier }}</template>
                       </div>
                     </div>
                     <div class="sc-drop-item sc-drop-manual" @click="setEditManual(i)">
@@ -2079,6 +2072,7 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-prices-name { flex: 1; min-width: 0; }
 .sc-prices-name > div:first-child { font-size: 13.5px; color: #502314; font-weight: 600; word-break: break-word; }
 .sc-prices-sub { font-size: 11.5px; color: #8b7355; margin-top: 2px; }
+.sc-inline-sku { color: #E76F51; font-weight: 700; margin-right: 4px; }
 .sc-prices-input-wrap { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .sc-prices-input { width: 110px; text-align: right; }
 .sc-prices-currency { color: #8b7355; font-weight: 700; font-size: 12px; }

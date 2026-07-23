@@ -1,4 +1,5 @@
 import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes, applyEntityGroupFilter } from './utils.js';
+import { formatRestaurantNumber } from './legalEntities.js';
 import { db } from './apiClient.js';
 
 /**
@@ -717,7 +718,7 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
       const rSched = scheduleByRestaurant.get(String(r.id));
       const cnt = rSched ? rSched.size : 0;
 
-      setCell(row, 0, r.number || '', sNum(stripe));
+      setCell(row, 0, formatRestaurantNumber(r.number) || (r.number || ''), sNum(stripe));
       setCell(row, 1, r.address || '', sAddr(stripe));
       setCell(row, 2, cnt, sCnt(stripe));
 
@@ -859,7 +860,7 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
         const startCol = col * (colsPerDay + gapCols);
         const r = dayData[di][i];
         if (r) {
-          setCell2(curRow, startCol, r.number || '', sNum(stripe));
+          setCell2(curRow, startCol, formatRestaurantNumber(r.number) || (r.number || ''), sNum(stripe));
           setCell2(curRow, startCol + 1, r.address || '', { ...sAddr(stripe), font: { ...sAddr(stripe).font, sz: 11 } });
           setCell2(curRow, startCol + 2, r.delivery_time || '', sDay(true, stripe));
         } else {

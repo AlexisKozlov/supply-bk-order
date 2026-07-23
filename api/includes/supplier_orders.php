@@ -212,6 +212,23 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
         fn($row) => soDeliveryDateMatchesDow($deliveryDate, (int)$row['delivery_day'])
             && (($row['legal_entity_group'] ?? '') === $supplierGroup)
     ));
+    // Внеплановые (довоз): рестораны с фактической заявкой на эту дату, которых
+    // нет в графике. Добавляем их, чтобы довоз попал в сводку/Excel/почту поставщику.
+    $schedNums = array_map('strval', array_column($expectedRests, 'restaurant_number'));
+    $adhocStmt = $pdo->prepare("
+        SELECT DISTINCT o.restaurant_number, r.city, r.region, r.address
+        FROM so_orders o
+        LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.legal_entity_group = ?
+        WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+          AND o.legal_entity IN ({$entityPh})");
+    $adhocStmt->execute(array_merge([$supplierGroup, $supplierId, $deliveryDate], $supplierEntities));
+    foreach ($adhocStmt->fetchAll() as $ar) {
+        if (in_array((string)$ar['restaurant_number'], $schedNums, true)) continue;
+        $expectedRests[] = [
+            'restaurant_number' => $ar['restaurant_number'],
+            'city' => $ar['city'] ?? '', 'region' => $ar['region'] ?? '', 'address' => $ar['address'] ?? '',
+        ];
+    }
     usort($expectedRests, function ($a, $b) {
         $regionCmp = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));
         if ($regionCmp !== 0) return $regionCmp;
@@ -404,6 +421,15 @@ function soGetDayStatusLight(PDO $pdo, string $supplierId, string $supplierGroup
             && (($row['legal_entity_group'] ?? '') === $supplierGroup)
     ));
     $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'restaurant_number'))));
+
+    // + рестораны с фактической заявкой вне графика (довоз и иные расхождения),
+    // чтобы «X из Y» в обзоре совпадал с реальными заявками и Excel-сводкой.
+    $ordNumsStmt = $pdo->prepare("SELECT DISTINCT restaurant_number FROM so_orders WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft' AND legal_entity IN ({$entityPh})");
+    $ordNumsStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities));
+    foreach ($ordNumsStmt->fetchAll(PDO::FETCH_COLUMN) as $on) {
+        $on = (string)$on;
+        if (!in_array($on, $expectedNums, true)) $expectedNums[] = $on;
+    }
 
     $submittedCount = 0;
     if ($expectedNums) {
@@ -1200,7 +1226,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     // 5. Существующие заявки ресторана по всем поставщикам — один запрос
     $ordParams = array_merge($supplierIds, [$rest['restaurant_number'], $rangeStart]);
     $ordRows = $pdo->prepare("
-        SELECT o.supplier_id, o.delivery_date, o.id, o.status, o.submitted_at,
+        SELECT o.supplier_id, o.delivery_date, o.id, o.status, o.submitted_at, o.is_adhoc, o.adhoc_deadline,
                (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
         FROM so_orders o
         WHERE o.supplier_id IN ({$ph}) AND o.restaurant_number = ? AND o.delivery_date >= ?
@@ -1323,6 +1349,36 @@ if ($soAction === 'suppliers' && $method === 'GET') {
                 }));
             }
         }
+
+        // Внеплановые заявки (довоз): заявки на даты ВНЕ графика. Показываем всегда
+        // (даже если приём на паузе) — ресторан должен видеть довоз. Дедлайн —
+        // adhoc_deadline: если он в будущем, ресторан может править (open), иначе
+        // заявка финальная (closed, только просмотр).
+        $existingDates = array_column($availableDates, null, 'delivery_date');
+        foreach (($ordersMap[$sid] ?? []) as $odate => $orow) {
+            if ((int)($orow['is_adhoc'] ?? 0) !== 1) continue;
+            if (isset($existingDates[$odate])) continue; // уже показана по графику
+            $adl = $orow['adhoc_deadline'] ?? null;
+            $adhocClosed = $adl ? ((new DateTime($adl, $tz)) <= (new DateTime('now', $tz))) : true;
+            $dow = (int)(new DateTime($odate))->format('N');
+            $availableDates[] = [
+                'order_date'        => $odate,
+                'order_day_name'    => '',
+                'delivery_date'     => $odate,
+                'delivery_day_name' => $dayNamesFull[$dow] ?? '',
+                'deadline'          => $adl ? (new DateTime($adl))->format('Y-m-d H:i') : null,
+                'deadline_status'   => $adhocClosed ? 'closed' : 'open',
+                'is_adhoc'          => true,
+                'order' => [
+                    'id'           => (int)$orow['id'],
+                    'status'       => $orow['status'],
+                    'submitted_at' => $orow['submitted_at'],
+                    'item_count'   => (int)$orow['item_count'],
+                    'is_skip'      => ((int)$orow['item_count']) === 0,
+                ],
+            ];
+        }
+        usort($availableDates, fn($a, $b) => strcmp($a['delivery_date'], $b['delivery_date']));
 
         $result[] = [
             'id'                 => $sid,
@@ -1492,22 +1548,42 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата доставки'], 400);
     if (empty($items) && !$skipDelivery) soRespond(['error' => 'Заявка пуста'], 400);
 
-    // Проверяем, что поставщик принимает заявки
+    // Внеплановая заявка (довоз): её ресторан правит по СВОЕМУ дедлайну (adhoc_deadline),
+    // вне графика и обычных проверок. Если довоз финальный (locked / без дедлайна /
+    // дедлайн прошёл) — править нельзя.
+    $adhocOrd = $pdo->prepare("SELECT status, adhoc_deadline FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ? AND is_adhoc = 1");
+    $adhocOrd->execute([$supplierId, $rest['restaurant_number'], $deliveryDate, $rest['legal_entity']]);
+    $adhocRow = $adhocOrd->fetch();
+    $isAdhocEdit = false;
+    if ($adhocRow) {
+        if ((string)$adhocRow['status'] === 'locked' || empty($adhocRow['adhoc_deadline'])) {
+            soRespond(['error' => 'Внеплановая заявка финальная — изменить нельзя'], 403);
+        }
+        if ((new DateTime($adhocRow['adhoc_deadline'])) <= (new DateTime('now', new DateTimeZone('Europe/Minsk')))) {
+            soRespond(['error' => 'Срок корректировки внеплановой заявки истёк'], 403);
+        }
+        $isAdhocEdit = true;
+    }
+
+    // Проверяем, что поставщик принимает заявки (для довоза не проверяем — его
+    // создали закупки, ресторан лишь корректирует до заданного дедлайна).
     $settings = soGetSupplierSettings($pdo, $supplierId);
-    if ((int)($settings['is_accepting_orders'] ?? 1) !== 1) {
+    if (!$isAdhocEdit && (int)($settings['is_accepting_orders'] ?? 1) !== 1) {
         $msg = $settings['pause_message'] ?: 'Приём заявок для этого поставщика временно приостановлен';
         soRespond(['error' => $msg], 403);
     }
 
-    // Проверяем дедлайн (по дате доставки)
-    $dlStatus = soCheckDeadline($pdo, $supplierId, $deliveryDate);
-    if ($dlStatus['status'] === 'closed') {
-        $deadlineTime = soDeadlineTimeLabel($dlStatus['deadline']);
-        soRespond(['error' => 'Приём заявок на эту дату закрыт' . ($deadlineTime ? " (дедлайн {$deadlineTime})" : '')], 403);
-    }
-
-    if (!soRestaurantHasDeliveryDate($pdo, $rest['restaurant_id'] ?? null, $supplierId, $deliveryDate)) {
-        soRespond(['error' => 'На эту дату у ресторана нет поставки от этого поставщика'], 403);
+    // Проверяем дедлайн и график (по дате доставки) — но не для довоза: у него
+    // свой дедлайн (проверен выше) и его нет в графике.
+    if (!$isAdhocEdit) {
+        $dlStatus = soCheckDeadline($pdo, $supplierId, $deliveryDate);
+        if ($dlStatus['status'] === 'closed') {
+            $deadlineTime = soDeadlineTimeLabel($dlStatus['deadline']);
+            soRespond(['error' => 'Приём заявок на эту дату закрыт' . ($deadlineTime ? " (дедлайн {$deadlineTime})" : '')], 403);
+        }
+        if (!soRestaurantHasDeliveryDate($pdo, $rest['restaurant_id'] ?? null, $supplierId, $deliveryDate)) {
+            soRespond(['error' => 'На эту дату у ресторана нет поставки от этого поставщика'], 403);
+        }
     }
 
     // Валидация кратности и минимума по шаблону поставщика
@@ -2476,6 +2552,37 @@ if ($soAction === 'admin') {
                 'total_qty' => $orderRow['total_qty'] ?? null,
             ];
         }
+        // Внеплановые (довоз): рестораны с заявкой на эту дату, которых нет в графике.
+        $schedNums = array_map('strval', array_column($restaurants, 'number'));
+        $adhocNums = array_values(array_diff(array_map('strval', array_keys($ordersByRestaurant)), $schedNums));
+        if ($adhocNums) {
+            $aph = implode(',', array_fill(0, count($adhocNums), '?'));
+            $rInfo = $pdo->prepare("SELECT number, region, city, address, legal_entity_group FROM restaurants WHERE legal_entity_group = ? AND number IN ($aph)");
+            $rInfo->execute(array_merge([$supplierGroup], array_map('intval', $adhocNums)));
+            $rInfoMap = [];
+            foreach ($rInfo->fetchAll() as $ri) $rInfoMap[(string)$ri['number']] = $ri;
+            foreach ($adhocNums as $rn) {
+                $orderRow = $ordersByRestaurant[(string)$rn];
+                $ri = $rInfoMap[(string)$rn] ?? [];
+                $restaurants[] = [
+                    'number' => $rn,
+                    'region' => $ri['region'] ?? '',
+                    'city' => $ri['city'] ?? '',
+                    'address' => $ri['address'] ?? '',
+                    'legal_entity_group' => $ri['legal_entity_group'] ?? $supplierGroup,
+                    'order_day' => null,
+                    'order_id' => $orderRow['order_id'] ?? null,
+                    'order_status' => $orderRow['order_status'] ?? null,
+                    'submitted_at' => $orderRow['submitted_at'] ?? null,
+                    'is_auto_submitted' => 0,
+                    'auto_source_order_id' => null,
+                    'auto_source_delivery_date' => null,
+                    'item_count' => isset($orderRow['item_count']) ? (int)$orderRow['item_count'] : 0,
+                    'total_qty' => $orderRow['total_qty'] ?? null,
+                    'is_adhoc' => true,
+                ];
+            }
+        }
         usort($restaurants, function ($a, $b) {
             $regionCmp = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));
             if ($regionCmp !== 0) return $regionCmp;
@@ -2496,6 +2603,27 @@ if ($soAction === 'admin') {
                 'day_name_full' => $dayNamesFull[$dow] ?? '',
             ];
         }, $weekDates);
+        // Внеплановые даты (довоз) вне графика — добавляем в выбор дат, чтобы
+        // закупщик мог их открыть. Помечаем is_adhoc для метки на фронте.
+        $weekDateSet = array_column($weekDates, null, 'date');
+        $adhocDatesStmt = $pdo->prepare("
+            SELECT DISTINCT delivery_date FROM so_orders
+            WHERE supplier_id = ? AND is_adhoc = 1 AND status != 'draft'
+              AND legal_entity IN ({$entityPh})
+              AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+            ORDER BY delivery_date");
+        $adhocDatesStmt->execute(array_merge([$supplierId], $supplierEntities));
+        foreach ($adhocDatesStmt->fetchAll(PDO::FETCH_COLUMN) as $adhocDate) {
+            if (isset($weekDateSet[$adhocDate])) continue;
+            $dow = (int)(new DateTime($adhocDate))->format('N');
+            $weekDates[] = [
+                'date' => $adhocDate,
+                'day_name' => $dayNames[$dow] ?? '',
+                'day_name_full' => $dayNamesFull[$dow] ?? '',
+                'is_adhoc' => true,
+            ];
+        }
+        usort($weekDates, fn($a, $b) => strcmp($a['date'], $b['date']));
 
         // Все позиции заявок для этой даты
         $itemsStmt = $pdo->prepare("
@@ -3094,6 +3222,112 @@ if ($soAction === 'admin') {
         }
 
         soRespond(['success' => true, 'reload' => !empty($reload)]);
+    }
+
+    // --- Внеплановая заявка (довоз): закупки создают заявку на дату ВНЕ графика ---
+    // Ресторан её видит (кабинет/бот) и получает уведомление; попадает в сводку
+    // поставщику (Excel/почта) как обычная заявка на эту дату. Дедлайн задаётся
+    // вручную: до него ресторан может править; NULL/прошлое → заявка финальная (locked).
+    if ($adminAction === 'adhoc-order' && $method === 'POST') {
+        $suppId = $body['supplier_id'] ?? '';
+        $restNum = (int)($body['restaurant_number'] ?? 0);
+        $deliveryDate = $body['delivery_date'] ?? '';
+        $deadlineRaw = trim((string)($body['deadline'] ?? ''));
+        $items = $body['items'] ?? [];
+        if (!$suppId || !$restNum || !$deliveryDate) soRespond(['error' => 'Не указан поставщик, ресторан или дата'], 400);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate)) soRespond(['error' => 'Некорректная дата доставки'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $suppId);
+        $le = roGetLegalEntity($pdo, $restNum);
+        if (!$le) soRespond(['error' => 'Не определено юрлицо ресторана'], 400);
+        soRequireAdminEntityGroupAccess($sessionUser, $le);
+        $group = getEntityGroup($le);
+
+        // Дедлайн: 'Y-m-d H:i' → DATETIME; иначе NULL. Статус: правится (submitted)
+        // только если дедлайн в будущем, иначе заявка финальная (locked).
+        $adhocDeadline = null;
+        if ($deadlineRaw !== '' && preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})/', $deadlineRaw, $dm)) {
+            $adhocDeadline = $dm[1] . ' ' . sprintf('%02d:%02d:00', (int)$dm[2], (int)$dm[3]);
+        }
+        $tz = new DateTimeZone('Europe/Minsk');
+        $editable = $adhocDeadline !== null && (new DateTime($adhocDeadline, $tz)) > (new DateTime('now', $tz));
+        $status = $editable ? 'submitted' : 'locked';
+
+        $validItems = [];
+        foreach ($items as $it) {
+            $sku = trim((string)($it['sku'] ?? ''));
+            $qty = (float)($it['qty'] ?? $it['admin_qty'] ?? 0);
+            if ($sku === '' || $qty <= 0) continue;
+            $validItems[] = ['sku' => $sku, 'product_id' => (string)($it['product_id'] ?? ''), 'product_name' => (string)($it['product_name'] ?? ''), 'qty' => $qty];
+        }
+        if (!$validItems) soRespond(['error' => 'Добавьте хотя бы одну позицию с количеством'], 400);
+
+        $pdo->beginTransaction();
+        try {
+            $ex = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+            $ex->execute([$suppId, $restNum, $deliveryDate, $le]);
+            $orderId = (int)($ex->fetchColumn() ?: 0);
+            if ($orderId) {
+                $pdo->prepare("UPDATE so_orders SET status = ?, is_adhoc = 1, adhoc_deadline = ?, submitted_at = COALESCE(submitted_at, NOW()), updated_at = NOW() WHERE id = ?")
+                    ->execute([$status, $adhocDeadline, $orderId]);
+            } else {
+                $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, is_adhoc, adhoc_deadline, submitted_at, legal_entity, legal_entity_group)
+                    VALUES (?, ?, ?, CURDATE(), ?, 1, ?, NOW(), ?, ?)")
+                    ->execute([$restNum, $suppId, $deliveryDate, $status, $adhocDeadline, $le, $group]);
+                $orderId = (int)$pdo->lastInsertId();
+            }
+            $findItem = $pdo->prepare("SELECT id FROM so_order_items WHERE order_id = ? AND sku = ?");
+            $updItem = $pdo->prepare("UPDATE so_order_items SET admin_qty = ?, product_name = ? WHERE id = ?");
+            $insItem = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty) VALUES (?, ?, ?, ?, 0, ?)");
+            foreach ($validItems as $vi) {
+                $findItem->execute([$orderId, $vi['sku']]);
+                $iid = (int)($findItem->fetchColumn() ?: 0);
+                if ($iid) $updItem->execute([$vi['qty'], $vi['product_name'], $iid]);
+                else $insItem->execute([$orderId, $vi['product_id'], $vi['sku'], $vi['product_name'], $vi['qty']]);
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log('[so adhoc-order] ' . $e->getMessage());
+            soRespond(['error' => 'Ошибка создания довоза'], 500);
+        }
+
+        $sn = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $sn->execute([$suppId]);
+        $supplierName = $sn->fetchColumn() ?: 'поставщику';
+        $deliveryFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+        $by = resolveActorName($pdo, $sessionUser, 'отдел закупок');
+
+        // Уведомление ресторану: Telegram + push
+        try {
+            $restRow = roGetRestaurantRow($pdo, $restNum, $group);
+            $restLabel = roFormatRestaurantTelegramLabel($restNum, $restRow['city'] ?? '', $restRow['address'] ?? '', $group);
+            $esc = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $lines = ['📦 <b>Внеплановая поставка (довоз)</b>', ''];
+            $lines[] = '🏪 <b>Ресторан:</b> ' . $esc($restLabel);
+            $lines[] = '🏪 <b>Поставщик:</b> ' . $esc($supplierName);
+            $lines[] = '📅 <b>Доставка:</b> ' . $deliveryFmt;
+            if ($editable) $lines[] = '⏳ <b>Можно скорректировать до:</b> ' . (new DateTime($adhocDeadline))->format('d.m.Y H:i');
+            $lines[] = '';
+            $lines[] = '<i>Оформил: ' . $esc($by) . '</i>';
+            roNotifyRestaurant($pdo, $restNum, implode("\n", $lines), $group);
+        } catch (Exception $e) { /* не критично */ }
+        try {
+            pushSendToRestaurant($pdo, $restNum, $group, [
+                'title' => '📦 Внеплановая поставка (довоз)',
+                'body'  => "{$supplierName}: доставка {$deliveryFmt}" . ($editable ? ', можно скорректировать' : ''),
+                'url'   => '/restaurant/orders/supplier/' . $suppId,
+                'tag'   => "adhoc_{$suppId}_{$deliveryDate}",
+            ]);
+        } catch (\Throwable $e) { /* не критично */ }
+
+        try {
+            auditLog($pdo, 'so_adhoc_created', 'supplier_order', $orderId, $by, [
+                'supplier' => $supplierName, 'restaurant_number' => $restNum,
+                'delivery_date' => $deliveryDate, 'items' => count($validItems),
+                'deadline' => $adhocDeadline, 'editable' => $editable,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
+
+        soRespond(['success' => true, 'order_id' => $orderId, 'status' => $status, 'editable' => $editable]);
     }
 
     // --- Удаление заявки ---

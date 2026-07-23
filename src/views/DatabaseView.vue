@@ -155,7 +155,7 @@
       <div v-else class="db-grid">
         <div v-for="r in filteredRestaurants" :key="r.id" class="db-card" @click="!isViewer && openRestaurantModal(r)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
-            <span class="db-rest-num">{{ r.number }}</span>
+            <span class="db-rest-num">{{ formatRestaurantNumber(r.number) }}</span>
             <div class="db-card-title">
               <span class="db-card-address">{{ r.address || 'Без адреса' }}</span>
             </div>
@@ -255,7 +255,7 @@
       <div v-if="restModal.show" class="modal" @click.self="tryCloseRestModal">
         <div class="modal-box" style="max-width: 480px;">
           <div class="modal-header">
-            <h2>{{ restModal.data.id ? 'Ресторан ' + restModal.data.number : 'Новый ресторан' }}</h2>
+            <h2>{{ restModal.data.id ? 'Ресторан ' + formatRestaurantNumber(restModal.data.number) : 'Новый ресторан' }}</h2>
             <button class="modal-close" @click="tryCloseRestModal"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="db-rest-modal-body">
@@ -336,7 +336,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
-import { getEntityGroupCode } from '@/lib/legalEntities.js';
+import { getEntityGroupCode, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 

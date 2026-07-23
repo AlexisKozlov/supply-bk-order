@@ -2,6 +2,7 @@
  * Excel-экспорт для модуля «Загрузка машин»
  */
 import { EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE } from '@/lib/roUtils.js';
+import { formatRestaurantNumber } from './legalEntities.js';
 
 export async function exportTruckLoading(trucks, orders, deliveryDate, truckStatsFn) {
   const XLSX = await import('xlsx-js-style');
@@ -42,7 +43,7 @@ export async function exportTruckLoading(trucks, orders, deliveryDate, truckStat
       const order = orderMap[a.order_id];
       rows.push([
         i + 1,
-        a.restaurant_number,
+        formatRestaurantNumber(a.restaurant_number),
         order?.city || '',
         order?.address || '',
         a.category || modeName,

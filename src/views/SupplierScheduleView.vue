@@ -67,7 +67,7 @@
           <tr v-for="rest in filteredRestaurants" :key="rest.restaurant_id" :class="{ 'is-unset': !hasAnyDay(rest) }">
             <td class="ssv-td-rest">
               <div class="ssv-rest-row1">
-                <span class="ssv-rest-num">№{{ rest.restaurant_number }}</span>
+                <span class="ssv-rest-num">{{ formatRestaurantNumber(rest.restaurant_number) }}</span>
                 <span v-if="subscriptionFor(rest)?.is_enabled"
                       class="ssv-rest-sub"
                       :class="{ 'has-tg': (subscriptionFor(rest)?.tg_names || []).length }"
@@ -215,7 +215,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
-import { getEntityGroupCode } from '@/lib/legalEntities.js';
+import { getEntityGroupCode, formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 const ReminderTimesEditor = defineAsyncComponent(() => import('@/components/ui/ReminderTimesEditor.vue'));

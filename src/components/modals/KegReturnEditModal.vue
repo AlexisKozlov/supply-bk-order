@@ -14,7 +14,7 @@
           <div class="kr-em-body">
             <div class="kr-em-field">
               <span class="kr-em-label">Ресторан</span>
-              <span class="kr-em-value">№{{ form.restaurant_number }} {{ form.restaurant_city }} {{ form.restaurant_address }}</span>
+              <span class="kr-em-value">{{ formatRestaurantNumber(form.restaurant_number) }} {{ form.restaurant_city }} {{ form.restaurant_address }}</span>
             </div>
 
             <div class="kr-em-field">
@@ -183,6 +183,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useCloseGuard } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';
 import { appConfirm } from '@/lib/appDialogs.js';

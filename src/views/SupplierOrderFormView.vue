@@ -10,7 +10,7 @@
           <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
         </svg>
         <div>
-          <div class="ro-header-title">Ресторан {{ roStore.restaurant?.number }}</div>
+          <div class="ro-header-title">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number) }}</div>
           <div class="ro-header-addr">{{ roStore.restaurant?.city }}{{ roStore.restaurant?.address ? ', ' + roStore.restaurant.address : '' }}</div>
         </div>
       </div>
@@ -70,8 +70,9 @@
             </div>
             <div v-else class="so-supplier-dates">
               <div v-for="d in getOrderedDates(sup)" :key="d.delivery_date" class="so-date-chip"
-                :class="{ submitted: d.order, closed: d.deadline_status === 'closed' && !d.order }">
-                {{ formatDateShort(d.delivery_date) }}
+                :class="{ submitted: d.order, closed: d.deadline_status === 'closed' && !d.order, adhoc: d.is_adhoc }"
+                :title="d.is_adhoc ? 'Внеплановая поставка (довоз)' : ''">
+                {{ formatDateShort(d.delivery_date) }}<span v-if="d.is_adhoc" class="so-chip-adhoc">довоз</span>
                 <span v-if="d.order" class="so-chip-icon">✓</span>
                 <span v-else-if="d.deadline_status === 'closed'" class="so-chip-icon">✕</span>
               </div>
@@ -116,9 +117,12 @@
               submitted: !!d.order && !d.order?.is_skip,
               skipped: !!d.order?.is_skip,
               closed: d.deadline_status === 'closed' && !d.order,
+              adhoc: d.is_adhoc,
             }"
+            :title="d.is_adhoc ? 'Внеплановая поставка (довоз)' : ''"
             @click="selectDate(d)"
           >
+            <span v-if="d.is_adhoc" class="ro-day-adhoc">довоз</span>
             <span class="ro-day-name">{{ d.delivery_day_name }}</span>
             <span class="ro-day-date">{{ formatDateShort(d.delivery_date) }}</span>
             <span v-if="d.order?.is_skip" class="ro-day-badge skipped" title="Поставка не нужна">🚫</span>
@@ -256,6 +260,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
@@ -711,7 +716,11 @@ function formatDateShort(d) {
 }
 .so-date-chip.submitted { background: #bbdefb; color: #1565c0; }
 .so-date-chip.closed { background: #ffebee; color: #c62828; }
+.so-date-chip.adhoc { background: #ede7f6; color: #5e35b1; }
+.so-chip-adhoc { margin-left: 5px; padding: 0 6px; border-radius: 8px; background: #5e35b1; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.3px; vertical-align: middle; }
 .so-chip-icon { margin-left: 4px; }
+.ro-day-tab.adhoc { border-color: #b39ddb; }
+.ro-day-adhoc { display: block; font-size: 9px; font-weight: 700; color: #5e35b1; letter-spacing: 0.3px; margin-bottom: 2px; }
 .so-back-btn { margin: 12px 16px 0; font-size: 14px; }
 .so-order-form { max-width: 600px; margin: 0 auto; }
 

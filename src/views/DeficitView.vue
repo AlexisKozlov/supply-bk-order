@@ -57,7 +57,7 @@
                 <thead><tr><th>Рест.</th><th>Остаток</th><th></th></tr></thead>
                 <tbody>
                   <tr v-for="(d, i) in stockData" :key="d.restaurantNumber">
-                    <td class="fw">{{ d.restaurantNumber }}</td>
+                    <td class="fw">{{ formatRestaurantNumber(d.restaurantNumber) }}</td>
                     <td><input v-model.number="stockData[i].value" type="number" min="0" class="dfc-cell-input"/></td>
                     <td><button class="dfc-x" @click="stockData.splice(i, 1)">✕</button></td>
                   </tr>
@@ -86,7 +86,7 @@
                 <thead><tr><th>Рест.</th><th>Расход</th><th>Сут.</th><th></th></tr></thead>
                 <tbody>
                   <tr v-for="(d, i) in consumptionData" :key="d.restaurantNumber">
-                    <td class="fw">{{ d.restaurantNumber }}</td>
+                    <td class="fw">{{ formatRestaurantNumber(d.restaurantNumber) }}</td>
                     <td><input v-model.number="consumptionData[i].value" type="number" min="0" class="dfc-cell-input"/></td>
                     <td class="muted">{{ (d.value / (consumptionDays || 1)).toFixed(1) }}</td>
                     <td><button class="dfc-x" @click="consumptionData.splice(i, 1)">✕</button></td>
@@ -119,8 +119,8 @@
               </div>
               <div v-if="showProductDropdown && productResults.length" class="dfc-drop">
                 <div v-for="p in productResults" :key="p.id" class="dfc-drop-item" @click="selectProduct(p)">
-                  <span class="dfc-drop-name">{{ p.name }}</span>
-                  <span class="dfc-drop-meta">{{ p.sku }}<template v-if="p.supplier"> · {{ p.supplier }}</template><template v-if="p.qty_per_box"> · {{ p.qty_per_box }} шт/кор</template></span>
+                  <span class="dfc-drop-name"><span class="dfc-drop-sku">{{ p.sku }}</span> {{ p.name }}</span>
+                  <span class="dfc-drop-meta"><template v-if="p.supplier">{{ p.supplier }}</template><template v-if="p.qty_per_box"> · {{ p.qty_per_box }} шт/кор</template></span>
                 </div>
               </div>
               <div v-if="showProductDropdown && productSearch.length >= 2 && !productResults.length && !searchingProduct" class="dfc-drop dfc-drop-empty">Не найдено</div>
@@ -281,7 +281,7 @@
           </thead>
           <tbody>
             <tr v-for="r in filteredResults" :key="r.restaurantNumber" :class="{ dim: r.allocated === 0 }">
-              <td class="left fw">{{ r.restaurantNumber }}</td>
+              <td class="left fw">{{ formatRestaurantNumber(r.restaurantNumber) }}</td>
               <td>{{ dsp(r.currentStock) }}</td>
               <td>{{ dsp(r.dailyConsumption, 2) }}</td>
               <td>{{ r.daysToCover }}</td>
@@ -333,7 +333,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { formatDateShort as fmtDateShort, formatDateTime as formatDate } from '@/lib/utils.js';
-import { getEntityGroupCode } from '@/lib/legalEntities.js';
+import { getEntityGroupCode, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -845,6 +845,7 @@ async function loadHistory() {
 .dfc-drop-item:last-child { border-bottom: none; }
 .dfc-drop-item:hover { background: #FFF8F0; }
 .dfc-drop-name { font-size: 13px; font-weight: 600; }
+.dfc-drop-sku { color: var(--bk-orange, #E76F51); font-weight: 700; margin-right: 4px; }
 .dfc-drop-meta { font-size: 10px; color: var(--muted); }
 .dfc-selected-badge {
   margin-top: 6px; padding: 6px 10px; border-radius: 6px;

@@ -264,6 +264,14 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  // Внеплановая заявка (довоз): закупки создают заявку ресторану на дату вне графика.
+  async function adminCreateAdhocOrder(params) {
+    return api('admin/adhoc-order', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
   async function adminGetExport(supplierId, date) {
     const data = await api(`admin/export?supplier_id=${supplierId}&date=${date}`);
     return data;
@@ -304,6 +312,6 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminGetReminderRecipients, adminSetReminderRecipient,
     adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
     adminGetTemplates, adminSaveTemplates, adminGetRestaurantsDirectory,
-    adminUpdateQty, adminGetExport, adminSendSummary, adminSendSummaryEmail, adminRemindUnsubmitted,
+    adminUpdateQty, adminCreateAdhocOrder, adminGetExport, adminSendSummary, adminSendSummaryEmail, adminRemindUnsubmitted,
   };
 });

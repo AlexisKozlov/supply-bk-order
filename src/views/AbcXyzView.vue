@@ -85,8 +85,8 @@
               <tr v-for="(item, i) in filteredItems" :key="item.sku" :class="'abc-row-' + item.abc">
                 <td class="col-rank">{{ i + 1 }}</td>
                 <td class="col-name">
-                  <div class="item-name">{{ item.name }}</div>
                   <div class="item-sku">{{ item.sku }}</div>
+                  <div class="item-name">{{ item.name }}</div>
                 </td>
                 <td>{{ item.supplier }}</td>
                 <td class="num-cell">{{ formatNum(item.totalQty) }}</td>

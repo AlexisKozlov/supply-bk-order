@@ -51,7 +51,7 @@
               <tbody>
                 <tr v-for="r in restaurants" :key="r.id">
                   <td class="scm-sched-rest">
-                    <b>{{ r.number }}</b> <span>{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
+                    <b>{{ formatRestaurantNumber(r.number) }}</b> <span>{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
                   </td>
                   <td v-for="d in [1,2,3,4,5,6,7]" :key="d" class="scm-sched-cell" @click="toggleScheduleDay(r.id, d)">
                     <input type="checkbox" :checked="!!scheduleGrid[r.id]?.[d]" @click.stop="toggleScheduleDay(r.id, d)" />
@@ -229,7 +229,7 @@ import { db } from '@/lib/apiClient.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroupCode } from '@/lib/legalEntities.js';
+import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroupCode, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useCloseGuard } from '@/composables/useFormDirty.js';
 
 const emit = defineEmits(['close', 'connected']);

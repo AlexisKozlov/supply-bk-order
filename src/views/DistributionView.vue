@@ -332,7 +332,7 @@
             </div>
             <div class="import-preview-list">
               <div v-for="(row, i) in importPreview.slice(0, 50)" :key="i" class="import-row" :class="{ err: row.error }">
-                <span class="import-rn">{{ row.restaurant_number }}</span>
+                <span class="import-rn">{{ formatRestaurantNumber(row.restaurant_number) }}</span>
                 <span v-if="row.error" class="import-err-msg">{{ row.error }}</span>
                 <span v-else class="import-changes">
                   <span v-for="ch in row.changes" :key="ch.spId" class="import-chg">

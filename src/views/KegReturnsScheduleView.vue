@@ -41,7 +41,7 @@
           </thead>
           <tbody>
             <tr v-for="row in filteredRows" :key="row.id" :class="{ 'krs-row-off': !row.keg_returns_enabled }">
-              <td class="krs-td-num">{{ row.number }}</td>
+              <td class="krs-td-num">{{ formatRestaurantNumber(row.number) }}</td>
               <td class="krs-td-rest">
                 <div class="krs-cell-city">{{ row.city }}</div>
                 <div class="krs-cell-addr">{{ row.address }}</div>
@@ -89,6 +89,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 

@@ -28,7 +28,7 @@
                 <td class="dh-who">{{ r.user_name }}</td>
                 <td><span class="dh-act" :class="actClass(r.action)">{{ actLabel(r.action) }}</span></td>
                 <td class="dh-prod">{{ prodText(r) }}</td>
-                <td class="dh-rest">{{ r.restaurant_number || '—' }}</td>
+                <td class="dh-rest">{{ r.restaurant_number ? formatRestaurantNumber(r.restaurant_number) : '—' }}</td>
                 <td class="dh-change">{{ changeText(r) }}</td>
               </tr>
             </tbody>
@@ -48,6 +48,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 
 const props = defineProps({

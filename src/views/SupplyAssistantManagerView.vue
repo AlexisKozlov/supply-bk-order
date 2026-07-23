@@ -76,7 +76,7 @@
                 @click="openOrder(order.id)"
               >
                 <td class="rom-td-rest">
-                  <span class="rom-cell-rest-city">№{{ order.restaurant_number }}</span>
+                  <span class="rom-cell-rest-city">{{ formatRestaurantNumber(order.restaurant_number) }}</span>
                   <span v-if="order.city" class="sam-city">, {{ order.city }}</span>
                 </td>
                 <td>{{ order.delivery_date || '—' }}</td>
@@ -182,7 +182,7 @@
       <div class="rom-modal sam-order-modal">
         <div class="rom-modal-header">
           <h2>
-            Заказ ресторана №{{ editingOrder?.restaurant_number }}
+            Заказ ресторана {{ formatRestaurantNumber(editingOrder?.restaurant_number) }}
             <span v-if="editingOrder?.delivery_date" class="sam-modal-sub">
               — поставка {{ editingOrder.delivery_date }}
             </span>
@@ -369,7 +369,7 @@ import { useSupplyAssistantStore } from '@/stores/supplyAssistantStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
+import { LEGAL_ENTITIES, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 
 const saStore = useSupplyAssistantStore();

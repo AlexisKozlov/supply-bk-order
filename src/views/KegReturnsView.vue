@@ -26,7 +26,7 @@
       </select>
       <select v-model="filters.restaurant_id">
         <option value="">Все рестораны</option>
-        <option v-for="r in filterRestaurantOptions" :key="r.id" :value="r.id">№{{ r.number }} — {{ r.address }}</option>
+        <option v-for="r in filterRestaurantOptions" :key="r.id" :value="r.id">{{ formatRestaurantNumber(r.number) }} — {{ r.address }}</option>
       </select>
       <input v-model="filters.from" type="date" />
       <input v-model="filters.to" type="date" />
@@ -52,7 +52,7 @@
       </thead>
       <tbody>
         <tr v-for="row in filteredRows" :key="row.id" @click="openEdit(row.id)" class="kr-row">
-          <td>№{{ row.restaurant_number }} {{ row.restaurant_city }}<span v-if="row.restaurant_address">, {{ row.restaurant_address }}</span></td>
+          <td>{{ formatRestaurantNumber(row.restaurant_number) }} {{ row.restaurant_city }}<span v-if="row.restaurant_address">, {{ row.restaurant_address }}</span></td>
           <td>{{ pickupAddressFor(row) }}</td>
           <td>{{ fmtDate(row.return_date) }}</td>
           <td>
@@ -202,7 +202,7 @@
                         </option>
                       </select>
                       <div v-if="p.match && effectiveReqId(i, p) !== p.match.request_id" class="kr-import-hint">
-                        Авто-матч: №{{ p.match.restaurant_number }}
+                        Авто-матч: {{ formatRestaurantNumber(p.match.restaurant_number) }}
                       </div>
                     </td>
                   </tr>
@@ -256,6 +256,7 @@
 
 <script setup>
 import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';
 import { appConfirm } from '@/lib/appDialogs.js';

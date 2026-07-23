@@ -93,13 +93,13 @@
                         <button v-if="item.sku && !isViewer" class="td-item-unlink" @click="unlinkItem(item)" title="Отвязать от справочника">&times;</button>
                       </div>
                     </td>
-                    <td><input v-model.number="item.quantity" type="number" min="0" class="td-cell-input" placeholder="—" :disabled="isViewer"
+                    <td><input v-model.number="item.quantity" type="number" min="0" step="0.001" class="td-cell-input" placeholder="—" :disabled="isViewer"
                       @focus="(e) => onItemCalcFocus(e, i, 'quantity')"
                       @blur="itemCalc.onBlur"
                       @keydown="(e) => onItemCalcKeydown(e, i, 'quantity')" /></td>
                     <td><input v-model="item.unit" class="td-cell-input" placeholder="шт" :disabled="isViewer" /></td>
                     <td class="td-consumption-cell">
-                      <input v-model.number="item.monthly_consumption" type="number" min="0" step="0.1" class="td-cell-input td-consumption-input" placeholder="—" :disabled="isViewer"
+                      <input v-model.number="item.monthly_consumption" type="number" min="0" step="0.001" class="td-cell-input td-consumption-input" placeholder="—" :disabled="isViewer"
                         @focus="(e) => onItemCalcFocus(e, i, 'monthly_consumption')"
                         @blur="itemCalc.onBlur"
                         @keydown="(e) => onItemCalcKeydown(e, i, 'monthly_consumption')" />
@@ -169,7 +169,7 @@
                   <tr v-for="(item, ii) in tender.items" :key="ii">
                     <td class="td-price-item-name">{{ item.name || '(без названия)' }}</td>
                     <td>
-                      <input :value="offer.prices_rub[ii]" type="number" step="0.01" min="0"
+                      <input :value="offer.prices_rub[ii]" type="number" step="0.001" min="0"
                         class="td-cell-input price-cell" :class="{ 'cheapest': isCheapest(ii, offer.prices_rub[ii], 'rub') }"
                         :disabled="isViewer" placeholder="—"
                         @input="onPriceRubInput(offer, ii, $event)"
@@ -178,7 +178,7 @@
                         @keydown="(e) => onOfferCalcKeydown(e, oi, ii, 'price_rub')" />
                     </td>
                     <td>
-                      <input :value="offer.prices_byn[ii]" type="number" step="0.01" min="0"
+                      <input :value="offer.prices_byn[ii]" type="number" step="0.001" min="0"
                         class="td-cell-input price-cell"
                         :disabled="isViewer" placeholder="—"
                         @input="onPriceBynInput(offer, ii, $event)"
@@ -303,12 +303,30 @@
                         <strong>{{ formatPrice(compOfferTotalCur(o, compareCurrency.toLowerCase())) }}</strong>
                       </td>
                     </tr>
+                    <tr class="comp-pct-row">
+                      <td class="comp-fixed-col">Отклонение от лучшей, %</td>
+                      <td class="comp-qty-col"></td>
+                      <td v-for="(o, oi) in compOffers" :key="oi" :class="{ 'cheapest-total': isCheapestTotalComp(o) }">
+                        <span v-if="compPctAboveMin(o, compareCurrency.toLowerCase(), false) === 0" class="comp-pct-best">лучшая</span>
+                        <span v-else-if="compPctAboveMin(o, compareCurrency.toLowerCase(), false) != null" class="comp-pct-worse">+{{ compPctAboveMin(o, compareCurrency.toLowerCase(), false) }}%</span>
+                        <span v-else>—</span>
+                      </td>
+                    </tr>
                     <tr v-if="tender.items.some(it => it.quantity)" class="comp-total-row">
                       <td class="comp-fixed-col"><strong>Итого (сумма), {{ compareCurrency }}{{ compareMode ? ' *' : '' }}</strong></td>
                       <td class="comp-qty-col"></td>
                       <td v-for="(o, oi) in compOffers" :key="oi"
                         :class="{ 'cheapest-total': isCheapestTotalQtyComp(o), winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
                         <strong>{{ formatPrice(compOfferTotalWithQtyCur(o, compareCurrency.toLowerCase())) }}</strong>
+                      </td>
+                    </tr>
+                    <tr v-if="tender.items.some(it => it.quantity)" class="comp-pct-row">
+                      <td class="comp-fixed-col">Отклонение от лучшей, %</td>
+                      <td class="comp-qty-col"></td>
+                      <td v-for="(o, oi) in compOffers" :key="oi" :class="{ 'cheapest-total': isCheapestTotalQtyComp(o) }">
+                        <span v-if="compPctAboveMin(o, compareCurrency.toLowerCase(), true) === 0" class="comp-pct-best">лучшая</span>
+                        <span v-else-if="compPctAboveMin(o, compareCurrency.toLowerCase(), true) != null" class="comp-pct-worse">+{{ compPctAboveMin(o, compareCurrency.toLowerCase(), true) }}%</span>
+                        <span v-else>—</span>
                       </td>
                     </tr>
                     <tr class="comp-extra-row">
@@ -942,6 +960,20 @@ function compOfferTotalWithQtyCur(o, cur) {
   }
   return s;
 }
+// Минимальный (лучший) итог среди предложений: withQty=false — по цене, true — по сумме.
+function compMinTotalCur(cur, withQty) {
+  const totals = compOffers.value
+    .map(o => withQty ? compOfferTotalWithQtyCur(o, cur) : compOfferTotalCur(o, cur))
+    .filter(v => v > 0);
+  return totals.length ? Math.min(...totals) : 0;
+}
+// На сколько % предложение дороже лучшего. 0 = лучшее; null = нет цен.
+function compPctAboveMin(o, cur, withQty) {
+  const total = withQty ? compOfferTotalWithQtyCur(o, cur) : compOfferTotalCur(o, cur);
+  const min = compMinTotalCur(cur, withQty);
+  if (!(total > 0) || !(min > 0)) return null;
+  return Math.round((total - min) / min * 1000) / 10;
+}
 
 // Цена в выбранной валюте для сравнения
 function getComparePrice(offer, ii) {
@@ -1341,6 +1373,9 @@ td.cheapest-total strong { color:#1B5E20; }
 td.best-term { color:#1565C0; font-weight:600; background:#E3F2FD; }
 .comp-total-row td { border-top:2px solid var(--bk-brown, #502314); padding:12px 14px; font-weight:700; }
 .comp-extra-row td { font-size:11px; color:var(--text-muted); border-bottom:1px dashed #E8E0D6; padding:8px 14px; }
+.comp-pct-row td { font-size:12px; padding:6px 14px; font-weight:600; }
+.comp-pct-best { color:#1B5E20; font-weight:700; }
+.comp-pct-worse { color:#C62828; }
 
 /* ═══ Боковая панель ═══ */
 .compare-sidebar { background:white; border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); border-left:1px solid #E8E0D6; padding:20px; position:sticky; top:16px; display:flex; flex-direction:column; gap:18px; max-height:calc(100vh - 120px); overflow-y:auto; }

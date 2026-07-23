@@ -240,8 +240,8 @@
                   >
                     <td class="pf-td pf-td-num">{{ idx + 1 }}</td>
                     <td class="pf-td pf-td-name">
-                      <span class="pf-item-name">{{ item.name }}</span>
                       <span v-if="item.sku" class="pf-item-sku">{{ item.sku }}</span>
+                      <span class="pf-item-name">{{ item.name }}</span>
                     </td>
                     <td class="pf-td pf-td-qty">{{ toAccountingBoxes(item) }}</td>
                     <td v-if="tab === 'transit' || tab === 'pending'" class="pf-td pf-td-fact">

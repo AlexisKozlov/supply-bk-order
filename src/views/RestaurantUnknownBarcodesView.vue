@@ -298,8 +298,8 @@
             :class="['ub-bind-item', { active: bindModal.selectedSku === p.sku && bindModal.selectedLE === p.legal_entity }]"
             @click="bindModal.selectedSku = p.sku; bindModal.selectedName = p.name; bindModal.selectedLE = p.legal_entity"
           >
-            <span class="ub-bind-item-name">{{ p.name }}</span>
-            <span class="ub-bind-item-meta">{{ p.sku }} · {{ p.legal_entity }}<span v-if="p.gtin"> · текущий GTIN: {{ p.gtin }}</span></span>
+            <span class="ub-bind-item-name"><span class="ub-bind-item-sku">{{ p.sku }}</span> {{ p.name }}</span>
+            <span class="ub-bind-item-meta">{{ p.legal_entity }}<span v-if="p.gtin"> · текущий GTIN: {{ p.gtin }}</span></span>
           </button>
         </div>
         <div v-else-if="bindModal.search && bindModal.search.length >= 2 && !bindModal.searching" class="ub-bind-empty">Ничего не найдено</div>
@@ -758,6 +758,7 @@ onBeforeUnmount(() => {
 .ub-bind-item:hover { background: #f9fafb; }
 .ub-bind-item.active { border-color: #E76F51; background: #fff3ec; }
 .ub-bind-item-name { font-size: 13px; font-weight: 600; color: #111827; }
+.ub-bind-item-sku { color: #E76F51; font-weight: 700; margin-right: 4px; }
 .ub-bind-item-meta { font-size: 11px; color: #6b7280; }
 .ub-bind-empty, .ub-bind-loading {
   text-align: center; padding: 12px; color: #6b7280; font-size: 13px;

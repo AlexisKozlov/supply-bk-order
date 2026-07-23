@@ -2472,10 +2472,14 @@ if ($roAction === 'warehouse-stock' && $method === 'GET') {
     $customer = roShortCustomerName($legalEntity);
     if (!$customer) roRespond(['error' => 'Не удалось определить юр. лицо ресторана'], 400);
 
+    // Включаем и НЕактивные карточки: часть остатков склада — по товарам, снятым
+    // с активного справочника (напр. 51108), но артикул и чистое имя у них есть.
+    // Активные в приоритете (ORDER BY is_active DESC + не перезаписываем).
     $prodStmt = $pdo->prepare("
         SELECT sku, external_code, gtin, name, analog_group, category
         FROM products
-        WHERE legal_entity = ? AND is_active = 1
+        WHERE legal_entity = ?
+        ORDER BY is_active DESC
     ");
     $prodStmt->execute([$legalEntity]);
     $productsBySku = [];
@@ -2485,9 +2489,9 @@ if ($roAction === 'warehouse-stock' && $method === 'GET') {
         $sku = trim((string)($p['sku'] ?? ''));
         $ext = trim((string)($p['external_code'] ?? ''));
         $name = roNormalizeLookupText($p['name'] ?? '');
-        if ($sku !== '') $productsBySku[$sku] = $p;
-        if ($ext !== '') $productsByExternal[$ext] = $p;
-        if ($name !== '') $productsByName[$name] = $p;
+        if ($sku !== '' && !isset($productsBySku[$sku])) $productsBySku[$sku] = $p;
+        if ($ext !== '' && !isset($productsByExternal[$ext])) $productsByExternal[$ext] = $p;
+        if ($name !== '' && !isset($productsByName[$name])) $productsByName[$name] = $p;
     }
 
     $s = $pdo->prepare("
@@ -2512,8 +2516,17 @@ if ($roAction === 'warehouse-stock' && $method === 'GET') {
         $product = roFindProductForShelfRow($row['product_name'] ?? '', $productsBySku, $productsByExternal, $productsByName);
         $sku = trim((string)($product['sku'] ?? ''));
         $external = trim((string)($product['external_code'] ?? ''));
-        if (!$sku && preg_match('/^\s*([^\s]+)\s+-\s+([^\s]+)\s+/u', (string)$row['product_name'], $m)) $sku = trim($m[2]);
-        if (!$external && preg_match('/^\s*([^\s]+)\s+-\s+([^\s]+)\s+/u', (string)$row['product_name'], $m)) $external = trim($m[1]);
+        // Артикул из имени, если карточки нет. Формат остатков — «КОД Название»
+        // (реже «ВНЕШНИЙ - SKU Название»). Берём код из начала строки — иначе
+        // артикул не читался и уезжал в наименование (особенно у ПС).
+        if (!$sku) {
+            if (preg_match('/^\s*(\S+)\s+-\s+(\S+)\s+/u', (string)$row['product_name'], $m)) {
+                if (!$external) $external = trim($m[1]);
+                $sku = trim($m[2]);
+            } elseif (preg_match('/^\s*(\S+)\s+\S/u', (string)$row['product_name'], $m)) {
+                $sku = trim($m[1]);
+            }
+        }
 
         $key = $sku ? 'sku:' . $sku : 'name:' . roNormalizeLookupText($row['product_name']);
         $storage = roWarehouseStorageMode($row['warehouse'] ?? '');
@@ -2523,7 +2536,7 @@ if ($roAction === 'warehouse-stock' && $method === 'GET') {
                 'sku' => $sku,
                 'external_code' => $external,
                 'gtin' => $product['gtin'] ?? '',
-                'name' => $product['name'] ?? preg_replace('/^\s*[^\s]+\s+-\s*[^\s]+\s+/u', '', (string)$row['product_name']),
+                'name' => $product['name'] ?? trim(preg_replace('/^\s*\S+\s+-\s+\S+\s+|^\s*\S+\s+/u', '', (string)$row['product_name'])),
                 'raw_name' => $row['product_name'],
                 'analog_group' => $product['analog_group'] ?? '',
                 'category' => $product['category'] ?? '',
