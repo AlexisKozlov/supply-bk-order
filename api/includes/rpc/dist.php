@@ -7,6 +7,41 @@
  * $ROLE_TEMPLATES, $ACCESS_LEVELS, $clientIp.
  */
 
+    // Запись в историю модуля распределения (таблица dist_history).
+    // Отдельный журнал: кто, когда и что нажал в сессии. Ошибку журнала
+    // глотаем — она не должна ронять само действие пользователя.
+    if (!function_exists('distHistoryLog')) {
+        function distHistoryLog($pdo, $sessionId, $group, $action, $userName, $opts = []) {
+            try {
+                $pdo->prepare("INSERT INTO dist_history
+                    (session_id, legal_entity_group, action, session_product_id, restaurant_number, old_value, new_value, detail, user_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([
+                        (int)$sessionId,
+                        (string)$group,
+                        $action,
+                        isset($opts['spId']) ? (int)$opts['spId'] : null,
+                        $opts['restNum'] ?? null,
+                        $opts['old'] ?? null,
+                        $opts['new'] ?? null,
+                        $opts['detail'] ?? null,
+                        $userName,
+                    ]);
+            } catch (Exception $e) {
+                error_log('distHistoryLog error: ' . $e->getMessage());
+            }
+        }
+    }
+    // Читаемое значение статуса клетки для истории.
+    if (!function_exists('distShippedLabel')) {
+        function distShippedLabel($v) {
+            $v = (int)$v;
+            if ($v === 1) return '✓ отгружено';
+            if ($v === 2) return '✗ не нужно';
+            return '—';
+        }
+    }
+
     if ($fn === 'dist_get_sessions') {
         requireModuleAccess($authUser, 'distribution', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
@@ -38,6 +73,9 @@
             $customSku = !empty($p['custom_sku']) ? trim($p['custom_sku']) : null;
             $ins->execute([$sessionId, $productId, $customName, $customSku, $p['default_qty'] ?? 1, $p['unit'] ?? 'кор', $i]);
         }
+        distHistoryLog($pdo, $sessionId, $group, 'session_created', $authUserName, [
+            'detail' => $name . ' (' . count($products) . ' тов.)',
+        ]);
         respond(['success' => true, 'session_id' => (int)$sessionId]);
     }
 
@@ -45,10 +83,16 @@
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['session_id'] ?? 0);
         if (!$id) respond(['error' => 'session_id обязателен'], 400);
-        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$id]);
-        $sgVal = $sg->fetchColumn();
-        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        $sg = $pdo->prepare("SELECT legal_entity_group, name FROM dist_sessions WHERE id=?"); $sg->execute([$id]);
+        $sgRow = $sg->fetch();
+        if ($sgRow === false) respond(['error' => 'Сессия не найдена'], 404);
+        $sgVal = $sgRow['legal_entity_group'];
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+        // История пишется ДО удаления (записи dist_history не привязаны FK,
+        // поэтому переживут удаление сессии).
+        distHistoryLog($pdo, $id, $sgVal ?: 'BK_VM', 'session_deleted', $authUserName, [
+            'detail' => $sgRow['name'],
+        ]);
         // CASCADE удалит session_products и entries
         $pdo->prepare("DELETE FROM dist_sessions WHERE id=?")->execute([$id]);
         respond(['success' => true]);
@@ -63,6 +107,7 @@
         if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("UPDATE dist_sessions SET status='closed', closed_at=NOW() WHERE id=?")->execute([$id]);
+        distHistoryLog($pdo, $id, $sgVal ?: 'BK_VM', 'session_closed', $authUserName);
         respond(['success' => true]);
     }
 
@@ -75,6 +120,7 @@
         if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
         $pdo->prepare("UPDATE dist_sessions SET status='active', closed_at=NULL WHERE id=?")->execute([$id]);
+        distHistoryLog($pdo, $id, $sgVal ?: 'BK_VM', 'session_reopened', $authUserName);
         respond(['success' => true]);
     }
 
@@ -152,10 +198,17 @@
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
         $expectedVersion = isset($body['version']) ? (int)$body['version'] : null;
         if (!$spId || !$restNum) respond(['error' => 'Не указан товар или ресторан'], 400);
-        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
-        $sgVal = $sg->fetchColumn();
-        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group, s.id AS session_id FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgRow = $sg->fetch();
+        if ($sgRow === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sgVal = $sgRow['legal_entity_group'];
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+
+        // Прежнее значение — для истории «было → стало».
+        $prevStmt = $pdo->prepare("SELECT shipped FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
+        $prevStmt->execute([$spId, $restNum]);
+        $prevShipped = $prevStmt->fetchColumn();
+        $prevShipped = $prevShipped === false ? 0 : (int)$prevShipped;
 
         if ($expectedVersion !== null) {
             $cur = $pdo->prepare("SELECT shipped, qty, version, updated_by FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
@@ -175,6 +228,13 @@
             ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1");
         $s->execute([$spId, $restNum, $shipped, $authUserName, $authUserName]);
 
+        if ($prevShipped !== (int)$shipped) {
+            distHistoryLog($pdo, $sgRow['session_id'], $sgVal ?: 'BK_VM', 'cell_shipped', $authUserName, [
+                'spId' => $spId, 'restNum' => $restNum,
+                'old' => distShippedLabel($prevShipped), 'new' => distShippedLabel($shipped),
+            ]);
+        }
+
         $vs = $pdo->prepare("SELECT version FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
         $vs->execute([$spId, $restNum]);
         respond(['success' => true, 'version' => (int)$vs->fetchColumn()]);
@@ -187,10 +247,17 @@
         $qty = $body['qty'] ?? null;
         $expectedVersion = isset($body['version']) ? (int)$body['version'] : null;
         if (!$spId || !$restNum) respond(['error' => 'Не указан товар или ресторан'], 400);
-        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
-        $sgVal = $sg->fetchColumn();
-        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group, s.id AS session_id FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgRow = $sg->fetch();
+        if ($sgRow === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sgVal = $sgRow['legal_entity_group'];
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+
+        // Прежнее количество — для истории «было → стало».
+        $prevStmt = $pdo->prepare("SELECT qty FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
+        $prevStmt->execute([$spId, $restNum]);
+        $prevQtyRaw = $prevStmt->fetchColumn();
+        $prevQty = ($prevQtyRaw === false || $prevQtyRaw === null || trim((string)$prevQtyRaw) === '') ? null : (string)$prevQtyRaw;
 
         if ($expectedVersion !== null) {
             $cur = $pdo->prepare("SELECT shipped, qty, version, updated_by FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
@@ -209,6 +276,15 @@
             VALUES (?, ?, ?, ?, ?, 1)
             ON DUPLICATE KEY UPDATE qty = VALUES(qty), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1");
         $s->execute([$spId, $restNum, $qty, $authUserName, $authUserName]);
+
+        $newQty = ($qty === null || trim((string)$qty) === '') ? null : (string)$qty;
+        if ($prevQty !== $newQty) {
+            distHistoryLog($pdo, $sgRow['session_id'], $sgVal ?: 'BK_VM', 'cell_qty', $authUserName, [
+                'spId' => $spId, 'restNum' => $restNum,
+                'old' => $prevQty === null ? 'стандарт' : $prevQty,
+                'new' => $newQty === null ? 'стандарт' : $newQty,
+            ]);
+        }
 
         $vs = $pdo->prepare("SELECT version FROM dist_entries WHERE session_product_id=? AND restaurant_number=?");
         $vs->execute([$spId, $restNum]);
@@ -235,6 +311,10 @@
             $customSku = !empty($p['custom_sku']) ? trim($p['custom_sku']) : null;
             $ins->execute([$sessionId, $productId, $customName, $customSku, $p['default_qty'] ?? 1, $p['unit'] ?? 'кор', $maxOrder + $i + 1]);
         }
+        $addDetail = count($products) === 1
+            ? trim(($products[0]['custom_sku'] ?? '') . ' ' . ($products[0]['custom_name'] ?? 'товар'))
+            : (count($products) . ' тов.');
+        distHistoryLog($pdo, $sessionId, $sgVal ?: 'BK_VM', 'product_added', $authUserName, ['detail' => $addDetail]);
         respond(['success' => true]);
     }
 
@@ -242,10 +322,19 @@
         requireModuleAccess($authUser, 'distribution', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $spId = intval($body['session_product_id'] ?? 0);
         if (!$spId) respond(['error' => 'Не указан товар'], 400);
-        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
-        $sgVal = $sg->fetchColumn();
-        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group, s.id AS session_id,
+                COALESCE(sp.custom_sku, p.sku) AS article, COALESCE(sp.custom_name, p.name) AS pname
+            FROM dist_session_products sp
+            JOIN dist_sessions s ON s.id=sp.session_id
+            LEFT JOIN products p ON p.id = sp.product_id
+            WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgRow = $sg->fetch();
+        if ($sgRow === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sgVal = $sgRow['legal_entity_group'];
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+        distHistoryLog($pdo, $sgRow['session_id'], $sgVal ?: 'BK_VM', 'product_removed', $authUserName, [
+            'detail' => trim(($sgRow['article'] ?? '') . ' ' . ($sgRow['pname'] ?? '')),
+        ]);
         $pdo->prepare("DELETE FROM dist_session_products WHERE id=?")->execute([$spId]);
         respond(['success' => true]);
     }
@@ -320,6 +409,9 @@
             $pdo->prepare($sql)->execute($params);
             $totalUpdated += count($qtyOnly);
         }
+        distHistoryLog($pdo, $sessionId, $sgVal ?: 'BK_VM', 'cell_bulk_import', $authUserName, [
+            'detail' => 'Импорт из Excel: ' . $totalUpdated . ' клеток',
+        ]);
         respond(['success' => true, 'updated' => $totalUpdated]);
     }
 
@@ -337,6 +429,10 @@
             VALUES (?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE note = VALUES(note), updated_by = VALUES(updated_by)");
         $s->execute([$sessionId, $restNum, $note, $authUserName, $authUserName]);
+        distHistoryLog($pdo, $sessionId, $sgVal ?: 'BK_VM', 'note_saved', $authUserName, [
+            'restNum' => $restNum,
+            'detail' => $note === '' ? 'очищено' : mb_substr($note, 0, 200),
+        ]);
         respond(['success' => true]);
     }
 
@@ -349,9 +445,10 @@
         $shipped = isset($body['shipped']) ? (int)$body['shipped'] : 1;
         if (!$spId || empty($restaurantNumbers)) respond(['error' => 'Нет данных'], 400);
         if (count($restaurantNumbers) > 5000) respond(['error' => 'Слишком много ресторанов в одном запросе (макс. 5000)'], 400);
-        $sg = $pdo->prepare("SELECT s.legal_entity_group FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
-        $sgVal = $sg->fetchColumn();
-        if ($sgVal === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sg = $pdo->prepare("SELECT s.legal_entity_group, s.id AS session_id FROM dist_session_products sp JOIN dist_sessions s ON s.id=sp.session_id WHERE sp.id=?"); $sg->execute([$spId]);
+        $sgRow = $sg->fetch();
+        if ($sgRow === false) respond(['error' => 'Позиция не найдена'], 404);
+        $sgVal = $sgRow['legal_entity_group'];
         if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
 
         $placeholders = [];
@@ -364,6 +461,11 @@
             . implode(',', $placeholders)
             . " ON DUPLICATE KEY UPDATE shipped = VALUES(shipped), updated_at = NOW(), updated_by = VALUES(updated_by), version = version + 1";
         $pdo->prepare($sql)->execute($params);
+        distHistoryLog($pdo, $sgRow['session_id'], $sgVal ?: 'BK_VM', 'cell_bulk_shipped', $authUserName, [
+            'spId' => $spId,
+            'new' => distShippedLabel($shipped),
+            'detail' => count($restaurantNumbers) . ' ресторанов',
+        ]);
         respond(['success' => true, 'updated' => count($restaurantNumbers)]);
     }
 
@@ -471,4 +573,40 @@
         }
 
         respond(['sessions' => $sessions, 'products' => $products, 'entries' => $entries, 'restaurants' => $out]);
+    }
+
+    // История действий по одной сессии распределения. Отдаётся порциями
+    // (свежие сверху). Товар/ресторан подтягиваются на чтении — так строка
+    // остаётся читаемой даже если позицию потом удалили из сессии.
+    if ($fn === 'dist_get_history') {
+        requireModuleAccess($authUser, 'distribution', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $sessionId = intval($body['session_id'] ?? 0);
+        if (!$sessionId) respond(['error' => 'session_id обязателен'], 400);
+        $sg = $pdo->prepare("SELECT legal_entity_group FROM dist_sessions WHERE id=?"); $sg->execute([$sessionId]);
+        $sgVal = $sg->fetchColumn();
+        if ($sgVal === false) respond(['error' => 'Сессия не найдена'], 404);
+        if (!checkLegalEntityGroupAccess($authUser, $sgVal)) respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+
+        $limit = intval($body['limit'] ?? 100);
+        if ($limit < 1) $limit = 100;
+        if ($limit > 500) $limit = 500;
+        $offset = intval($body['offset'] ?? 0);
+        if ($offset < 0) $offset = 0;
+
+        $tot = $pdo->prepare("SELECT COUNT(*) FROM dist_history WHERE session_id=?");
+        $tot->execute([$sessionId]);
+        $total = (int)$tot->fetchColumn();
+
+        $hs = $pdo->prepare("SELECT h.id, h.action, h.session_product_id, h.restaurant_number,
+                    h.old_value, h.new_value, h.detail, h.user_name, h.created_at,
+                    COALESCE(sp.custom_sku, p.sku) AS article,
+                    COALESCE(sp.custom_name, p.name) AS product_name
+                FROM dist_history h
+                LEFT JOIN dist_session_products sp ON sp.id = h.session_product_id
+                LEFT JOIN products p ON p.id = sp.product_id
+                WHERE h.session_id = ?
+                ORDER BY h.id DESC
+                LIMIT " . (int)$limit . " OFFSET " . (int)$offset);
+        $hs->execute([$sessionId]);
+        respond(['rows' => $hs->fetchAll(), 'total' => $total]);
     }
