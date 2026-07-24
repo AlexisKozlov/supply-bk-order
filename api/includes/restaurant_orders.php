@@ -150,6 +150,20 @@ function roSendAccountEmail($pdo, $userId, $type, array $ctx = []) {
                 ]);
                 break;
             }
+            case 'account_enabled': {
+                $subject = 'Доступ ресторана восстановлен — Supply Department';
+                $bodyHtml = '<p style="margin:0 0 12px;">Доступ ресторана №<strong>' . htmlspecialchars($restNum, ENT_QUOTES, 'UTF-8') . '</strong> к порталу закупок восстановлен.</p>'
+                          . '<p style="margin:0;">Вход в личный кабинет снова открыт, заявки поставщикам и напоминания возобновлены.</p>';
+                $html = renderMailHtml([
+                    'title'   => 'Доступ восстановлен',
+                    'preview' => 'Доступ ресторана к порталу закупок восстановлен',
+                    'intro'   => 'Здравствуйте!',
+                    'body'    => $bodyHtml,
+                    'cta'     => ['text' => 'Войти в кабинет', 'url' => $siteUrl . '/restaurant/login'],
+                    'footer'  => 'Вопросы по подключению — в Telegram: @' . $supportTg,
+                ]);
+                break;
+            }
             case 'new_device': {
                 $subject = 'Новый вход в кабинет — Supply Department';
                 $deviceLabel = $ctx['device'] ?? 'Неизвестное устройство';
@@ -184,11 +198,12 @@ function roSendAccountEmail($pdo, $userId, $type, array $ctx = []) {
 }
 
 /**
- * Уведомление ресторану об отключении доступа — в Telegram и на почту.
- * Вызывается ДО/во время отключения; chat_id берём напрямую (без r.active),
- * т.к. к моменту вызова ресторан уже помечен неактивным.
+ * Уведомление ресторану о смене доступа (отключён/восстановлен) — в Telegram
+ * и на почту. chat_id берём напрямую (без r.active): при отключении ресторан
+ * уже неактивен, а при включении подписки на месте.
  */
-function roNotifyRestaurantDisabled($pdo, $restaurantNumber, $legalEntityGroup) {
+function roNotifyRestaurantAccess($pdo, $restaurantNumber, $legalEntityGroup, $active) {
+    $active = (int)$active;
     $displayNumber = function_exists('formatRestaurantNumber')
         ? formatRestaurantNumber((int)$restaurantNumber)
         : (string)$restaurantNumber;
@@ -205,24 +220,30 @@ function roNotifyRestaurantDisabled($pdo, $restaurantNumber, $legalEntityGroup) 
             $subs->execute([(int)$restaurantNumber, $legalEntityGroup]);
             $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
             if ($chatIds) {
-                $msg  = "🚫 <b>Доступ ресторана {$displayNumber} отключён</b>\n\n";
-                $msg .= "Отдел закупок отключил доступ ресторана к порталу. Вход в кабинет закрыт, заявки поставщикам и напоминания приостановлены.\n\n";
-                $msg .= "Если это ошибка — свяжитесь с отделом закупок.";
+                if ($active === 1) {
+                    $msg  = "✅ <b>Доступ ресторана {$displayNumber} восстановлен</b>\n\n";
+                    $msg .= "Вход в кабинет снова открыт, заявки поставщикам и напоминания возобновлены.";
+                } else {
+                    $msg  = "🚫 <b>Доступ ресторана {$displayNumber} отключён</b>\n\n";
+                    $msg .= "Отдел закупок отключил доступ ресторана к порталу. Вход в кабинет закрыт, заявки поставщикам и напоминания приостановлены.\n\n";
+                    $msg .= "Если это ошибка — свяжитесь с отделом закупок.";
+                }
                 sendTelegramBulk($botToken, $chatIds, $msg);
             }
         }
     } catch (Throwable $e) {
-        error_log('[roNotifyRestaurantDisabled] tg: ' . $e->getMessage());
+        error_log('[roNotifyRestaurantAccess] tg: ' . $e->getMessage());
     }
     // Email — всем учёткам ресторана с подтверждённым адресом.
     try {
+        $emailType = $active === 1 ? 'account_enabled' : 'account_disabled';
         $us = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ?");
         $us->execute([(int)$restaurantNumber, $legalEntityGroup]);
         foreach ($us->fetchAll(PDO::FETCH_COLUMN) as $uid) {
-            roSendAccountEmail($pdo, (int)$uid, 'account_disabled');
+            roSendAccountEmail($pdo, (int)$uid, $emailType);
         }
     } catch (Throwable $e) {
-        error_log('[roNotifyRestaurantDisabled] email: ' . $e->getMessage());
+        error_log('[roNotifyRestaurantAccess] email: ' . $e->getMessage());
     }
 }
 
@@ -5715,10 +5736,10 @@ if (strpos($roAction, 'admin') === 0) {
             // но и сам ресторан (restaurants.active). При active=0 он выпадает из
             // заявок поставщикам, расписаний, графика доставки и напоминаний.
             $pdo->prepare("UPDATE restaurants SET active = ? WHERE number = ? AND legal_entity_group = ?")->execute([$active, $restNum, $restGroup]);
+            // Уведомляем ресторан о смене доступа (Telegram + почта): отключён
+            // или восстановлен. chat_id/email берём напрямую.
+            roNotifyRestaurantAccess($pdo, $restNum, $restGroup, $active);
             if ($active === 0) {
-                // Уведомляем ресторан об отключении (Telegram + почта) — до того,
-                // как флаги отрежут его от рассылок (chat_id берём напрямую).
-                roNotifyRestaurantDisabled($pdo, $restNum, $restGroup);
                 // Гасим живые сессии кабинета.
                 roRevokeAllSessionsForRestaurant($pdo, $restNum, $restGroup);
             }
