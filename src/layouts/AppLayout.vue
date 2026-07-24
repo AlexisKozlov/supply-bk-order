@@ -400,7 +400,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useNotificationStore } from '@/stores/notificationStore.js';
 import { db, serverDown } from '@/lib/apiClient.js';
-import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
+import { LEGAL_ENTITIES, getEntityGroupCode } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import BroadcastPopup from '@/components/BroadcastPopup.vue';
@@ -448,7 +448,16 @@ function handleOffline() { isOffline.value = true; }
 const sidebarCollapsed = ref(localStorage.getItem('bk_sidebar_collapsed') === 'true');
 const sidebarOpen = ref(false);
 const hiddenModules = computed(() => userStore.getHiddenModules());
-function isModuleVisible(module, route = null) { return !hiddenModules.value.includes(route || module) && !hiddenModules.value.includes(module); }
+
+// Модули, завязанные на 1С УТ и пивные кеги — только для БК+ВМ.
+// У Пиццы Стар нет 1С (у них Додо) и нет кег, поэтому на ПС их прячем.
+const BK_VM_ONLY_MODULES = ['keg-returns', 'supply-assistant', 'reconciliation'];
+const currentGroup = computed(() => getEntityGroupCode(orderStore.settings.legalEntity));
+
+function isModuleVisible(module, route = null) {
+  if (currentGroup.value === 'PS' && BK_VM_ONLY_MODULES.includes(module)) return false;
+  return !hiddenModules.value.includes(route || module) && !hiddenModules.value.includes(module);
+}
 
 const sidebarSections = [
   { title: 'Заказы', items: [

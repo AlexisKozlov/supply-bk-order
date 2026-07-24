@@ -5654,9 +5654,12 @@ if (strpos($roAction, 'admin') === 0) {
             $active = (int)($body['is_active'] ?? 1);
             roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
             $pdo->prepare("UPDATE ro_users SET is_active = ? WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$active, $restNum, $restGroup]);
-            // Если деактивируем — гасим все живые сессии, иначе ресторан останется
-            // внутри по уже выданным токенам.
+            // Отключение/включение ресторана — полное: гасим не только кабинет,
+            // но и сам ресторан (restaurants.active). При active=0 он выпадает из
+            // заявок поставщикам, расписаний, графика доставки и напоминаний.
+            $pdo->prepare("UPDATE restaurants SET active = ? WHERE number = ? AND legal_entity_group = ?")->execute([$active, $restNum, $restGroup]);
             if ($active === 0) {
+                // Гасим живые сессии кабинета.
                 roRevokeAllSessionsForRestaurant($pdo, $restNum, $restGroup);
             }
             roRespond(['success' => true]);

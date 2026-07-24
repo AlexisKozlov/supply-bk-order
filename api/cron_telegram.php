@@ -718,7 +718,8 @@ try {
         $subsStmt = $pdo->prepare("SELECT DISTINCT s.chat_id, s.restaurant_number, s.notify_stock_reminders
             FROM ro_telegram_subs s
             JOIN restaurants r ON r.number = s.restaurant_number AND r.legal_entity_group = ?
-            WHERE s.tg_blocked_at IS NULL OR s.tg_blocked_at < NOW() - INTERVAL 30 DAY");
+            WHERE r.active = 1
+              AND (s.tg_blocked_at IS NULL OR s.tg_blocked_at < NOW() - INTERVAL 30 DAY)");
         $subsStmt->execute([$sc['legal_entity_group']]);
         $subs = $subsStmt->fetchAll();
         foreach ($subs as $sub) {
