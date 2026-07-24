@@ -1375,3 +1375,52 @@ export async function exportPaymentPlanXlsx(rows, period) {
   XLSX.utils.book_append_sheet(wb, ws, 'План оплат');
   XLSX.writeFile(wb, `План оплат ${monthLabel}.xlsx`);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Таблица аналогов — выгрузка для ОК/бухгалтерии. Столбцы:
+//   Артикул | Наименование | Учётная единица (шт/кг/л в упаковке) |
+//   Поставщик | Группа аналогов
+// rows: [{ sku, name, measure, supplier, group }]. Оформление — стиль портала.
+// ═══════════════════════════════════════════════════════════════════
+export async function exportAnalogsXlsx(rows) {
+  const XLSX = await import('xlsx-js-style');
+  const brown = '502314', cream = 'FFF8F0', borderClr = 'E0D6CC';
+  const b = { style: 'thin', color: { rgb: borderClr } };
+  const borders = { top: b, bottom: b, left: b, right: b };
+  const sTitle = { font: { bold: true, sz: 16, color: { rgb: brown }, name: 'Calibri' }, alignment: { vertical: 'center' } };
+  const sHeader = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' }, fill: { fgColor: { rgb: brown } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: borders };
+  const sHeaderLeft = { ...sHeader, alignment: { ...sHeader.alignment, horizontal: 'left' } };
+  const cell = (stripe, extra = {}) => ({ font: { sz: 11, name: 'Calibri', ...(extra.font || {}) }, fill: stripe ? { fgColor: { rgb: cream } } : undefined, alignment: { vertical: 'center', ...(extra.alignment || {}) }, border: borders });
+
+  const ws = {};
+  const put = (r, c, v, s) => { const ref = XLSX.utils.encode_cell({ r, c }); ws[ref] = { v, t: typeof v === 'number' ? 'n' : 's', s }; };
+
+  let r = 0;
+  put(r, 0, 'Таблица аналогов', sTitle); r += 2;
+  ['Артикул', 'Наименование', 'Учётная единица', 'Поставщик', 'Группа аналогов'].forEach((h, c) => put(r, c, h, c === 1 ? sHeaderLeft : sHeader));
+  r++;
+
+  const sorted = [...rows].sort((a, b2) => {
+    const g = String(a.group || 'яяя').localeCompare(String(b2.group || 'яяя'), 'ru');
+    if (g) return g;
+    return String(a.sku || '').localeCompare(String(b2.sku || ''), 'ru');
+  });
+  sorted.forEach((row, i) => {
+    const stripe = i % 2 === 1;
+    put(r, 0, row.sku || '', cell(stripe, { font: { bold: true, color: { rgb: 'B26A00' } } }));
+    put(r, 1, row.name || '', cell(stripe, { alignment: { horizontal: 'left', wrapText: true } }));
+    put(r, 2, row.measure || '', cell(stripe, { alignment: { horizontal: 'center' } }));
+    put(r, 3, row.supplier || '', cell(stripe, { alignment: { horizontal: 'left' } }));
+    put(r, 4, row.group || '', cell(stripe, { alignment: { horizontal: 'left' }, font: { bold: true, color: { rgb: brown } } }));
+    r++;
+  });
+
+  ws['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: r - 1, c: 4 });
+  ws['!cols'] = [{ wch: 14 }, { wch: 48 }, { wch: 16 }, { wch: 24 }, { wch: 34 }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
+  ws['!freeze'] = { xSplit: 0, ySplit: 3 };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Аналоги');
+  const d = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `Таблица аналогов ${d}.xlsx`);
+}
