@@ -451,7 +451,7 @@ const hiddenModules = computed(() => userStore.getHiddenModules());
 
 // Модули, завязанные на 1С УТ и пивные кеги — только для БК+ВМ.
 // У Пиццы Стар нет 1С (у них Додо) и нет кег, поэтому на ПС их прячем.
-const BK_VM_ONLY_MODULES = ['keg-returns', 'supply-assistant', 'reconciliation'];
+const BK_VM_ONLY_MODULES = ['keg-returns', 'supply-assistant', 'reconciliation', 'analogs'];
 const currentGroup = computed(() => getEntityGroupCode(orderStore.settings.legalEntity));
 
 function isModuleVisible(module, route = null) {

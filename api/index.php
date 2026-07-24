@@ -101,6 +101,9 @@ require_once __DIR__ . '/includes/uploads.php';
 // Поиск товаров
 require_once __DIR__ . '/includes/search.php';
 
+// Модуль «Аналоги» — импорт из Excel
+require_once __DIR__ . '/includes/analogs.php';
+
 // RPC-эндпоинты
 require_once __DIR__ . '/includes/rpc.php';
 
