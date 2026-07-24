@@ -85,6 +85,7 @@
           </div>
 
           <div class="adm-user-actions">
+            <button class="adm-act-btn" @click.stop="resetLoginAttempts(u)" title="Сбросить попытки входа (разблокировать)"><BkIcon name="lock" size="sm"/></button>
             <button class="adm-act-btn" @click.stop="openUserModal(u)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
@@ -1940,6 +1941,14 @@ async function deleteUser(u) {
   if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
   toast.success('Удалено', u.name);
   await loadUsers();
+}
+
+async function resetLoginAttempts(u) {
+  const ok = await confirmAction('Сбросить попытки входа?', `Блокировка входа для «${u.name}» будет снята — он сможет войти сразу.`);
+  if (!ok) return;
+  const { data, error } = await db.rpc('reset_login_attempts', { caller_name: userStore.currentUser?.name || '', name: u.name });
+  if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
+  toast.success('Готово', `Блокировка снята (сброшено записей: ${data?.cleared ?? 0})`);
 }
 
 async function toggleMaintenance() {

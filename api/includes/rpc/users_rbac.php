@@ -163,6 +163,32 @@ if ($fn === 'update_user') {
     auditLog($pdo, 'user_updated', 'user', $userId, $caller['name'], null, $changedFields);
     respond(['success' => true]);
 }
+if ($fn === 'reset_login_attempts') {
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    $name = trim((string)($body['name'] ?? ''));
+    if ($name === '') respond(['success' => false, 'error' => 'Не указан пользователь'], 400);
+    $cleared = 0;
+    try {
+        // Сначала соберём IP, с которых были попытки этого пользователя, чтобы
+        // снять и IP-лимит (иначе останется блокировка по IP).
+        $ipStmt = $pdo->prepare("SELECT DISTINCT ip_address FROM failed_login_attempts WHERE user_name = ? AND ip_address IS NOT NULL AND ip_address <> ''");
+        $ipStmt->execute([$name]);
+        $ips = $ipStmt->fetchAll(PDO::FETCH_COLUMN);
+        $d = $pdo->prepare("DELETE FROM failed_login_attempts WHERE user_name = ?");
+        $d->execute([$name]);
+        $cleared += $d->rowCount();
+        foreach ($ips as $ip) {
+            $d2 = $pdo->prepare("DELETE FROM failed_login_attempts WHERE ip_address = ?");
+            $d2->execute([$ip]);
+            $cleared += $d2->rowCount();
+        }
+    } catch (Throwable $e) {
+        respond(['success' => false, 'error' => 'Ошибка сброса'], 500);
+    }
+    respond(['success' => true, 'cleared' => $cleared]);
+}
+
 if ($fn === 'delete_user') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
