@@ -105,7 +105,7 @@
           <button v-if="canEdit" class="alg-mini-btn" @click.stop="renameGroup(g)" title="Переименовать группу">✎</button>
         </div>
         <div v-if="expanded.has(g.name)" class="alg-rows">
-          <div v-for="c in g.items" :key="c.id" class="alg-row">
+          <div v-for="c in g.items" :key="c.id" class="alg-row" :class="{ 'alg-row-hit': isHit(c) }">
             <span class="alg-code" :class="{ 'alg-code-in': c.in_catalog }">{{ c.code }}</span>
             <span class="alg-name">{{ c.full_name || '—' }}</span>
             <span class="alg-measure">{{ c.measure || '' }}</span>
@@ -261,8 +261,9 @@ function matchCard(c, q) {
     (c.analog_group || '').toLowerCase().includes(q);
 }
 const foundCount = computed(() => {
-  if (!search.value.trim()) return cards.value.length;
-  return filteredUngrouped.value.length + filteredGroups.value.reduce((s, g) => s + g.items.length, 0);
+  const q = search.value.trim().toLowerCase();
+  if (!q) return cards.value.length;
+  return cards.value.filter(c => matchCard(c, q)).length;
 });
 const filteredUngrouped = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -271,10 +272,14 @@ const filteredUngrouped = computed(() => {
 const filteredGroups = computed(() => {
   const q = search.value.trim().toLowerCase();
   if (!q) return groups.value;
-  return groups.value
-    .map(g => g.name.toLowerCase().includes(q) ? g : { name: g.name, items: g.items.filter(c => matchCard(c, q)) })
-    .filter(g => g.items.length);
+  // Если совпало имя группы ИЛИ хоть один товар — показываем группу ЦЕЛИКОМ,
+  // чтобы рядом с найденной карточкой были видны все её аналоги.
+  return groups.value.filter(g => g.name.toLowerCase().includes(q) || g.items.some(c => matchCard(c, q)));
 });
+function isHit(c) {
+  const q = search.value.trim().toLowerCase();
+  return !!q && matchCard(c, q);
+}
 
 function toggle(name) {
   if (expanded.value.has(name)) expanded.value.delete(name);
@@ -404,6 +409,8 @@ onMounted(load);
 .alg-row { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--border-light); font-size: 13px; }
 .alg-row:last-child { border-bottom: none; }
 .alg-row:hover { background: rgba(0,0,0,.012); }
+.alg-row-hit { background: #FFF7E0; box-shadow: inset 3px 0 0 #E76F51; }
+.alg-row-hit:hover { background: #FFF3D6; }
 .alg-code { font-weight: 700; color: #B26A00; min-width: 96px; font-variant-numeric: tabular-nums; }
 .alg-code-in { color: #2E7D32; }
 .alg-name { flex: 1; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
