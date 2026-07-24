@@ -29,6 +29,13 @@
         $o = $order->fetch();
         if (!$o) respond(['skip' => true]); // заказ не найден
 
+        // Доступ к юрлицу заказа: как и в остальных операциях с заказами,
+        // право order:edit не должно позволять создавать оплату для заказа
+        // чужого юрлица (нужен лишь UUID заказа).
+        if (($authUser['role'] ?? '') !== 'admin' && !checkLegalEntityAccess($authUser, $o['legal_entity'])) {
+            respond(['error' => 'Нет доступа к юр. лицу заказа'], 403);
+        }
+
         if (!$deliveryDate) {
             $deliveryDate = trim((string)($o['delivery_date'] ?? ''));
         }
