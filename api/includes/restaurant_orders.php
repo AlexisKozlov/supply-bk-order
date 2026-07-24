@@ -5590,9 +5590,12 @@ if (strpos($roAction, 'admin') === 0) {
         // В выборку включаем legal_entity_group ресторана — нужно, чтобы
         // подставить правильное юрлицо (особенно для Пицца Стар, где у ресторана
         // может совпадать номер с БК).
-        $usersWhere = ["r.active = 1"];
+        // Отключённые рестораны (r.active=0) НЕ прячем: иначе их невозможно
+        // включить обратно из этой же админки.
+        $usersWhere = [];
         $usersParams = [];
         roApplyAllowedGroupsSql($sessionUser, $usersWhere, $usersParams, "r.legal_entity_group");
+        if (!$usersWhere) $usersWhere[] = '1=1';
         $s = $pdo->prepare("
             SELECT
                 r.number AS restaurant_number,
@@ -5600,6 +5603,7 @@ if (strpos($roAction, 'admin') === 0) {
                 r.region,
                 r.city,
                 r.address,
+                r.active AS restaurant_active,
                 ru.id,
                 ru.legal_entity,
                 ru.is_active,
@@ -5623,7 +5627,12 @@ if (strpos($roAction, 'admin') === 0) {
             if (empty($row['legal_entity'])) {
                 $row['legal_entity'] = roGetLegalEntity($pdo, $row['restaurant_number'], $row['legal_entity_group']);
             }
-            $row['is_active'] = (int)($row['is_active'] ?? 1);
+            // Статус «включён» = флаг ресторана (он и учётка синхронны). Для
+            // ресторана без учётки берём r.active, иначе ru.is_active.
+            $restActive = (int)($row['restaurant_active'] ?? 1);
+            $row['is_active'] = $row['id'] !== null ? (int)($row['is_active'] ?? 1) : $restActive;
+            if ($restActive === 0) $row['is_active'] = 0;
+            $row['restaurant_active'] = $restActive;
             $row['has_password'] = (int)$row['has_password'];
         }
         unset($row);
