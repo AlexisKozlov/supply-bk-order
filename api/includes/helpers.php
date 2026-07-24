@@ -1215,3 +1215,37 @@ function parseOr($orStr, &$where, &$params, $allowedFields = []) {
     }
     if ($orClauses) $where[] = '(' . implode(' OR ', $orClauses) . ')';
 }
+
+/**
+ * Глобальные настройки портала (таблица app_settings, ключ-значение).
+ * Одно значение на весь портал. Используется, например, для контакта
+ * поддержки, чтобы не хардкодить его в коде.
+ */
+function getAppSetting($pdo, $key, $default = null) {
+    static $cache = [];
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $s = $pdo->prepare("SELECT svalue FROM app_settings WHERE skey = ? LIMIT 1");
+        $s->execute([$key]);
+        $v = $s->fetchColumn();
+        $cache[$key] = ($v === false || $v === null || $v === '') ? $default : $v;
+    } catch (Throwable $e) {
+        $cache[$key] = $default;
+    }
+    return $cache[$key];
+}
+
+/**
+ * Приводит введённый контакт Telegram к «голому» логину без @, пробелов и ссылки.
+ * Понимает 'https://t.me/name', '@name', ' name '. Возвращает 'name'.
+ */
+function normalizeTelegramUsername($raw) {
+    $s = trim((string)$raw);
+    if ($s === '') return '';
+    $s = preg_replace('#^https?://(t\.me|telegram\.me)/#i', '', $s);
+    $s = ltrim($s, '@');
+    $s = trim($s);
+    // Только допустимые символы логина Telegram
+    if (!preg_match('/^[A-Za-z0-9_]{1,64}$/', $s)) return '';
+    return $s;
+}

@@ -143,7 +143,7 @@
       <div class="ro-login-footer">
         {{ loginBrand.footer }}
         <span class="ro-help-sep">·</span>
-        <a class="ro-help-link" href="https://t.me/alexiskozlov" target="_blank" rel="noopener">Нужна помощь?</a>
+        <a class="ro-help-link" :href="`https://t.me/${supportTg}`" target="_blank" rel="noopener">Нужна помощь?</a>
       </div>
     </div>
   </div>
@@ -154,6 +154,9 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { parseRestaurantInput } from '@/lib/legalEntities.js';
+import { useSupportContact } from '@/lib/supportContact.js';
+
+const supportTg = useSupportContact();
 
 const router = useRouter();
 const route = useRoute();

@@ -97,7 +97,7 @@
 
       </div>
       <div class="cab-sb-footer">
-      <a href="https://t.me/alexiskozlov" target="_blank" rel="noopener noreferrer" class="sb-help">
+      <a :href="`https://t.me/${supportTg}`" target="_blank" rel="noopener noreferrer" class="sb-help">
         <span class="sb-help-icon" v-html="cabIconSvg.help"></span>
         <span>Помощь</span>
         <span class="sb-item-ext" title="Откроется в Telegram" v-html="cabIconSvg.external"></span>
@@ -1486,6 +1486,9 @@ import { appConfirm } from '@/lib/appDialogs.js';
 import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
+import { useSupportContact } from '@/lib/supportContact.js';
+
+const supportTg = useSupportContact();
 import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg, resolveSupplierIcon, supplierIconStyle } from '@/lib/cabinetIcons.js';
 import { roFetch } from '@/lib/roUtils.js';
 import { renderMarkdown } from '@/lib/markdown.js';

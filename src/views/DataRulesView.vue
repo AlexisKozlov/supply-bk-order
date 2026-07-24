@@ -51,13 +51,16 @@
       </div>
 
       <div class="rules-contact">
-        Администратор портала: <a href="https://t.me/alexiskozlov" target="_blank" rel="noopener">@alexiskozlov</a>
+        Администратор портала: <a :href="`https://t.me/${supportTg}`" target="_blank" rel="noopener">@{{ supportTg }}</a>
       </div>
     </section>
   </main>
 </template>
 
 <script setup>
+import { useSupportContact } from '@/lib/supportContact.js';
+
+const supportTg = useSupportContact();
 </script>
 
 <style scoped>

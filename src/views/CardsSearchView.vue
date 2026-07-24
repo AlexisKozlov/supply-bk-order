@@ -11,8 +11,6 @@
           <router-link to="/" class="nav-link">Портал закупок</router-link>
           <router-link to="/restaurant" class="nav-link">Личный кабинет</router-link>
           <router-link to="/restaurant/orders/planeta" class="nav-link">Планета Ресторанов</router-link>
-          <a href="https://docs.google.com/spreadsheets/d/1dv-s5Rqe9Hgyg1fbPeCWEwh0MaKMNkj7JK_gFyxPDdU/edit?pli=1&gid=0#gid=0" target="_blank" class="nav-link">График поставок</a>
-          <a href="https://docs.google.com/spreadsheets/d/1ToILNXjzvBwvyRm8687h-RJrUA3RuffMx3vJuCdF-xQ/edit?gid=0#gid=0" target="_blank" class="nav-link">Контакты поставщиков</a>
         </div>
       </nav>
 
@@ -348,7 +346,7 @@
         Обновлено: {{ lastUpdate }}
       </div>
       <span class="footer-dot">·</span>
-      <a href="https://t.me/alexiskozlov" target="_blank" class="footer-item footer-link">
+      <a :href="`https://t.me/${supportTg}`" target="_blank" class="footer-item footer-link">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         Нашли ошибку?
       </a>
@@ -367,6 +365,9 @@
 import { ref, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUserStore } from '../stores/userStore'
 import { appConfirm } from '@/lib/appDialogs.js'
+import { useSupportContact } from '@/lib/supportContact.js'
+
+const supportTg = useSupportContact()
 
 const MaintenanceScreen = defineAsyncComponent(() => import('@/components/MaintenanceScreen.vue'))
 

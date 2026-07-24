@@ -320,6 +320,17 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
+  async function adminGetAppSettings() {
+    return await api('admin/app-settings');
+  }
+
+  async function adminSaveAppSettings(supportTelegram) {
+    return await api('admin/app-settings', {
+      method: 'POST',
+      body: JSON.stringify({ support_telegram: supportTelegram }),
+    });
+  }
+
   async function adminGetOrder(orderId) {
     const data = await api(`admin/order/${orderId}`);
     return data.order;
@@ -802,7 +813,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,
     loadSurveys, loadSurvey, submitSurvey, uploadSurveyFile, removeSurveyFile, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection, saveStockCollectionDraft, loadWarehouseStock,
-    adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetOrder, adminUpdateOrder,
+    adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetAppSettings, adminSaveAppSettings, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,
     adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock, adminSearchProducts,

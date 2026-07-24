@@ -13,10 +13,39 @@
     <div class="rcm-tabs">
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'info' }" type="button" @click="activeManagerTab = 'info'">Важная информация</button>
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'contacts' }" type="button" @click="activeManagerTab = 'contacts'">Контакты поставщиков</button>
-      <button class="rcm-tab" disabled>Настройки кабинета</button>
+      <button class="rcm-tab" :class="{ active: activeManagerTab === 'settings' }" type="button" @click="activeManagerTab = 'settings'; loadAppSettings()">Настройки кабинета</button>
     </div>
 
     <ManagerSupplierContactsTab v-if="activeManagerTab === 'contacts'" />
+
+    <div v-if="activeManagerTab === 'settings'" class="rcm-grid">
+      <section class="rcm-panel">
+        <div class="rcm-panel-head">
+          <h2>Контакт поддержки</h2>
+          <span>Один логин Telegram на весь портал. Его видят рестораны в кабинете, на входе и в письмах.</span>
+        </div>
+
+        <label class="rcm-field">
+          <span>Telegram для связи</span>
+          <div class="rcm-tg-input">
+            <span class="rcm-tg-at">@</span>
+            <input v-model="appSettings.supportTelegram" type="text" placeholder="username" @input="appSettings.supportTelegram = appSettings.supportTelegram.replace(/^@+/, '')" />
+          </div>
+          <small class="rcm-hint">Только латиница, цифры и «_». Без @ и без ссылки — просто логин.</small>
+        </label>
+
+        <div class="rcm-field" v-if="appSettings.supportTelegram">
+          <span>Предпросмотр</span>
+          <a class="rcm-tg-preview" :href="`https://t.me/${appSettings.supportTelegram}`" target="_blank" rel="noopener">https://t.me/{{ appSettings.supportTelegram }}</a>
+        </div>
+
+        <div class="rcm-actions">
+          <button class="rcm-btn rcm-btn-primary" @click="saveAppSettings" :disabled="settingsSaving || !appSettings.supportTelegram">
+            {{ settingsSaving ? 'Сохранение...' : 'Сохранить' }}
+          </button>
+        </div>
+      </section>
+    </div>
 
     <div v-if="activeManagerTab === 'info'" class="rcm-grid">
       <section class="rcm-panel">
@@ -165,13 +194,13 @@
 import { onBeforeUnmount, onMounted, reactive, ref, watch, defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
-import { appConfirm } from '@/lib/appDialogs.js';
+import { appConfirm, appAlert } from '@/lib/appDialogs.js';
 
 const ManagerSupplierContactsTab = defineAsyncComponent(() => import('@/components/admin/ManagerSupplierContactsTab.vue'));
 
 const route = useRoute();
 const router = useRouter();
-const VALID_TABS = ['info', 'contacts'];
+const VALID_TABS = ['info', 'contacts', 'settings'];
 const activeManagerTab = ref(VALID_TABS.includes(route.query.tab) ? route.query.tab : 'info');
 
 // При смене вкладки — обновляем ?tab= в URL (можно делиться ссылкой и жать «назад»).
@@ -198,6 +227,40 @@ const fileInput = ref(null);
 const filterGroup = ref('');
 const previewUrls = reactive({});
 const imagePreview = reactive({ show: false, url: '', name: '' });
+
+// --- Настройки кабинета: контакт поддержки ---
+const appSettings = reactive({ supportTelegram: '' });
+const settingsSaving = ref(false);
+let appSettingsLoaded = false;
+
+async function loadAppSettings() {
+  if (appSettingsLoaded) return;
+  try {
+    const data = await store.adminGetAppSettings();
+    appSettings.supportTelegram = data.support_telegram || '';
+    appSettingsLoaded = true;
+  } catch (e) {
+    error.value = 'Не удалось загрузить настройки';
+  }
+}
+
+async function saveAppSettings() {
+  const val = (appSettings.supportTelegram || '').replace(/^@+/, '').trim();
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(val)) {
+    appAlert('Укажите корректный логин Telegram: латиница, цифры и «_».');
+    return;
+  }
+  settingsSaving.value = true;
+  try {
+    const data = await store.adminSaveAppSettings(val);
+    appSettings.supportTelegram = data.support_telegram || val;
+    appAlert('Контакт поддержки сохранён.');
+  } catch (e) {
+    appAlert('Не удалось сохранить контакт поддержки.');
+  } finally {
+    settingsSaving.value = false;
+  }
+}
 
 const form = reactive({
   title: '',
@@ -360,7 +423,10 @@ function formatFileSize(size) {
   return `${n} Б`;
 }
 
-onMounted(loadPosts);
+onMounted(() => {
+  loadPosts();
+  if (activeManagerTab.value === 'settings') loadAppSettings();
+});
 onBeforeUnmount(() => {
   for (const url of Object.values(previewUrls)) URL.revokeObjectURL(url);
 });
@@ -385,6 +451,11 @@ onBeforeUnmount(() => {
 .rcm-field input, .rcm-field textarea, .rcm-field select, .rcm-list-head select { border: 1px solid #ddd2c8; border-radius: 6px; padding: 10px 11px; font: inherit; background: #fff; color: #2d2420; }
 .rcm-field textarea { resize: vertical; min-height: 130px; }
 .rcm-hint { font-weight: 400; font-size: 11.5px; color: #8b7355; line-height: 1.5; }
+.rcm-tg-input { display: flex; align-items: center; border: 1px solid #ddd2c8; border-radius: 6px; background: #fff; overflow: hidden; }
+.rcm-tg-input .rcm-tg-at { padding: 0 4px 0 11px; color: #8a7a70; font-weight: 700; }
+.rcm-tg-input input { border: 0 !important; border-radius: 0 !important; flex: 1; padding-left: 2px !important; }
+.rcm-tg-preview { font-weight: 400; color: #2563eb; word-break: break-all; }
+.rcm-actions { margin-top: 4px; }
 .rcm-hint code { background: #f6efe8; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #502314; }
 .rcm-segments { display: flex; gap: 6px; background: #f7f1eb; border-radius: 8px; padding: 4px; }
 .rcm-segments button { flex: 1; border: 0; border-radius: 6px; padding: 8px; background: transparent; cursor: pointer; font-weight: 700; color: #6f5f55; }

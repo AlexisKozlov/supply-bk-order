@@ -99,6 +99,7 @@ function roSendAccountEmail($pdo, $userId, $type, array $ctx = []) {
             ? formatRestaurantNumber((int)$u['restaurant_number'])
             : (string)$u['restaurant_number'];
         $when = date('d.m.Y H:i');
+        $supportTg = getAppSetting($pdo, 'support_telegram', 'alexiskozlov');
 
         switch ($type) {
             case 'welcome': {
@@ -131,7 +132,7 @@ function roSendAccountEmail($pdo, $userId, $type, array $ctx = []) {
                     'intro'   => 'Здравствуйте!',
                     'body'    => $bodyHtml,
                     'cta'     => ['text' => 'Войти в кабинет', 'url' => $siteUrl . '/restaurant/login'],
-                    'footer'  => 'Если это не вы — немедленно обратитесь к закупщику. Свяжитесь в Telegram: @alexiskozlov',
+                    'footer'  => 'Если это не вы — немедленно обратитесь к закупщику. Свяжитесь в Telegram: @' . $supportTg,
                 ]);
                 break;
             }
@@ -1996,6 +1997,13 @@ if ($roAction === 'login' && $method === 'POST') {
 }
 
 // --- Валидация сессии ---
+// --- Контакт поддержки (публичный: нужен на странице входа без авторизации) ---
+if ($roAction === 'support-contact' && $method === 'GET') {
+    roRespond([
+        'support_telegram' => getAppSetting($pdo, 'support_telegram', 'alexiskozlov'),
+    ]);
+}
+
 if ($roAction === 'validate' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) {
@@ -4557,6 +4565,31 @@ if (strpos($roAction, 'admin') === 0) {
             'legal_entity_group' => $entityGroup,
             'restaurant_orders_enabled' => $enabled === 1,
         ]);
+    }
+
+    // --- Глобальные настройки портала (контакт поддержки и т.п.) ---
+    if ($adminAction === 'app-settings' && $method === 'GET') {
+        roRespond([
+            'support_telegram' => getAppSetting($pdo, 'support_telegram', 'alexiskozlov'),
+        ]);
+    }
+
+    if ($adminAction === 'app-settings' && $method === 'POST') {
+        $tg = normalizeTelegramUsername($body['support_telegram'] ?? '');
+        if ($tg === '') {
+            roRespond(['error' => 'Укажите корректный логин Telegram (латиница, цифры, _)'], 400);
+        }
+        $updatedBy = $sessionUser['name'] ?? null;
+        $s = $pdo->prepare("
+            INSERT INTO app_settings (skey, svalue, updated_by)
+            VALUES ('support_telegram', ?, ?)
+            ON DUPLICATE KEY UPDATE
+              svalue = VALUES(svalue),
+              updated_by = VALUES(updated_by),
+              updated_at = CURRENT_TIMESTAMP
+        ");
+        $s->execute([$tg, $updatedBy]);
+        roRespond(['success' => true, 'support_telegram' => $tg]);
     }
 
     // --- Настройщик кабинета ресторанов: важная информация ---
