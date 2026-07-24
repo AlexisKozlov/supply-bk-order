@@ -346,9 +346,20 @@ if ($method === 'GET') {
         $params[] = $searchTerm;
     }
 
-    // Внедряем фильтр по юрлицу в SQL для entity tables, если пользователь не админ и фильтр не указан.
-    // Если фронт уже передал legal_entity_group — он сам ограничит выборку, авто-фильтр не нужен.
-    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && !isset($_GET['legal_entity']) && !isset($_GET['legal_entity_group']) && $table !== 'notifications') {
+    // Внедряем фильтр по юрлицу в SQL для entity tables, если пользователь не админ.
+    //
+    // ВАЖНО (защита от обхода разделения юрлиц): раньше авто-фильтр отключался,
+    // если клиент передал legal_entity_group. Но для рабочих таблиц (orders,
+    // analysis_data, plans, stock_1c, product_adu и т.п.) поле группы не в белом
+    // списке фильтров — параметр молча отбрасывался, и запрос уходил БЕЗ фильтра
+    // по юрлицу, отдавая данные всех юрлиц сразу. Теперь для таких таблиц
+    // авто-фильтр «только твои юрлица» применяется ВСЕГДА, чем бы клиент ни
+    // фильтровал. Исключение — таблицы, которые ПО ЗАМЫСЛУ работают по группе
+    // (сбор остатков): для них при заданном legal_entity_group доверяем групповому
+    // фильтру, доступ к группе проверен выше.
+    $GROUP_SCOPED_ENTITY_TABLES = ['stock_collections'];
+    $groupScopedRequest = in_array($table, $GROUP_SCOPED_ENTITY_TABLES) && isset($_GET['legal_entity_group']);
+    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && !isset($_GET['legal_entity']) && !$groupScopedRequest && $table !== 'notifications') {
         $userEntities = $sessionUser['legal_entities'] ?? '';
         if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
         if (is_array($userEntities) && !empty($userEntities)) {
