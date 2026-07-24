@@ -16,6 +16,12 @@
           <option v-for="s in supplierFilterOptions" :key="s" :value="s">{{ s }}</option>
         </select>
         <button class="btn primary pay-add-btn" @click="openAddModal">+ Добавить вручную</button>
+        <span class="pay-export">
+          <input type="month" v-model="exportMonth" class="pay-input" title="Месяц плана оплат" />
+          <button class="btn pay-export-btn" @click="exportPlan" :disabled="exporting" title="Выгрузить план оплат для казначея (все юрлица)">
+            {{ exporting ? 'Готовлю…' : '⭳ План оплат' }}
+          </button>
+        </span>
       </div>
     </div>
 
@@ -139,6 +145,7 @@ import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { appConfirm } from '@/lib/appDialogs.js'
 import { getEntityGroup, getEntityGroupCode } from '@/lib/legalEntities.js'
+import { exportPaymentPlanXlsx } from '@/lib/excelExport.js'
 
 const orderStore = useOrderStore()
 
@@ -155,6 +162,44 @@ const editAmount = ref('')
 const editNote = ref('')
 const editPayDate = ref('')
 const editDeliveryDate = ref('')
+
+// План оплат для казначея: месяц по умолчанию — текущий.
+const _now = new Date()
+const exportMonth = ref(`${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}`)
+const exporting = ref(false)
+
+async function exportPlan() {
+  if (exporting.value) return
+  const [y, m] = exportMonth.value.split('-')
+  if (!y || !m) { toast.error('Ошибка', 'Выберите месяц'); return }
+  exporting.value = true
+  try {
+    const start = `${y}-${m}-01`
+    // Берём оплаты всех юрлиц (БК+ВМ и ПС), от начала выбранного месяца.
+    let all = []
+    for (const g of ['BK_VM', 'PS']) {
+      const { data } = await db.from('supplier_payments').select('*')
+        .eq('legal_entity_group', g)
+        .gte('payment_date', start)
+        .order('payment_date')
+        .limit(5000)
+      all = all.concat(data || [])
+    }
+    // Оставляем только выбранный месяц и не отменённые.
+    const rows = all.filter(p => {
+      if (p.status === 'cancelled' || !p.payment_date) return false
+      const [py, pm] = String(p.payment_date).split('-')
+      return py === y && pm === m
+    })
+    if (!rows.length) { toast.info('Нет оплат', `За ${m}.${y} оплат не найдено`); return }
+    await exportPaymentPlanXlsx(rows, { year: +y, month: +m })
+    toast.success('Готово', `План оплат за ${m}.${y} выгружен (${rows.length})`)
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось выгрузить план оплат')
+  } finally {
+    exporting.value = false
+  }
+}
 
 async function load() {
   loading.value = true
@@ -470,6 +515,13 @@ async function submitAddModal() {
 
 /* Кнопка «+ Добавить вручную» в фильтрах */
 .pay-add-btn { padding: 6px 14px; font-size: 13px; }
+
+/* Выгрузка плана оплат */
+.pay-export { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+.pay-export-btn { padding: 6px 14px; font-size: 13px; background: #502314; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.pay-export-btn:hover:not(:disabled) { background: #3d1a0f; }
+.pay-export-btn:disabled { opacity: .6; cursor: default; }
+@media (max-width: 640px) { .pay-export { margin-left: 0; width: 100%; } .pay-export-btn { flex: 1; } }
 
 /* Модалка ручного создания оплаты */
 .pay-modal-backdrop {

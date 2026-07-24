@@ -1,5 +1,5 @@
 import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes, applyEntityGroupFilter } from './utils.js';
-import { formatRestaurantNumber } from './legalEntities.js';
+import { formatRestaurantNumber, ENTITY_SHORT_NAMES } from './legalEntities.js';
 import { db } from './apiClient.js';
 
 /**
@@ -1234,4 +1234,144 @@ export function printSupplierOrder(settings, items, priceMap) {
     iframe.contentWindow.print();
     setTimeout(() => document.body.removeChild(iframe), 2000);
   }, 300);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// План оплат для казначея. Формат (столбцы):
+//   Неделя | Поставщик | Валюта | Условия оплаты | Планируемая дата
+//   оплаты | Сумма в RUB с НДС | Юрлицо (БК/ВМ/ПС)
+// Плюс итоговая строка суммы. Оформление — в стиле портала.
+// rows: массив supplier_payments (supplier, currency, payment_date, amount, legal_entity).
+// period: { year, month } (month 1-12).
+// ═══════════════════════════════════════════════════════════════════
+function isoWeekNumber(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3);
+  return 1 + Math.round((date - firstThursday) / (7 * 24 * 3600 * 1000));
+}
+
+function entityShort(legalEntity) {
+  if (ENTITY_SHORT_NAMES[legalEntity]) return ENTITY_SHORT_NAMES[legalEntity];
+  const s = String(legalEntity || '');
+  if (s.includes('Пицца')) return 'ПС';
+  if (s.includes('Воглия')) return 'ВМ';
+  if (s.includes('Бургер')) return 'БК';
+  return s;
+}
+
+export async function exportPaymentPlanXlsx(rows, period) {
+  const XLSX = await import('xlsx-js-style');
+
+  const brown = '502314';
+  const cream = 'FFF8F0';
+  const borderClr = 'E0D6CC';
+  const b = { style: 'thin', color: { rgb: borderClr } };
+  const borders = { top: b, bottom: b, left: b, right: b };
+  const money = '#,##0.00';
+
+  const sTitle = { font: { bold: true, sz: 16, color: { rgb: brown }, name: 'Calibri' }, alignment: { vertical: 'center' } };
+  const sHeader = {
+    font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: borders,
+  };
+  const sHeaderLeft = { ...sHeader, alignment: { ...sHeader.alignment, horizontal: 'left' } };
+  const cell = (stripe, extra = {}) => ({
+    font: { sz: 11, name: 'Calibri' },
+    fill: stripe ? { fgColor: { rgb: cream } } : undefined,
+    alignment: { vertical: 'center', ...(extra.alignment || {}) },
+    border: borders,
+    ...(extra.font ? { font: { sz: 11, name: 'Calibri', ...extra.font } } : {}),
+  });
+  const sTotalLabel = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borders,
+  };
+  const sTotalVal = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borders,
+  };
+
+  const ws = {};
+  const put = (r, c, v, s, z) => {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    ws[ref] = { v, t: typeof v === 'number' ? 'n' : 's', s };
+    if (z) ws[ref].z = z;
+  };
+
+  const mm = String(period.month).padStart(2, '0');
+  const monthLabel = `${mm}.${period.year}`;
+
+  let r = 0;
+  put(r, 0, `План оплат — ${monthLabel}`, sTitle);
+  r += 2;
+
+  const headers = ['Неделя', 'Поставщик', 'Валюта', 'Условия оплаты', 'Планируемая дата оплаты', 'Сумма в RUB с НДС', 'Юрлицо'];
+  headers.forEach((h, c) => put(r, c, h, c === 1 ? sHeaderLeft : sHeader));
+  r++;
+
+  // Сортировка: по дате оплаты → поставщик → юрлицо
+  const sorted = [...rows].sort((a, b2) => {
+    const d = String(a.payment_date || '').localeCompare(String(b2.payment_date || ''));
+    if (d) return d;
+    const s = String(a.supplier || '').localeCompare(String(b2.supplier || ''), 'ru');
+    if (s) return s;
+    return entityShort(a.legal_entity).localeCompare(entityShort(b2.legal_entity), 'ru');
+  });
+
+  let total = 0;
+  sorted.forEach((p, i) => {
+    const stripe = i % 2 === 1;
+    const amount = Number(p.amount) || 0;
+    total += amount;
+    const [yy, moo, dd] = String(p.payment_date || '').split('-');
+    const dateStr = dd ? `${dd}.${moo}.${yy}` : '';
+    put(r, 0, isoWeekNumber(p.payment_date), cell(stripe, { alignment: { horizontal: 'center' } }));
+    put(r, 1, p.supplier || '', cell(stripe, { alignment: { horizontal: 'left' } }));
+    put(r, 2, p.currency || 'RUB', cell(stripe, { alignment: { horizontal: 'center' } }));
+    put(r, 3, 'Факт', cell(stripe, { alignment: { horizontal: 'center' } }));
+    put(r, 4, dateStr, cell(stripe, { alignment: { horizontal: 'center' } }));
+    put(r, 5, amount, cell(stripe, { alignment: { horizontal: 'right' } }), money);
+    put(r, 6, entityShort(p.legal_entity), cell(stripe, { alignment: { horizontal: 'center' }, font: { bold: true } }));
+    r++;
+  });
+
+  // Итог
+  put(r, 0, '', sTotalLabel);
+  put(r, 1, '', sTotalLabel);
+  put(r, 2, '', sTotalLabel);
+  put(r, 3, '', sTotalLabel);
+  put(r, 4, 'Итого:', sTotalLabel);
+  put(r, 5, total, sTotalVal, money);
+  put(r, 6, '', sTotalVal);
+  r++;
+
+  ws['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: r - 1, c: 6 });
+  ws['!cols'] = [
+    { wch: 8 },   // Неделя
+    { wch: 28 },  // Поставщик
+    { wch: 9 },   // Валюта
+    { wch: 16 },  // Условия оплаты
+    { wch: 22 },  // Планируемая дата оплаты
+    { wch: 20 },  // Сумма
+    { wch: 9 },   // Юрлицо
+  ];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+  ws['!freeze'] = { xSplit: 0, ySplit: 3 };
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'План оплат');
+  XLSX.writeFile(wb, `План оплат ${monthLabel}.xlsx`);
 }
