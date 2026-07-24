@@ -230,7 +230,18 @@ function scMailSpawn(int $collectionId, string $kind): bool {
     if (!in_array($kind, scMailKinds(), true)) return false;
     $script = __DIR__ . '/../cron_stock_collection_mail.php';
     if (!is_file($script)) return false;
-    $cmd = 'php ' . escapeshellarg($script)
+    // ВАЖНО: полный путь к php. В веб-процессе (php-fpm) PATH урезан и голое
+    // «php» не находится — фоновая команда молча падала, из-за чего письма о
+    // старте ждали планового крона (задержка до 5 минут). PHP_BINARY в fpm
+    // указывает на сам php-fpm, поэтому его не используем — берём CLI-php.
+    $phpBin = $_ENV['PHP_CLI_BIN'] ?? '';
+    if (!$phpBin || !@is_executable($phpBin)) {
+        foreach (['/usr/bin/php', '/usr/local/bin/php', '/bin/php'] as $cand) {
+            if (@is_executable($cand)) { $phpBin = $cand; break; }
+        }
+    }
+    if (!$phpBin) $phpBin = 'php'; // последний шанс — как было
+    $cmd = escapeshellarg($phpBin) . ' ' . escapeshellarg($script)
          . ' --collection=' . escapeshellarg((string)$collectionId)
          . ' --kind=' . escapeshellarg($kind)
          . ' > /dev/null 2>&1 &';
