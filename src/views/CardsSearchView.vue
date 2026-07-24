@@ -10,7 +10,6 @@
         <div class="nav-links">
           <router-link to="/" class="nav-link">Портал закупок</router-link>
           <router-link to="/restaurant" class="nav-link">Личный кабинет</router-link>
-          <router-link to="/restaurant/orders/planeta" class="nav-link">Планета Ресторанов</router-link>
         </div>
       </nav>
 
