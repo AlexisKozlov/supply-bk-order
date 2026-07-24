@@ -72,6 +72,7 @@
               <span v-if="u.role === 'admin'" class="adm-badge adm-badge-admin">admin</span>
               <span v-else-if="u.role === 'viewer'" class="adm-badge adm-badge-viewer">читатель</span>
               <span v-if="u.name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
+              <span v-if="isLocked(u)" class="adm-badge adm-badge-locked" :title="`${lockouts[u.name]} неудачных попыток за 10 мин`">🔒 заблокирован</span>
             </div>
             <div v-if="u.email" class="adm-user-email">{{ u.email }}</div>
             <div class="adm-user-meta">
@@ -85,7 +86,7 @@
           </div>
 
           <div class="adm-user-actions">
-            <button class="adm-act-btn" @click.stop="resetLoginAttempts(u)" title="Сбросить попытки входа (разблокировать)"><BkIcon name="lock" size="sm"/></button>
+            <button class="adm-act-btn" :class="{ 'adm-act-locked': isLocked(u) }" @click.stop="resetLoginAttempts(u)" :title="isLocked(u) ? 'Заблокирован — сбросить попытки входа' : 'Сбросить попытки входа'"><BkIcon name="key" size="sm"/></button>
             <button class="adm-act-btn" @click.stop="openUserModal(u)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
@@ -1023,6 +1024,7 @@ const activeTab = useTabRoute('users', ['users', 'restaurant-accounts', 'email-i
 const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);
+const lockouts = ref({});
 
 const allEntities = LEGAL_ENTITIES;
 
@@ -1848,9 +1850,20 @@ async function loadUsers() {
       }
       return u;
     });
+    loadLockouts();
   } catch { toast.error('Ошибка', 'Не удалось загрузить пользователей'); }
   finally { loading.value = false; }
 }
+
+// Кто сейчас заблокирован по числу неудачных попыток входа (за 10 минут).
+async function loadLockouts() {
+  try {
+    const { data } = await db.rpc('get_login_lockouts');
+    lockouts.value = (data && data.lockouts) || {};
+  } catch { lockouts.value = {}; }
+}
+// Аккаунт блокируется после 5 неудачных попыток за 10 минут.
+function isLocked(u) { return (lockouts.value[u.name] || 0) >= 5; }
 
 async function loadSettings() {
   try {
@@ -1949,6 +1962,7 @@ async function resetLoginAttempts(u) {
   const { data, error } = await db.rpc('reset_login_attempts', { caller_name: userStore.currentUser?.name || '', name: u.name });
   if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
   toast.success('Готово', `Блокировка снята (сброшено записей: ${data?.cleared ?? 0})`);
+  loadLockouts();
 }
 
 async function toggleMaintenance() {
@@ -2448,6 +2462,7 @@ onUnmounted(() => {
 .adm-badge-admin { background: #FFEBEE; color: #C62828; }
 .adm-badge-viewer { background: #E3F2FD; color: #1565C0; }
 .adm-badge-you { background: #E8F5E9; color: #2E7D32; }
+.adm-badge-locked { background: #FFEBEE; color: #C62828; font-weight: 700; }
 
 .adm-user-entities { display: flex; gap: 4px; flex-shrink: 0; }
 .adm-entity {
@@ -2464,6 +2479,8 @@ onUnmounted(() => {
 }
 .adm-act-btn:hover { background: var(--bg); border-color: var(--border); color: var(--text); }
 .adm-act-del:hover { background: #FFF0F0; border-color: #E57373; color: #D32F2F; }
+.adm-act-locked { background: #FFEBEE; border-color: #E57373; color: #C62828; }
+.adm-act-locked:hover { background: #FFCDD2; }
 .adm-act-btn:disabled { opacity: .3; pointer-events: none; }
 
 /* ═══ Maintenance ═══ */

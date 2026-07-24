@@ -163,6 +163,19 @@ if ($fn === 'update_user') {
     auditLog($pdo, 'user_updated', 'user', $userId, $caller['name'], null, $changedFields);
     respond(['success' => true]);
 }
+if ($fn === 'get_login_lockouts') {
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    // Число неудачных попыток за 10 минут по каждому пользователю. Аккаунт
+    // блокируется после 5 попыток (checkAccountRateLimit в public.php).
+    $lockouts = [];
+    try {
+        $s = $pdo->query("SELECT user_name, COUNT(*) c FROM failed_login_attempts WHERE attempted_at > NOW() - INTERVAL 10 MINUTE AND user_name <> '' GROUP BY user_name");
+        foreach ($s as $r) $lockouts[$r['user_name']] = (int)$r['c'];
+    } catch (Throwable $e) { /* таблицы может не быть */ }
+    respond(['lockouts' => $lockouts]);
+}
+
 if ($fn === 'reset_login_attempts') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
