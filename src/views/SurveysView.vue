@@ -568,18 +568,21 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { appConfirm } from '@/lib/appDialogs.js'
-import { formatRestaurantNumber } from '@/lib/legalEntities.js'
+import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js'
 import { useUserStore } from '@/stores/userStore.js'
+import { useOrderStore } from '@/stores/orderStore.js'
 import { exportSurveyToExcel } from '@/lib/surveyExport.js'
 
 const userStore = useUserStore()
+const orderStore = useOrderStore()
 
 function makeEmptySurvey() {
   return {
     id: null,
     title: '',
     description: '',
-    legal_entity_group: 'BK_VM',
+    // Новый опрос по умолчанию — для группы юрлица из переключателя в сайдбаре.
+    legal_entity_group: getEntityGroupCode(orderStore.settings?.legalEntity),
     status: 'draft',
     allow_comment: true,
     remind_after_hours: 24,

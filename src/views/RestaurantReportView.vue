@@ -339,7 +339,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -362,6 +362,16 @@ const reportEntityOptions = [
   { label: 'Пицца Стар', value: 'ООО "Пицца Стар"' },
 ];
 const legalEntity = ref(defaultReportEntity(orderStore.settings.legalEntity));
+// Следим за переключателем юрлица в сайдбаре: селектор отчёта идёт за ним.
+// Отчёт грузится по кнопке, поэтому только синхронизируем выбор и сбрасываем
+// список ресторанов (как при ручной смене в выпадашке).
+watch(() => orderStore.settings.legalEntity, (le) => {
+  const next = defaultReportEntity(le);
+  if (next !== legalEntity.value) {
+    legalEntity.value = next;
+    selectedRestaurants.value = [];
+  }
+});
 const category = ref('');
 const status = ref('');
 const selectedRestaurants = ref([]);

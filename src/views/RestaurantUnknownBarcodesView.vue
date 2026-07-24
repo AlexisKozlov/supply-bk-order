@@ -323,12 +323,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 
 const toast = useToastStore();
+const orderStore = useOrderStore();
 
 const tab = ref('unknown'); // 'unknown' | 'all'
 
@@ -336,8 +338,18 @@ const items = ref([]);
 const loading = ref(false);
 
 const filterStatus = ref('new');
-const filterGroup = ref('');
+// Группа берётся из переключателя юрлица в сайдбаре, а не «все группы».
+const filterGroup = ref(getEntityGroupCode(orderStore.settings?.legalEntity));
 const filterSearch = ref('');
+
+// Следим за сменой юрлица в сайдбаре: обновляем группу и перезагружаем.
+watch(() => orderStore.settings?.legalEntity, (le) => {
+  const group = getEntityGroupCode(le);
+  if (group !== filterGroup.value) {
+    filterGroup.value = group;
+    load();
+  }
+});
 
 const subscribers = ref([]);
 const subsCandidates = ref([]);
