@@ -505,9 +505,10 @@
           <!-- Панель управления -->
           <div class="fc2-toolbar">
             <div class="fc2-toolbar-left">
-              <div class="fc2-period-group">
-                <button v-for="p in [7, 14, 30]" :key="p" class="fc2-period-btn" :class="{ active: forecastPeriod === p }" @click="forecastPeriod = p">{{ p }} дн.</button>
-              </div>
+              <label class="fc2-safety" title="Запас в днях сверх срока поставки">
+                Страховые дни
+                <input type="number" min="0" max="60" v-model.number="forecastSafetyDays" @change="onSafetyChange" class="fc2-safety-input" />
+              </label>
               <div class="fc2-search-wrap">
                 <svg class="fc2-search-icon" viewBox="0 0 16 16" width="13" height="13"><circle cx="6.5" cy="6.5" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 10l4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 <input v-model="forecastSearch" class="fc2-search" placeholder="Поиск..." />
@@ -530,26 +531,17 @@
             </div>
             <div class="fc2-stat-sep"></div>
             <div class="fc2-stat">
-              <span class="fc2-stat-val fc2-stat-accent">{{ nf(forecastKpi.totalForecast) }}</span>
-              <span class="fc2-stat-label">ед. на {{ forecastPeriod }} дн.</span>
+              <span class="fc2-stat-val fc2-stat-danger">{{ forecastKpi.criticalCount }}</span>
+              <span class="fc2-stat-label">🔴 срочно</span>
             </div>
-            <div class="fc2-stat-sep"></div>
-            <div class="fc2-stat" v-if="forecastKpi.deficitCount > 0">
-              <span class="fc2-stat-val fc2-stat-danger">{{ forecastKpi.deficitCount }}</span>
-              <span class="fc2-stat-label">дефицит</span>
-            </div>
-            <div class="fc2-stat" v-else>
-              <span class="fc2-stat-val fc2-stat-ok">0</span>
-              <span class="fc2-stat-label">дефицит</span>
+            <div class="fc2-stat">
+              <span class="fc2-stat-val fc2-stat-warn">{{ forecastKpi.warningCount }}</span>
+              <span class="fc2-stat-label">🟡 заказать</span>
             </div>
             <div class="fc2-stat-sep"></div>
             <div class="fc2-stat">
-              <span class="fc2-stat-val">{{ forecastKpi.trendUp }}</span>
-              <span class="fc2-stat-label">растут</span>
-            </div>
-            <div class="fc2-stat">
-              <span class="fc2-stat-val">{{ forecastKpi.trendDown }}</span>
-              <span class="fc2-stat-label">падают</span>
+              <span class="fc2-stat-val fc2-stat-accent">{{ nf(forecastKpi.totalRecommendedOrder) }}</span>
+              <span class="fc2-stat-label">ед. к заказу</span>
             </div>
           </div>
 
@@ -559,11 +551,12 @@
               <thead>
                 <tr>
                   <th class="fc2-th fc2-th-name" @click="toggleForecastSort('name')">Группа{{ sortIcon('name') }}</th>
-                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('avgPerDay')">В день{{ sortIcon('avgPerDay') }}</th>
-                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('forecast')">На {{ forecastPeriod }} дн.{{ sortIcon('forecast') }}</th>
+                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('avgPerDay')">Расход/день{{ sortIcon('avgPerDay') }}</th>
                   <th class="fc2-th fc2-th-num" @click="toggleForecastSort('stock')">Остаток{{ sortIcon('stock') }}</th>
-                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('daysOfStock')">Дней{{ sortIcon('daysOfStock') }}</th>
-                  <th v-if="hasYoyData" class="fc2-th fc2-th-num fc2-hide-sm" @click="toggleForecastSort('yoy')">vs год{{ sortIcon('yoy') }}</th>
+                  <th class="fc2-th fc2-th-num fc2-hide-sm" @click="toggleForecastSort('inTransit')">В пути{{ sortIcon('inTransit') }}</th>
+                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('daysOfStock')">Дней запаса{{ sortIcon('daysOfStock') }}</th>
+                  <th class="fc2-th fc2-th-status">Статус</th>
+                  <th class="fc2-th fc2-th-num fc2-th-order" @click="toggleForecastSort('recommendedOrder')">Заказать{{ sortIcon('recommendedOrder') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -578,7 +571,7 @@
                           <span v-if="g.isGroup" class="fc2-cnt">{{ g.items.length }}</span>
                           <span v-if="g.dataSource === 'restaurant_sales'" class="fc2-src" title="Данные реализации ресторанов">Р</span>
                           <span class="fc2-unit">{{ g.unit || 'шт' }}</span>
-                          <span class="fc2-trend-icon" :class="'fc2-t-' + g.trend" :title="g.trend === 'up' ? 'Растёт' : g.trend === 'down' ? 'Падает' : 'Стабильно'">{{ g.trend === 'up' ? '\u25B2' : g.trend === 'down' ? '\u25BC' : '' }}</span>
+                          <span v-if="g.dlt" class="fc2-dlt" :title="'Срок поставки ' + g.dlt + ' дн.'">⏱{{ g.dlt }}</span>
                         </div>
                         <div v-if="g.supplier && !forecastSupplier" class="fc2-supplier">{{ g.supplier }}</div>
                       </div>
@@ -587,28 +580,24 @@
                     <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': !g.hasConsumptionData }">
                       {{ g.hasConsumptionData ? g.avgPerDay.toFixed(1) : '---' }}
                     </td>
-                    <!-- Прогноз -->
-                    <td class="fc2-td fc2-td-num fc2-td-forecast" :class="{ 'fc2-muted': !g.hasConsumptionData }">
-                      <span>{{ g.hasConsumptionData ? Math.round(forecastVal(g)) : '---' }}</span>
-                      <span v-if="g.seasonCoeff && Math.abs(g.seasonCoeff - 1) > 0.08" class="fc2-season" :class="g.seasonCoeff > 1 ? 'fc2-season-up' : 'fc2-season-dn'" :title="'Сезонность: ' + (g.seasonCoeff > 1 ? '+' : '') + Math.round((g.seasonCoeff - 1) * 100) + '%'">
-                        {{ g.seasonCoeff > 1 ? '\u25B2' : '\u25BC' }}
-                      </span>
-                    </td>
                     <!-- Остаток -->
                     <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': g.stock === null }">
                       {{ g.stock !== null ? Math.round(g.stock) : '---' }}
                     </td>
+                    <!-- В пути -->
+                    <td class="fc2-td fc2-td-num fc2-hide-sm" :class="{ 'fc2-muted': !g.inTransit }">
+                      {{ g.inTransit ? Math.round(g.inTransit) : '—' }}
+                    </td>
                     <!-- Дней запаса -->
-                    <td class="fc2-td fc2-td-num fc2-td-days" :class="g.daysOfStock !== null && g.daysOfStock <= 3 ? 'fc2-days-crit' : g.daysOfStock !== null && g.daysOfStock <= 7 ? 'fc2-days-warn' : g.daysOfStock === null ? 'fc2-muted' : 'fc2-days-ok'">
+                    <td class="fc2-td fc2-td-num fc2-td-days" :class="'fc2-days-' + (g.stockStatus === 'critical' ? 'crit' : g.stockStatus === 'warning' ? 'warn' : g.stockStatus === 'ok' ? 'ok' : 'muted')">
                       <template v-if="g.daysOfStock === null || g.daysOfStock >= 999">---</template>
                       <template v-else>{{ g.daysOfStock }}</template>
                     </td>
-                    <!-- YoY -->
-                    <td v-if="hasYoyData" class="fc2-td fc2-td-num fc2-hide-sm" :class="{ 'fc2-muted': g.yoyChange === null }">
-                      <template v-if="g.yoyChange !== null">
-                        <span :class="g.yoyChange > 5 ? 'fc2-yoy-up' : g.yoyChange < -5 ? 'fc2-yoy-dn' : ''">{{ g.yoyChange > 0 ? '+' : '' }}{{ g.yoyChange }}%</span>
-                      </template>
-                      <template v-else>---</template>
+                    <td class="fc2-td fc2-td-status">
+                      <span class="fc2-light" :title="statusTitle(g.stockStatus)">{{ statusEmoji(g.stockStatus) }}</span>
+                    </td>
+                    <td class="fc2-td fc2-td-num fc2-td-order" :class="{ 'fc2-order-hi': g.recommendedOrder > 0 }">
+                      {{ g.recommendedOrder > 0 ? Math.round(g.recommendedOrder) : '—' }}
                     </td>
                   </tr>
                   <!-- Развёрнутые товары -->
@@ -619,22 +608,24 @@
                         <span class="fc2-sub-label">{{ item.name }}</span>
                       </td>
                       <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': !item.hasConsumptionData }">{{ item.hasConsumptionData ? item.avgPerDay.toFixed(1) : '---' }}</td>
-                      <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': !item.hasConsumptionData }">{{ item.hasConsumptionData ? Math.round(forecastVal(item)) : '---' }}</td>
                       <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': item.stock === null }">{{ item.stock !== null ? Math.round(item.stock) : '---' }}</td>
-                      <td class="fc2-td fc2-td-num fc2-td-days" :class="item.daysOfStock !== null && item.daysOfStock <= 3 ? 'fc2-days-crit' : item.daysOfStock !== null && item.daysOfStock <= 7 ? 'fc2-days-warn' : item.daysOfStock === null ? 'fc2-muted' : 'fc2-days-ok'">
+                      <td class="fc2-td fc2-td-num fc2-hide-sm" :class="{ 'fc2-muted': !item.inTransit }">{{ item.inTransit ? Math.round(item.inTransit) : '—' }}</td>
+                      <td class="fc2-td fc2-td-num fc2-td-days" :class="'fc2-days-' + (item.stockStatus === 'critical' ? 'crit' : item.stockStatus === 'warning' ? 'warn' : item.stockStatus === 'ok' ? 'ok' : 'muted')">
                         <template v-if="item.daysOfStock === null || item.daysOfStock >= 999">---</template>
                         <template v-else>{{ item.daysOfStock }}</template>
                       </td>
-                      <td v-if="hasYoyData" class="fc2-td fc2-td-num fc2-hide-sm" :class="{ 'fc2-muted': item.yoyChange === null }">
-                        <template v-if="item.yoyChange !== null"><span :class="item.yoyChange > 5 ? 'fc2-yoy-up' : item.yoyChange < -5 ? 'fc2-yoy-dn' : ''">{{ item.yoyChange > 0 ? '+' : '' }}{{ item.yoyChange }}%</span></template>
-                        <template v-else>---</template>
-                      </td>
+                      <td class="fc2-td fc2-td-status"><span class="fc2-light" :title="statusTitle(item.stockStatus)">{{ statusEmoji(item.stockStatus) }}</span></td>
+                      <td class="fc2-td fc2-td-num fc2-td-order" :class="{ 'fc2-order-hi': item.recommendedOrder > 0 }">{{ item.recommendedOrder > 0 ? Math.round(item.recommendedOrder) : '—' }}</td>
                     </tr>
                   </template>
                 </template>
               </tbody>
             </table>
             <div v-if="!filteredForecastGroups.length" class="fc2-empty">Нет данных по выбранному фильтру</div>
+          </div>
+          <div class="fc2-legend">
+            🔴 не хватит до новой поставки · 🟡 пора заказывать · 🟢 запаса достаточно.
+            Расход за 14 дней; горизонт = срок поставки + страховые дни; учитываются остаток и «в пути».
           </div>
         </template>
       </template>
@@ -693,7 +684,7 @@ const seasonality = ref(null);
 const seasonalityLoading = ref(false);
 const forecast = ref(null);
 const forecastLoading = ref(false);
-const forecastPeriod = ref(7);
+const forecastSafetyDays = ref(5);
 const forecastSupplier = ref('');
 const forecastSort = ref({ col: 'default', asc: true });
 const forecastSearch = ref('');
@@ -965,7 +956,7 @@ async function loadForecast() {
   const myId = ++_forecastLoadId;
   forecastLoading.value = true;
   try {
-    const d = await getForecastData(orderStore.settings.legalEntity);
+    const d = await getForecastData(orderStore.settings.legalEntity, forecastSafetyDays.value);
     if (myId !== _forecastLoadId) return;
     forecast.value = d;
     fcExpanded.clear();
@@ -1011,9 +1002,9 @@ const filteredForecastGroups = computed(() => {
     groups = [...groups].sort((a, b) => {
       let va, vb;
       if (sort.col === 'name') { va = a.name.toLowerCase(); vb = b.name.toLowerCase(); return sort.asc ? va.localeCompare(vb) : vb.localeCompare(va); }
-      if (sort.col === 'forecast') { va = forecastVal(a); vb = forecastVal(b); }
-      else if (sort.col === 'avgPerDay') { va = a.avgPerDay; vb = b.avgPerDay; }
-      else if (sort.col === 'yoy') { va = a.yoyChange ?? -9999; vb = b.yoyChange ?? -9999; }
+      if (sort.col === 'avgPerDay') { va = a.avgPerDay; vb = b.avgPerDay; }
+      else if (sort.col === 'inTransit') { va = a.inTransit ?? 0; vb = b.inTransit ?? 0; }
+      else if (sort.col === 'recommendedOrder') { va = a.recommendedOrder ?? 0; vb = b.recommendedOrder ?? 0; }
       else if (sort.col === 'stock') { va = a.stock ?? -1; vb = b.stock ?? -1; }
       else if (sort.col === 'daysOfStock') { va = a.daysOfStock ?? 9999; vb = b.daysOfStock ?? 9999; }
       else { va = 0; vb = 0; }
@@ -1023,41 +1014,29 @@ const filteredForecastGroups = computed(() => {
   return groups;
 });
 
-const hasYoyData = computed(() => {
-  if (!forecast.value?.groups) return false;
-  return forecast.value.groups.some(g => g.yoyChange !== null);
-});
-
 function toggleFcExpand(name) {
   if (fcExpanded.has(name)) fcExpanded.delete(name);
   else fcExpanded.add(name);
 }
 
-function forecastVal(item) {
-  if (forecastPeriod.value === 14) return item.forecast14;
-  if (forecastPeriod.value === 30) return item.forecast30;
-  return item.forecast7;
+function onSafetyChange() {
+  if (forecastSafetyDays.value < 0) forecastSafetyDays.value = 0;
+  if (forecastSafetyDays.value > 60) forecastSafetyDays.value = 60;
+  // Пересчёт: горизонт зависит от страховых дней — перезагружаем прогноз.
+  forecast.value = null;
+  loadForecast();
 }
+function statusEmoji(st) { return st === 'critical' ? '🔴' : st === 'warning' ? '🟡' : st === 'ok' ? '🟢' : '⚪'; }
+function statusTitle(st) { return st === 'critical' ? 'Не хватит до новой поставки' : st === 'warning' ? 'Пора заказывать' : st === 'ok' ? 'Запаса достаточно' : 'Нет данных'; }
 
 // KPI пересчитываются по отфильтрованным группам
 const forecastKpi = computed(() => {
   const groups = filteredForecastGroups.value;
-  // Раскрываем до отдельных товаров для точных подсчётов
-  const items = groups.flatMap(g => g.items);
-  const withStock = items.filter(i => i.stockStatus !== 'unknown');
-  const deficit = withStock.filter(i => i.stockStatus === 'critical' || i.stockStatus === 'warning');
-  const totalForecast = items.reduce((s, i) => s + forecastVal(i), 0);
   return {
     totalGroups: groups.length,
-    totalProducts: items.length,
-    withStockCount: withStock.length,
-    noStockCount: items.length - withStock.length,
-    deficitCount: deficit.length,
-    criticalCount: items.filter(i => i.stockStatus === 'critical').length,
-    totalForecast: Math.round(totalForecast),
-    trendUp: items.filter(i => i.trend === 'up').length,
-    trendDown: items.filter(i => i.trend === 'down').length,
-    trendStable: items.filter(i => i.trend === 'stable').length,
+    criticalCount: groups.filter(g => g.stockStatus === 'critical').length,
+    warningCount: groups.filter(g => g.stockStatus === 'warning').length,
+    totalRecommendedOrder: Math.round(groups.reduce((s, g) => s + (g.recommendedOrder || 0), 0)),
   };
 });
 
@@ -1754,4 +1733,18 @@ onMounted(() => {
   .rpt-yoy-grid { grid-template-columns: repeat(4, 1fr); }
   .dash-sup-row__right { width: 55%; }
 }
+
+/* Forecast v3 — буфер/светофор */
+.fc2-safety { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--text-muted); }
+.fc2-safety-input { width:54px; padding:6px 8px; border:1.5px solid var(--border); border-radius:8px; background:var(--card); color:var(--text); font-size:12px; text-align:center; }
+.fc2-stat-warn { color:#E65100; }
+.fc2-dlt { font-size:9px; font-weight:700; color:#1565C0; background:#E3F2FD; border-radius:4px; padding:0 4px; line-height:1.6; white-space:nowrap; }
+.fc2-th-status { text-align:center; min-width:56px; cursor:default; }
+.fc2-td-status { text-align:center; }
+.fc2-light { font-size:14px; line-height:1; }
+.fc2-th-order { text-align:right; min-width:70px; }
+.fc2-td-order { text-align:right; font-weight:600; color:var(--text-muted); }
+.fc2-order-hi { color:#502314; font-weight:800; }
+.fc2-days-muted { color:var(--text-muted); font-weight:400; }
+.fc2-legend { margin-top:8px; padding:8px 12px; font-size:11px; color:var(--text-muted); background:var(--bg); border-radius:8px; line-height:1.6; }
 </style>

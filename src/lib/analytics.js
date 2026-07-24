@@ -352,14 +352,15 @@ export async function getSeasonalityData(legalEntity) {
 /**
  * Прогноз расхода товаров: взвешенное среднее, тренд, sparkline, статус запаса
  */
-export async function getForecastData(legalEntity) {
+export async function getForecastData(legalEntity, safetyDays = 5) {
   const now = new Date();
   const start60 = new Date(now); start60.setDate(start60.getDate() - 60);
+  const SAFETY = Math.max(0, Number(safetyDays) || 0);
 
-  // 3 параллельных запроса: заказы за 60 дней, остатки, сезонность (12 мес.)
-  // Для рабочих данных (orders, analysis_data) фильтруем строго по одному юрлицу
+  // Заказы за 60 дней. received_at нужен, чтобы отделить «в пути» (не принято)
+  // от полученного. Для рабочих данных фильтруем строго по одному юрлицу.
   let ordersQuery = db.from('orders')
-    .select('id, created_at, supplier, order_items(qty_boxes, sku, name)')
+    .select('id, created_at, delivery_date, received_at, supplier, order_items(qty_boxes, sku, name)')
     .eq('legal_entity', legalEntity)
     .gte('created_at', start60.toISOString())
     .order('created_at', { ascending: true });
@@ -370,10 +371,14 @@ export async function getForecastData(legalEntity) {
 
   // Для справочников (products) — общий фильтр по группе юрлиц
   let productsQuery = db.from('products')
-    .select('sku, name, qty_per_box, supplier, analog_group, unit_of_measure');
+    .select('sku, name, qty_per_box, multiplicity, supplier, analog_group, unit_of_measure');
   productsQuery = applyEntityGroupFilter(productsQuery, legalEntity);
 
-  // Реализация ресторанов за 365 дней (для сезонности и прогноза, по группе юрлиц)
+  // Срок поставки (dlt) поставщиков — по группе юрлиц
+  let suppliersQuery = db.from('suppliers').select('short_name, dlt');
+  suppliersQuery = applyEntityGroupFilter(suppliersQuery, legalEntity);
+
+  // Реализация ресторанов за 365 дней (для прогноза, по группе юрлиц)
   const start365 = new Date(now); start365.setDate(start365.getDate() - 365);
   let salesQuery = db.from('restaurant_sales')
     .select('sale_date, analog_group, quantity, restaurant_count')
@@ -382,8 +387,8 @@ export async function getForecastData(legalEntity) {
     .order('sale_date', { ascending: true })
     .limit(500000);
 
-  const [ordersRes, stockRes, productsRes, salesRes] = await Promise.all([
-    ordersQuery, stockQuery, productsQuery, salesQuery,
+  const [ordersRes, stockRes, productsRes, salesRes, suppliersRes] = await Promise.all([
+    ordersQuery, stockQuery, productsQuery, salesQuery, suppliersQuery,
   ]);
 
   if (ordersRes.error || stockRes.error || productsRes.error || salesRes.error) {
@@ -393,11 +398,36 @@ export async function getForecastData(legalEntity) {
   const stockRows = stockRes.data || [];
   const products = productsRes.data || [];
   const salesRows = salesRes.data || [];
+  const suppliersRows = suppliersRes.data || [];
 
   // Карта товаров для qty_per_box и supplier
   const productMap = {};
   products.forEach(p => {
     if (p.sku) productMap[p.sku] = p;
+  });
+
+  // Срок поставки по поставщику (dlt, дней). Нет значения → 0.
+  const dltBySupplier = {};
+  suppliersRows.forEach(s => {
+    if (s.short_name) dltBySupplier[s.short_name] = Math.max(0, parseInt(s.dlt) || 0);
+  });
+
+  // «В пути»: заказы без отметки о приёмке (received_at пусто). Считаем в штуках
+  // (qty_boxes × qty_per_box) по SKU. Учитываем заказы с датой поставки не старше
+  // 30 дней — совсем старые непринятые считаем зависшими, не «в пути».
+  const inTransitBySku = {};
+  const transitCutoff = new Date(now); transitCutoff.setDate(transitCutoff.getDate() - 30);
+  orders.forEach(o => {
+    if (o.received_at) return;
+    const dd = o.delivery_date ? new Date(o.delivery_date) : (o.created_at ? new Date(o.created_at) : null);
+    if (dd && dd < transitCutoff) return;
+    (o.order_items || []).forEach(item => {
+      const sku = item.sku;
+      if (!sku) return;
+      const qpb = productMap[sku]?.qty_per_box || 1;
+      const boxes = parseFloat(String(item.qty_boxes || '0').replace(',', '.')) || 0;
+      inTransitBySku[sku] = (inTransitBySku[sku] || 0) + boxes * qpb;
+    });
   });
 
   // SKU → analog_group и подсчёт SKU в каждой группе
@@ -570,30 +600,25 @@ export async function getForecastData(legalEntity) {
     let salesTrend = null;
     if (salesData && salesData.dayCount >= 7) {
       hasSalesData = true;
-      // Взвешенное среднее: 7 дн (50%), 8-30 дн (30%), 31-90 дн (20%)
       const salesDates90 = [];
       for (let i = 89; i >= 0; i--) {
         const d = new Date(now); d.setDate(d.getDate() - i);
         salesDates90.push(toLocalDateStr(d));
       }
-      const sLast7 = salesDates90.slice(-7).reduce((s, d) => s + (salesData.days[d] || 0), 0);
-      const sMid23 = salesDates90.slice(-30, -7).reduce((s, d) => s + (salesData.days[d] || 0), 0);
-      const sOld60 = salesDates90.slice(0, -30).reduce((s, d) => s + (salesData.days[d] || 0), 0);
-      const sAvg7 = sLast7 / 7;
-      const sMidDays = salesDates90.slice(-30, -7).length || 1;
-      const sOldDays = salesDates90.slice(0, -30).length || 1;
-      const sAvgMid = sMidDays > 0 ? sMid23 / sMidDays : sAvg7;
-      const sAvgOld = sOldDays > 0 ? sOld60 / sOldDays : sAvgMid;
-      // Делим на кол-во SKU в группе: реализация — это итого по всей группе
-      salesAvgPerDay = (sAvg7 * 0.5 + sAvgMid * 0.3 + sAvgOld * 0.2) / skusInGroup;
-      // Тренд по реализации (тренд общий, не делим)
-      // Находим последнюю дату с данными (данные приходят с задержкой)
+      // Последняя дата с данными (реализация приходит с задержкой)
       let salesLastDate = null;
       for (let i = salesDates90.length - 1; i >= 0; i--) {
         if (salesData.days[salesDates90[i]]) { salesLastDate = i; break; }
       }
-      // Если данные отстают — сдвигаем окно к последней дате с данными
       const trendEnd = salesLastDate !== null ? salesLastDate + 1 : salesDates90.length;
+      // Дневной расход = простое среднее за последние 14 дней (окно
+      // заканчивается на последней дате с данными). Делим на число SKU в
+      // группе — реализация даётся итогом по группе аналогов.
+      const start14 = Math.max(0, trendEnd - 14);
+      const sum14 = salesDates90.slice(start14, trendEnd).reduce((s, d) => s + (salesData.days[d] || 0), 0);
+      const days14 = (trendEnd - start14) || 14;
+      salesAvgPerDay = (sum14 / days14) / skusInGroup;
+      // Тренд по реализации
       const trendStart7 = Math.max(0, trendEnd - 7);
       const trendStartPrev = Math.max(0, trendEnd - 14);
       const sLast7trend = salesDates90.slice(trendStart7, trendEnd).reduce((s, d) => s + (salesData.days[d] || 0), 0);
@@ -608,59 +633,63 @@ export async function getForecastData(legalEntity) {
       }
     }
 
-    // Расход и остаток — всё в исходных единицах (шт/кг/л)
+    // Расход и остаток — всё в исходных единицах (шт/кг/л). Сезонность НЕ
+    // применяем (искажала). Прогноз = чистый дневной расход.
     const dailyConsumptionPieces = analysisData ? analysisData.dailyConsumption : 0;
-    // Если есть реализация ресторанов — используем её; иначе analysis_data
     const effectiveDaily = hasSalesData ? salesAvgPerDay : dailyConsumptionPieces;
     const stockPieces = analysisData ? analysisData.stock : null;
+    const inTransit = Math.round((inTransitBySku[sku] || 0) * 10) / 10;
+    const dlt = dltBySupplier[supplier] || 0;
+    // Доступно к покрытию спроса = остаток на складе + в пути
+    const available = (stockPieces || 0) + inTransit;
 
+    // Дней запаса и светофор по сроку поставки + страховым дням.
     let daysOfStock = null;
     let stockStatus = 'unknown';
     if (hasStockData) {
       if (effectiveDaily > 0) {
-        daysOfStock = Math.round(stockPieces / effectiveDaily);
+        daysOfStock = Math.round((available / effectiveDaily) * 10) / 10;
+        if (daysOfStock < dlt) stockStatus = 'critical';           // не доедет новая поставка
+        else if (daysOfStock < dlt + SAFETY) stockStatus = 'warning'; // пора заказывать
+        else stockStatus = 'ok';
       } else {
-        daysOfStock = stockPieces > 0 ? 999 : 0;
+        daysOfStock = available > 0 ? 999 : 0;
+        stockStatus = 'ok'; // расхода нет — дефицита нет
       }
-      stockStatus = 'ok';
-      if (daysOfStock <= 3) stockStatus = 'critical';
-      else if (daysOfStock <= 7) stockStatus = 'warning';
     }
+
+    // Потребность на горизонт (срок поставки + страховые) и рекомендованный заказ.
+    const horizon = dlt + SAFETY;
+    const need = effectiveDaily * horizon;
+    const mult = productInfo.multiplicity || 1;
+    const rawOrder = Math.max(0, need - available);
+    const recommendedOrder = rawOrder > 0 ? Math.ceil(rawOrder / mult) * mult : 0;
 
     // Тренд: предпочитаем данные реализации, иначе по заказам
     const effectiveTrend = salesTrend || trend;
 
-    // Сезонность по группе аналогов (данные реализации ресторанов за год)
-    const season = getGroupSeason(group);
-    const adjCoeff = season.seasonCoeff;
-    const adjDaily = effectiveDaily * adjCoeff;
-
     // Пропускаем товары без данных (ни реализации, ни расхода, ни остатков)
     if (!hasSalesData && !analysisData && !prod) continue;
-    // Пропускаем группы с реализацией, но без актуальных данных (>3 дней)
-    // НЕ пропускаем товары с расходом из analysis_data или заказов — у них может не быть реализации
     if (group && !recentSalesGroups.has(group) && !analysisData && !prod) continue;
 
     forecastItems.push({
-      sku: sku,
+      sku,
       name: prodName,
       supplier,
       unit,
       qtyPerBox,
-      // Расход/день в исходных единицах (шт/кг/л)
+      dlt,
       avgPerDay: Math.round(effectiveDaily * 100) / 100,
-      // Прогноз = дневной расход × дней × сезонный коэффициент
-      forecast7: Math.round(adjDaily * 7 * 10) / 10,
-      forecast14: Math.round(adjDaily * 14 * 10) / 10,
-      forecast30: Math.round(adjDaily * 30 * 10) / 10,
+      // Потребность на горизонт = расход × (срок поставки + страховые дни)
+      need: Math.round(need * 10) / 10,
+      recommendedOrder,
       hasConsumptionData: effectiveDaily > 0,
       dataSource: hasSalesData ? 'restaurant_sales' : (dailyConsumptionPieces > 0 ? 'analysis_data' : 'orders'),
       trend: effectiveTrend,
       sparkline,
-      // Сезонность
-      seasonCoeff: Math.round(adjCoeff * 100) / 100,
-      yoyChange: season.yoyChange,
       stock: hasStockData ? Math.round(stockPieces * 10) / 10 : null,
+      inTransit,
+      available: hasStockData ? Math.round(available * 10) / 10 : null,
       daysOfStock,
       stockStatus,
     });
@@ -694,37 +723,36 @@ export async function getForecastData(legalEntity) {
   for (const g of Object.values(groupMap)) {
     const items = g.items;
     const avgPerDay = items.reduce((s, i) => s + i.avgPerDay, 0);
-    const forecast7 = items.reduce((s, i) => s + i.forecast7, 0);
-    const forecast14 = items.reduce((s, i) => s + i.forecast14, 0);
-    const forecast30 = items.reduce((s, i) => s + i.forecast30, 0);
+    const need = items.reduce((s, i) => s + (i.need || 0), 0);
+    const recommendedOrder = items.reduce((s, i) => s + (i.recommendedOrder || 0), 0);
     const hasAnyStock = items.some(i => i.stock !== null);
     const stockTotal = hasAnyStock ? items.reduce((s, i) => s + (i.stock || 0), 0) : null;
-    // Дни запаса группы = суммарный остаток / суммарный расход (в коробках)
+    const inTransitTotal = items.reduce((s, i) => s + (i.inTransit || 0), 0);
+    const availableTotal = hasAnyStock ? (stockTotal + inTransitTotal) : null;
+    // Срок поставки группы — максимум по товарам (консервативно).
+    const groupDlt = items.reduce((m, i) => Math.max(m, i.dlt || 0), 0);
+    // Дни запаса группы = (остаток + в пути) / суммарный расход; светофор по dlt+страховые.
     let daysOfStock = null;
     let stockStatus = 'unknown';
     if (hasAnyStock) {
       if (avgPerDay > 0) {
-        daysOfStock = Math.round(stockTotal / avgPerDay);
+        daysOfStock = Math.round((availableTotal / avgPerDay) * 10) / 10;
+        if (daysOfStock < groupDlt) stockStatus = 'critical';
+        else if (daysOfStock < groupDlt + SAFETY) stockStatus = 'warning';
+        else stockStatus = 'ok';
       } else {
-        daysOfStock = stockTotal > 0 ? 999 : 0;
+        daysOfStock = availableTotal > 0 ? 999 : 0;
+        stockStatus = 'ok';
       }
-      stockStatus = 'ok';
-      if (daysOfStock <= 3) stockStatus = 'critical';
-      else if (daysOfStock <= 7) stockStatus = 'warning';
     }
-    // Тренд: если хоть один растёт — up; если хоть один падает и никто не растёт — down
     const hasUp = items.some(i => i.trend === 'up');
     const hasDown = items.some(i => i.trend === 'down');
     const trend = hasUp ? 'up' : hasDown ? 'down' : 'stable';
     const hasConsumptionData = items.some(i => i.hasConsumptionData);
     const dataSource = items.some(i => i.dataSource === 'restaurant_sales') ? 'restaurant_sales'
       : items.some(i => i.dataSource === 'analysis_data') ? 'analysis_data' : 'orders';
-    // Поставщики в группе
     const suppliers = [...new Set(items.map(i => i.supplier).filter(Boolean))];
-    // Sparkline: суммируем по дням
     const sparkline = (items[0]?.sparkline || []).map((_, di) => items.reduce((s, it) => s + ((it.sparkline || [])[di] || 0), 0));
-
-    // Единица измерения группы — берём от первого товара (обычно одинаковая)
     const groupUnit = items[0]?.unit || 'шт';
 
     forecastGroups.push({
@@ -734,25 +762,19 @@ export async function getForecastData(legalEntity) {
       unit: groupUnit,
       suppliers,
       supplier: suppliers.join(', '),
+      dlt: groupDlt,
       avgPerDay: Math.round(avgPerDay * 100) / 100,
-      forecast7: Math.round(forecast7 * 10) / 10,
-      forecast14: Math.round(forecast14 * 10) / 10,
-      forecast30: Math.round(forecast30 * 10) / 10,
+      need: Math.round(need * 10) / 10,
+      recommendedOrder: Math.round(recommendedOrder * 10) / 10,
       hasConsumptionData,
       dataSource,
       trend,
       sparkline,
       stock: stockTotal !== null ? Math.round(stockTotal * 10) / 10 : null,
+      inTransit: Math.round(inTransitTotal * 10) / 10,
+      available: availableTotal !== null ? Math.round(availableTotal * 10) / 10 : null,
       daysOfStock,
       stockStatus,
-      // Сезонность: средний коэффициент и YoY по группе
-      seasonCoeff: items.reduce((s, i) => s + (i.seasonCoeff || 1), 0) / items.length,
-      yoyChange: (() => {
-        const withYoy = items.filter(i => i.yoyChange !== null);
-        if (!withYoy.length) return null;
-        return Math.round(withYoy.reduce((s, i) => s + i.yoyChange, 0) / withYoy.length);
-      })(),
-      // lastYearBoxes не задаётся у отдельных позиций прогноза — убираем агрегацию
     });
   }
 
@@ -775,29 +797,28 @@ export async function getForecastData(legalEntity) {
     return b.avgPerDay - a.avgPerDay;
   });
 
-  // KPI
-  const withStock = forecastItems.filter(i => i.stockStatus !== 'unknown');
-  const deficitItems = withStock.filter(i => i.stockStatus === 'critical' || i.stockStatus === 'warning');
-  const noStockData = forecastItems.filter(i => i.stockStatus === 'unknown');
-  const totalForecast7 = forecastItems.reduce((s, i) => s + i.forecast7, 0);
-  const totalForecast14 = forecastItems.reduce((s, i) => s + i.forecast14, 0);
-  const totalForecast30 = forecastItems.reduce((s, i) => s + i.forecast30, 0);
+  // KPI (по группам — они основная единица отображения)
+  const withStock = forecastGroups.filter(g => g.stockStatus !== 'unknown');
+  const criticalGroups = forecastGroups.filter(g => g.stockStatus === 'critical');
+  const warningGroups = forecastGroups.filter(g => g.stockStatus === 'warning');
+  const noStockData = forecastGroups.filter(g => g.stockStatus === 'unknown');
+  const totalOrder = forecastGroups.reduce((s, g) => s + (g.recommendedOrder || 0), 0);
 
   return {
     items: forecastItems,
     groups: forecastGroups,
     suppliers: allSuppliers,
-    seasonCoeff: 1, // сезонный коэфф. теперь считается по каждому SKU отдельно
+    safetyDays: SAFETY,
     kpi: {
       totalProducts: forecastItems.length,
       totalGroups: forecastGroups.length,
       withStockCount: withStock.length,
       noStockCount: noStockData.length,
-      deficitCount: deficitItems.length,
-      criticalCount: forecastItems.filter(i => i.stockStatus === 'critical').length,
-      totalForecast7: Math.round(totalForecast7),
-      totalForecast14: Math.round(totalForecast14),
-      totalForecast30: Math.round(totalForecast30),
+      criticalCount: criticalGroups.length,
+      warningCount: warningGroups.length,
+      // «Пора заказывать» = красные + жёлтые
+      deficitCount: criticalGroups.length + warningGroups.length,
+      totalRecommendedOrder: Math.round(totalOrder),
     },
   };
 }
