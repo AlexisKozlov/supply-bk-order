@@ -1339,7 +1339,7 @@ export async function exportPaymentPlanXlsx(rows, period) {
     const [yy, moo, dd] = String(p.payment_date || '').split('-');
     const dateStr = dd ? `${dd}.${moo}.${yy}` : '';
     put(r, 0, isoWeekNumber(p.payment_date), cell(stripe, { alignment: { horizontal: 'center' } }));
-    put(r, 1, p.supplier || '', cell(stripe, { alignment: { horizontal: 'left' } }));
+    put(r, 1, p.supplier_full || p.supplier || '', cell(stripe, { alignment: { horizontal: 'left', wrapText: true } }));
     put(r, 2, p.currency || 'RUB', cell(stripe, { alignment: { horizontal: 'center' } }));
     put(r, 3, 'Факт', cell(stripe, { alignment: { horizontal: 'center' } }));
     put(r, 4, dateStr, cell(stripe, { alignment: { horizontal: 'center' } }));
@@ -1361,7 +1361,7 @@ export async function exportPaymentPlanXlsx(rows, period) {
   ws['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: r - 1, c: 6 });
   ws['!cols'] = [
     { wch: 8 },   // Неделя
-    { wch: 28 },  // Поставщик
+    { wch: 42 },  // Поставщик (полное наименование)
     { wch: 9 },   // Валюта
     { wch: 16 },  // Условия оплаты
     { wch: 22 },  // Планируемая дата оплаты

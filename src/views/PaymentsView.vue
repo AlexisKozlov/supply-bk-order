@@ -192,6 +192,17 @@ async function exportPlan() {
       return py === y && pm === m
     })
     if (!rows.length) { toast.info('Нет оплат', `За ${m}.${y} оплат не найдено`); return }
+    // Подтягиваем полное наименование поставщика (в оплатах хранится короткое).
+    const supMap = {}
+    for (const g of ['BK_VM', 'PS']) {
+      const { data } = await db.from('suppliers').select('short_name,full_name,legal_entity_group').eq('legal_entity_group', g).limit(5000)
+      for (const s of (data || [])) {
+        if (s.full_name) supMap[`${g}|${s.short_name}`] = s.full_name
+      }
+    }
+    for (const p of rows) {
+      p.supplier_full = supMap[`${p.legal_entity_group}|${p.supplier}`] || p.supplier
+    }
     await exportPaymentPlanXlsx(rows, { year: +y, month: +m })
     toast.success('Готово', `План оплат за ${m}.${y} выгружен (${rows.length})`)
   } catch (e) {
