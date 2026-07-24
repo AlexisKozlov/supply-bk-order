@@ -81,9 +81,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, onMounted, watch, defineAsyncComponent } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { appAlert } from '@/lib/appDialogs.js';
 
 const orderStore = useOrderStore();
@@ -102,7 +103,9 @@ const showSettings = ref(false);
 const unmatchedCount = ref(0);
 
 const filters = reactive({
-  legal_entity_group: 'BK_VM',
+  // Группа юрлиц берётся из переключателя в сайдбаре, а не жёстко BK_VM,
+  // чтобы модуль следовал за выбранным юрлицом (как остальные разделы).
+  legal_entity_group: getEntityGroupCode(orderStore.settings?.legalEntity),
   status: '',
   date_from: '',
   date_to: '',
@@ -205,6 +208,15 @@ async function createQuick() {
     creating.value = false;
   }
 }
+
+// Следим за переключателем юрлица в сайдбаре: при смене — обновляем группу и перезагружаем.
+watch(() => orderStore.settings?.legalEntity, (le) => {
+  const group = getEntityGroupCode(le);
+  if (group !== filters.legal_entity_group) {
+    filters.legal_entity_group = group;
+    reload();
+  }
+});
 
 onMounted(async () => {
   await reload();

@@ -364,8 +364,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useSupplyAssistantStore } from '@/stores/supplyAssistantStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -375,11 +376,19 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 const saStore = useSupplyAssistantStore();
 const userStore = useUserStore();
 const toast = useToastStore();
+const orderStore = useOrderStore();
 
 const CATEGORIES = ['Сухой', 'Холод', 'Мороз'];
 
 // Пицца Стар работает не через 1С УТ — модуль на неё не распространяется.
 const saEntities = computed(() => LEGAL_ENTITIES.filter(le => !String(le).includes('Пицца')));
+
+// Юрлицо из переключателя сайдбара, приведённое к поддерживаемым (БК/ВМ).
+// Для Пиццы Стар модуль не применяется — берём первое поддерживаемое (БК).
+function saEntityFromSidebar() {
+  const le = orderStore.settings?.legalEntity || '';
+  return saEntities.value.includes(le) ? le : saEntities.value[0];
+}
 
 const canEdit = computed(() => userStore.hasAccess('supply-assistant', 'edit'));
 
@@ -390,7 +399,7 @@ const pageTab = ref('orders');
 const filterRestaurant = ref('');
 const filterDateFrom = ref('');
 const filterDateTo = ref('');
-const filterLegalEntity = ref('');
+const filterLegalEntity = ref(saEntityFromSidebar());
 const orders = ref([]);
 const ordersLoading = ref(false);
 const ordersError = ref('');
@@ -568,7 +577,7 @@ async function confirmDeleteCurrentOrder() {
 }
 
 // ═══ Вкладка «Шаблон товаров» ═══
-const tplLegalEntity = ref(LEGAL_ENTITIES[0]);
+const tplLegalEntity = ref(saEntityFromSidebar());
 const tplCategory = ref('Сухой');
 const tplItems = ref([]);
 const tplFilter = ref('');
@@ -737,6 +746,18 @@ function addStockToTemplate() {
   showStockImportModal.value = false;
   if (added) toast.success('Добавлено', `${added} товаров в шаблон. Не забудьте «Сохранить шаблон».`);
 }
+
+// Следим за переключателем юрлица в сайдбаре: синхронизируем выбор
+// юрлица в обеих вкладках и перезагружаем активную.
+watch(() => orderStore.settings?.legalEntity, () => {
+  const le = saEntityFromSidebar();
+  const changed = tplLegalEntity.value !== le || filterLegalEntity.value !== le;
+  if (!changed) return;
+  tplLegalEntity.value = le;
+  filterLegalEntity.value = le;
+  if (pageTab.value === 'templates') loadSaTemplates();
+  else loadOrders();
+});
 
 onMounted(() => {
   // Загрузим первую страницу заказов сразу
