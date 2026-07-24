@@ -20,7 +20,7 @@ $allowed = [
     'plt_products', 'plt_deliveries', 'plt_delivery_items', 'plt_daily_stock', 'plt_summary',
     'marketing_activities', 'marketing_activity_items', 'marketing_activity_files',
     'recipes', 'recipe_ingredients', 'recipe_groups', 'recipe_group_items', 'pallet_reference',
-    'reminder_cron_log',
+    'reminder_cron_log', 'analog_cards',
 ];
 // Защита: только чтение через REST, запись — через RPC.
 // supplier_payments — read-only: запись через update_payment / create_payment_if_needed,
