@@ -40,6 +40,7 @@ const routes = [
       { path: 'ui-kit', name: 'ui-kit', component: () => import('@/views/UiKitView.vue'), meta: { requiresAdmin: true, title: 'UI Kit — дизайн-система' } },
       { path: 'telegram-admin', name: 'telegram-admin', component: () => import('@/views/TelegramAdminView.vue'), meta: { title: 'Telegram-бот', module: 'telegram' } },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
+      { path: 'analogs', name: 'analogs', component: () => import('@/views/AnalogsView.vue'), meta: { title: 'Аналоги', module: 'analogs' } },
       { path: 'deficit', name: 'deficit', component: () => import('@/views/DeficitView.vue'), meta: { title: 'Распределение дефицита', module: 'deficit' } },
       { path: 'stock-collection', name: 'stock-collection', component: () => import('@/views/StockCollectionView.vue'), meta: { title: 'Сбор остатков', module: 'stock-collection' } },
       { path: 'tenders', name: 'tenders', component: () => import('@/views/TendersView.vue'), meta: { title: 'Тендеры', module: 'tenders' } },

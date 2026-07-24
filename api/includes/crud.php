@@ -198,6 +198,7 @@ if ($sessionUser && $sessionUser['role'] !== 'admin' && isset($PARENT_LE_CHECK[$
 // Белый список полей, доступных для фильтрации через GET-параметры
 $filterWhitelist = [
     'products'    => ['id','sku','name','supplier','legal_entity','legal_entity_group','is_active','analog_group','category','is_traceable'],
+    'analog_cards'=> ['id','code','sku','analog_group','legal_entity_group','in_catalog','supplier'],
     'suppliers'   => ['id','short_name','full_name','legal_entity','legal_entity_group','is_active','dlt','doc','country'],
     'orders'      => ['id','supplier','legal_entity','delivery_date','created_at','created_by','unit','received_at'],
     'order_items' => ['id','order_id','sku','name'],

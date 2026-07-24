@@ -4,7 +4,7 @@ import { db, setSessionToken } from '@/lib/apiClient.js';
 
 // ═══ Система модульных прав ═══
 // Fallback-значения (используются до загрузки конфига с сервера)
-export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'supplier-schedule', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'shelf-life', 'pricing', 'tenders', 'stock-collection', 'deficit', 'distribution', 'telegram', 'pallet-calc', 'cards', 'protocols', 'marketing', 'corrections', 'chat', 'pallet-storage', 'restaurant-orders', 'supplier-orders', 'truck-loading', 'surveys', 'tasks', 'dashboard', 'supply-assistant', 'keg-returns', 'reconciliation', 'tit-requests'];
+export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'supplier-schedule', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'shelf-life', 'pricing', 'tenders', 'stock-collection', 'deficit', 'distribution', 'telegram', 'pallet-calc', 'cards', 'protocols', 'marketing', 'corrections', 'chat', 'pallet-storage', 'restaurant-orders', 'supplier-orders', 'truck-loading', 'surveys', 'tasks', 'dashboard', 'supply-assistant', 'keg-returns', 'reconciliation', 'tit-requests', 'analogs'];
 
 export const ROLE_TEMPLATES = {
   admin:  { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', 'supplier-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full', 'restaurant-sales': 'full', 'shelf-life': 'full', pricing: 'full', tenders: 'full', 'stock-collection': 'full', deficit: 'full', distribution: 'full', telegram: 'full', 'pallet-calc': 'full', cards: 'full', protocols: 'full', marketing: 'full', corrections: 'full', chat: 'full', 'pallet-storage': 'full', 'restaurant-orders': 'full', 'supplier-orders': 'full', 'truck-loading': 'full', surveys: 'full', tasks: 'full', dashboard: 'full', 'supply-assistant': 'full' },
@@ -40,6 +40,7 @@ export const MODULE_LABELS = {
   'keg-returns': 'Возврат кег',
   reconciliation: 'Сверка 1С/УТ',
   'tit-requests': 'Заявка на пропуск',
+  analogs: 'Аналоги',
 };
 
 // Загрузка RBAC-конфига с сервера (единый источник правды — PHP)

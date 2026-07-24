@@ -469,6 +469,7 @@ const sidebarSections = [
   ]},
   { title: 'Данные', items: [
     { module: 'database', route: 'database', icon: 'database', label: 'База данных' },
+    { module: 'analogs', route: 'analogs', icon: 'link', label: 'Аналоги' },
     { module: 'pricing', route: 'pricing', icon: 'pricing', label: 'Цены и ПСЦ' },
     { module: 'calendar', route: 'calendar', icon: 'calendar', label: 'Календарь' },
   ]},
