@@ -155,7 +155,7 @@
       <div v-else class="db-grid">
         <div v-for="r in filteredRestaurants" :key="r.id" class="db-card" @click="!isViewer && openRestaurantModal(r)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
-            <span class="db-rest-num">{{ formatRestaurantNumber(r.number) }}</span>
+            <span class="db-rest-num">{{ formatRestaurantNumber(r.number) }}</span><span v-if="dodoCityLabel(r)" class="db-rest-dodo">{{ dodoCityLabel(r) }}</span>
             <div class="db-card-title">
               <span class="db-card-address">{{ r.address || 'Без адреса' }}</span>
             </div>
@@ -255,7 +255,7 @@
       <div v-if="restModal.show" class="modal" @click.self="tryCloseRestModal">
         <div class="modal-box" style="max-width: 480px;">
           <div class="modal-header">
-            <h2>{{ restModal.data.id ? 'Ресторан ' + formatRestaurantNumber(restModal.data.number) : 'Новый ресторан' }}</h2>
+            <h2>{{ restModal.data.id ? ('Ресторан ' + formatRestaurantNumber(restModal.data.number) + (dodoCityLabel(restModal.data) ? ' · ' + dodoCityLabel(restModal.data) : '')) : 'Новый ресторан' }}</h2>
             <button class="modal-close" @click="tryCloseRestModal"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="db-rest-modal-body">
@@ -272,10 +272,16 @@
                 </select>
               </label>
             </div>
-            <label class="db-rest-label">
-              <span class="db-rest-label-text">Город</span>
-              <input v-model="restModal.data.city" type="text" placeholder="Минск" />
-            </label>
+            <div class="db-rest-form-row">
+              <label class="db-rest-label">
+                <span class="db-rest-label-text">Город</span>
+                <input v-model="restModal.data.city" type="text" placeholder="Минск" />
+              </label>
+              <label v-if="restModal.data.legal_entity_group === 'PS'" class="db-rest-label">
+                <span class="db-rest-label-text">Номер Додо ИС</span>
+                <input v-model.number="restModal.data.dodo_is_number" type="number" min="1" placeholder="напр. 1" />
+              </label>
+            </div>
             <label class="db-rest-label">
               <span class="db-rest-label-text">Адрес</span>
               <input v-model="restModal.data.address" type="text" placeholder="ул. Притыцкого, 154" />
@@ -284,23 +290,26 @@
               <span class="db-rest-label-text">Комментарий</span>
               <input v-model="restModal.data.notes" type="text" />
             </label>
-            <label class="db-rest-label">
-              <span class="db-rest-label-text">Адрес погрузки (для ТТН возврата кег)</span>
-              <input v-model="restModal.data.pickup_address" type="text" placeholder="г. Минск, ул. Притыцкого, 154" />
-            </label>
-            <label class="db-rest-label">
-              <span class="db-rest-label-text">Дни возврата кег</span>
-              <div class="db-rest-weekdays">
-                <label v-for="(day, idx) in weekdayNames" :key="idx" class="db-rest-weekday">
-                  <input
-                    type="checkbox"
-                    :checked="!!((restModal.data.pickup_weekdays || 0) & (1 << idx))"
-                    @change="toggleWeekday(idx, $event.target.checked)"
-                  />
-                  {{ day }}
-                </label>
-              </div>
-            </label>
+            <!-- Возврат кег не применяется к Додо (ПС) — поля скрыты -->
+            <template v-if="restModal.data.legal_entity_group !== 'PS'">
+              <label class="db-rest-label">
+                <span class="db-rest-label-text">Адрес погрузки (для ТТН возврата кег)</span>
+                <input v-model="restModal.data.pickup_address" type="text" placeholder="г. Минск, ул. Притыцкого, 154" />
+              </label>
+              <label class="db-rest-label">
+                <span class="db-rest-label-text">Дни возврата кег</span>
+                <div class="db-rest-weekdays">
+                  <label v-for="(day, idx) in weekdayNames" :key="idx" class="db-rest-weekday">
+                    <input
+                      type="checkbox"
+                      :checked="!!((restModal.data.pickup_weekdays || 0) & (1 << idx))"
+                      @change="toggleWeekday(idx, $event.target.checked)"
+                    />
+                    {{ day }}
+                  </label>
+                </div>
+              </label>
+            </template>
           </div>
           <div class="db-rest-modal-footer">
             <button v-if="restModal.data.id && isAdmin" class="btn db-rest-btn-delete" @click="deleteRestaurant(restModal.data); restModal.show = false">
@@ -336,7 +345,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
-import { getEntityGroupCode, formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { getEntityGroupCode, formatRestaurantNumber, dodoCityLabel } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 
@@ -963,6 +972,7 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 }
 
 /* ═══ Restaurant number badge ═══ */
+.db-rest-dodo { margin-left: 8px; font-size: 12px; font-weight: 700; color: #5E35B1; background: #EDE7F6; border-radius: 10px; padding: 2px 9px; }
 .db-rest-num {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 28px; height: 28px; border-radius: 50%;

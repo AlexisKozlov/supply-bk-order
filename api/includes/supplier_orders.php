@@ -117,9 +117,19 @@ function soNormalizeReminderCsv($input, array $whitelist) {
     return implode(',', $out);
 }
 
+// Белый список ключей иконок (поставщики + ссылки кабинета).
+// ВАЖНО: держать в синхроне с supplierIconKeys в src/lib/cabinetIcons.js.
+function soIconKeyWhitelist() {
+    return ['package', 'link', 'drinks', 'water', 'juice', 'coffee', 'wine', 'sweets', 'donut', 'icecream',
+        'vegetables', 'fruit', 'berries', 'tomato', 'carrot', 'onion', 'corn', 'mushroom', 'pepper', 'leaf',
+        'spice', 'salt', 'sauce', 'honey', 'oil', 'meat', 'chicken', 'sausage', 'hotdog', 'burger', 'fries',
+        'fish', 'seafood', 'nuts', 'dairy', 'milk', 'yogurt', 'cheese', 'egg', 'bread', 'grain', 'flour',
+        'rice', 'noodles', 'pizza', 'can', 'jar', 'bottle', 'frozen', 'napkin', 'gloves', 'gas', 'cleaning'];
+}
+
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, icon_key, reminder_offsets, reminder_channels, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) {
@@ -155,6 +165,7 @@ function soGetSupplierSettings($pdo, $supplierId) {
         'email_cc_restaurants' => 0,
         'default_deadline_time' => '14:00:00',
         'pause_message' => null,
+        'icon_key' => null,
         // Строки настроек нет → дефолты: все тайминги, только Telegram
         'reminder_offsets' => soReminderOffsetWhitelist(),
         'reminder_channels' => ['tg'],
@@ -1140,6 +1151,41 @@ $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда'
 // Маршруты для ресторанов
 // ════��══════════════════════════════════════════
 
+// --- Ссылки в кабинете ресторана (управляемые, вместо хардкода) ---
+if ($soAction === 'cabinet-links' && $method === 'GET') {
+    $rest = soGetRestaurantSession($pdo);
+    if (!$rest) soRespond(['error' => 'Не авторизован'], 401);
+    $le = $rest['legal_entity'] ?? '';
+    if ($le === '') $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
+    $s = $pdo->prepare("SELECT id, name, url, icon_key FROM cabinet_external_links WHERE legal_entity = ? AND is_active = 1 ORDER BY sort_order, id");
+    $s->execute([$le]);
+    $rows = $s->fetchAll();
+    if ($rows) {
+        $ids = array_column($rows, 'id');
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $vs = $pdo->prepare("SELECT link_id, scope_type, scope_value FROM cabinet_external_link_visibility WHERE link_id IN ($ph)");
+        $vs->execute($ids);
+        $visByLink = [];
+        foreach ($vs->fetchAll() as $v) $visByLink[(int)$v['link_id']][] = $v;
+        if ($visByLink) {
+            $restRow = roGetRestaurantRow($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
+            $restRegion = (string)($restRow['region'] ?? '');
+            $restNum = (string)$rest['restaurant_number'];
+            $rows = array_values(array_filter($rows, function ($r) use ($visByLink, $restRegion, $restNum) {
+                $v = $visByLink[(int)$r['id']] ?? [];
+                if (!$v) return true; // без ограничений — видят все
+                foreach ($v as $x) {
+                    if ($x['scope_type'] === 'region' && (string)$x['scope_value'] === $restRegion) return true;
+                    if ($x['scope_type'] === 'restaurant' && (string)$x['scope_value'] === $restNum) return true;
+                }
+                return false;
+            }));
+        }
+        $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'name' => $r['name'], 'url' => $r['url'], 'icon_key' => $r['icon_key']], $rows);
+    }
+    soRespond(['links' => array_values($rows)]);
+}
+
 // --- Список поставщиков с графиком ---
 if ($soAction === 'suppliers' && $method === 'GET') {
     $rest = soGetRestaurantSession($pdo);
@@ -1181,7 +1227,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $ph = implode(',', array_fill(0, count($supplierIds), '?'));
 
     // 2. Настройки всех поставщиков — один запрос
-    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
+    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, icon_key, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
     $settingsRows->execute($supplierIds);
     $settingsMap = [];
     foreach ($settingsRows->fetchAll() as $r) {
@@ -1391,6 +1437,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
             ] : null),
             'is_accepting_orders'=> $isAccepting,
             'pause_message'      => $settings['pause_message'] ?? null,
+            'icon_key'           => $settings['icon_key'] ?? null,
             'min_order_value'    => $minOrderValue,
             'min_order_unit'     => $minOrderUnit,
             'available_dates'    => $availableDates,
@@ -2298,7 +2345,7 @@ if ($soAction === 'admin') {
         // частичное сохранение: если ключа нет в теле — сохраняем текущее значение,
         // а не дефолт. Иначе частичный POST (напр. только reminder_*) затирал бы
         // приём заявок, авто-подачу/письмо, текст паузы и дедлайн.
-        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
+        $curStmt = $pdo->prepare("SELECT is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, icon_key, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics FROM so_supplier_settings WHERE supplier_id = ?");
         $curStmt->execute([$supplierId]);
         $curRow = $curStmt->fetch(PDO::FETCH_ASSOC);
         // Прежние дефолты — на случай, если строки ещё нет (первое сохранение).
@@ -2308,6 +2355,7 @@ if ($soAction === 'admin') {
         $curCcRestaurants = $curRow !== false ? (int)$curRow['email_cc_restaurants'] : 0;
         $curDefaultDl = $curRow !== false ? ($curRow['default_deadline_time'] ?? '14:00:00') : '14:00:00';
         $curPauseMsg = $curRow !== false ? $curRow['pause_message'] : null;
+        $curIconKey = $curRow !== false ? ($curRow['icon_key'] ?? null) : null;
         // Недельный режим: текущие значения (null = режим выключен / строки ещё нет).
         $curWeeklyDow = ($curRow !== false && isset($curRow['weekly_deadline_dow']) && $curRow['weekly_deadline_dow'] !== null && $curRow['weekly_deadline_dow'] !== '')
             ? (int)$curRow['weekly_deadline_dow'] : null;
@@ -2348,6 +2396,14 @@ if ($soAction === 'admin') {
             $defaultDl = $curDefaultDl;
         }
         $pauseMsg = array_key_exists('pause_message', $body) ? $body['pause_message'] : $curPauseMsg;
+        // Иконка поставщика (партиал-безопасно): ''/null → NULL (автоподбор по названию);
+        // иначе только из белого списка, чужой ключ отбрасываем в NULL.
+        if (array_key_exists('icon_key', $body)) {
+            $ik = $body['icon_key'];
+            $iconKey = (is_string($ik) && in_array($ik, soIconKeyWhitelist(), true)) ? $ik : null;
+        } else {
+            $iconKey = $curIconKey;
+        }
         $notifyUsers = array_key_exists('notify_users', $body) ? ($body['notify_users'] ?? []) : null;
 
         // Недельный режим (партиал-безопасно, как остальные базовые поля):
@@ -2414,8 +2470,8 @@ if ($soAction === 'admin') {
             $xlsxPalletCsv = $curXlsxPalletCsv;
         }
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, auto_email_summary, email_cc_restaurants, default_deadline_time, pause_message, icon_key, weekly_deadline_dow, weekly_deadline_time, weekly_weeks_ahead, min_order_value, min_order_unit, xlsx_drop_empty, xlsx_pallet_metrics, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
               auto_submit_previous = VALUES(auto_submit_previous),
@@ -2423,6 +2479,7 @@ if ($soAction === 'admin') {
               email_cc_restaurants = VALUES(email_cc_restaurants),
               default_deadline_time = VALUES(default_deadline_time),
               pause_message = VALUES(pause_message),
+              icon_key = VALUES(icon_key),
               weekly_deadline_dow = VALUES(weekly_deadline_dow),
               weekly_deadline_time = VALUES(weekly_deadline_time),
               weekly_weeks_ahead = VALUES(weekly_weeks_ahead),
@@ -2431,7 +2488,7 @@ if ($soAction === 'admin') {
               xlsx_drop_empty = VALUES(xlsx_drop_empty),
               xlsx_pallet_metrics = VALUES(xlsx_pallet_metrics),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $ccRestaurants, $defaultDl, $pauseMsg, $weeklyDow, $weeklyTime, $weeklyWeeksAhead, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $autoEmailSummary, $ccRestaurants, $defaultDl, $pauseMsg, $iconKey, $weeklyDow, $weeklyTime, $weeklyWeeksAhead, $minValue, $minUnit, $xlsxDropEmpty, $xlsxPalletCsv, $updatedBy]);
 
         // Постоянная копия писем: живёт в карточке поставщика (suppliers.cc_emails),
         // но правится в настройках заявок. Пишем только если ключ реально пришёл.
@@ -3976,18 +4033,97 @@ if ($soAction === 'admin') {
     // --- Шаблоны товаров ---
     // Справочник ресторанов группы поставщика — для окна выбора доступности товара.
     if ($adminAction === 'restaurants-directory' && $method === 'GET') {
+        // Группа берётся либо от поставщика (supplier_id), либо от юрлица
+        // (legal_entity) — второй вариант нужен окну видимости ссылок кабинета.
         $supplierId = $_GET['supplier_id'] ?? '';
-        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
-        $supRow = $pdo->prepare("SELECT legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
-        $supRow->execute([$supplierId]);
-        $sup = $supRow->fetch();
-        if (!$sup) soRespond(['error' => 'Поставщик не найден'], 404);
-        $group = ($sup['legal_entity_group'] ?? '') ?: getEntityGroup($sup['legal_entity'] ?? '');
+        $leParam = $_GET['legal_entity'] ?? '';
+        if ($supplierId !== '') {
+            soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+            $supRow = $pdo->prepare("SELECT legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
+            $supRow->execute([$supplierId]);
+            $sup = $supRow->fetch();
+            if (!$sup) soRespond(['error' => 'Поставщик не найден'], 404);
+            $group = ($sup['legal_entity_group'] ?? '') ?: getEntityGroup($sup['legal_entity'] ?? '');
+        } elseif ($leParam !== '') {
+            soRequireAdminEntityGroupAccess($sessionUser, $leParam);
+            $group = getEntityGroup($leParam);
+        } else {
+            soRespond(['error' => 'Не указан поставщик или юрлицо'], 400);
+        }
         $rs = $pdo->prepare("SELECT number, region, city, address FROM restaurants WHERE active = 1 AND legal_entity_group = ? ORDER BY region, CAST(number AS UNSIGNED)");
         $rs->execute([$group]);
         $rows = $rs->fetchAll();
         $regions = array_values(array_unique(array_filter(array_map(fn($r) => (string)$r['region'], $rows))));
         soRespond(['restaurants' => $rows, 'regions' => $regions]);
+    }
+
+    // ═══ Ссылки в кабинете ресторана (управляемые, вместо хардкода) ═══
+    if ($adminAction === 'cabinet-links' && $method === 'GET') {
+        $le = $_GET['legal_entity'] ?? '';
+        if ($le === '') soRespond(['error' => 'Не указано юрлицо'], 400);
+        soRequireAdminEntityGroupAccess($sessionUser, $le);
+        $s = $pdo->prepare("SELECT id, legal_entity, name, url, icon_key, sort_order, is_active FROM cabinet_external_links WHERE legal_entity = ? ORDER BY sort_order, id");
+        $s->execute([$le]);
+        $rows = $s->fetchAll();
+        if ($rows) {
+            $ids = array_column($rows, 'id');
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $vs = $pdo->prepare("SELECT link_id, scope_type, scope_value FROM cabinet_external_link_visibility WHERE link_id IN ($ph)");
+            $vs->execute($ids);
+            $visMap = [];
+            foreach ($vs->fetchAll() as $v) $visMap[(int)$v['link_id']][$v['scope_type'] === 'region' ? 'regions' : 'restaurants'][] = $v['scope_value'];
+            foreach ($rows as &$r) {
+                $r['is_active'] = (int)$r['is_active'];
+                $r['vis_regions'] = $visMap[(int)$r['id']]['regions'] ?? [];
+                $r['vis_restaurants'] = $visMap[(int)$r['id']]['restaurants'] ?? [];
+            }
+            unset($r);
+        }
+        soRespond(['links' => $rows]);
+    }
+
+    if ($adminAction === 'cabinet-links' && $method === 'POST') {
+        $le = $body['legal_entity'] ?? '';
+        if ($le === '') soRespond(['error' => 'Не указано юрлицо'], 400);
+        soRequireAdminEntityGroupAccess($sessionUser, $le);
+        $id = (int)($body['id'] ?? 0);
+        $name = trim((string)($body['name'] ?? ''));
+        $url = trim((string)($body['url'] ?? ''));
+        if ($name === '' || $url === '') soRespond(['error' => 'Укажите название и ссылку'], 400);
+        if (!preg_match('#^https?://#i', $url)) soRespond(['error' => 'Ссылка должна начинаться с http:// или https://'], 400);
+        $iconKey = in_array($body['icon_key'] ?? '', soIconKeyWhitelist(), true) ? $body['icon_key'] : 'package';
+        $sort = (int)($body['sort_order'] ?? 0);
+        $active = !empty($body['is_active']) ? 1 : 0;
+        $by = resolveActorName($pdo, $sessionUser);
+        if ($id) {
+            $chk = $pdo->prepare("SELECT legal_entity FROM cabinet_external_links WHERE id = ?");
+            $chk->execute([$id]);
+            $cur = $chk->fetchColumn();
+            if ($cur === false) soRespond(['error' => 'Ссылка не найдена'], 404);
+            soRequireAdminEntityGroupAccess($sessionUser, $cur);
+            $pdo->prepare("UPDATE cabinet_external_links SET legal_entity=?, name=?, url=?, icon_key=?, sort_order=?, is_active=? WHERE id=?")
+                ->execute([$le, $name, mb_substr($url, 0, 500), $iconKey, $sort, $active, $id]);
+        } else {
+            $pdo->prepare("INSERT INTO cabinet_external_links (legal_entity, name, url, icon_key, sort_order, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                ->execute([$le, $name, mb_substr($url, 0, 500), $iconKey, $sort, $active, $by]);
+            $id = (int)$pdo->lastInsertId();
+        }
+        $pdo->prepare("DELETE FROM cabinet_external_link_visibility WHERE link_id = ?")->execute([$id]);
+        $insV = $pdo->prepare("INSERT IGNORE INTO cabinet_external_link_visibility (link_id, scope_type, scope_value) VALUES (?, ?, ?)");
+        foreach (array_unique(array_filter(array_map('strval', (array)($body['vis_regions'] ?? [])))) as $rg) { if ($rg !== '') $insV->execute([$id, 'region', mb_substr($rg, 0, 100)]); }
+        foreach (array_unique(array_filter(array_map('strval', (array)($body['vis_restaurants'] ?? [])))) as $rn) { if ($rn !== '') $insV->execute([$id, 'restaurant', mb_substr($rn, 0, 100)]); }
+        soRespond(['success' => true, 'id' => $id]);
+    }
+
+    if ($adminAction === 'cabinet-link' && $method === 'DELETE' && $adminParam) {
+        $id = (int)$adminParam;
+        $chk = $pdo->prepare("SELECT legal_entity FROM cabinet_external_links WHERE id = ?");
+        $chk->execute([$id]);
+        $cur = $chk->fetchColumn();
+        if ($cur === false) soRespond(['error' => 'Не найдено'], 404);
+        soRequireAdminEntityGroupAccess($sessionUser, $cur);
+        $pdo->prepare("DELETE FROM cabinet_external_links WHERE id = ?")->execute([$id]);
+        soRespond(['success' => true]);
     }
 
     if ($adminAction === 'templates' && $method === 'GET') {

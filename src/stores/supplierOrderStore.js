@@ -237,8 +237,8 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
-  async function adminGetRestaurantsDirectory(supplierId) {
-    const params = new URLSearchParams({ supplier_id: supplierId });
+  async function adminGetRestaurantsDirectory(supplierId, legalEntity = '') {
+    const params = new URLSearchParams(legalEntity ? { legal_entity: legalEntity } : { supplier_id: supplierId });
     const data = await api(`admin/restaurants-directory?${params}`);
     return { restaurants: data.restaurants || [], regions: data.regions || [] };
   }
@@ -270,6 +270,22 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
       method: 'POST',
       body: JSON.stringify(params),
     });
+  }
+
+  // Управляемые ссылки в кабинете ресторана
+  async function getCabinetLinks() {
+    const data = await api('cabinet-links');
+    return data.links || [];
+  }
+  async function adminGetCabinetLinks(legalEntity) {
+    const data = await api(`admin/cabinet-links?legal_entity=${encodeURIComponent(legalEntity)}`);
+    return data.links || [];
+  }
+  async function adminSaveCabinetLink(payload) {
+    return api('admin/cabinet-links', { method: 'POST', body: JSON.stringify(payload) });
+  }
+  async function adminDeleteCabinetLink(id) {
+    return api(`admin/cabinet-link/${id}`, { method: 'DELETE' });
   }
 
   async function adminGetExport(supplierId, date) {
@@ -313,5 +329,6 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
     adminGetTemplates, adminSaveTemplates, adminGetRestaurantsDirectory,
     adminUpdateQty, adminCreateAdhocOrder, adminGetExport, adminSendSummary, adminSendSummaryEmail, adminRemindUnsubmitted,
+    getCabinetLinks, adminGetCabinetLinks, adminSaveCabinetLink, adminDeleteCabinetLink,
   };
 });

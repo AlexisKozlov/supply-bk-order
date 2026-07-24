@@ -770,6 +770,18 @@
           </div>
         </div>
 
+        <!-- Иконка поставщика -->
+        <div class="so-settings-block">
+          <div class="so-section-title" style="margin:0">Иконка поставщика</div>
+          <p class="so-section-hint" style="margin:4px 0 10px 0">Иконка показывается ресторану рядом с названием поставщика. «Авто» — подбор по названию.</p>
+          <div class="so-icon-picker">
+            <button type="button" class="so-icon-opt so-icon-auto" :class="{ active: !settings.icon_key }" @click="setSupplierIcon(null)" title="Авто (по названию)">Авто</button>
+            <button v-for="ic in supplierIconKeys" :key="ic" type="button" class="so-icon-opt"
+              :class="{ active: settings.icon_key === ic }" :style="supplierIconStyle(ic)"
+              @click="setSupplierIcon(ic)" v-html="trustedSupplierIcon(ic)"></button>
+          </div>
+        </div>
+
         <!-- Автоматизация -->
         <div class="so-settings-block">
           <div class="so-section-title" style="margin:0">Автоматизация по дедлайну</div>
@@ -1033,6 +1045,7 @@ import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
 import { buildSoOrderSheet } from '@/lib/soOrderXlsx.js';
+import { supplierIconKeys, trustedSupplierIcon, supplierIconStyle } from '@/lib/cabinetIcons.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
 
@@ -1485,6 +1498,19 @@ async function toggleAccepting() {
     await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ is_accepting_orders: next }));
     await loadSettings();
   } catch (e) {
+    toast.error('Ошибка', e.message);
+  }
+}
+
+async function setSupplierIcon(key) {
+  const prev = settings.value.icon_key || null;
+  const next = key || null;
+  if (prev === next) return;
+  settings.value = { ...settings.value, icon_key: next }; // мгновенный отклик
+  try {
+    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ icon_key: next }));
+  } catch (e) {
+    settings.value = { ...settings.value, icon_key: prev }; // откат при ошибке
     toast.error('Ошибка', e.message);
   }
 }
@@ -2265,7 +2291,7 @@ async function loadTemplates() {
 }
 
 // ═══ Окно доступности товара по регионам/ресторанам ═══
-const accessModal = ref({ open: false, idx: null, regions: [], restaurants: [] });
+const accessModal = ref({ open: false, idx: null, regions: [], restaurants: [], target: 'template' });
 const accessDirectory = ref({ restaurants: [], regions: [] });
 const accessRestSearch = ref('');
 const accessFilteredRestaurants = computed(() => {
@@ -2360,6 +2386,7 @@ async function submitAdhoc() {
     adhoc.saving = false;
   }
 }
+
 
 function addManualTemplateRow() {
   templates.value.push({
@@ -3633,6 +3660,21 @@ watch(
   padding: 6px 0; font-size: var(--tk-fz-md); color: var(--tk-text); cursor: pointer;
 }
 .so-settings-check input { accent-color: var(--tk-accent); }
+.so-icon-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.so-icon-opt {
+  width: 40px; height: 40px; flex-shrink: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--tk-border); border-radius: 10px; cursor: pointer;
+  background: var(--tk-bg-card); line-height: 1; transition: transform .1s, box-shadow .1s, border-color .1s;
+}
+.so-icon-opt:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0,0,0,.12); }
+.so-icon-opt.active { border-color: var(--tk-accent); box-shadow: 0 0 0 2px var(--tk-accent); }
+.so-icon-opt :deep(svg) { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.so-icon-auto {
+  width: auto; padding: 0 12px; font-family: inherit; font-size: 12px; font-weight: 700;
+  color: var(--tk-text-muted); background: var(--tk-bg-subtle, #f5f5f5);
+}
+.so-icon-auto.active { color: var(--tk-accent); }
 .so-reminder-group { margin-top: var(--tk-s-3); }
 .so-reminder-title {
   font-size: var(--tk-fz-md); font-weight: var(--tk-fw-bold);

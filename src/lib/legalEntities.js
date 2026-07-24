@@ -70,6 +70,18 @@ export function formatRestaurantNumber(number, group = null) {
   return String(n);
 }
 
+// Доп. метка «Город + номер Додо ИС» для ПС/Додо (например «Минск 1»,
+// «Витебск 1») — показывается РЯДОМ с обычным номером ресторана в базе и графике
+// доставки. Для БК/ВМ и без данных — пустая строка (можно скрыть через v-if).
+export function dodoCityLabel(r) {
+  if (!r) return '';
+  const group = r.legal_entity_group || (parseInt(r.number, 10) >= 1000 ? 'PS' : 'BK_VM');
+  const dodo = r.dodo_is_number;
+  const city = (r.city || '').trim();
+  if (group === 'PS' && dodo != null && dodo !== '' && city) return `${city} ${dodo}`;
+  return '';
+}
+
 /**
  * Обратная операция: принимает текст от пользователя и возвращает
  * число для базы. Понимает 'PS01', 'ps1', '1001', '1', ' 24 '.

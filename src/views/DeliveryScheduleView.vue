@@ -233,7 +233,7 @@
               class="ds-col-item"
               @dblclick="isEditing && startEditRestaurant(item)"
             >
-              <span class="ds-col-item-num">{{ formatRestaurantNumber(item.number) }}</span>
+              <span class="ds-col-item-num">{{ formatRestaurantNumber(item.number) }}<span v-if="dodoCityLabel(item)" class="ds-dodo-label"> · {{ dodoCityLabel(item) }}</span></span>
               <div class="ds-col-item-content">
                 <span class="ds-col-item-addr">{{ item.address }}</span>
                 <div class="ds-col-item-lines">
@@ -267,7 +267,7 @@
           </div>
           <div class="ds-modal-body">
             <div class="ds-edit-info">
-              <span class="ds-edit-num">{{ formatRestaurantNumber(cardEditing.restaurant.number) }}</span>
+              <span class="ds-edit-num">{{ formatRestaurantNumber(cardEditing.restaurant.number) }}<span v-if="dodoCityLabel(cardEditing.restaurant)"> · {{ dodoCityLabel(cardEditing.restaurant) }}</span></span>
               {{ cardEditing.restaurant.address }}
             </div>
             <div class="ds-edit-day">{{ cardEditing.dayLabel }}</div>
@@ -398,7 +398,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, dodoCityLabel } from '@/lib/legalEntities.js';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -1340,6 +1340,7 @@ function formatLastUpdate(upd) {
 }
 .ds-col-item:last-child { border-bottom: none; }
 .ds-col-item:hover { background: #FFF8F0; }
+.ds-dodo-label { color: #5E35B1; font-weight: 700; }
 .ds-col-item-num {
   font-weight: 800; font-size: 11px; color: var(--bk-red);
   font-family: 'Plus Jakarta Sans', sans-serif;

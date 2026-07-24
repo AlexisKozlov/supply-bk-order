@@ -63,6 +63,7 @@ const routes = [
       { path: 'restaurant-unknown-barcodes', name: 'restaurant-unknown-barcodes', component: () => import('@/views/RestaurantUnknownBarcodesView.vue'), meta: { title: 'Штрихкоды', module: 'restaurant-orders' } },
       { path: 'surveys', name: 'surveys', component: () => import('@/views/SurveysView.vue'), meta: { title: 'Опросы', module: 'surveys' } },
       { path: 'supplier-orders', name: 'supplier-orders', component: () => import('@/views/SupplierOrdersHubView.vue'), meta: { title: 'Заявки поставщикам', module: 'supplier-orders' } },
+      { path: 'cabinet-links', name: 'cabinet-links', component: () => import('@/views/CabinetLinksView.vue'), meta: { title: 'Ссылки кабинета', module: 'supplier-orders' } },
       { path: 'truck-loading', name: 'truck-loading', component: () => import('@/views/TruckLoadingView.vue'), meta: { title: 'Загрузка машин', module: 'truck-loading' } },
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },

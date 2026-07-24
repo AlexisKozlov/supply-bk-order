@@ -489,6 +489,7 @@ const toolsGroups = [
     { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
     { module: 'supplier-schedule', route: 'supplier-schedule', icon: 'truck', label: 'График поставок' },
     { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
+    { module: 'supplier-orders', route: 'cabinet-links', icon: 'link', label: 'Ссылки кабинета' },
     { module: 'plan-fact', route: 'payments', icon: 'payments', label: 'Оплаты поставщиков' },
   ]},
   { title: 'Управление ресторанами', items: [

@@ -35,7 +35,7 @@
       <button v-for="sup in suppliers" :key="'sb-'+sup.id" class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'sup_' + sup.id }"
         @click="switchTab('orders', 'sup_' + sup.id)">
-        <span class="supplier-icon supplier-icon-sm" :class="supplierIcon(sup.name).className" v-html="supplierIcon(sup.name).svg"></span>
+        <span class="supplier-icon supplier-icon-sm" :class="resolveSupplierIcon(sup).className" :style="resolveSupplierIcon(sup).style" v-html="resolveSupplierIcon(sup).svg"></span>
         {{ sup.name }}
         <span v-if="supplierBadge(sup)" class="sb-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
       </button>
@@ -47,7 +47,7 @@
         target="_blank"
         rel="noopener noreferrer"
       >
-        <span class="supplier-icon supplier-icon-sm" :class="link.iconClass" v-html="trustedSupplierIcon(link.iconKey)"></span>
+        <span class="supplier-icon supplier-icon-sm" :style="link.iconStyle" v-html="trustedSupplierIcon(link.iconKey)"></span>
         {{ link.name }}
         <span class="sb-ext" v-html="cabIconSvg.external"></span>
       </a>
@@ -383,7 +383,7 @@
           :class="{ active: orderSubTab === 'sup_' + sup.id }"
           @click="switchTab('orders', 'sup_' + sup.id)"
         >
-          <span class="supplier-icon supplier-icon-xs" :class="supplierIcon(sup.name).className" v-html="supplierIcon(sup.name).svg"></span>
+          <span class="supplier-icon supplier-icon-xs" :class="resolveSupplierIcon(sup).className" :style="resolveSupplierIcon(sup).style" v-html="resolveSupplierIcon(sup).svg"></span>
           {{ sup.name }}
           <span v-if="supplierBadge(sup)" class="ord-tab-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
         </button>
@@ -395,7 +395,7 @@
           target="_blank"
           rel="noopener noreferrer"
         >
-          <span class="supplier-icon supplier-icon-xs" :class="link.iconClass" v-html="trustedSupplierIcon(link.iconKey)"></span>
+          <span class="supplier-icon supplier-icon-xs" :style="link.iconStyle" v-html="trustedSupplierIcon(link.iconKey)"></span>
           {{ link.name }}
           <span class="ord-tab-ext" v-html="cabIconSvg.external"></span>
         </a>
@@ -1486,7 +1486,7 @@ import { appConfirm } from '@/lib/appDialogs.js';
 import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
-import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg } from '@/lib/cabinetIcons.js';
+import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg, resolveSupplierIcon, supplierIconStyle } from '@/lib/cabinetIcons.js';
 import { roFetch } from '@/lib/roUtils.js';
 import { renderMarkdown } from '@/lib/markdown.js';
 
@@ -1564,13 +1564,19 @@ const cabBrand = computed(() => {
 const isPizzaStarCabinet = computed(() => roStore.restaurant?.legal_entity_group === 'PS');
 const canUseCardSearch = computed(() => !isPizzaStarCabinet.value);
 // Иконки кабинета вынесены в src/lib/cabinetIcons.js
-const externalOrderLinks = [
-  { id: 'lidskae', name: 'Лидское пиво', url: 'https://client.lidskae.by/catalog', iconKey: 'drinks', iconClass: 'supplier-icon-drinks' },
-  { id: 'salatoria', name: 'Салатория', url: 'http://salatoria.liam.by/my_zakaz/ru_RU', iconKey: 'vegetables', iconClass: 'supplier-icon-vegetables' },
-];
-const externalSupplierLinks = computed(() => (
-  roStore.restaurant?.legal_entity_group === ENTITY_GROUP_BK_VM ? externalOrderLinks : []
-));
+// Внешние ссылки кабинета теперь управляются в /supplier-orders (не хардкод).
+const cabinetLinks = ref([]);
+const externalSupplierLinks = computed(() => cabinetLinks.value.map(l => ({
+  id: l.id,
+  name: l.name,
+  url: l.url,
+  iconKey: l.icon_key || 'package',
+  iconStyle: supplierIconStyle(l.icon_key || 'package'),
+})));
+async function loadCabinetLinks() {
+  try { cabinetLinks.value = await soStore.getCabinetLinks(); }
+  catch (e) { cabinetLinks.value = []; }
+}
 // Защита от javascript:-ссылок: если url не http(s) — открываем как about:blank.
 function safeExternalUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) ? url : 'about:blank';
@@ -1830,7 +1836,7 @@ const urgentItems = computed(() => {
     if (openDates.length) {
       items.push({
         key: 'sup_' + sup.id, type: 'orange',
-        icon: supplierIcon(sup.name).svg, title: `${sup.name}: ${openDates.length} дн. без заявки`,
+        icon: resolveSupplierIcon(sup).svg, title: `${sup.name}: ${openDates.length} дн. без заявки`,
         subtitle: openDates.map(d => d.delivery_day_name).join(', '),
         deadline: earliest(openDates),
         action: () => switchTab('orders', 'sup_' + sup.id),
@@ -3822,6 +3828,7 @@ onMounted(async () => {
   window.addEventListener('beforeunload', onBeforeUnload);
   window.addEventListener('bk:ro-session-expired', onSessionExpiredFlushDraft);
   window.addEventListener('online', flushStockDraftOnline);
+  loadCabinetLinks();
   // Если в URL есть tg_token — это переход из бота, надо переавторизоваться
   // (важно когда кликают «Через сайт» для другого ресторана)
   const tgTokenParam = route.query.tg_token;
