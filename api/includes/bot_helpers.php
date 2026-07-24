@@ -416,3 +416,50 @@ function botIsSubscribedToRestaurant($pdo, $chatId, $restNum): bool {
     $s->execute([(int)$chatId, (int)$restNum]);
     return (bool)$s->fetchColumn();
 }
+
+/**
+ * Уведомление о технических работах для бота.
+ *
+ * Читает тот же источник, что и портал — таблицу settings (ключи
+ * maintenance_mode / maintenance_message / maintenance_end_time). Пока техработы
+ * включены, бот отвечает этим текстом и не выполняет действий, чтобы данные не
+ * менялись во время обновления.
+ *
+ * Возвращает готовый HTML-текст, если техработы активны, иначе null.
+ * Как и на портале (RPC check_maintenance), при истёкшем таймере сам гасит флаг.
+ */
+function botMaintenanceNotice(PDO $pdo): ?string {
+    static $cached = false;
+    static $value = null;
+    if ($cached) return $value;
+    $cached = true;
+    try {
+        $st = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message','maintenance_end_time')");
+        $st->execute();
+        $mode = 'false'; $msg = ''; $endTime = '';
+        foreach ($st->fetchAll() as $r) {
+            if ($r['key'] === 'maintenance_mode') $mode = $r['value'];
+            if ($r['key'] === 'maintenance_message') $msg = $r['value'];
+            if ($r['key'] === 'maintenance_end_time') $endTime = $r['value'];
+        }
+        if ($mode !== 'true') { $value = null; return null; }
+        // Авто-выключение по таймеру — как в check_maintenance на портале.
+        $endTs = ($endTime !== '') ? strtotime($endTime) : false;
+        if ($endTs !== false && $endTs <= time()) {
+            $pdo->prepare("UPDATE settings SET value='false' WHERE `key`='maintenance_mode'")->execute();
+            $pdo->prepare("UPDATE settings SET value='' WHERE `key`='maintenance_end_time'")->execute();
+            $value = null; return null;
+        }
+        $body = trim($msg) !== '' ? trim($msg) : 'Мы проводим технические работы, чтобы сделать систему ещё лучше.';
+        $text = "🔧 <b>Ведутся технические работы</b>\n\n" . htmlspecialchars($body, ENT_QUOTES, 'UTF-8');
+        if ($endTs !== false) {
+            $text .= "\n\n⏳ Портал снова заработает примерно в " . date('H:i', $endTs) . '.';
+        }
+        $text .= "\n\nСпасибо за терпение 🙏";
+        $value = $text;
+        return $text;
+    } catch (Throwable $e) {
+        $value = null;
+        return null;
+    }
+}

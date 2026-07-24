@@ -102,6 +102,17 @@ function handleGroupMessage($chatId, array $msg): void
 
     if (!$addressed) return; // обычное сообщение в группе — игнорируем
 
+    // Технические работы: если к боту обратились во время обновления —
+    // отвечаем тем же уведомлением, что и портал, и ничего не ищем.
+    $maintNotice = botMaintenanceNotice($pdo);
+    if ($maintNotice !== null) {
+        tgClientSend($chatId, $maintNotice, [
+            'reply_to_message_id' => $msg['message_id'] ?? null,
+            'pdo' => $pdo,
+        ]);
+        return;
+    }
+
     // ── Чистим вопрос от упоминаний и команд ────────────────────────────
     // Убираем @username и токены вида /cmd@username, чтобы модель видела
     // только сам вопрос.

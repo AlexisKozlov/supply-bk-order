@@ -1912,6 +1912,15 @@ if (isset($input['callback_query'])) {
     $msgId = $cb['message']['message_id'];
     $data = $cb['data'] ?? '';
 
+    // Технические работы: во время обновления бот не выполняет действий,
+    // показывает то же уведомление, что и портал.
+    $maintNotice = botMaintenanceNotice($pdo);
+    if ($maintNotice !== null) {
+        answerCallback($cb['id'], 'Ведутся технические работы', true);
+        sendMessage($chatId, $maintNotice);
+        exit;
+    }
+
     // Rate-limit: больше 30 нажатий в минуту от одного chat_id — отказ.
     // Защищает БД и Telegram API от долбёжки. Использует ту же таблицу
     // failed_login_attempts, что и rate-limit для 6-значного кода, с
@@ -3001,6 +3010,14 @@ $chatId = $msg['chat']['id'];
 $chatType = $msg['chat']['type'] ?? 'private';
 if ($chatType === 'group' || $chatType === 'supergroup') {
     handleGroupMessage($chatId, $msg);
+    exit;
+}
+
+// Технические работы: в личном чате бот отвечает тем же уведомлением, что и
+// портал, и не выполняет команд/действий, пока идёт обновление.
+$maintNotice = botMaintenanceNotice($pdo);
+if ($maintNotice !== null) {
+    sendMessage($chatId, $maintNotice);
     exit;
 }
 
