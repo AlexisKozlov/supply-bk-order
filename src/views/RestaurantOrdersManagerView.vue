@@ -2535,7 +2535,7 @@ async function handleSetPassword(u) {
 async function handleToggleUser(u) {
   const next = u.is_active ? 0 : 1;
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
-  if (next === 0 && !confirm(`Отключить учётку ресторана ${label}? Он не сможет войти.`)) return;
+  if (next === 0 && !confirm(`Отключить ресторан ${label}? Он не сможет войти в кабинет и выпадет из заявок поставщикам, расписаний и напоминаний. Включение всё вернёт.`)) return;
   usersBusy.value = true;
   try {
     await store.adminToggleUser(u.restaurant_number, u.legal_entity_group, next);

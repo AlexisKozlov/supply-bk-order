@@ -302,7 +302,10 @@ async function handleSetPassword(u) {
 async function handleToggleUser(u) {
   const next = u.is_active ? 0 : 1;
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
-  if (!(await appConfirm(`${u.is_active ? 'Отключить' : 'Включить'} ресторан ${label}?`, { okText: u.is_active ? 'Отключить' : 'Включить', danger: !!u.is_active }))) return;
+  const msg = u.is_active
+    ? `Отключить ресторан ${label}? Он не сможет войти в кабинет и выпадет из заявок поставщикам, расписаний и напоминаний. Включение всё вернёт.`
+    : `Включить ресторан ${label}?`;
+  if (!(await appConfirm(msg, { okText: u.is_active ? 'Отключить' : 'Включить', danger: !!u.is_active }))) return;
   busy.value = true;
   try {
     await store.adminToggleUser(u.restaurant_number, u.legal_entity_group, next);
