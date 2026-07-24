@@ -336,6 +336,11 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     $out['date_fmt'] = $dateFmt;
     $out['restaurants_count'] = count($expectedRests);
     $out['submitted_count'] = count(array_intersect($expectedNums, array_keys($submittedNums)));
+    // real_count — реальные заявки (с товарами); skip_count — «поставка не нужна»
+    // (откликнулись, но без позиций). Нужно, чтобы «Подали» не путало счётчик.
+    $realNumsSum = array_values(array_unique(array_map('strval', array_column($orderRows, 'restaurant_number'))));
+    $out['real_count'] = count(array_intersect($expectedNums, $realNumsSum));
+    $out['skip_count'] = max(0, $out['submitted_count'] - $out['real_count']);
     $out['items_count'] = count($orderRows);
     $out['filename'] = "Заявка {$supName} на {$dateFmt}.xlsx";
     sort($fromEntities);
@@ -662,7 +667,8 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
               . "<p>Направляем заявки ресторанов на доставку {$esc($dateFmt)}.</p>"
               . ($fromLegal !== '' ? "<p>От кого: {$esc($fromLegal)}</p>" : '')
               . "<p>Кому: {$esc($supName)}</p>"
-              . "<p>Ресторанов: {$esc($sum['submitted_count'])} из {$esc($sum['restaurants_count'])}. Позиций: {$esc($ic)}.</p>"
+              . "<p>Ресторанов: {$esc($sum['real_count'])} из {$esc($sum['restaurants_count'])}. Позиций: {$esc($ic)}."
+                . ((int)($sum['skip_count'] ?? 0) > 0 ? " Отметили «поставка не нужна»: {$esc($sum['skip_count'])}." : "") . "</p>"
               . "<p>Подробности — в приложенном файле Excel.</p>"
               . "<p>Отдел закупок</p>"
               . "</body></html>";

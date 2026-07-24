@@ -1670,6 +1670,12 @@ try {
                 // Считаем подавших по статусу заявки, а не по наличию ненулевых позиций
                 $submittedCount = count(array_intersect($expectedNums, array_keys($submittedByStatus)));
                 $missingCount = count($expectedNums) - $submittedCount;
+                // «Подали» считаем только реальные заявки (с товарами). Отметившие
+                // «Поставка не нужна» (заявка без позиций) — отдельной строкой, иначе
+                // счётчик путает: «6 из 7», хотя реальных заявок 4.
+                $realSubmitterNums = array_values(array_unique(array_map('strval', array_column($orderRows, 'restaurant_number'))));
+                $realCount = count(array_intersect($expectedNums, $realSubmitterNums));
+                $skipCount = max(0, $submittedCount - $realCount);
                 $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
                 $dateFmt = $deliveryDateObj->format('d.m.Y');
                 $dayShort = $dayNames[(int)$deliveryDateObj->format('N')] ?? '';
@@ -1742,7 +1748,10 @@ try {
                 $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
                 $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
                 $caption .= "\n";
-                $caption .= "✅ Подали: <b>{$submittedCount}</b> из <b>" . count($expectedRests) . "</b>\n";
+                $caption .= "✅ Подали: <b>{$realCount}</b> из <b>" . count($expectedRests) . "</b>\n";
+                if ($skipCount > 0) {
+                    $caption .= "🚫 Поставка не нужна: <b>{$skipCount}</b>\n";
+                }
                 if ($missingCount > 0) {
                     $caption .= "❌ Не подали: <b>{$missingCount}</b>\n";
                 }
