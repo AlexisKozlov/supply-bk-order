@@ -8,8 +8,8 @@
       <div class="alg-actions">
         <div class="alg-search-wrap">
           <span class="alg-search-ico">🔍</span>
-          <input v-model="search" class="alg-input alg-search-input" placeholder="Поиск: код, наименование или группа…" />
-          <button v-if="search" class="alg-clear" @click="search = ''" title="Очистить">×</button>
+          <input v-model="searchInput" class="alg-input alg-search-input" placeholder="Поиск: код, наименование или группа…" />
+          <button v-if="searchInput" class="alg-clear" @click="searchInput = ''; search = ''" title="Очистить">×</button>
         </div>
         <button v-if="canEdit" class="alg-btn" @click="openAdd">＋ Карточка</button>
         <button class="alg-btn alg-btn-ghost" @click="exportAll" :disabled="!cards.length">⭳ Excel</button>
@@ -40,9 +40,6 @@
         <label class="alg-field">
           <span>Группа аналогов</span>
           <input v-model="newCard.analog_group" class="alg-input" list="alg-group-list" placeholder="выберите или введите новую" />
-          <datalist id="alg-group-list">
-            <option v-for="gn in groupNames" :key="gn" :value="gn" />
-          </datalist>
           <small class="alg-field-hint">Можно ввести новое название — группа создастся автоматически.</small>
         </label>
         <div class="alg-modal-actions">
@@ -60,6 +57,11 @@
       <span v-if="ungrouped.length" class="alg-stat-warn"><b>{{ ungrouped.length }}</b> без группы</span>
       <span><b>{{ inCatalogCount }}</b> в справочнике</span>
     </div>
+
+    <!-- Общий список групп (для инлайн-ввода и модалки) — один на всю страницу -->
+    <datalist id="alg-group-list">
+      <option v-for="gn in groupNames" :key="gn" :value="gn" />
+    </datalist>
 
     <div v-if="loading" style="text-align:center;padding:50px;"><BurgerSpinner text="Загрузка…" /></div>
     <div v-else-if="!cards.length" style="text-align:center;padding:50px;color:var(--text-muted);">Карточек аналогов нет</div>
@@ -87,11 +89,8 @@
             <span class="alg-name">{{ c.full_name || '—' }}</span>
             <span class="alg-measure">{{ c.measure || '' }}</span>
             <span v-if="c.in_catalog" class="alg-inbase" title="Есть в справочнике портала">✓ в базе</span>
-            <select v-if="canEdit" class="alg-gsel" :value="c.analog_group || ''" @change="onGroupChange(c, $event)">
-              <option value="">— без группы —</option>
-              <option v-for="gn in groupNames" :key="gn" :value="gn">{{ gn }}</option>
-              <option value="__new__">＋ Новая группа…</option>
-            </select>
+            <input v-if="canEdit" class="alg-gsel" :value="c.analog_group || ''" list="alg-group-list"
+                   placeholder="группа…" @change="onGroupInput(c, $event)" />
             <button v-if="canEdit" class="alg-edit" @click="openEdit(c)" title="Редактировать карточку">✎</button>
           </div>
         </div>
@@ -111,11 +110,8 @@
             <span class="alg-name">{{ c.full_name || '—' }}</span>
             <span class="alg-measure">{{ c.measure || '' }}</span>
             <span v-if="c.in_catalog" class="alg-inbase" title="Есть в справочнике портала">✓ в базе</span>
-            <select v-if="canEdit" class="alg-gsel" :value="c.analog_group || ''" @change="onGroupChange(c, $event)">
-              <option value="">— без группы —</option>
-              <option v-for="gn in groupNames" :key="gn" :value="gn">{{ gn }}</option>
-              <option value="__new__">＋ Новая группа…</option>
-            </select>
+            <input v-if="canEdit" class="alg-gsel" :value="c.analog_group || ''" list="alg-group-list"
+                   placeholder="группа…" @change="onGroupInput(c, $event)" />
             <button v-if="canEdit" class="alg-edit" @click="openEdit(c)" title="Редактировать карточку">✎</button>
           </div>
         </div>
@@ -144,7 +140,13 @@ const toast = useToastStore();
 const canEdit = computed(() => userStore.hasAccess('analogs', 'edit'));
 const cards = ref([]);
 const loading = ref(false);
-const search = ref('');
+const searchInput = ref('');   // то, что печатает пользователь
+const search = ref('');         // дебаунс-значение для фильтров
+let _searchTimer = null;
+watch(searchInput, (v) => {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => { search.value = v; }, 250);
+});
 const expanded = ref(new Set());
 const importInput = ref(null);
 const importing = ref(false);
@@ -280,21 +282,17 @@ function toggle(name) {
   expanded.value = new Set(expanded.value);
 }
 
-// При поиске — авто-раскрытие найденных групп
+// При поиске (от 2 символов) раскрываем найденные группы; при очистке — сворачиваем,
+// чтобы не держать в DOM сотни строк.
 watch(search, (q) => {
-  if (q.trim()) expanded.value = new Set(filteredGroups.value.map(g => g.name));
+  const t = q.trim();
+  expanded.value = t.length >= 2 ? new Set(filteredGroups.value.map(g => g.name)) : new Set();
 });
 
-async function onGroupChange(card, e) {
-  const val = e.target.value;
-  if (val === '__new__') {
-    e.target.value = card.analog_group || '';
-    const name = await appPrompt('Название новой группы аналогов:', '');
-    if (!name || !name.trim()) return;
-    await updateGroup(card, name.trim());
-  } else {
-    await updateGroup(card, val || null);
-  }
+async function onGroupInput(card, e) {
+  const val = (e.target.value || '').trim();
+  if (val === (card.analog_group || '')) return;
+  await updateGroup(card, val || null);
 }
 
 async function updateGroup(card, newGroup) {

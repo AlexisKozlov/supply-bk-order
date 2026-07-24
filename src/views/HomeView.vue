@@ -505,8 +505,21 @@ async function doLogin() {
       if (redirect && redirect !== '/' && redirect !== '/login') router.push(redirect);
       else router.push({ name: 'order' });
     }, 1400);
-  } catch (e) { loginError.value = e.message || 'Неверный пароль'; }
+  } catch (e) { loginError.value = loginErrMsg(e.message); }
   finally { loginLoading.value = false; }
+}
+
+// Перевод кодов ошибок входа с сервера в понятные сообщения.
+function loginErrMsg(code) {
+  const map = {
+    too_many_attempts: 'Слишком много попыток входа. Подождите около 10 минут и попробуйте снова.',
+    wrong_password: 'Неверный пароль.',
+    user_not_found: 'Пользователь не найден.',
+    account_disabled: 'Учётная запись отключена. Обратитесь к администратору.',
+    password_too_short: 'Пароль слишком короткий (минимум 8 символов).',
+    'missing params': 'Заполните все поля.',
+  };
+  return map[code] || code || 'Неверный пароль';
 }
 
 function switchLoginMode(mode) {
