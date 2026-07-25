@@ -2303,6 +2303,17 @@ if (isset($input['callback_query'])) {
     if (str_starts_with($data, 'receive_')) {
         $user = getUser($chatId);
         if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        // Отметка приёмки меняет статус заказа — это действие уровня edit модуля
+        // «Новый заказ» (на портале приёмка идёт PATCH-ом orders, требующим edit).
+        // Без проверки роли привязанный сотрудник с правом «только просмотр» мог
+        // бы отмечать приёмку через бота в обход политики портала.
+        $permStmt = $pdo->prepare("SELECT permissions FROM users WHERE telegram_chat_id = ? LIMIT 1");
+        $permStmt->execute([$chatId]);
+        $recvPerms = resolvePermissions($user['role'] ?? 'user', $permStmt->fetchColumn() ?: null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$recvPerms['order'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            answerCallback($cb['id'], '⛔ Нет прав на приёмку поставки', true);
+            exit;
+        }
         $orderId = substr($data, 8);
         $entity = getUserEntity($user);
         $sql = "SELECT id, supplier FROM orders WHERE id = ? AND received_at IS NULL";
