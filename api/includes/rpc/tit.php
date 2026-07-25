@@ -17,6 +17,21 @@ if (isset($fn) && strncmp((string)$fn, 'tit_', 4) === 0) {
     requireModuleAccess($authUser, 'tit-requests', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
 }
 
+// Операции записи модуля ТиТ требуют уровень edit (создание/изменение/отмена/
+// удаление заявок, сохранение машин, отправка охране, изменение настроек).
+// Верхний гейт даёт только view — без этой проверки пользователь с правом
+// «только просмотр» мог бы менять данные прямым вызовом API. При добавлении
+// новой пишущей tit_*-функции — дописать её сюда.
+$TIT_WRITE_FNS = [
+    'tit_create_quick', 'tit_update_basic', 'tit_create_manual', 'tit_cancel',
+    'tit_delete', 'tit_vehicle_save', 'tit_vehicle_delete', 'tit_apply_supplier_default',
+    'tit_send_to_security', 'tit_mark_sent', 'tit_settings_update',
+    'tit_email_link', 'tit_email_ignore',
+];
+if (isset($fn) && in_array($fn, $TIT_WRITE_FNS, true)) {
+    requireModuleAccess($authUser, 'tit-requests', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+}
+
 $titRequireStaff = function () use ($authUser) {
     if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
 };

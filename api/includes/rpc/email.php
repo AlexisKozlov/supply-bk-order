@@ -7,6 +7,11 @@
 
     if ($fn === 'send_supplier_order_email') {
         if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
+        // Отправка письма поставщику от фирменного ящика — действие уровня edit
+        // модуля «Новый заказ» (как и сама страница). Получатель и текст берутся
+        // из запроса, поэтому без этой проверки любой пользователь с правом
+        // «только просмотр» мог бы рассылать письма от имени компании.
+        requireModuleAccess($authUser, 'order', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
 
         $rawTo       = trim((string)($body['to'] ?? ''));
         $bodyText    = (string)($body['body_text'] ?? '');
@@ -373,6 +378,11 @@
 
     if ($fn === 'send_supplier_plan_email') {
         if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
+        // Отправка плана поставщику от фирменного ящика — действие уровня edit
+        // модуля «Планирование» (как и сама страница). Получатель и текст берутся
+        // из запроса, поэтому без проверки любой пользователь с правом «только
+        // просмотр» мог бы рассылать письма от имени компании.
+        requireModuleAccess($authUser, 'planning', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
 
         $rawTo        = trim((string)($body['to'] ?? ''));
         $bodyText     = (string)($body['body_text'] ?? '');
