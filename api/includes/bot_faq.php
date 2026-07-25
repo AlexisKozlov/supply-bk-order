@@ -100,6 +100,14 @@ function handleGroupMessage($chatId, array $msg): void
         }
     }
 
+    // ── Команда привязки группы к бизнесу (только админ) ────────────────
+    // Обрабатываем до проверки «обращались ли к боту»: /faqbind@bot считается
+    // обращением, а плейн-команда должна сработать в любом случае.
+    if (preg_match('#^\s*/faq(bind|unbind)(?:@[A-Za-z0-9_]+)?(?:\s+(\S+))?#u', $text, $cm)) {
+        faqHandleBindCommand($pdo, $chatId, $msg, mb_strtolower($cm[1], 'UTF-8'), $cm[2] ?? '');
+        return;
+    }
+
     if (!$addressed) return; // обычное сообщение в группе — игнорируем
 
     // Технические работы: если к боту обратились во время обновления —
@@ -107,6 +115,18 @@ function handleGroupMessage($chatId, array $msg): void
     $maintNotice = botMaintenanceNotice($pdo);
     if ($maintNotice !== null) {
         tgClientSend($chatId, $maintNotice, [
+            'reply_to_message_id' => $msg['message_id'] ?? null,
+            'pdo' => $pdo,
+        ]);
+        return;
+    }
+
+    // ── Групповой бот отдаёт данные только в привязанных группах ────────
+    // Иначе группа одного бизнеса могла бы спросить данные другого, и любой
+    // добавивший бота в свою группу — выгружать остатки/номенклатуру.
+    $faqBinding = faqGetGroupBinding($pdo, $chatId);
+    if (!$faqBinding) {
+        tgClientSend($chatId, "Эта группа ещё не привязана к ресторану, поэтому я пока здесь не отвечаю.\n\nАдминистратор портала может привязать её командой:\n<code>/faqbind BK</code> — Бургер Кинг\n<code>/faqbind PS</code> — Пицца Стар", [
             'reply_to_message_id' => $msg['message_id'] ?? null,
             'pdo' => $pdo,
         ]);
@@ -152,6 +172,8 @@ function handleGroupMessage($chatId, array $msg): void
     // Юрлицо определяем из вопроса (по умолчанию Бургер БК; «по ВМ»/«по ПС» —
     // переключают). Остатки у юрлиц разные, поэтому это важно.
     $ent = faqDetectEntity($question);
+    // Ограничиваем бизнесом группы: BK_VM не получает данные PS и наоборот.
+    $ent = faqClampEntityToGroup($ent, $faqBinding['legal_entity_group']);
 
     // Режим с данными (остатки/номенклатура/аналоги) + контекст ветки и
     // накопленные знания. Если не вышло — обычный FAQ по инструкциям.
@@ -404,6 +426,68 @@ function faqDetectEntity(string $question): array
         return ['entity' => 'ООО "Воглия Матта"', 'label' => 'Воглия Матта'];
     }
     return ['entity' => 'ООО "Бургер БК"', 'label' => 'Бургер БК'];
+}
+
+/** Привязка группы к бизнесу (BK_VM|PS) из реестра tg_faq_groups, или null. */
+function faqGetGroupBinding($pdo, $chatId): ?array
+{
+    try {
+        $s = $pdo->prepare("SELECT legal_entity_group FROM tg_faq_groups WHERE chat_id = ? LIMIT 1");
+        $s->execute([$chatId]);
+        $r = $s->fetch();
+        return $r ?: null;
+    } catch (Throwable $e) {
+        return null; // нет таблицы — считаем непривязанной
+    }
+}
+
+/**
+ * Ограничивает юрлицо ответа бизнесом группы: группа BK_VM не должна получать
+ * данные PS и наоборот. Если вопрос указывает на другой бизнес — заменяем на
+ * дефолтное юрлицо группы.
+ */
+function faqClampEntityToGroup(array $ent, string $group): array
+{
+    $detGroup = getEntityGroup($ent['entity'] ?? '');
+    if ($detGroup === $group) return $ent;
+    if ($group === 'PS') return ['entity' => 'ООО "Пицца Стар"', 'label' => 'Пицца Стар'];
+    return ['entity' => 'ООО "Бургер БК"', 'label' => 'Бургер БК'];
+}
+
+/**
+ * Команда /faqbind <BK|PS> и /faqunbind — привязка группы к бизнесу.
+ * Доступна только администратору портала (по users.role через telegram id).
+ */
+function faqHandleBindCommand($pdo, $chatId, array $msg, string $action, string $arg): void
+{
+    $sender = faqIdentifyGroupSender($msg['from'] ?? []);
+    $replyId = $msg['message_id'] ?? null;
+    if (($sender['role'] ?? '') !== 'admin') {
+        tgClientSend($chatId, "⛔ Привязать группу может только администратор портала.", ['reply_to_message_id' => $replyId, 'pdo' => $pdo]);
+        return;
+    }
+    if ($action === 'unbind') {
+        $pdo->prepare("DELETE FROM tg_faq_groups WHERE chat_id = ?")->execute([$chatId]);
+        tgClientSend($chatId, "✅ Группа отвязана — данные здесь больше не показываются.", ['reply_to_message_id' => $replyId, 'pdo' => $pdo]);
+        return;
+    }
+    $a = mb_strtolower(trim($arg), 'UTF-8');
+    $group = null;
+    if (in_array($a, ['ps', 'пс', 'пицца', 'додо', 'dodo'], true)) $group = 'PS';
+    elseif (in_array($a, ['bk', 'бк', 'vm', 'вм', 'bk_vm', 'burger', 'бургер'], true)) $group = 'BK_VM';
+    if (!$group) {
+        tgClientSend($chatId, "Укажите бизнес:\n<code>/faqbind BK</code> — Бургер Кинг (БК/ВМ)\n<code>/faqbind PS</code> — Пицца Стар", ['reply_to_message_id' => $replyId, 'pdo' => $pdo]);
+        return;
+    }
+    $title = mb_substr((string)($msg['chat']['title'] ?? ''), 0, 255);
+    $pdo->prepare("
+        INSERT INTO tg_faq_groups (chat_id, legal_entity_group, title, registered_by)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE legal_entity_group = VALUES(legal_entity_group),
+                                title = VALUES(title), registered_by = VALUES(registered_by)
+    ")->execute([$chatId, $group, $title, $sender['name']]);
+    $label = $group === 'PS' ? 'Пицца Стар' : 'Бургер Кинг (БК/ВМ)';
+    tgClientSend($chatId, "✅ Группа привязана к бизнесу: <b>{$label}</b>. Теперь показываю данные только по нему.", ['reply_to_message_id' => $replyId, 'pdo' => $pdo]);
 }
 
 /** Определения 3 безопасных инструментов (формат function-calling). */
