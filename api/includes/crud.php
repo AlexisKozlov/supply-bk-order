@@ -287,6 +287,26 @@ $writeWhitelist = [
     'plt_summary'           => ['id','legal_entity','entry_date','supplier_name','cold_pallets','frozen_pallets','is_manual','delivery_id'],
 ];
 
+// Защита привилегированных переходов ПСЦ через REST.
+// Согласование протокола цен (status='active') и подпись согласующего
+// (approved_by/approved_at) должны идти ТОЛЬКО через RPC approve_agreement,
+// где стоит проверка pricing=full и выполняется архивация прежнего ПСЦ.
+// Без этой защиты пользователь с уровнем edit мог бы выставить status='active'
+// напрямую через REST — в обход требования full и без архивации.
+// Создание черновика (status='draft') и правка прочих полей остаются на edit.
+function guardPriceAgreementWrite($table, array &$rec, $sessionUser, $roleTemplates, $accessLevels) {
+    if ($table !== 'price_agreements') return;
+    if (!$sessionUser) return; // запись без сессии сюда не доходит (блокируется раньше)
+    if (($sessionUser['role'] ?? '') === 'admin') return; // у админа всегда full
+    $perms = resolvePermissions($sessionUser['role'] ?? 'user', $sessionUser['permissions'] ?? null, $roleTemplates);
+    $hasFull = ($accessLevels[$perms['pricing'] ?? 'none'] ?? 0) >= ($accessLevels['full'] ?? 3);
+    if ($hasFull) return;
+    if (isset($rec['status']) && $rec['status'] === 'active') {
+        respond(['error' => 'Согласование ПСЦ доступно только с полным доступом к ценам'], 403);
+    }
+    unset($rec['approved_by'], $rec['approved_at']);
+}
+
 if ($method === 'GET') {
     $where = []; $params = [];
     $allowedFields = $filterWhitelist[$table] ?? [];
@@ -519,6 +539,8 @@ if ($method === 'POST') {
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Недопустимое имя колонки: '.$col], 400); }
         // Белый список колонок для записи
         if (isset($writeWhitelist[$table])) { $rec = array_intersect_key($rec, array_flip($writeWhitelist[$table])); if (empty($rec)) respond(['error' => 'Нет допустимых колонок для записи'], 400); }
+        // Защита согласования ПСЦ (status='active' / approved_by только через RPC full)
+        guardPriceAgreementWrite($table, $rec, $sessionUser, $ROLE_TEMPLATES, $ACCESS_LEVELS);
         // audit_log: принудительно ставить user_name из сессии
         if ($table === 'audit_log' && $sessionUser) { $rec['user_name'] = $sessionUser['name']; }
         $cols = array_keys($rec); $ph = implode(',', array_fill(0, count($cols), '?')); $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
@@ -602,6 +624,8 @@ if ($method === 'PATCH' || $method === 'PUT') {
     if (isset($writeWhitelist[$table])) { $body = array_intersect_key($body, array_flip($writeWhitelist[$table])); if (empty($body)) respond(['error' => 'Нет допустимых колонок для записи'], 400); }
     // PATCH не должен менять created_by / created_at
     unset($body['created_by'], $body['created_at']);
+    // Защита согласования ПСЦ (status='active' / approved_by только через RPC full)
+    guardPriceAgreementWrite($table, $body, $sessionUser, $ROLE_TEMPLATES, $ACCESS_LEVELS);
     if (empty($body)) respond(['error' => 'Нет допустимых колонок для записи'], 400);
     // Optimistic lock: если клиент прислал X-Expected-Updated-At — проверяем версию.
     // ID может прийти как $subpoint (/api/plans/UUID) или как ?id=eq.UUID — поддерживаем оба варианта.
