@@ -771,6 +771,13 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
 function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     global $pdo;
     tgStateClear($chatId, 'restord');
+    // Ресторан приходит из callback_data — проверяем подписку вызывающего,
+    // иначе виден график/наличие заказов чужого ресторана (подача заявки
+    // защищена отдельно на этапе submit, но и промежуточный шаг закрываем).
+    if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) {
+        editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$restNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+        return;
+    }
     $supName = soGetSupplierName($pdo, $supplierId);
     $botData = soGetBotAvailableDates($pdo, $supplierId, $restNum);
     $rest = $botData['rest'];
@@ -1652,6 +1659,10 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
 
 // Генерирует одноразовый tg-токен авто-логина и возвращает deep-link на страницу сбора остатков.
 function restScBuildWebLink(PDO $pdo, $chatId, $restNum): ?string {
+    // Защита: токен авто-логина минтим только если вызывающий чат реально
+    // подписан на этот ресторан. Вход (tg-auth) тоже перепроверяет подписку,
+    // но auth-токен для чужого ресторана не должен создаваться в принципе.
+    if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) return null;
     $restGroup = botGetRestaurantGroupByNumber($pdo, $restNum);
     $check = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
     $check->execute([$restNum, $restGroup]);

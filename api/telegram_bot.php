@@ -2606,6 +2606,12 @@ if (isset($input['callback_query'])) {
     }
     if (preg_match('/^sohist_rest_(.+?)_(\d+)$/', $data, $m)) {
         answerCallback($cb['id']);
+        // Номер ресторана из callback_data проверяем по подпискам вызывающего —
+        // иначе можно посмотреть историю заявок (с позициями) чужого ресторана.
+        if (!botIsSubscribedToRestaurant($pdo, $chatId, $m[2])) {
+            editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+            exit;
+        }
         soShowRestOrders($chatId, $msgId, $m[1], $m[2]);
         exit;
     }
@@ -2634,7 +2640,16 @@ if (isset($input['callback_query'])) {
         answerCallback($cb['id']);
         // sc_rest_{collId}_{restNum}
         $parts = explode('_', substr($data, 8), 2);
-        if (count($parts) === 2) restScShowProducts($chatId, $msgId, intval($parts[0]), $parts[1]);
+        if (count($parts) === 2) {
+            // Номер ресторана из callback_data проверяем по подпискам вызывающего
+            // (как в corr_rest_): иначе подписанный пользователь мог бы подменить
+            // номер и подсмотреть чужой сбор / получить ссылку на чужой кабинет.
+            if (!botIsSubscribedToRestaurant($pdo, $chatId, $parts[1])) {
+                editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$parts[1]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_sc_start']]]]);
+                exit;
+            }
+            restScShowProducts($chatId, $msgId, intval($parts[0]), $parts[1]);
+        }
         exit;
     }
 
