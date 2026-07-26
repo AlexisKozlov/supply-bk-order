@@ -2535,6 +2535,16 @@ if (isset($input['callback_query'])) {
         restMenuMain($chatId, $msgId);
         exit;
     }
+    if ($data === 'rest_novelties') {
+        answerCallback($cb['id']);
+        restNoveltiesList($chatId, $msgId);
+        exit;
+    }
+    if (preg_match('/^rest_nov_(.+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        restNoveltyDetail($chatId, $msgId, $m[1]);
+        exit;
+    }
     if ($data === 'rest_menu_supplier_legacy') {
         // Старый callback — теперь всё через единое меню поставщиков
         answerCallback($cb['id']);

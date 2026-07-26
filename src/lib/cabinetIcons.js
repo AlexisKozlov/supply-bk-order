@@ -205,5 +205,6 @@ export function tabIconSvg(tabId) {
   if (tabId === 'warehouse-stock') return cabIconSvg.warehouse;
   if (tabId === 'keg-returns') return cabIconSvg.kegReturn;
   if (tabId === 'reminders') return cabIconSvg.reminders;
+  if (tabId === 'novelties') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.2 5.2L19.5 10l-5.3 1.8L12 17l-2.2-5.2L4.5 10l5.3-1.8z"/><path d="M18.5 14.8l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>';
   return cabIconSvg[tabId] || cabIconSvg.profile;
 }

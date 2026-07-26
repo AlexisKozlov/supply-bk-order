@@ -2550,6 +2550,43 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
 }
 
 // --- Остатки склада для кабинета ресторана (из модуля «Сроки годности») ---
+// ─── Новинки для ресторана ───
+// Товар-новинка: активен, своей бизнес-группы, не скрыт закупщиком и ещё в
+// пределах срока показа (show_until или created_at + 14 дней).
+if ($roAction === 'novelties' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $group = $rest['legal_entity_group'] ?: (((int)$rest['restaurant_number'] >= 1000) ? 'PS' : 'BK_VM');
+
+    $s = $pdo->prepare("
+        SELECT p.id AS product_id, p.sku, p.name, p.external_code, p.created_at,
+               n.description, n.sales_start_date, n.photo_path
+        FROM products p
+        LEFT JOIN product_novelties n ON n.product_id = p.id
+        WHERE p.is_active = 1
+          AND p.legal_entity_group = ?
+          AND COALESCE(n.is_hidden, 0) = 0
+          AND NOW() <= COALESCE(n.show_until, p.created_at + INTERVAL " . NOVELTY_DAYS . " DAY)
+        ORDER BY p.created_at DESC, p.name
+        LIMIT 200
+    ");
+    $s->execute([$group]);
+    $items = [];
+    foreach ($s->fetchAll() as $r) {
+        $items[] = [
+            'product_id'       => $r['product_id'],
+            'sku'              => $r['sku'],
+            'name'             => $r['name'],
+            'external_code'    => $r['external_code'],
+            'created_at'       => $r['created_at'],
+            'description'      => $r['description'],
+            'sales_start_date' => $r['sales_start_date'],
+            'photo_url'        => $r['photo_path'] ? '/api/' . ltrim($r['photo_path'], '/') : null,
+        ];
+    }
+    roRespond(['items' => $items]);
+}
+
 if ($roAction === 'warehouse-stock' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);

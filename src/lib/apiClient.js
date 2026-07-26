@@ -262,10 +262,43 @@ async function searchProducts(query, opts = {}) {
   } catch (e) { trackServerStatus(false); return { data: [], error: e.message }; }
 }
 
+// Универсальный запрос к произвольному эндпоинту API (не CRUD-таблица и не RPC).
+// Используется, например, модулем «Новинки» (эндпоинт /api/novelties).
+// body: объект → JSON; FormData → multipart (для загрузки фото).
+async function apiRequest(method, path, body = null, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 30000;
+  const isForm = (typeof FormData !== 'undefined') && body instanceof FormData;
+  let headers;
+  if (isForm) {
+    headers = {};
+    const t = getSessionToken();
+    if (t) headers['X-Session-Token'] = t;
+  } else {
+    headers = buildHeaders();
+  }
+  try {
+    const r = await fetchWithRetry(
+      `${API_BASE}/${path}`,
+      { method, headers, body: body == null ? undefined : (isForm ? body : JSON.stringify(body)) },
+      opts.maxRetries ?? 2,
+      timeoutMs,
+    );
+    trackServerStatus(true);
+    if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
+    if (!r.ok) {
+      if (r.status >= 500) trackServerStatus(false);
+      const e = await r.json().catch(() => ({}));
+      return { data: null, error: e.error || r.statusText };
+    }
+    return { data: await r.json().catch(() => ({})), error: null };
+  } catch (e) { trackServerStatus(false); return { data: null, error: e.message }; }
+}
+
 export const db = {
   from(t) { return new QueryBuilder(t); },
   rpc(fn, p, opts) { return rpc(fn, p, opts); },
   searchProducts(q, opts) { return searchProducts(q, opts); },
+  request(method, path, body, opts) { return apiRequest(method, path, body, opts); },
 };
 
 export function setSessionToken(t) { localStorage.setItem('bk_session_token', t); }

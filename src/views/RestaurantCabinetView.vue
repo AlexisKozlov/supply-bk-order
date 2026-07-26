@@ -86,6 +86,7 @@
           <span class="sb-icon" v-html="tabIconSvg(tab.id)"></span>
           {{ tab.label }}
           <span v-if="tab.beta" class="sb-beta">BETA</span>
+          <span v-if="tab.newBadge" class="sb-new">NEW</span>
           <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
       </template>
@@ -129,7 +130,7 @@
       <!-- Десктоп-топбар -->
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты поставщиков' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты поставщиков' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров">
@@ -143,7 +144,7 @@
           <span class="mob-topbar-num">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</span>
           <span class="mob-topbar-label">Ресторан</span>
         </div>
-        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
+        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : 'Профиль' }}</div>
         <button
           v-if="activeTab !== 'scanner'"
           class="mob-topbar-scan"
@@ -258,6 +259,14 @@
                 <div class="dash-tile-text">
                   <div class="dash-tile-title">Остатки склада</div>
                   <div class="dash-tile-sub">Сроки годности по товарам</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
+              </button>
+              <button class="dash-tile dash-tile--novelties" @click="switchTab('novelties')">
+                <span class="dash-tile-icon"><span class="dash-new-tag">NEW</span></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Новинки</div>
+                  <div class="dash-tile-sub">{{ noveltiesUnseenCount ? noveltiesUnseenCount + ' новых — посмотреть' : 'Новые товары и что это' }}</div>
                 </div>
                 <span class="dash-tile-arrow">›</span>
               </button>
@@ -1069,6 +1078,15 @@
       @reload="loadWarehouseStock"
     />
 
+    <!-- ══════ TAB: Новинки ══════ -->
+    <RestaurantNoveltiesTab
+      v-if="activeTab === 'novelties' && !globalError"
+      :items="noveltiesItems"
+      :loading="noveltiesLoading"
+      :error="noveltiesError"
+      @reload="loadNovelties"
+    />
+
     <!-- ══════ TAB: Контакты поставщиков ══════ -->
     <section v-if="activeTab === 'contacts' && !globalError" class="cab-section">
       <RestaurantSupplierContactsTab />
@@ -1512,6 +1530,7 @@ const RestaurantInfoTab = defineAsyncComponent(() => import('@/components/restau
 const RestaurantEmailModal = defineAsyncComponent(() => import('@/components/restaurant/RestaurantEmailModal.vue'));
 const BugReportButton = defineAsyncComponent(() => import('@/components/BugReportButton.vue'));
 const RestaurantWarehouseStockTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantWarehouseStockTab.vue'));
+const RestaurantNoveltiesTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantNoveltiesTab.vue'));
 const RestaurantSupplyAssistantTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplyAssistantTab.vue'));
 const RestaurantSupplierContactsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSupplierContactsTab.vue'));
 
@@ -1638,6 +1657,11 @@ const warehouseStockCustomer = ref('');
 const warehouseStockUploadedAt = ref('');
 const warehouseStockLoading = ref(false);
 const warehouseStockError = ref('');
+// Новинки
+const noveltiesItems = ref([]);
+const noveltiesLoading = ref(false);
+const noveltiesError = ref('');
+const noveltiesSeen = ref(loadNoveltiesSeen());
 const restaurantBroadcasts = ref([]);
 let restaurantBroadcastTimer = null;
 let heartbeatTimer = null;
@@ -1897,6 +1921,7 @@ const mainTabs = computed(() => {
       badgeType: unfilled > 0 ? 'alert' : '',
     });
   }
+  tabs.push({ id: 'novelties', label: 'Новинки', newBadge: noveltiesUnseenCount.value > 0 });
   tabs.push({ id: 'warehouse-stock', label: 'Остатки склада' });
   tabs.push({ id: 'contacts', label: 'Контакты' });
   tabs.push({ id: 'scanner', label: 'Сканер' });
@@ -2784,6 +2809,10 @@ async function switchTab(tab, subTab) {
   }
   if (tab === 'stock' && stockCollection.active) loadStockInline(stockCollection.selectedId);
   if (tab === 'warehouse-stock' && !warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
+  if (tab === 'novelties') {
+    if (!noveltiesItems.value.length && !noveltiesLoading.value) loadNovelties().then(markNoveltiesSeen);
+    else markNoveltiesSeen();
+  }
   ensureSupDeadlineTimer();
 }
 // ═══ Синхронизация табов с роутом (URL) ═══
@@ -2830,6 +2859,10 @@ function applyRouteToState() {
   } else if (name === 'restaurant-warehouse-stock') {
     activeTab.value = 'warehouse-stock';
     if (!warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
+  } else if (name === 'restaurant-novelties') {
+    activeTab.value = 'novelties';
+    if (!noveltiesItems.value.length && !noveltiesLoading.value) loadNovelties().then(markNoveltiesSeen);
+    else markNoveltiesSeen();
   } else if (name === 'restaurant-contacts') {
     activeTab.value = 'contacts';
   } else if (name === 'restaurant-scanner') {
@@ -2869,6 +2902,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-contacts' };
   } else if (activeTab.value === 'scanner') {
     target = { name: 'restaurant-scanner' };
+  } else if (activeTab.value === 'novelties') {
+    target = { name: 'restaurant-novelties' };
   } else if (activeTab.value === 'profile') {
     target = { name: 'restaurant-profile' };
   } else if (activeTab.value === 'keg-returns') {
@@ -3739,6 +3774,41 @@ async function loadWarehouseStock() {
   }
 }
 
+// ── Новинки ──
+function noveltiesSeenKey() {
+  const num = roStore.restaurant?.number || 'x';
+  return 'bk_ro_novelties_seen_' + num;
+}
+function loadNoveltiesSeen() {
+  try { return new Set(JSON.parse(localStorage.getItem(noveltiesSeenKey()) || '[]')); }
+  catch { return new Set(); }
+}
+function saveNoveltiesSeen() {
+  try { localStorage.setItem(noveltiesSeenKey(), JSON.stringify([...noveltiesSeen.value])); } catch {}
+}
+const noveltiesUnseenCount = computed(() =>
+  noveltiesItems.value.filter(it => !noveltiesSeen.value.has(it.product_id)).length
+);
+async function loadNovelties() {
+  noveltiesLoading.value = true;
+  noveltiesError.value = '';
+  try {
+    const data = await roStore.loadNovelties();
+    noveltiesItems.value = data.items || [];
+  } catch (e) {
+    noveltiesError.value = e.message || 'Ошибка загрузки новинок';
+  } finally {
+    noveltiesLoading.value = false;
+  }
+}
+function markNoveltiesSeen() {
+  if (!noveltiesItems.value.length) return;
+  const s = new Set(noveltiesSeen.value);
+  for (const it of noveltiesItems.value) s.add(it.product_id);
+  noveltiesSeen.value = s;
+  saveNoveltiesSeen();
+}
+
 
 function onBeforeUnload(e) {
   if (delHasUnsavedChanges.value || pwOld.value || pwNew.value) {
@@ -3780,6 +3850,7 @@ function startCabinetBackgroundLoading() {
     ['broadcasts',      () => loadRestaurantBroadcasts()],
     ['surveys',         () => surveyItems.value.length ? null : loadSurveyList()],
     ['previous-orders', () => loadPreviousDeliveryOrders()],
+    ['novelties',       () => noveltiesItems.value.length ? null : loadNovelties()],
   ];
   // Запускаем 2 параллельно — не спамим сеть, но и не тормозим
   const CONCURRENCY = 2;
@@ -3945,6 +4016,8 @@ onUnmounted(() => {
 .sb-badge.alert { background: #dc2626; }
 .sb-badge.pause { background: #9ca3af; font-size: 9px; padding: 0 7px; text-transform: uppercase; letter-spacing: 0.5px; }
 .sb-beta { margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: linear-gradient(90deg, #FFD54F, #F4A261); color: #3d2400; flex-shrink: 0; }
+.sb-new { margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: #E4572E; color: #fff; flex-shrink: 0; }
+.sb-new + .sb-badge { margin-left: 4px; }
 .sb-help {
   display: flex;
   align-items: center;
@@ -5346,6 +5419,8 @@ tr.del-err { background: #fef2f2; }
 .dash-tile--scanner .dash-tile-icon { background: #E5F3E5; color: #2E7D32; }
 .dash-tile--warehouse .dash-tile-icon { background: #EFE9FF; color: #6B46C1; }
 .dash-tile--keg .dash-tile-icon { background: #FFF1E0; color: #C16B4D; }
+.dash-tile--novelties .dash-tile-icon { background: #FDE8E1; }
+.dash-new-tag { font-size: 12px; font-weight: 800; letter-spacing: .6px; color: #fff; background: #E4572E; padding: 3px 7px; border-radius: 5px; line-height: 1; }
 .dash-tile-icon-img img {
   width: 100%;
   height: 100%;

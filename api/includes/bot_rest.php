@@ -273,6 +273,24 @@ function soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) {
     return "{$siteUrl}/restaurant/login?tg_token={$tgToken}&redirect=" . urlencode($redirect);
 }
 
+// Ссылка на «Поиск карточек» из бота с авторизацией ресторана.
+// Страница требует сессию (get_cards), а Telegram-webapp открывается без cookie —
+// поэтому кладём одноразовый tg_token: страница входа обменяет его на сессию
+// ресторана и перебросит на /search-cards. Берём первую подписку чата.
+function restCardSearchWebLink($pdo, $chatId) {
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    if (!$subs) return null;
+    $restNum = $subs[0]['restaurant_number'];
+    $restGroup = $subs[0]['legal_entity_group'] ?: (((int)$restNum >= 1000) ? 'PS' : 'BK_VM');
+    $tgToken = bin2hex(random_bytes(32));
+    $pdo->prepare("
+        INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used)
+        VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)
+    ")->execute([$tgToken, $chatId, $restNum, $restGroup]);
+    $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
+    return "{$siteUrl}/restaurant/login?tg_token={$tgToken}&redirect=" . urlencode('/search-cards');
+}
+
 function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
     $rest = soGetRestaurantContext($pdo, $restNum);
     if (!$rest) {
@@ -571,14 +589,16 @@ function restShowMySubs($chatId, $msgId = null) {
         if ($activeSc) {
             $btns[] = [['text' => "📋 Сбор остатков", 'callback_data' => 'rest_sc_start']];
         }
+        $btns[] = [['text' => '🆕 Новинки', 'callback_data' => 'rest_novelties']];
 
         // ── Инструменты ──
         $btns[] = [
             ['text' => '⏰ Напоминания', 'callback_data' => 'rest_reminders'],
             ['text' => '⚙️ Уведомления', 'callback_data' => 'rest_notif_settings'],
         ];
+        $cardLink = restCardSearchWebLink($pdo, $chatId);
         $btns[] = [
-            ['text' => '🔍 Карточки', 'web_app' => ['url' => 'https://supply-department.online/search-cards']],
+            ['text' => '🔍 Карточки', 'web_app' => ['url' => $cardLink ?: 'https://supply-department.online/search-cards']],
         ];
 
         if ($orderFile) {
@@ -618,6 +638,121 @@ function restShowMySubs($chatId, $msgId = null) {
     $markup = ['inline_keyboard' => $btns];
     if ($msgId) editMessage($chatId, $msgId, $text, $markup);
     else sendMessage($chatId, $text, $markup);
+}
+
+
+// ═══ Новинки для ресторана ═══
+
+// Бизнес-группы (BK_VM / PS) по подпискам чата.
+function botRestNoveltyGroups($pdo, $chatId) {
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $groups = [];
+    foreach ($subs as $s) {
+        $g = $s['legal_entity_group'] ?? null;
+        if (!$g) $g = ((int)$s['restaurant_number'] >= 1000) ? 'PS' : 'BK_VM';
+        if ($g && !in_array($g, $groups, true)) $groups[] = $g;
+    }
+    return $groups;
+}
+
+// Список текущих новинок кнопками.
+function restNoveltiesList($chatId, $msgId = null) {
+    global $pdo;
+    $back = [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']];
+    $groups = botRestNoveltyGroups($pdo, $chatId);
+    if (!$groups) {
+        $txt = "🆕 <b>Новинки</b>\n\nСначала подпишитесь на ресторан.";
+        if ($msgId) editMessage($chatId, $msgId, $txt, ['inline_keyboard' => [$back]]);
+        else sendMessage($chatId, $txt, ['inline_keyboard' => [$back]]);
+        return;
+    }
+    $ph = implode(',', array_fill(0, count($groups), '?'));
+    $s = $pdo->prepare("
+        SELECT p.id, p.name, p.sku
+        FROM products p
+        LEFT JOIN product_novelties n ON n.product_id = p.id
+        WHERE p.is_active = 1
+          AND p.legal_entity_group IN ($ph)
+          AND COALESCE(n.is_hidden, 0) = 0
+          AND NOW() <= COALESCE(n.show_until, p.created_at + INTERVAL " . NOVELTY_DAYS . " DAY)
+        ORDER BY p.created_at DESC, p.name
+        LIMIT 30
+    ");
+    $s->execute($groups);
+    $rows = $s->fetchAll();
+    if (!$rows) {
+        $txt = "🆕 <b>Новинки</b>\n\nПока новинок нет.";
+        if ($msgId) editMessage($chatId, $msgId, $txt, ['inline_keyboard' => [$back]]);
+        else sendMessage($chatId, $txt, ['inline_keyboard' => [$back]]);
+        return;
+    }
+    $txt = "🆕 <b>Новинки</b>\nНовые товары в справочнике. Нажмите, чтобы узнать подробнее.";
+    $btns = [];
+    foreach ($rows as $r) {
+        $label = trim(($r['sku'] ? $r['sku'] . ' ' : '') . $r['name']);
+        $btns[] = [['text' => '🆕 ' . mb_substr($label, 0, 40), 'callback_data' => 'rest_nov_' . $r['id']]];
+    }
+    $btns[] = $back;
+    if ($msgId) editMessage($chatId, $msgId, $txt, ['inline_keyboard' => $btns]);
+    else sendMessage($chatId, $txt, ['inline_keyboard' => $btns]);
+}
+
+// Карточка новинки: описание, дата старта, фото (если есть).
+function restNoveltyDetail($chatId, $msgId, $productId) {
+    global $pdo, $BOT_TOKEN;
+    $back = [['text' => '◂ К новинкам', 'callback_data' => 'rest_novelties']];
+    $groups = botRestNoveltyGroups($pdo, $chatId);
+    if (!$groups) { editMessage($chatId, $msgId, "Нет доступа.", ['inline_keyboard' => [$back]]); return; }
+    $ph = implode(',', array_fill(0, count($groups), '?'));
+    $args = array_merge([$productId], $groups);
+    $s = $pdo->prepare("
+        SELECT p.name, p.sku, n.description, n.sales_start_date, n.photo_path
+        FROM products p
+        LEFT JOIN product_novelties n ON n.product_id = p.id
+        WHERE p.id = ?
+          AND p.is_active = 1
+          AND p.legal_entity_group IN ($ph)
+          AND COALESCE(n.is_hidden, 0) = 0
+          AND NOW() <= COALESCE(n.show_until, p.created_at + INTERVAL " . NOVELTY_DAYS . " DAY)
+        LIMIT 1
+    ");
+    $s->execute($args);
+    $r = $s->fetch();
+    if (!$r) { editMessage($chatId, $msgId, "Новинка не найдена или снята.", ['inline_keyboard' => [$back]]); return; }
+
+    $titleText = trim(($r['sku'] ? $r['sku'] . ' ' : '') . $r['name']);
+    $cap = "🆕 <b>" . soEsc($titleText) . "</b>\n";
+    if (!empty($r['sales_start_date'])) {
+        $cap .= "Старт продаж: <b>" . soEsc(date('d.m.Y', strtotime($r['sales_start_date']))) . "</b>\n";
+    }
+    $desc = trim((string)($r['description'] ?? ''));
+    $cap .= "\n" . ($desc !== '' ? soEsc($desc) : "Описание пока не добавлено.") . "\n";
+
+    $photoAbs = null;
+    if (!empty($r['photo_path'])) {
+        $abs = __DIR__ . '/../' . ltrim((string)$r['photo_path'], '/');
+        if (is_file($abs)) $photoAbs = $abs;
+    }
+    if ($photoAbs) {
+        // Текстовое сообщение нельзя превратить в фото — шлём фото новым сообщением.
+        $post = [
+            'chat_id'      => $chatId,
+            'photo'        => new CURLFile($photoAbs),
+            'caption'      => mb_substr($cap, 0, 1000),
+            'parse_mode'   => 'HTML',
+            'reply_markup' => json_encode(['inline_keyboard' => [$back]], JSON_UNESCAPED_UNICODE),
+        ];
+        $ch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendPhoto");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $post, CURLOPT_TIMEOUT => 15, CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+        $resp = curl_exec($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($resp !== false && $http === 200) return;
+    }
+    editMessage($chatId, $msgId, $cap, ['inline_keyboard' => [$back]]);
 }
 
 

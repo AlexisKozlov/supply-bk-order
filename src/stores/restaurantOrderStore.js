@@ -802,6 +802,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api('warehouse-stock');
   }
 
+  async function loadNovelties() {
+    return await api('novelties');
+  }
+
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     serverTimeOffset, nowFromServer,
@@ -812,7 +816,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     loadBroadcasts, heartbeat, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,
     loadSurveys, loadSurvey, submitSurvey, uploadSurveyFile, removeSurveyFile, markBroadcastRead,
-    getStockCollectionStatus, getStockCollectionData, submitStockCollection, saveStockCollectionDraft, loadWarehouseStock,
+    getStockCollectionStatus, getStockCollectionData, submitStockCollection, saveStockCollectionDraft, loadWarehouseStock, loadNovelties,
     adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetAppSettings, adminSaveAppSettings, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,

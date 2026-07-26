@@ -203,8 +203,9 @@ const loginBrand = computed(() => {
 });
 
 function safeRedirect(target) {
-  // Разрешаем только локальные пути под /restaurant/ — защита от open-redirect
-  if (typeof target === 'string' && /^\/restaurant(\/|$)/.test(target)) return target;
+  // Разрешаем только известные локальные пути — защита от open-redirect.
+  // /restaurant/* — кабинет; /search-cards — поиск карточек из бота.
+  if (typeof target === 'string' && (/^\/restaurant(\/|$)/.test(target) || /^\/search-cards(\/|$|\?)/.test(target))) return target;
   return null;
 }
 

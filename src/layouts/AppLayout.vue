@@ -43,6 +43,7 @@
               <router-link v-if="item.public || (userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module))" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }" @contextmenu.prevent="togglePin(item.route)">
                 <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
                 <span v-if="!sidebarCollapsed">{{ item.label }}</span>
+                <span v-if="!sidebarCollapsed && item.newBadge && noveltiesUnseen > 0" class="sidebar-new">NEW</span>
                 <span v-if="!sidebarCollapsed && isPinned(item.route)" class="sidebar-pin-mark">⭐</span>
               </router-link>
             </template>
@@ -470,6 +471,7 @@ const sidebarSections = [
   { title: 'Данные', items: [
     { module: 'database', route: 'database', icon: 'database', label: 'База данных' },
     { module: 'analogs', route: 'analogs', icon: 'link', label: 'Аналоги' },
+    { module: 'novelties', route: 'novelties', icon: 'fire', label: 'Новинки', newBadge: true },
     { module: 'pricing', route: 'pricing', icon: 'pricing', label: 'Цены и ПСЦ' },
     { module: 'calendar', route: 'calendar', icon: 'calendar', label: 'Календарь' },
   ]},
@@ -818,6 +820,19 @@ function handleHotkeys(e) {
 
 // Badges для непрочитанных
 const badgeCounts = ref({})
+
+// Значок NEW на пункте «Новинки»: показываем, только если есть текущие новинки,
+// которые закупщик ещё не открывал. Гаснет после открытия раздела.
+const noveltiesUnseen = ref(0)
+let novCurrentIds = []
+function novSeenSet() { try { return new Set(JSON.parse(localStorage.getItem('bk_novelties_seen') || '[]')) } catch { return new Set() } }
+function markNovSeen() {
+  const s = novSeenSet()
+  for (const id of novCurrentIds) s.add(id)
+  try { localStorage.setItem('bk_novelties_seen', JSON.stringify([...s])) } catch {}
+  noveltiesUnseen.value = 0
+}
+
 async function loadBadges() {
   if (!userStore.isAuthenticated) return
   if (isOffline.value || serverDown.value || document.hidden) return
@@ -839,6 +854,22 @@ async function loadBadges() {
     if (corrRes.data?.length > 0) badgeCounts.value['corrections'] = corrRes.data.length
     if (scanUnknownRes?.count > 0) badgeCounts.value['scan-unknown'] = scanUnknownRes.count
   } catch {}
+
+  // Новинки: считаем непросмотренные текущие для текущей группы
+  if (userStore.hasAccess('novelties', 'view')) {
+    try {
+      const { data } = await db.request('GET', 'novelties?group=' + encodeURIComponent(currentGroup.value))
+      novCurrentIds = (data?.items || []).filter(x => x.is_current).map(x => x.product_id)
+      if (route.name === 'novelties') {
+        markNovSeen()
+      } else {
+        const seen = novSeenSet()
+        noveltiesUnseen.value = novCurrentIds.filter(id => !seen.has(id)).length
+      }
+    } catch { noveltiesUnseen.value = 0 }
+  } else {
+    noveltiesUnseen.value = 0
+  }
 }
 let badgeTimer = null
 
@@ -866,6 +897,9 @@ removeAfterEach = router.afterEach(() => {
 });
 
 const currentRoute = computed(() => route.name);
+
+// Открыли раздел «Новинки» — гасим NEW сразу.
+watch(() => route.name, (n) => { if (n === 'novelties') markNovSeen(); });
 
 const availableEntities = computed(() => {
   const allowed = userStore.getAllowedEntities();
@@ -1199,6 +1233,17 @@ function confirmLogout() {
 .sidebar-badge-inline {
   position: static;
   margin-left: auto;
+}
+.sidebar-new {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  color: #fff;
+  background: #E4572E;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1.4;
 }
 .sidebar-tools-row {
   display: flex;

@@ -123,6 +123,54 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'restaurant_info' && isset(
     exit;
 }
 
+// ═══ DOWNLOAD NOVELTY PHOTO ═══
+// Фото новинки видно закупщику (модуль novelties ≥ view) и залогиненному
+// ресторану своей бизнес-группы. Файлы — картинки товаров, не секретные,
+// но анонимного доступа нет.
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'novelties' && isset($parts[2])) {
+    $filename = basename($parts[2]);
+    $filepath = __DIR__ . '/../uploads/novelties/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+
+    $safeName = str_replace(['%', '_'], ['\\%', '\\_'], $filename);
+    $s = $pdo->prepare("
+        SELECT p.legal_entity_group
+        FROM product_novelties n
+        JOIN products p ON p.id = n.product_id
+        WHERE n.photo_path LIKE ? ESCAPE '\\\\'
+        LIMIT 1
+    ");
+    $s->execute(['%' . $safeName]);
+    $novGroup = $s->fetchColumn();
+    if ($novGroup === false) respond(['error' => 'Файл не найден'], 404);
+
+    $ok = false;
+    if (checkAuth($pdo)) {
+        $su = getSessionUser($pdo);
+        if ($su) {
+            $p = resolvePermissions($su['role'] ?? 'user', $su['permissions'] ?? null, $ROLE_TEMPLATES);
+            if (($ACCESS_LEVELS[$p['novelties'] ?? 'none'] ?? 0) >= $ACCESS_LEVELS['view']) $ok = true;
+        }
+    }
+    if (!$ok) {
+        $rest = roReadActiveSessionRow($pdo);
+        if ($rest) {
+            $grp = $rest['legal_entity_group'] ?: (((int)$rest['restaurant_number'] >= 1000) ? 'PS' : 'BK_VM');
+            if ((string)$grp === (string)$novGroup) $ok = true;
+        }
+    }
+    if (!$ok) respond(['error' => 'Нет доступа'], 403);
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $filepath) ?: 'application/octet-stream';
+    finfo_close($finfo);
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: inline; filename="' . sanitizeHeaderFilename($filename) . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
+
 // ═══ DELETE ACT ═══
 if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
     if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
@@ -458,7 +506,19 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'protocols' && isset($parts
     // Поддержка токена через query-параметр (для открытия в новой вкладке)
     if (isset($_GET['token'])) $_SERVER['HTTP_X_SESSION_TOKEN'] = $_GET['token'];
     if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    // Доступ к протоколу — модуль protocols (view) + доступ к юр. лицу протокола.
+    // Раньше здесь была только checkAuth: любой сотрудник (даже protocols=none)
+    // мог скачать протокол любого юрлица по имени файла в обход модуля и юрлица.
+    $protoUser = getSessionUser($pdo);
+    if (!$protoUser) respond(['error' => 'Требуется авторизация'], 401);
+    $protoPerms = resolvePermissions($protoUser['role'] ?? 'user', $protoUser['permissions'] ?? null, $ROLE_TEMPLATES);
+    if (($ACCESS_LEVELS[$protoPerms['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['view']) respond(['error' => 'Недостаточно прав'], 403);
     $filename = basename($parts[2]);
+    $protoLe = $pdo->prepare("SELECT mp.legal_entity FROM meeting_protocol_files f JOIN meeting_protocols mp ON mp.id = f.protocol_id WHERE f.file_path = ? LIMIT 1");
+    $protoLe->execute([$filename]);
+    $protoLeVal = $protoLe->fetchColumn();
+    if ($protoLeVal === false) respond(['error' => 'Файл не найден'], 404); // сирота — не отдаём
+    if (!checkLegalEntityAccess($protoUser, $protoLeVal)) respond(['error' => 'Нет доступа'], 403);
     $filepath = __DIR__ . '/../uploads/protocols/' . $filename;
     if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
     $finfo = finfo_open(FILEINFO_MIME_TYPE); $mime = finfo_file($finfo, $filepath); finfo_close($finfo);

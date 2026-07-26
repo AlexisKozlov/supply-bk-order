@@ -41,6 +41,7 @@ const routes = [
       { path: 'telegram-admin', name: 'telegram-admin', component: () => import('@/views/TelegramAdminView.vue'), meta: { title: 'Telegram-бот', module: 'telegram' } },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
       { path: 'analogs', name: 'analogs', component: () => import('@/views/AnalogsView.vue'), meta: { title: 'Аналоги', module: 'analogs' } },
+      { path: 'novelties', name: 'novelties', component: () => import('@/views/NoveltiesView.vue'), meta: { title: 'Новинки', module: 'novelties' } },
       { path: 'deficit', name: 'deficit', component: () => import('@/views/DeficitView.vue'), meta: { title: 'Распределение дефицита', module: 'deficit' } },
       { path: 'stock-collection', name: 'stock-collection', component: () => import('@/views/StockCollectionView.vue'), meta: { title: 'Сбор остатков', module: 'stock-collection' } },
       { path: 'tenders', name: 'tenders', component: () => import('@/views/TendersView.vue'), meta: { title: 'Тендеры', module: 'tenders' } },
@@ -148,6 +149,7 @@ const routes = [
       // а не в общий раздел, где ресторан видел только самый новый сбор.
       { path: 'stock/:collectionId', name: 'restaurant-stock-collection', component: EmptySlot, meta: { title: 'Сбор остатков' } },
       { path: 'warehouse-stock', name: 'restaurant-warehouse-stock', component: EmptySlot, meta: { title: 'Остатки склада' } },
+      { path: 'novelties', name: 'restaurant-novelties', component: EmptySlot, meta: { title: 'Новинки' } },
       { path: 'contacts', name: 'restaurant-contacts', component: EmptySlot, meta: { title: 'Контакты поставщиков' } },
       { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
