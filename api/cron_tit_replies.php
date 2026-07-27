@@ -352,11 +352,38 @@ foreach ($unseen as $msgNum) {
             // (та же машина в нескольких письмах) — иначе закупщик видит копии.
             $existsStmt = $pdo->prepare("SELECT id FROM tit_vehicles WHERE request_id = ? AND plate = ? AND deleted_at IS NULL LIMIT 1");
             foreach ($pairs as $pair) {
-                // Пара без номера машины (распознали только телефон водителя) —
-                // машину не заводим, телефон уже сохранён в карточке письма.
-                if ($pair['plate'] === '') continue;
+                // Распознали только телефон водителя — всё равно заводим машину
+                // с пустым номером. Иначе заявка выглядит пустой («поставщик
+                // ещё не прислал данные»), а телефон прячется внутри карточки
+                // письма, и закупщик его не видит. Запись помечена needs_review,
+                // без номера её нельзя подтвердить и отправить охране.
+                if ($pair['plate'] === '') {
+                    if ($pair['phone'] === '') continue;
+                    $dup = $pdo->prepare("SELECT id FROM tit_vehicles WHERE request_id = ? AND phone = ? AND deleted_at IS NULL LIMIT 1");
+                    $dup->execute([$requestId, $pair['phone']]);
+                    if ($dup->fetchColumn()) continue;
+                    $pdo->prepare("
+                        INSERT INTO tit_vehicles
+                            (request_id, plate, plate_raw, phone, phone_raw, source, email_log_id, needs_review)
+                        VALUES (?, '', '', ?, ?, 'EMAIL_TEXT', ?, 1)
+                    ")->execute([$requestId, $pair['phone'], $pair['phone_raw'], $emailLogId]);
+                    continue;
+                }
                 $existsStmt->execute([$requestId, $pair['plate']]);
                 if ($existsStmt->fetchColumn()) continue;
+                // Если раньше пришёл только телефон и по нему завели пустую
+                // запись — дозаполняем её, а не плодим вторую машину.
+                if ($pair['phone'] !== '') {
+                    $half = $pdo->prepare("SELECT id FROM tit_vehicles WHERE request_id = ? AND plate = '' AND phone = ? AND deleted_at IS NULL LIMIT 1");
+                    $half->execute([$requestId, $pair['phone']]);
+                    $halfId = $half->fetchColumn();
+                    if ($halfId) {
+                        $pdo->prepare("UPDATE tit_vehicles SET plate = ?, plate_raw = ?, email_log_id = ?, updated_at = NOW() WHERE id = ?")
+                            ->execute([$pair['plate'], $pair['plate_raw'], $emailLogId, $halfId]);
+                        titRememberSupplierDefaults($pdo, $req['supplier_id'] ?? null, $pair['plate'], $pair['phone']);
+                        continue;
+                    }
+                }
                 $pdo->prepare("
                     INSERT INTO tit_vehicles
                         (request_id, plate, plate_raw, phone, phone_raw, source, email_log_id, needs_review)
@@ -373,6 +400,17 @@ foreach ($unseen as $msgNum) {
                 $exists = $pdo->prepare("SELECT id FROM tit_vehicles WHERE request_id = ? AND plate = ? AND deleted_at IS NULL LIMIT 1");
                 $exists->execute([$requestId, $op['plate']]);
                 if ($exists->fetchColumn()) continue;
+                // Номер из накладной дозаполняет запись, заведённую по одному
+                // телефону, — иначе в заявке будет две половинчатые машины.
+                $half = $pdo->prepare("SELECT id FROM tit_vehicles WHERE request_id = ? AND plate = '' AND deleted_at IS NULL ORDER BY id LIMIT 1");
+                $half->execute([$requestId]);
+                $halfId = $half->fetchColumn();
+                if ($halfId) {
+                    $pdo->prepare("UPDATE tit_vehicles SET plate = ?, plate_raw = ?, source = 'EMAIL_OCR', email_log_id = ?, updated_at = NOW() WHERE id = ?")
+                        ->execute([$op['plate'], $op['raw'], $emailLogId, $halfId]);
+                    titRememberSupplierDefaults($pdo, $req['supplier_id'] ?? null, $op['plate'], null);
+                    continue;
+                }
                 $pdo->prepare("
                     INSERT INTO tit_vehicles
                         (request_id, plate, plate_raw, source, email_log_id, needs_review)
