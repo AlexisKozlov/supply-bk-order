@@ -19,7 +19,10 @@
             <div v-for="group in groupedResults" :key="group.title" class="cp-group">
               <div class="cp-group-title">{{ group.title }}</div>
               <div v-for="item in group.items" :key="item._key" class="cp-item" :class="{ active: item._idx === activeIdx }" @click="go(item)" @mouseenter="activeIdx = item._idx">
-                <span class="cp-item-icon">{{ item.icon }}</span>
+                <span class="cp-item-icon">
+                  <BkIcon v-if="item.iconName" :name="item.iconName" size="sm" />
+                  <template v-else>{{ item.icon }}</template>
+                </span>
                 <div class="cp-item-text">
                   <div class="cp-item-title" v-html="highlight(item.title)"></div>
                   <div v-if="item.subtitle" class="cp-item-sub">{{ item.subtitle }}</div>
@@ -35,7 +38,10 @@
             <div class="cp-group">
               <div class="cp-group-title">Быстрые действия</div>
               <div v-for="item in quickActions" :key="item._key" class="cp-item" :class="{ active: item._idx === activeIdx }" @click="go(item)" @mouseenter="activeIdx = item._idx">
-                <span class="cp-item-icon">{{ item.icon }}</span>
+                <span class="cp-item-icon">
+                  <BkIcon v-if="item.iconName" :name="item.iconName" size="sm" />
+                  <template v-else>{{ item.icon }}</template>
+                </span>
                 <div class="cp-item-text"><div class="cp-item-title">{{ item.title }}</div></div>
               </div>
             </div>
@@ -58,6 +64,8 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
+import { ALL_NAV_ITEMS } from '@/lib/navSections.js'
+import BkIcon from '@/components/ui/BkIcon.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -69,63 +77,22 @@ const loading = ref(false)
 const searchResults = ref([])
 let searchTimer = null
 
-// Модули — актуальный список, синхронизирован с сайдбаром (AppLayout.vue) и роутером.
-// При добавлении/переименовании раздела в сайдбаре — обновить и здесь.
-const modules = [
-  // Заказы
-  { title: 'Новый заказ', icon: '📦', route: 'order', module: 'order', keywords: 'заказ new' },
-  { title: 'Планирование', icon: '📋', route: 'planning', module: 'planning' },
-  { title: 'Поставки', icon: '🚚', route: 'plan-fact', module: 'plan-fact', keywords: 'план факт' },
-  { title: 'История', icon: '📜', route: 'history', module: 'history', keywords: 'история заказов' },
-  { title: 'Задачи', icon: '🗒', route: 'tasks', module: 'tasks', keywords: 'таск доска канбан' },
-  // Данные
-  { title: 'База данных', icon: '🗄', route: 'database', module: 'database', keywords: 'товары поставщики рестораны справочник база товаров' },
-  { title: 'Цены и ПСЦ', icon: '💰', route: 'pricing', module: 'pricing', keywords: 'прайс протокол' },
-  { title: 'Календарь', icon: '📅', route: 'calendar', module: 'calendar' },
-  // Аналитика
-  { title: 'Дашборд', icon: '📊', route: 'dashboard', module: 'dashboard' },
-  { title: 'Аналитика', icon: '📈', route: 'analytics', module: 'analytics' },
-  { title: 'Анализ запасов', icon: '📉', route: 'analysis', module: 'analysis' },
-  { title: 'Сверка 1С/УТ', icon: '🔁', route: 'reconciliation', module: 'reconciliation', keywords: 'сверка ут 1с расхождения' },
-  { title: 'ИИ-помощник', icon: '💡', route: 'assistant', module: 'analysis', keywords: 'ai ассистент нейросеть' },
-  { title: 'Маркетинг', icon: '🎯', route: 'marketing', module: 'marketing', keywords: 'акция промо' },
-  { title: 'Протоколы совещаний', icon: '📄', route: 'protocols', module: 'protocols', keywords: 'совещание протокол' },
-  // Склад и логистика
-  { title: 'Сроки годности', icon: '⏰', route: 'shelf-life', module: 'shelf-life', keywords: 'срок просрочка ячейки' },
-  { title: 'График доставки', icon: '🗓', route: 'delivery-schedule', module: 'delivery-schedule' },
-  { title: 'Распределение дефицита', icon: '⚠️', route: 'deficit', module: 'deficit' },
-  { title: 'Распределение', icon: '📦', route: 'distribution', module: 'distribution' },
-  { title: 'Загрузка машин', icon: '🚛', route: 'truck-loading', module: 'truck-loading', keywords: 'фура грузовик паллеты' },
-  { title: 'Заявка на пропуск', icon: '🎫', route: 'tit-requests', module: 'tit-requests', keywords: 'пропуск тит въезд машина' },
-  { title: 'Калькулятор паллет', icon: '🧮', route: 'pallet-calc', module: 'pallet-calc' },
-  { title: 'Паллетовка склада', icon: '🏭', route: 'pallet-storage', module: 'pallet-storage' },
-  // Поставщики
-  { title: 'Тендеры', icon: '📑', route: 'tenders', module: 'tenders' },
-  { title: 'График поставок', icon: '🚚', route: 'supplier-schedule', module: 'supplier-schedule', keywords: 'расписание поставщиков дедлайн' },
-  { title: 'Заявки поставщикам', icon: '🏭', route: 'supplier-orders', module: 'supplier-orders', keywords: 'камако овощи so планета' },
-  { title: 'Оплаты поставщиков', icon: '💳', route: 'payments', module: 'plan-fact' },
-  // Управление ресторанами
-  { title: 'Кабинеты ресторанов', icon: 'ℹ️', route: 'restaurant-cabinet-manager', module: 'restaurant-orders', keywords: 'управление ресторанами важная информация кабинет' },
-  { title: 'Заказы ресторанов', icon: '🍔', route: 'restaurant-orders', module: 'restaurant-orders', keywords: 'рестораны ро' },
-  { title: 'Сбор заказа осн. поставки', icon: '🧺', route: 'supply-assistant', module: 'supply-assistant', keywords: 'помощник основная поставка sa' },
-  { title: 'Штрихкоды', icon: '🏷', route: 'restaurant-unknown-barcodes', module: 'restaurant-orders', keywords: 'сканер неизвестные штрихкод barcode' },
-  { title: 'Возврат кег', icon: '🛢', route: 'keg-returns', module: 'keg-returns', keywords: 'кеги ттн бсо' },
-  { title: 'Сбор остатков', icon: '📝', route: 'stock-collection', module: 'stock-collection' },
-  { title: 'Опросы', icon: '📋', route: 'surveys', module: 'surveys', keywords: 'анкета опросник ответы рестораны' },
-  { title: 'Чат с ресторанами', icon: '💬', route: 'chat', module: 'chat' },
-  { title: 'Корректировки', icon: '✏️', route: 'corrections', module: 'corrections', keywords: 'корректировки заказов' },
-  // Прочие страницы
-  { title: 'Реализация ресторанов', icon: '💹', route: 'restaurant-sales', module: 'restaurant-sales', keywords: 'продажи выручка' },
-  { title: 'Отчёт по заказам ресторанов', icon: '📄', route: 'restaurant-report', module: 'restaurant-orders' },
-  { title: 'Поиск карточек', icon: '🔍', route: 'search-cards', keywords: 'карточка sku' },
-  { title: 'Импорт данных', icon: '⬆️', route: 'import', module: 'analysis' },
-  { title: 'Telegram-бот', icon: '🤖', route: 'telegram-admin', module: 'telegram' },
-  { title: 'Админ-панель', icon: '🛠', route: 'admin', requiresAdmin: true },
-  { title: 'Настройки аккаунта', icon: '⚙️', route: 'user-settings' },
-].filter(m => {
-  if (m.requiresAdmin) return userStore.hasAccess && (userStore.user?.role === 'admin');
+// Разделы портала берутся из общего списка (lib/navSections.js) — того же,
+// по которому строится меню. Поэтому новый раздел находится поиском сразу,
+// без правок здесь.
+const modules = ALL_NAV_ITEMS.filter(m => {
+  if (m.requiresAdmin) return userStore.user?.role === 'admin';
   return !m.module || userStore.hasAccess(m.module, 'view');
-}).map((m, i) => ({ ...m, group: 'Модули', type: 'route', _key: 'mod_' + i }))
+}).map((m, i) => ({
+  title: m.label,
+  iconName: m.icon,
+  route: m.route,
+  module: m.module,
+  keywords: m.keywords,
+  group: 'Модули',
+  type: 'route',
+  _key: 'mod_' + i,
+}))
 
 const quickActions = computed(() => {
   let idx = 0

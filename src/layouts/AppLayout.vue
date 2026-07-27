@@ -402,6 +402,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useNotificationStore } from '@/stores/notificationStore.js';
 import { db, serverDown } from '@/lib/apiClient.js';
 import { LEGAL_ENTITIES, getEntityGroupCode } from '@/lib/legalEntities.js';
+import { SIDEBAR_SECTIONS, TOOLS_GROUPS, PAGE_NAMES } from '@/lib/navSections.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import BroadcastPopup from '@/components/BroadcastPopup.vue';
@@ -460,62 +461,11 @@ function isModuleVisible(module, route = null) {
   return !hiddenModules.value.includes(route || module) && !hiddenModules.value.includes(module);
 }
 
-const sidebarSections = [
-  { title: 'Заказы', items: [
-    { module: 'order', route: 'order', icon: 'package', label: 'Новый заказ' },
-    { module: 'planning', route: 'planning', icon: 'planning', label: 'Планирование' },
-    { module: 'plan-fact', route: 'plan-fact', icon: 'delivery', label: 'Поставки' },
-    { module: 'history', route: 'history', icon: 'history', label: 'История' },
-    { module: 'tasks', route: 'tasks', icon: 'clipboard', label: 'Задачи' },
-  ]},
-  { title: 'Данные', items: [
-    { module: 'database', route: 'database', icon: 'database', label: 'База данных' },
-    { module: 'analogs', route: 'analogs', icon: 'link', label: 'Аналоги' },
-    { module: 'novelties', route: 'novelties', icon: 'fire', label: 'Новинки', newBadge: true },
-    { module: 'pricing', route: 'pricing', icon: 'pricing', label: 'Цены и ПСЦ' },
-    { module: 'calendar', route: 'calendar', icon: 'calendar', label: 'Календарь' },
-  ]},
-];
-
-const toolsGroups = [
-  { title: 'Аналитика', items: [
-    { module: 'dashboard', route: 'dashboard', icon: 'home', label: 'Дашборд' },
-    { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
-    { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
-    { module: 'reconciliation', route: 'reconciliation', icon: 'arrowLeftRight', label: 'Сверка 1С/УТ' },
-    { module: 'analysis', route: 'assistant', icon: 'bulb', label: 'ИИ-помощник' },
-    { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
-    { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
-  ]},
-  { title: 'Склад и логистика', items: [
-    { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
-    { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
-    { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
-    { module: 'distribution', route: 'distribution', icon: 'distribute', label: 'Распределение' },
-    { module: 'truck-loading', route: 'truck-loading', icon: 'truckLoad', label: 'Загрузка машин' },
-    { module: 'tit-requests', route: 'tit-requests', icon: 'truckLoad', label: 'Заявка на пропуск' },
-    { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
-    { module: 'pallet-storage', route: 'pallet-storage', icon: 'warehouse', label: 'Паллетовка склада' },
-  ]},
-  { title: 'Поставщики', items: [
-    { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
-    { module: 'supplier-schedule', route: 'supplier-schedule', icon: 'truck', label: 'График поставок' },
-    { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
-    { module: 'supplier-orders', route: 'cabinet-links', icon: 'link', label: 'Ссылки кабинета' },
-    { module: 'plan-fact', route: 'payments', icon: 'payments', label: 'Оплаты поставщиков' },
-  ]},
-  { title: 'Управление ресторанами', items: [
-    { module: 'restaurant-orders', route: 'restaurant-cabinet-manager', icon: 'building', label: 'Кабинеты ресторанов' },
-    { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'restaurantOrders', label: 'Заказы ресторанов' },
-    { module: 'supply-assistant', route: 'supply-assistant', icon: 'restaurantOrders', label: 'Сбор заказа осн. поставки' },
-    { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Штрихкоды', badgeKey: 'scan-unknown' },
-    { module: 'keg-returns', route: 'keg-returns', icon: 'kegReturn', label: 'Возврат кег' },
-    { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
-    { module: 'surveys', route: 'surveys', icon: 'survey', label: 'Опросы' },
-    { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
-    { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
-  ]},
-];
+// Списки разделов живут в lib/navSections.js — оттуда же их берут поиск
+// по «/» и подпись «кто на какой странице». Новый раздел добавляется
+// только там, здесь ничего дописывать не нужно.
+const sidebarSections = SIDEBAR_SECTIONS;
+const toolsGroups = TOOLS_GROUPS;
 const toolsItems = toolsGroups.flatMap(g => g.items);
 const toolsExpanded = ref(localStorage.getItem('bk_tools_expanded') === 'true');
 function toggleToolsExpanded() {
@@ -748,34 +698,9 @@ const pwdSuccess = ref('');
 const pwdLoading = ref(false);
 
 // ═══ Heartbeat (онлайн-присутствие) ═══
-const pageNames = {
-  order: 'Новый заказ',
-  planning: 'Планирование',
-  history: 'История',
-  analytics: 'Аналитика',
-  calendar: 'Календарь',
-  analysis: 'Анализ',
-  database: 'База данных',
-  admin: 'Админ панель',
-  'plan-fact': 'Поставки',
-  'delivery-schedule': 'График доставки',
-  'shelf-life': 'Сроки годности',
-  'deficit': 'Распределение дефицита',
-  'pricing': 'Цены и ПСЦ',
-  'restaurant-sales': 'Реализация ресторанов',
-  'tenders': 'Тендеры',
-  'tender-detail': 'Тендер',
-  'marketing': 'Маркетинг',
-  'marketing-new': 'Новая активность',
-  'marketing-detail': 'Маркетинговая активность',
-  'stock-collection': 'Сбор остатков',
-  'telegram-admin': 'Telegram-бот',
-  'surveys': 'Опросы',
-  'corrections': 'Корректировки',
-  'chat': 'Чат с ресторанами',
-  'pallet-calc': 'Калькулятор паллет',
-  'distribution': 'Распределение',
-};
+// Подписи страниц для статуса «кто где сейчас» — из общего списка разделов,
+// чтобы новые разделы не показывались техническим именем маршрута.
+const pageNames = PAGE_NAMES;
 
 const cmdPalette = ref(null)
 function openCommandPalette() {
