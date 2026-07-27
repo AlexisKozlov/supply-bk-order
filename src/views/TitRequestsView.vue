@@ -82,12 +82,15 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { appAlert } from '@/lib/appDialogs.js';
 
 const orderStore = useOrderStore();
+const route = useRoute();
+const router = useRouter();
 
 const TitRequestModal   = defineAsyncComponent(() => import('@/components/modals/TitRequestModal.vue'));
 const TitUnmatchedModal = defineAsyncComponent(() => import('@/components/modals/TitUnmatchedModal.vue'));
@@ -218,9 +221,26 @@ watch(() => orderStore.settings?.legalEntity, (le) => {
   }
 });
 
+// Ссылка из Telegram-бота приходит с номером заявки: /tit-requests?id=174.
+// Открываем её сразу, иначе пользователь попадает просто в общий список и
+// ищет нужную заявку руками.
+function openFromQuery() {
+  const id = Number(route.query.id);
+  if (!id) return;
+  openRequest(id);
+  // Номер из адреса убираем: иначе после закрытия карточки любое обновление
+  // страницы открывало бы её снова.
+  router.replace({ query: { ...route.query, id: undefined } });
+}
+
 onMounted(async () => {
   await reload();
+  openFromQuery();
 });
+
+// Если бот прислал вторую ссылку, когда вкладка уже открыта на этом разделе,
+// маршрут меняется без перезагрузки — открываем новую заявку.
+watch(() => route.query.id, (id) => { if (id) openFromQuery(); });
 </script>
 
 <style scoped>
