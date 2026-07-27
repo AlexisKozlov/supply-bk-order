@@ -105,6 +105,7 @@ export const icons = {
 
   collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="#F4A261" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`,
 
+  sparkle: `<svg viewBox="0 0 24 24" fill="none"><path d="M13 2.6l1.7 4.6 4.6 1.7-4.6 1.7-1.7 4.6-1.7-4.6-4.6-1.7 4.6-1.7L13 2.6z" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 15.4l.85 2.25L9.1 18.5l-2.25.85L6 21.6l-.85-2.25L2.9 18.5l2.25-.85L6 15.4z" fill="#E76F51"/><circle cx="19" cy="17.5" r="1.4" fill="#F4A261"/></svg>`,
   fire: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 22c4-3 8-7 8-12a8 8 0 00-16 0c0 5 4 9 8 12z" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5"/><path d="M12 22c-1.5-1.5-3-3.5-3-6a3 3 0 016 0c0 2.5-1.5 4.5-3 6z" fill="#E76F51"/></svg>`,
 
   bulb: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z" fill="#FFF8E1" stroke="#F4A261" stroke-width="1.8"/><path d="M9 18h6M10 22h4" stroke="#F4A261" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="10" r="2" fill="#FDBD10"/></svg>`,
@@ -187,6 +188,12 @@ export const iconsLight = {
 
   calendar: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" fill="rgba(79,195,247,0.18)" stroke="#4FC3F7" stroke-width="1.9"/><rect x="3" y="5" width="18" height="5" rx="2" fill="#4FC3F7"/><path d="M8 2.5v4M16 2.5v4" stroke="#4FC3F7" stroke-width="2.2" stroke-linecap="round"/><circle cx="8" cy="14.5" r="1.5" fill="#4FC3F7"/><circle cx="12" cy="14.5" r="1.5" fill="#4FC3F7" opacity="0.7"/><circle cx="16" cy="14.5" r="1.5" fill="#4FC3F7" opacity="0.45"/><circle cx="8" cy="18" r="1.5" fill="#4FC3F7" opacity="0.7"/><circle cx="12" cy="18" r="1.5" fill="#4FC3F7"/></svg>`,
 
+  // Новинки — звезда с искрами: универсальный знак «новое».
+  sparkle: `<svg viewBox="0 0 24 24" fill="none"><path d="M13 2.6l1.7 4.6 4.6 1.7-4.6 1.7-1.7 4.6-1.7-4.6-4.6-1.7 4.6-1.7L13 2.6z" fill="rgba(79,195,247,0.22)" stroke="#4FC3F7" stroke-width="1.7" stroke-linejoin="round"/><path d="M6 15.4l.85 2.25L9.1 18.5l-2.25.85L6 21.6l-.85-2.25L2.9 18.5l2.25-.85L6 15.4z" fill="#4FC3F7"/><circle cx="19" cy="17.5" r="1.5" fill="#4FC3F7" opacity="0.75"/></svg>`,
+
+  // Аналоги — две карточки внахлёст: взаимозаменяемые товары.
+  copy: `<svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="12" height="14" rx="2" fill="rgba(79,195,247,0.18)" stroke="#4FC3F7" stroke-width="1.8"/><path d="M8.5 20.5h10a2 2 0 002-2v-10" stroke="#4FC3F7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M6.5 8h6M6.5 11.5h6M6.5 15h3.5" stroke="#4FC3F7" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+
   // ─── Аналитика ───
 
   home: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 12L12 4l9 8" stroke="#FFD54F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" fill="rgba(255,213,79,0.22)" stroke="#FFD54F" stroke-width="1.9"/></svg>`,
@@ -194,6 +201,12 @@ export const iconsLight = {
   analytics: `<svg viewBox="0 0 24 24" fill="none"><polyline points="3 18 9 12 13 15 21 6" stroke="#FFD54F" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="12" r="2.2" fill="#FFA726"/><circle cx="21" cy="6" r="2.2" fill="#FFD54F"/><circle cx="3" cy="18" r="2" fill="#FFD54F" opacity="0.65"/><circle cx="13" cy="15" r="2" fill="#FFD54F" opacity="0.85"/></svg>`,
 
   ruler: `<svg viewBox="0 0 24 24" fill="none"><g transform="rotate(-30 9 13)"><rect x="2" y="9.5" width="14" height="6.5" rx="1" fill="rgba(79,195,247,0.18)" stroke="#4FC3F7" stroke-width="1.9"/><line x1="5" y1="9.5" x2="5" y2="11.5" stroke="#4FC3F7" stroke-width="1.6"/><line x1="8" y1="9.5" x2="8" y2="12.5" stroke="#4FC3F7" stroke-width="1.6"/><line x1="11" y1="9.5" x2="11" y2="11.5" stroke="#4FC3F7" stroke-width="1.6"/></g><circle cx="17.5" cy="8" r="4.5" fill="rgba(79,195,247,0.25)" stroke="#4FC3F7" stroke-width="1.9"/><line x1="20.7" y1="11.2" x2="22.5" y2="13" stroke="#4FC3F7" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+
+  // Сверка 1С/УТ — встречные стрелки: сопоставление двух систем.
+  arrowLeftRight: `<svg viewBox="0 0 24 24" fill="none"><path d="M7 8.5h13m0 0l-3.2-3.2M20 8.5l-3.2 3.2" stroke="#4FC3F7" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 15.5H4m0 0l3.2-3.2M4 15.5l3.2 3.2" stroke="#4FC3F7" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/></svg>`,
+
+  // ИИ-помощник — лампочка (жёлтая, как и положено лампочке).
+  bulb: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 2.8a6.2 6.2 0 00-3.6 11.25c.6.45.95 1.1.95 1.8V17h5.3v-1.15c0-.7.35-1.35.95-1.8A6.2 6.2 0 0012 2.8z" fill="rgba(255,213,79,0.22)" stroke="#FFD54F" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.6 19.5h4.8M10.3 21.6h3.4" stroke="#FFD54F" stroke-width="1.8" stroke-linecap="round"/></svg>`,
 
   marketing: `<svg viewBox="0 0 24 24" fill="none"><path d="M19 4L9 8H5a2 2 0 00-2 2v1a2 2 0 002 2h4l10 4V4z" fill="rgba(206,147,216,0.25)" stroke="#CE93D8" stroke-width="2" stroke-linejoin="round"/><line x1="19" y1="4" x2="19" y2="20" stroke="#CE93D8" stroke-width="2" stroke-linecap="round"/><path d="M9 13v3.5a2 2 0 002 2v0a2 2 0 002-2v-2" stroke="#CE93D8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="21.5" cy="8" r="1.5" fill="#FFD54F"/></svg>`,
 
@@ -220,6 +233,12 @@ export const iconsLight = {
   tender: `<svg viewBox="0 0 24 24" fill="none"><rect x="6" y="13" width="12" height="3.2" rx=".8" fill="rgba(255,213,79,0.25)" stroke="#FFD54F" stroke-width="1.9"/><rect x="4" y="16" width="16" height="4" rx="1" fill="rgba(255,213,79,0.25)" stroke="#FFD54F" stroke-width="1.9"/><line x1="12" y1="5" x2="12" y2="11" stroke="#FFD54F" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="4" r="2.5" fill="#FFD54F"/></svg>`,
 
   document: `<svg viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="rgba(206,147,216,0.22)" stroke="#CE93D8" stroke-width="1.9"/><path d="M14 2v6h6" stroke="#CE93D8" stroke-width="1.9" stroke-linejoin="round" fill="none"/><line x1="8" y1="13" x2="16" y2="13" stroke="#CE93D8" stroke-width="1.8" stroke-linecap="round"/><line x1="8" y1="17" x2="13" y2="17" stroke="#CE93D8" stroke-width="1.8" stroke-linecap="round" opacity="0.7"/></svg>`,
+
+  // График поставок — грузовик (в тон группе «Поставщики»).
+  truck: `<svg viewBox="0 0 24 24" fill="none"><rect x="1.5" y="6.5" width="12" height="9" rx="1.5" fill="rgba(255,204,128,0.2)" stroke="#FFCC80" stroke-width="1.8"/><path d="M13.5 9.5h4l3 3.2v2.8h-7z" fill="rgba(255,204,128,0.2)" stroke="#FFCC80" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6" cy="17.8" r="2.2" fill="rgba(255,204,128,0.25)" stroke="#FFCC80" stroke-width="1.8"/><circle cx="17" cy="17.8" r="2.2" fill="rgba(255,204,128,0.25)" stroke="#FFCC80" stroke-width="1.8"/></svg>`,
+
+  // Ссылки кабинета — звенья цепи.
+  link: `<svg viewBox="0 0 24 24" fill="none"><path d="M10 13.8a4 4 0 005.9.45l2.7-2.7a4 4 0 00-5.65-5.65l-1.5 1.5" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 10.2a4 4 0 00-5.9-.45l-2.7 2.7a4 4 0 005.65 5.65l1.5-1.5" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/></svg>`,
 
   factory: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 21V9.5L10 12.5V9.5L15 12.5V5h4a1 1 0 011 1v15z" fill="rgba(255,204,128,0.2)" stroke="#FFCC80" stroke-width="1.9" stroke-linejoin="round"/><line x1="3" y1="21" x2="21" y2="21" stroke="#FFCC80" stroke-width="2" stroke-linecap="round"/><rect x="17" y="3" width="3" height="3" rx=".4" fill="#FFCC80"/></svg>`,
 

@@ -31,7 +31,7 @@ export const SIDEBAR_SECTIONS = [
   { title: 'Данные', items: [
     { module: 'database', route: 'database', icon: 'database', label: 'База данных', keywords: 'товары поставщики рестораны справочник база товаров' },
     { module: 'analogs', route: 'analogs', icon: 'copy', label: 'Аналоги', keywords: 'аналог замена взаимозаменяемые группы' },
-    { module: 'novelties', route: 'novelties', icon: 'fire', label: 'Новинки', keywords: 'новый товар новинка старт продаж', newBadge: true },
+    { module: 'novelties', route: 'novelties', icon: 'sparkle', label: 'Новинки', keywords: 'новый товар новинка старт продаж', newBadge: true },
     { module: 'pricing', route: 'pricing', icon: 'pricing', label: 'Цены и ПСЦ', keywords: 'прайс протокол псц цена' },
     { module: 'calendar', route: 'calendar', icon: 'calendar', label: 'Календарь' },
   ]},
