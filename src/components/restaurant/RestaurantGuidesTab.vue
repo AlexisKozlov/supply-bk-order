@@ -45,8 +45,11 @@
           <span v-if="s.title" class="gd-step-title">{{ s.title }}</span>
         </div>
         <div class="gd-step-body" v-html="renderBody(s.body)"></div>
-        <img v-if="s.image_path" :src="'/api/' + s.image_path" class="gd-step-img"
-             :alt="s.title || ('Шаг ' + (i + 1))" loading="lazy" @click="zoom = '/api/' + s.image_path" />
+        <template v-if="s.image_path">
+          <img :src="'/api/' + s.image_path" class="gd-step-img"
+               :alt="s.title || ('Шаг ' + (i + 1))" loading="lazy" @click="zoom = '/api/' + s.image_path" />
+          <span class="gd-step-imgnote">нажмите на картинку, чтобы увеличить</span>
+        </template>
       </div>
 
       <div class="gd-foot">
@@ -185,10 +188,15 @@ onMounted(async () => {
 }
 .gd-step-title { font-size: 16px; font-weight: 700; color: var(--ro-brown, #502314); }
 .gd-step-body { font-size: 15px; line-height: 1.55; color: #3f3128; }
+/* Скриншот — не главное на экране, а подсказка: показываем компактно,
+   по нажатию открывается на весь экран. */
 .gd-step-img {
-  display: block; width: 100%; margin-top: 12px; border-radius: 10px;
-  border: 1px solid #ece3d8; cursor: zoom-in;
+  display: block; max-width: 320px; width: 100%; max-height: 200px;
+  object-fit: contain; object-position: left top;
+  margin-top: 12px; border-radius: 10px; padding: 6px;
+  background: #FBF7F2; border: 1px solid #ece3d8; cursor: zoom-in;
 }
+.gd-step-imgnote { display: block; margin-top: 4px; font-size: 12px; color: #a1907f; }
 .gd-foot { margin-top: 18px; }
 
 /* Просмотр картинки целиком: на телефоне мелкие детали иначе не разглядеть */
