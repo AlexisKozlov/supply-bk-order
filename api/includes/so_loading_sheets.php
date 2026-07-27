@@ -222,6 +222,11 @@ function soLsSafeSheetName(string $name, array $used): string {
  * Рисует на листе одну страницу-стопку начиная со строки $top.
  * Возвращает номер строки после страницы.
  */
+/** Короткое наименование для листа: «Тесто для пиццы 25 см». */
+function soLsShortName(string $name, string $sku): string {
+    return preg_match('/(\d{2})\s*см/u', $name, $m) ? 'Тесто для пиццы ' . $m[1] . ' см' : ($name ?: $sku);
+}
+
 function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int $total, string $dateFmt, int $top): int {
     $B = \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN;
     $BM = \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_MEDIUM;
@@ -257,15 +262,17 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     $r++;
 
     // ── Шапка: кому везём. Номер точки — крупно, его ищут глазами ──
+    // Наверху адрес — по нему водитель и грузчик находят точку. Номер в
+    // ДОДО ИС строкой ниже и мельче: он нужен для сверки, а не для поиска.
     $sheet->mergeCells("A{$r}:D{$r}");
-    $text("A{$r}", mb_strtoupper($rest['title']), 30, true, true);
-    $sheet->getRowDimension($r)->setRowHeight(46);
+    $text("A{$r}", $rest['address'], 22, true, true);
+    $sheet->getRowDimension($r)->setRowHeight(36);
     $band("A{$r}:D{$r}", 'E8E8E8', $BM);
     $r++;
 
     $sheet->mergeCells("A{$r}:D{$r}");
-    $text("A{$r}", $rest['address'], 12, false, true);
-    $sheet->getRowDimension($r)->setRowHeight(20);
+    $text("A{$r}", $rest['title'], 14, false, true);
+    $sheet->getRowDimension($r)->setRowHeight(22);
     $band("A{$r}:D{$r}", 'E8E8E8');
     $r++;
 
@@ -285,20 +292,16 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     $r++;
 
     foreach ($stack['lines'] as $line) {
-        // Размер теста — самое крупное на листе: «25 см».
-        $size = preg_match('/(\d{2})\s*см/u', $line['name'], $m) ? $m[1] . ' см' : $line['sku'];
+        // Наименование с размером и количество лотков — крупно, это главное,
+        // что читают при сборке стопки.
+        // Полное название из карточки — чтобы на складе не путать позиции.
         $sheet->mergeCells("A{$r}:B{$r}");
-        $text("A{$r}", $size, 48, true, true);
+        $text("A{$r}", $line['name'], 15, true, true);
         $sheet->mergeCells("C{$r}:D{$r}");
         $text("C{$r}", $line['trays'] . ' ' . soLsTrayWord($line['trays']), 42, true, true);
         $sheet->getRowDimension($r)->setRowHeight(76);
+        $sheet->getStyle("A{$r}:B{$r}")->getAlignment()->setWrapText(true);
         $band("A{$r}:D{$r}", null, $B);
-        $r++;
-
-        // Расшифровка мелко: артикул, вложенность, сколько это штук.
-        $sheet->mergeCells("A{$r}:D{$r}");
-        $text("A{$r}", $line['sku'] . ' · ' . $line['per_tray'] . ' шт/лоток · ' . ($line['trays'] * $line['per_tray']) . ' шт', 11, false, true, '444444');
-        $sheet->getRowDimension($r)->setRowHeight(18);
         $r++;
     }
 
@@ -317,11 +320,11 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     $text("A{$r}", 'ВСЯ ЗАЯВКА', 10, true, false, '444444');
     $r++;
     foreach ($rest['items'] as $it) {
-        $sizeTxt = preg_match('/(\d{2})\s*см/u', $it['name'], $m) ? $m[1] . ' см' : $it['sku'];
-        $text("A{$r}", $sizeTxt, 11, true);
-        $sheet->mergeCells("B{$r}:D{$r}");
-        $text("B{$r}", $it['trays'] . ' ' . soLsTrayWord($it['trays'])
-            . ' · ' . rtrim(rtrim(number_format($it['qty'], 2, '.', ' '), '0'), '.') . ' шт'
+        // Штуки («плюшки») на листе не показываем — ПРЦ считает лотками.
+        $sheet->mergeCells("A{$r}:B{$r}");
+        $text("A{$r}", soLsShortName($it['name'], $it['sku']), 11, true);
+        $sheet->mergeCells("C{$r}:D{$r}");
+        $text("C{$r}", $it['trays'] . ' ' . soLsTrayWord($it['trays'])
             . ($it['sticker'] ? ' · ' . $it['sticker'] : ''), 11);
         $sheet->getStyle("A{$r}:D{$r}")->getBorders()->getBottom()->setBorderStyle($B)->getColor()->setRGB('BBBBBB');
         $r++;

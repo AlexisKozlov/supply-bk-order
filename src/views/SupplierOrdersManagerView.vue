@@ -1250,18 +1250,13 @@ async function printLoadingSheets(restaurantNumber) {
       .map(i => `<div>${esc((i.name.match(/(\d{2})\s*см/) || [])[0] ? 'Тесто для пиццы ' + i.name.match(/(\d{2})\s*см/)[0] : i.name)} — ${esc(i.sticker)}</div>`).join('');
 
     const pages = rest.stacks.map((st, idx) => {
-      const lines = st.lines.map(l => {
-        const m = l.name.match(/(\d{2})\s*см/);
-        const size = m ? m[1] + ' см' : l.sku;
-        return `<div class="ls-row">
-            <div class="ls-size">${esc(size)}</div>
+      const lines = st.lines.map(l => `<div class="ls-row">
+            <div class="ls-name">${esc(l.name)}</div>
             <div class="ls-trays">${l.trays} ${trayWord(l.trays)}</div>
-          </div>
-          <div class="ls-sub">${esc(l.sku)} · ${l.per_tray} шт/лоток · ${l.trays * l.per_tray} шт</div>`;
-      }).join('');
+          </div>`).join('');
       return `<section class="ls-page">
-        <div class="ls-title">${esc(rest.title.toUpperCase())}</div>
-        <div class="ls-addr">${esc(rest.address)}</div>
+        <div class="ls-title">${esc(rest.address)}</div>
+        <div class="ls-addr">${esc(rest.title)}</div>
         <div class="ls-date">Отгрузка ${esc(dateFmt)}</div>
         <div class="ls-stack">
           <div class="ls-stack-head">${st.mixed ? 'СБОРНАЯ СТОПКА' : 'СТОПКА'} &nbsp;${idx + 1} / ${total}</div>
@@ -1272,8 +1267,8 @@ async function printLoadingSheets(restaurantNumber) {
           <div class="ls-all-head">ВСЯ ЗАЯВКА</div>
           ${rest.items.map(i => {
             const m = i.name.match(/(\d{2})\s*см/);
-            return `<div class="ls-all-row"><b>${esc(m ? m[1] + ' см' : i.sku)}</b>
-              <span>${i.trays} ${trayWord(i.trays)} · ${Math.round(i.qty)} шт${i.sticker ? ' · ' + esc(i.sticker) : ''}</span></div>`;
+            return `<div class="ls-all-row"><b>${esc(m ? 'Тесто для пиццы ' + m[1] + ' см' : i.name)}</b>
+              <span>${i.trays} ${trayWord(i.trays)}${i.sticker ? ' · ' + esc(i.sticker) : ''}</span></div>`;
           }).join('')}
         </div>
         <div class="ls-foot">Лист ${idx + 1} из ${total}</div>
@@ -1291,14 +1286,14 @@ async function printLoadingSheets(restaurantNumber) {
         body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0; }
         .ls-page { page-break-after: always; display: flex; flex-direction: column; min-height: 265mm; }
         .ls-page:last-child { page-break-after: auto; }
-        .ls-title { font-size: 40px; font-weight: 800; text-align: center; letter-spacing: 1px;
+        .ls-title { font-size: 28px; font-weight: 800; text-align: center; letter-spacing: 1px;
                     border: 2px solid #000; background: #ececec; padding: 8px 4px; }
-        .ls-addr { text-align: center; font-size: 13px; padding: 4px; border-left: 2px solid #000; border-right: 2px solid #000; background: #ececec; }
+        .ls-addr { text-align: center; font-size: 15px; padding: 4px; border-left: 2px solid #000; border-right: 2px solid #000; background: #ececec; }
         .ls-date { text-align: center; font-size: 15px; font-weight: 700; border: 2px solid #000; background: #ececec; padding: 5px; }
         .ls-stack { margin-top: 14px; border: 3px solid #000; }
         .ls-stack-head { background: #000; color: #fff; font-size: 20px; font-weight: 800; text-align: center; padding: 7px; letter-spacing: 1px; }
-        .ls-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; padding: 12px 10px; }
-        .ls-size { font-size: 60px; font-weight: 800; text-align: center; line-height: 1.05; }
+        .ls-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; padding: 14px 12px; min-height: 96px; }
+        .ls-name { font-size: 19px; font-weight: 700; text-align: center; line-height: 1.25; }
         .ls-trays { font-size: 54px; font-weight: 800; text-align: center; line-height: 1.05; }
         .ls-sub { text-align: center; font-size: 12px; color: #444; border-bottom: 1px solid #000; padding-bottom: 5px; }
         .ls-stack .ls-sub:last-child { border-bottom: none; }
@@ -1306,7 +1301,7 @@ async function printLoadingSheets(restaurantNumber) {
         .ls-all { margin-top: 20px; font-size: 12px; }
         .ls-all-head { font-size: 11px; font-weight: 700; color: #444; letter-spacing: 1px; margin-bottom: 4px; }
         .ls-all-row { display: flex; gap: 14px; border-bottom: 1px solid #ccc; padding: 3px 0; }
-        .ls-all-row b { min-width: 70px; }
+        .ls-all-row b { min-width: 190px; }
         .ls-foot { margin-top: auto; text-align: center; font-size: 15px; font-weight: 700; border-top: 1px solid #000; padding-top: 8px; }
       </style></head><body>${pages}</body></html>`);
     w.document.close();
