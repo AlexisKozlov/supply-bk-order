@@ -317,15 +317,16 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     $r += 2;
 
     // ── Справка мелким: весь заказ и цветовая кодировка ──
-    $text("A{$r}", 'ВСЯ ЗАЯВКА', 10, true, false, '444444');
+    $text("A{$r}", 'ВСЯ ЗАЯВКА', 11, true, false, '444444');
     $r++;
     foreach ($rest['items'] as $it) {
         // Штуки («плюшки») на листе не показываем — ПРЦ считает лотками.
         $sheet->mergeCells("A{$r}:B{$r}");
-        $text("A{$r}", soLsShortName($it['name'], $it['sku']), 11, true);
+        $text("A{$r}", soLsShortName($it['name'], $it['sku']), 14, true);
         $sheet->mergeCells("C{$r}:D{$r}");
         $text("C{$r}", $it['trays'] . ' ' . soLsTrayWord($it['trays'])
-            . ($it['sticker'] ? ' · ' . $it['sticker'] : ''), 11);
+            . ($it['sticker'] ? ' · ' . $it['sticker'] : ''), 14);
+        $sheet->getRowDimension($r)->setRowHeight(20);
         $sheet->getStyle("A{$r}:D{$r}")->getBorders()->getBottom()->setBorderStyle($B)->getColor()->setRGB('BBBBBB');
         $r++;
     }

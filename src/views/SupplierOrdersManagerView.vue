@@ -1298,10 +1298,10 @@ async function printLoadingSheets(restaurantNumber) {
         .ls-sub { text-align: center; font-size: 12px; color: #444; border-bottom: 1px solid #000; padding-bottom: 5px; }
         .ls-stack .ls-sub:last-child { border-bottom: none; }
         .ls-total { font-size: 18px; font-weight: 800; text-align: center; padding: 8px; background: #ececec; border-top: 2px solid #000; }
-        .ls-all { margin-top: 20px; font-size: 12px; }
-        .ls-all-head { font-size: 11px; font-weight: 700; color: #444; letter-spacing: 1px; margin-bottom: 4px; }
-        .ls-all-row { display: flex; gap: 14px; border-bottom: 1px solid #ccc; padding: 3px 0; }
-        .ls-all-row b { min-width: 190px; }
+        .ls-all { margin-top: 20px; font-size: 18px; }
+        .ls-all-head { font-size: 12px; font-weight: 700; color: #444; letter-spacing: 1px; margin-bottom: 4px; }
+        .ls-all-row { display: flex; gap: 16px; border-bottom: 1px solid #ccc; padding: 5px 0; }
+        .ls-all-row b { min-width: 240px; }
         .ls-foot { margin-top: auto; text-align: center; font-size: 15px; font-weight: 700; border-top: 1px solid #000; padding-top: 8px; }
       </style></head><body>${pages}</body></html>`);
     w.document.close();
