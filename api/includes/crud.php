@@ -533,7 +533,10 @@ if ($method === 'POST') {
     }
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions','stock_collection_products','stock_collection_data','plt_products','plt_deliveries','plt_delivery_items','plt_daily_stock','plt_summary','hidden_analogs','order_corrections','chat_conversations','chat_messages','supplier_payments','order_file'])) $rec['id'] = uuid();
+        // Список — таблицы с ЧИСЛОВЫМ автоинкрементом: им подставлять UUID нельзя,
+        // MySQL обрежет его до 0 и вернёт «Data truncated for column 'id'».
+        // Остальным (заказы, планы, поставщики) id генерируем сами.
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions','stock_collection_products','stock_collection_data','plt_products','plt_deliveries','plt_delivery_items','plt_daily_stock','plt_summary','hidden_analogs','order_corrections','chat_conversations','chat_messages','supplier_payments','order_file','analog_cards','product_novelties','ro_guides','ro_guide_steps'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Недопустимое имя колонки: '.$col], 400); }
