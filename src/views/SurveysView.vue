@@ -2533,14 +2533,21 @@ onUnmounted(() => {
 
 /* ══════ Адаптив ══════ */
 @media (max-width: 1100px) {
-  .sv-layout { grid-template-columns: 1fr; }
+  /* minmax(0, …) обязателен: обычный 1fr не даёт колонке стать уже своего
+     содержимого — длинные названия опросов растягивали её за край экрана. */
+  .sv-layout { grid-template-columns: minmax(0, 1fr); }
   .sv-sidebar {
     position: static;
     max-height: 420px;
+    min-width: 0;
   }
 }
 @media (max-width: 720px) {
   .sv-page-head { flex-direction: column; align-items: stretch; }
+  /* Вкладки-фильтры прокручиваются вбок, а не сжимаются до наложения. */
+  .sv-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .sv-tabs::-webkit-scrollbar { display: none; }
+  .sv-tabs > * { flex: 0 0 auto; white-space: nowrap; }
   .sv-detail-head { flex-direction: column; }
   .sv-grid { grid-template-columns: 1fr; }
   .sv-detail-actions { width: 100%; }

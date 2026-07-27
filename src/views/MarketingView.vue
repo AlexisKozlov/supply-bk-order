@@ -2,7 +2,7 @@
   <div class="mkt-view">
     <div class="mkt-header">
       <h1 class="page-title">Маркетинг</h1>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <div class="mkt-header-actions">
         <div class="mkt-view-toggle">
           <button class="db-sort-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">Список</button>
           <button class="db-sort-btn" :class="{ active: viewMode === 'gantt' }" @click="viewMode = 'gantt'">Гант</button>
@@ -190,7 +190,7 @@ import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { appConfirm } from '@/lib/appDialogs.js';
-import { formatDate, applyEntityFilter } from '@/lib/utils.js';
+import { formatDate } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -270,7 +270,10 @@ async function loadActivities() {
   loading.value = true;
   try {
     let q = db.from('marketing_activities').select('*');
-    q = applyEntityFilter(q, le);
+    // Строго по ОДНОМУ юрлицу: applyEntityFilter расширяет запрос до всей
+    // группы (БК+ВМ через `or=`), а бэкенд такие запросы отклоняет с 400
+    // «Требуется фильтр legal_entity» — раздел не открывался вообще.
+    q = q.eq('legal_entity', le);
     q = q.order('date_from', { ascending: false });
     const { data, error } = await q;
     if (gen !== _loadGen) return;
@@ -545,6 +548,7 @@ watch(legalEntity, () => {
 <style scoped>
 .mkt-view { padding: 0; }
 .mkt-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.mkt-header-actions { display: flex; gap: 8px; align-items: center; }
 .mkt-view-toggle { display: flex; gap: 0; }
 .mkt-view-toggle .db-sort-btn { border-radius: 0; margin-left: -1px; }
 .mkt-view-toggle .db-sort-btn:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
@@ -605,8 +609,19 @@ watch(legalEntity, () => {
 .mkt-recipe-table tbody tr:hover { background: #FFFBF5; }
 
 @media (max-width: 480px) {
-  .mkt-header { flex-direction: column; align-items: stretch; }
+  .mkt-header { flex-direction: column; align-items: stretch; min-width: 0; }
   .mkt-header .btn { text-align: center; }
+  /* Четыре вкладки в один ряд не помещались: уезжали за правый край и
+     растягивали за собой всю шапку вместе с заголовком. Прокручиваем вбок. */
+  .mkt-view-toggle { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .mkt-view-toggle::-webkit-scrollbar { display: none; }
+  .mkt-view-toggle .db-sort-btn { flex: 0 0 auto; }
+  /* Раньше у блока был инлайновый style="display:flex" — медиазапросом его
+     не переопределить, поэтому вкладки и кнопка «+ Новая» держались в одну
+     строку и растягивали шапку до 491px при экране 390. */
+  .mkt-header-actions { flex-wrap: wrap; min-width: 0; }
+  .mkt-header-actions > .btn { width: 100%; justify-content: center; }
+  .mkt-view-toggle { width: 100%; }
   .mkt-filters { overflow-x: auto; flex-wrap: nowrap; gap: 4px; }
   .mkt-filters .db-sort-btn { flex-shrink: 0; font-size: 10px; padding: 4px 8px; }
   .mkt-card { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 16px; border-radius: 10px; }

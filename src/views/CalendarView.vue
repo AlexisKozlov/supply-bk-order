@@ -241,7 +241,9 @@ onMounted(() => load());
 .cal-grid-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: auto; }
 
 .cal-weekdays {
-  display: grid; grid-template-columns: 36px repeat(7, 1fr);
+  /* minmax(0, …) обязателен: обычный 1fr не даёт колонке стать уже
+     самой длинной плашки поставщика, и сетка вылезает за экран. */
+  display: grid; grid-template-columns: 36px repeat(7, minmax(0, 1fr));
   gap: 2px; margin-bottom: 2px; flex-shrink: 0;
 }
 .cal-weekday {
@@ -252,7 +254,7 @@ onMounted(() => load());
 .cal-wk-header { font-size: 9px; color: var(--text-muted); opacity: 0.6; }
 
 .cal-row {
-  display: grid; grid-template-columns: 36px repeat(7, 1fr);
+  display: grid; grid-template-columns: 36px repeat(7, minmax(0, 1fr));
   gap: 2px; margin-bottom: 2px;
 }
 
@@ -329,6 +331,27 @@ onMounted(() => load());
 
 @media (max-width: 900px) {
   .cal-cell { min-height: 56px; }
-  .cal-row, .cal-weekdays { grid-template-columns: 28px repeat(7, 1fr); }
+  .cal-row, .cal-weekdays { grid-template-columns: 28px repeat(7, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  /* На телефоне семь колонок остаются, но ужимаются: номер недели уже,
+     отступы и шрифты меньше — иначе плашки поставщиков нечитаемы. */
+  .cal-row, .cal-weekdays { grid-template-columns: 18px repeat(7, minmax(0, 1fr)); gap: 1px; }
+  .cal-cell { min-height: 48px; padding: 2px 3px; border-width: 1px; border-radius: 4px; }
+  .cal-cell-num { font-size: 11px; }
+  /* Названия поставщиков в колонке шириной ~48px превращаются в «Др…» —
+     читать нечего. Показываем цветные точки: сколько поставок в день видно
+     сразу, какой поставщик — по легенде сверху, детали — по тапу. */
+  .cal-cell-orders { flex-direction: row; flex-wrap: wrap; gap: 3px; align-content: flex-start; }
+  .cal-tag {
+    padding: 0; border-left: none; border-radius: 50%;
+    width: 10px; height: 10px; flex: 0 0 auto;
+    background: var(--tag-color);
+  }
+  .cal-tag:hover { background: var(--tag-color); }
+  .cal-tag-name { display: none; }
+  .cal-tag-dot { display: none; }
+  .cal-weekday { font-size: 9px; padding: 3px 0; }
 }
 </style>

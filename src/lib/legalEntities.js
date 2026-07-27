@@ -25,7 +25,10 @@ export const SHARED_BK_VM_TABLES = [
   'order_corrections',
   'chat_conversations',
   'chat_messages',
-  'marketing_activities',
+  // marketing_activities здесь НЕ место: на бэке она в $ENTITY_TABLES, то есть
+  // данные каждого юрлица свои. Пока таблица числилась общей, фронт слал
+  // запрос сразу по двум юрлицам через `or=`, бэк отвечал 400 «Требуется
+  // фильтр legal_entity» — раздел «Маркетинг» не открывался вообще.
 ];
 
 export const ENTITY_SHORT_NAMES = {
