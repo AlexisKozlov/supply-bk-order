@@ -86,6 +86,7 @@
           <span class="sb-icon" v-html="tabIconSvg(tab.id)"></span>
           {{ tab.label }}
           <span v-if="tab.beta" class="sb-beta">BETA</span>
+          <span v-if="tab.soon" class="sb-soon">СКОРО</span>
           <span v-if="tab.newBadge" class="sb-new">NEW</span>
           <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
@@ -130,7 +131,7 @@
       <!-- Десктоп-топбар -->
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты поставщиков' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты поставщиков' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : activeTab === 'guides' ? 'Инструкции' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров">
@@ -144,7 +145,7 @@
           <span class="mob-topbar-num">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</span>
           <span class="mob-topbar-label">Ресторан</span>
         </div>
-        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : 'Профиль' }}</div>
+        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : activeTab === 'guides' ? 'Инструкции' : 'Профиль' }}</div>
         <button
           v-if="activeTab !== 'scanner'"
           class="mob-topbar-scan"
@@ -1079,6 +1080,8 @@
     />
 
     <!-- ══════ TAB: Новинки ══════ -->
+    <RestaurantGuidesTab v-if="activeTab === 'guides' && !globalError" />
+
     <RestaurantNoveltiesTab
       v-if="activeTab === 'novelties' && !globalError"
       :items="noveltiesItems"
@@ -1507,6 +1510,7 @@ import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.
 import { useSupportContact } from '@/lib/supportContact.js';
 
 const supportTg = useSupportContact();
+import RestaurantGuidesTab from '@/components/restaurant/RestaurantGuidesTab.vue';
 import { cabIconSvg, tileIconSvg, supplierIcon, trustedSupplierIcon, tabIconSvg, resolveSupplierIcon, supplierIconStyle } from '@/lib/cabinetIcons.js';
 import { roFetch } from '@/lib/roUtils.js';
 import { renderMarkdown } from '@/lib/markdown.js';
@@ -1926,6 +1930,10 @@ const mainTabs = computed(() => {
   tabs.push({ id: 'contacts', label: 'Контакты' });
   tabs.push({ id: 'scanner', label: 'Сканер' });
   if (kegReturnsEnabled.value) tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
+  // Инструкции — в конце списка: читают их редко, но искать должно быть легко.
+  // Пока тексты не наполнены, помечаем раздел как готовящийся, чтобы ресторан
+  // не подумал, что инструкции потерялись.
+  tabs.push({ id: 'guides', label: 'Инструкции', soon: true });
   return tabs;
 });
 
@@ -4016,6 +4024,7 @@ onUnmounted(() => {
 .sb-badge.alert { background: #dc2626; }
 .sb-badge.pause { background: #9ca3af; font-size: 9px; padding: 0 7px; text-transform: uppercase; letter-spacing: 0.5px; }
 .sb-beta { margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: linear-gradient(90deg, #FFD54F, #F4A261); color: #3d2400; flex-shrink: 0; }
+.sb-soon { margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: .5px; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.14); color: rgba(255,255,255,.75); }
 .sb-new { margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: #E4572E; color: #fff; flex-shrink: 0; }
 .sb-new + .sb-badge { margin-left: 4px; }
 .sb-help {

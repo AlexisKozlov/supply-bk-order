@@ -2842,6 +2842,39 @@ if ($roAction === 'broadcast-read' && $method === 'POST') {
     roRespond(['success' => true]);
 }
 
+// ═══ Инструкции для ресторанов ═══
+// Как работать с кабинетом: пошагово, со скриншотами. Тексты правит закупщик
+// из админки, поэтому лежат в базе (ro_guides / ro_guide_steps).
+if ($roAction === 'guides' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $group = roNormalizeLegalEntityGroup($rest['legal_entity_group'] ?? null, $rest['restaurant_number']);
+
+    // target_group = NULL — инструкция общая; иначе только своей группе юрлиц
+    // (у Пиццы Стар часть модулей отключена, порядок работы отличается).
+    $s = $pdo->prepare("
+        SELECT id, title, summary, icon_key, sort_order, updated_at
+        FROM ro_guides
+        WHERE is_published = 1 AND deleted_at IS NULL
+          AND (target_group IS NULL OR target_group = ?)
+        ORDER BY sort_order, id");
+    $s->execute([$group]);
+    $guides = $s->fetchAll();
+
+    if ($guides) {
+        $ids = array_column($guides, 'id');
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $st = $pdo->prepare("SELECT id, guide_id, title, body, image_path, sort_order
+                             FROM ro_guide_steps WHERE guide_id IN ($ph) ORDER BY sort_order, id");
+        $st->execute($ids);
+        $byGuide = [];
+        foreach ($st->fetchAll() as $row) $byGuide[(int)$row['guide_id']][] = $row;
+        foreach ($guides as &$g) $g['steps'] = $byGuide[(int)$g['id']] ?? [];
+        unset($g);
+    }
+    roRespond(['guides' => $guides]);
+}
+
 if ($roAction === 'cabinet-posts' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
@@ -4705,6 +4738,113 @@ if (strpos($roAction, 'admin') === 0) {
         ");
         $s->execute([$tg, $updatedBy]);
         roRespond(['success' => true, 'support_telegram' => $tg]);
+    }
+
+    // --- Инструкции для ресторанов (закупщик правит тексты и скриншоты) ---
+    if ($adminAction === 'guides' && $method === 'GET') {
+        $rows = $pdo->query("
+            SELECT id, title, summary, icon_key, sort_order, target_group,
+                   is_published, created_by, created_at, updated_at
+            FROM ro_guides WHERE deleted_at IS NULL ORDER BY sort_order, id")->fetchAll();
+        if ($rows) {
+            $ids = array_column($rows, 'id');
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $st = $pdo->prepare("SELECT id, guide_id, title, body, image_path, sort_order
+                                 FROM ro_guide_steps WHERE guide_id IN ($ph) ORDER BY sort_order, id");
+            $st->execute($ids);
+            $byGuide = [];
+            foreach ($st->fetchAll() as $row) $byGuide[(int)$row['guide_id']][] = $row;
+            foreach ($rows as &$g) $g['steps'] = $byGuide[(int)$g['id']] ?? [];
+            unset($g);
+        }
+        roRespond(['guides' => $rows]);
+    }
+
+    // Создание и правка темы вместе со всеми шагами: редактор сохраняет
+    // инструкцию целиком, так проще не рассинхронить порядок шагов.
+    if ($adminAction === 'guides' && in_array($method, ['POST', 'PATCH'], true)) {
+        $title = trim((string)($body['title'] ?? ''));
+        if ($title === '') roRespond(['error' => 'Укажите название инструкции'], 400);
+        $guideId = (int)($body['id'] ?? 0);
+        $fields = [
+            'title'        => $title,
+            'summary'      => mb_substr(trim((string)($body['summary'] ?? '')), 0, 500),
+            'icon_key'     => trim((string)($body['icon_key'] ?? 'document')) ?: 'document',
+            'sort_order'   => (int)($body['sort_order'] ?? 0),
+            'target_group' => in_array($body['target_group'] ?? null, ['BK_VM', 'PS'], true) ? $body['target_group'] : null,
+            'is_published' => !empty($body['is_published']) ? 1 : 0,
+        ];
+
+        if ($guideId) {
+            $set = implode(', ', array_map(fn($k) => "$k = ?", array_keys($fields)));
+            $st = $pdo->prepare("UPDATE ro_guides SET $set WHERE id = ? AND deleted_at IS NULL");
+            $st->execute([...array_values($fields), $guideId]);
+        } else {
+            $fields['created_by'] = $sessionUser['name'] ?? ($sessionUser['email'] ?? '');
+            $cols = implode(', ', array_keys($fields));
+            $ph   = implode(', ', array_fill(0, count($fields), '?'));
+            $pdo->prepare("INSERT INTO ro_guides ($cols) VALUES ($ph)")->execute(array_values($fields));
+            $guideId = (int)$pdo->lastInsertId();
+        }
+
+        // Шаги переписываем целиком. Картинки, которые редактор не прислал,
+        // удаляем и с диска — иначе папка растёт мусором.
+        if (isset($body['steps']) && is_array($body['steps'])) {
+            $keepImages = [];
+            foreach ($body['steps'] as $st) {
+                $img = trim((string)($st['image_path'] ?? ''));
+                if ($img !== '') $keepImages[] = $img;
+            }
+            $old = $pdo->prepare("SELECT image_path FROM ro_guide_steps WHERE guide_id = ? AND image_path IS NOT NULL");
+            $old->execute([$guideId]);
+            foreach ($old->fetchAll(PDO::FETCH_COLUMN) as $oldPath) {
+                if (in_array($oldPath, $keepImages, true)) continue;
+                $abs = realpath(__DIR__ . '/../' . $oldPath);
+                $base = realpath(__DIR__ . '/../uploads/restaurant_guides');
+                if ($abs && $base && str_starts_with($abs, $base)) @unlink($abs);
+            }
+
+            $pdo->prepare("DELETE FROM ro_guide_steps WHERE guide_id = ?")->execute([$guideId]);
+            $ins = $pdo->prepare("INSERT INTO ro_guide_steps (guide_id, sort_order, title, body, image_path)
+                                  VALUES (?, ?, ?, ?, ?)");
+            foreach (array_values($body['steps']) as $i => $st) {
+                $text = trim((string)($st['body'] ?? ''));
+                if ($text === '' && trim((string)($st['title'] ?? '')) === '') continue;
+                $img = trim((string)($st['image_path'] ?? ''));
+                $ins->execute([
+                    $guideId, $i,
+                    mb_substr(trim((string)($st['title'] ?? '')), 0, 255),
+                    $text,
+                    $img !== '' ? $img : null,
+                ]);
+            }
+        }
+        roRespond(['success' => true, 'id' => $guideId]);
+    }
+
+    if ($adminAction === 'guides' && $method === 'DELETE') {
+        $guideId = (int)($_GET['id'] ?? ($body['id'] ?? 0));
+        if (!$guideId) roRespond(['error' => 'Не указана инструкция'], 400);
+        $pdo->prepare("UPDATE ro_guides SET deleted_at = NOW() WHERE id = ?")->execute([$guideId]);
+        roRespond(['success' => true]);
+    }
+
+    // Скриншот к шагу. Файл кладём сразу, путь редактор подставит в шаг.
+    if ($adminAction === 'guide-image' && $method === 'POST') {
+        if (empty($_FILES['file']['tmp_name'])) roRespond(['error' => 'Файл не получен'], 400);
+        $tmp  = $_FILES['file']['tmp_name'];
+        $size = (int)($_FILES['file']['size'] ?? 0);
+        if ($size > 8 * 1024 * 1024) roRespond(['error' => 'Файл больше 8 МБ'], 400);
+        $mime = function_exists('mime_content_type') ? (string)mime_content_type($tmp) : '';
+        $allowed = ['image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp'];
+        if (!isset($allowed[$mime])) roRespond(['error' => 'Только картинки PNG, JPG или WEBP'], 400);
+
+        $dir = __DIR__ . '/../uploads/restaurant_guides/';
+        if (!is_dir($dir)) @mkdir($dir, 0775, true);
+        $filename = 'guide_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $allowed[$mime];
+        if (!move_uploaded_file($tmp, $dir . $filename)) roRespond(['error' => 'Не удалось сохранить файл'], 500);
+        $path = 'uploads/restaurant_guides/' . $filename;
+        roRespond(['success' => true, 'image_path' => $path, 'url' => '/api/' . $path]);
     }
 
     // --- Настройщик кабинета ресторанов: важная информация ---

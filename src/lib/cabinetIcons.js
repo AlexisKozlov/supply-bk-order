@@ -206,5 +206,7 @@ export function tabIconSvg(tabId) {
   if (tabId === 'keg-returns') return cabIconSvg.kegReturn;
   if (tabId === 'reminders') return cabIconSvg.reminders;
   if (tabId === 'novelties') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.2 5.2L19.5 10l-5.3 1.8L12 17l-2.2-5.2L4.5 10l5.3-1.8z"/><path d="M18.5 14.8l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>';
+  // Инструкции — открытая книга: отличается от «Информации» (объявления).
+  if (tabId === 'guides') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6.5C10.5 5 8.5 4.5 4 4.5v13c4.5 0 6.5.5 8 2 1.5-1.5 3.5-2 8-2v-13c-4.5 0-6.5.5-8 2z"/><path d="M12 6.5v13"/></svg>';
   return cabIconSvg[tabId] || cabIconSvg.profile;
 }
