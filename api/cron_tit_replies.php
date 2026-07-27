@@ -395,11 +395,31 @@ foreach ($unseen as $msgNum) {
 
             // Уведомление закупщику
             $supplierName = htmlspecialchars((string)($req['supplier_name'] ?? ''), ENT_QUOTES, 'UTF-8');
-            $plateForMsg = $pairs[0]['plate'] ?? ($ocrPlates[0]['plate'] ?? '');
-            $what = $pairs ? 'данные машины' : ($ocrPlates ? 'скан накладной с распознанным номером' : 'ответ от поставщика');
-            $msg = '🚛 <b>' . $supplierName . '</b>: пришли ' . $what
-                . ($plateForMsg ? ' — <code>' . htmlspecialchars($plateForMsg, ENT_QUOTES, 'UTF-8') . '</code>' : '')
-                . "\nЗаявка: " . ($_ENV['SITE_URL'] ?? 'https://supply-department.online') . '/tit-requests?id=' . $requestId;
+            $esc = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+            $plateForMsg = ($pairs[0]['plate'] ?? '') !== '' ? $pairs[0]['plate'] : ($ocrPlates[0]['plate'] ?? '');
+            $phoneForMsg = $pairs[0]['phone_raw'] ?? '';
+
+            // Сообщение должно честно говорить, что именно удалось вытащить.
+            // Раньше при нераспознанном письме приходило «пришли данные», а в
+            // заявке было пусто — закупщик шёл по ссылке впустую.
+            if ($plateForMsg !== '') {
+                $msg = '🚛 <b>' . $supplierName . '</b>: машина <code>' . $esc($plateForMsg) . '</code>'
+                    . ($phoneForMsg !== '' ? ', телефон <code>' . $esc($phoneForMsg) . '</code>' : '');
+            } elseif ($phoneForMsg !== '') {
+                $msg = '🚛 <b>' . $supplierName . '</b>: пришёл телефон водителя <code>' . $esc($phoneForMsg) . '</code>'
+                    . "\n⚠️ Номер машины не распознан — впишите в заявке вручную.";
+            } else {
+                // Ничего не вытащили. Показываем начало письма, чтобы было
+                // видно, о чём оно, и не приходилось открывать вслепую.
+                $snippet = trim(preg_replace('/\s+/u', ' ', titCleanReplyBody($bodyText)) ?? '');
+                if ($snippet === '') $snippet = trim(preg_replace('/\s+/u', ' ', $bodyText) ?? '');
+                if (mb_strlen($snippet) > 180) $snippet = mb_substr($snippet, 0, 180) . '…';
+                $msg = '🚛 <b>' . $supplierName . '</b>: пришёл ответ, но ни номера машины, ни телефона распознать не удалось.'
+                    . (count($tmpAttachments) ? "\n📎 Во вложении " . count($tmpAttachments) . ' файл(а) — посмотрите в заявке.' : '')
+                    . ($snippet !== '' ? "\n<i>" . $esc($snippet) . '</i>' : '')
+                    . "\n⚠️ Данные нужно вписать вручную.";
+            }
+            $msg .= "\nЗаявка: " . ($_ENV['SITE_URL'] ?? 'https://supply-department.online') . '/tit-requests?id=' . $requestId;
             titNotifyStaff($pdo, $req['created_by'] ?? null, $msg);
         } else {
             $unmatchedSaved++;

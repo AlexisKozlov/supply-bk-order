@@ -441,7 +441,15 @@ function titParseCleanedText(string $clean, bool $allowPhoneOnly = true): array
     // Закупщик увидит его в карточке письма и впишет номер руками.
     if (!$plates) {
         if (!$allowPhoneOnly || !$phones) return [];
-        if (!preg_match('/\b(машин|водител|авто|транспорт|ттн|номер)/iu', $clean)) return [];
+        // Обычно требуем слово про машину/водителя, иначе легко принять
+        // телефон менеджера из подписи за телефон водителя. Но если после
+        // очистки от цитат и подписи в письме не осталось ничего, кроме
+        // самого телефона, — это прямой ответ на наш вопрос «укажите номер
+        // машины и телефон водителя», и терять его нельзя.
+        $rest = str_replace($phones[0]['raw'], '', $clean);
+        $restLetters = preg_replace('/[^\p{L}\d]+/u', '', $rest) ?? '';
+        $onlyPhone = mb_strlen($restLetters) <= 3;
+        if (!$onlyPhone && !preg_match('/\b(машин|водител|авто|транспорт|ттн|номер)/iu', $clean)) return [];
         return [[
             'plate' => '',
             'phone' => $phones[0]['phone'],
