@@ -1,5 +1,5 @@
 <template>
-  <div class="gd-wrap">
+  <section class="cab-section gd-wrap">
     <div class="gd-head">
       <h1 class="gd-title">Инструкции</h1>
       <p class="gd-sub">Как работать с кабинетом закупок. Выберите тему — внутри пошагово, с картинками.</p>
@@ -35,7 +35,7 @@
 
     <!-- Одна инструкция -->
     <template v-else>
-      <button class="gd-back" @click="openGuide = null">‹ Все инструкции</button>
+      <button class="gd-back" @click="closeGuide">‹ Все инструкции</button>
       <h2 class="gd-guide-title">{{ openGuide.title }}</h2>
       <p v-if="openGuide.summary" class="gd-guide-sum">{{ openGuide.summary }}</p>
 
@@ -50,7 +50,7 @@
       </div>
 
       <div class="gd-foot">
-        <button class="gd-back" @click="openGuide = null">‹ Все инструкции</button>
+        <button class="gd-back" @click="closeGuide">‹ Все инструкции</button>
       </div>
     </template>
 
@@ -58,7 +58,7 @@
     <div v-if="zoom" class="gd-zoom" @click="zoom = null">
       <img :src="zoom" alt="" />
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup>
@@ -66,12 +66,18 @@ import { ref, computed, onMounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 
+// Какая тема открыта, решает родитель: от этого зависит адрес страницы,
+// чтобы ссылкой на инструкцию можно было поделиться.
+const props = defineProps({ openId: { type: [Number, null], default: null } });
+const emit = defineEmits(['update:openId']);
+
 const guides = ref([]);
 const loading = ref(true);
 const error = ref('');
 const query = ref('');
-const openGuide = ref(null);
 const zoom = ref(null);
+
+const openGuide = computed(() => guides.value.find(g => Number(g.id) === Number(props.openId)) || null);
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase();
@@ -90,9 +96,10 @@ function stepWord(n) {
 }
 
 function open(g) {
-  openGuide.value = g;
+  emit('update:openId', Number(g.id));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+function closeGuide() { emit('update:openId', null); }
 
 // Текст шага пишет закупщик обычным текстом. Разрешаем только перенос строк
 // и **жирный** — вставить разметку со стороны нельзя, всё остальное экранируем.

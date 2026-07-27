@@ -150,6 +150,9 @@ const routes = [
       { path: 'stock/:collectionId', name: 'restaurant-stock-collection', component: EmptySlot, meta: { title: 'Сбор остатков' } },
       { path: 'warehouse-stock', name: 'restaurant-warehouse-stock', component: EmptySlot, meta: { title: 'Остатки склада' } },
       { path: 'novelties', name: 'restaurant-novelties', component: EmptySlot, meta: { title: 'Новинки' } },
+      { path: 'guides', name: 'restaurant-guides', component: EmptySlot, meta: { title: 'Инструкции' } },
+      // Своя ссылка у каждой инструкции — можно скинуть коллеге сразу на нужную тему.
+      { path: 'guides/:guideId', name: 'restaurant-guide', component: EmptySlot, meta: { title: 'Инструкция' } },
       { path: 'contacts', name: 'restaurant-contacts', component: EmptySlot, meta: { title: 'Контакты поставщиков' } },
       { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },

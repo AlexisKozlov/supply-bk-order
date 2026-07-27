@@ -1080,7 +1080,7 @@
     />
 
     <!-- ══════ TAB: Новинки ══════ -->
-    <RestaurantGuidesTab v-if="activeTab === 'guides' && !globalError" />
+    <RestaurantGuidesTab v-if="activeTab === 'guides' && !globalError" v-model:openId="openGuideId" />
 
     <RestaurantNoveltiesTab
       v-if="activeTab === 'novelties' && !globalError"
@@ -1907,6 +1907,10 @@ const bugReportHasReplies = computed(() => !!bugReportRef.value?.hasNewReplies);
 // ═══ Tabs ═══
 // Полный список табов — используется на десктопе (вторичная навигация под топбаром)
 // и для определения, какие экраны вообще доступны.
+// Какая инструкция открыта — держим здесь, чтобы адрес страницы совпадал
+// с тем, что видно на экране (и ссылкой можно поделиться).
+const openGuideId = ref(null);
+
 const mainTabs = computed(() => {
   const tabs = [
     { id: 'dashboard', label: 'Главная' },
@@ -1931,9 +1935,7 @@ const mainTabs = computed(() => {
   tabs.push({ id: 'scanner', label: 'Сканер' });
   if (kegReturnsEnabled.value) tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
   // Инструкции — в конце списка: читают их редко, но искать должно быть легко.
-  // Пока тексты не наполнены, помечаем раздел как готовящийся, чтобы ресторан
-  // не подумал, что инструкции потерялись.
-  tabs.push({ id: 'guides', label: 'Инструкции', soon: true });
+  tabs.push({ id: 'guides', label: 'Инструкции' });
   return tabs;
 });
 
@@ -2871,6 +2873,13 @@ function applyRouteToState() {
     activeTab.value = 'novelties';
     if (!noveltiesItems.value.length && !noveltiesLoading.value) loadNovelties().then(markNoveltiesSeen);
     else markNoveltiesSeen();
+  } else if (name === 'restaurant-guides') {
+    activeTab.value = 'guides';
+    openGuideId.value = null;
+  } else if (name === 'restaurant-guide') {
+    // Ссылка сразу на конкретную инструкцию — открываем её, а не список.
+    activeTab.value = 'guides';
+    openGuideId.value = Number(route.params.guideId) || null;
   } else if (name === 'restaurant-contacts') {
     activeTab.value = 'contacts';
   } else if (name === 'restaurant-scanner') {
@@ -2912,6 +2921,11 @@ function syncStateToRoute() {
     target = { name: 'restaurant-scanner' };
   } else if (activeTab.value === 'novelties') {
     target = { name: 'restaurant-novelties' };
+  } else if (activeTab.value === 'guides') {
+    // Открытая инструкция получает свою ссылку — как сбор остатков.
+    target = openGuideId.value
+      ? { name: 'restaurant-guide', params: { guideId: String(openGuideId.value) } }
+      : { name: 'restaurant-guides' };
   } else if (activeTab.value === 'profile') {
     target = { name: 'restaurant-profile' };
   } else if (activeTab.value === 'keg-returns') {
@@ -2949,7 +2963,7 @@ watch(() => route.fullPath, applyRouteToState);
 // Реакция на смену табов в любом месте кода — обновляем URL
 // Смена вкладки или выбранного сбора остатков — обновляем адрес страницы,
 // чтобы у каждого сбора была своя ссылка.
-watch([activeTab, orderSubTab, () => stockCollection.selectedId], syncStateToRoute);
+watch([activeTab, orderSubTab, () => stockCollection.selectedId, openGuideId], syncStateToRoute);
 
 function supAutoSelectDate(sup) {
   const dates = sup.available_dates || [];

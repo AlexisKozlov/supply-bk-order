@@ -98,6 +98,28 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'survey_files' && isset($pa
 }
 
 // ═══ DOWNLOAD RESTAURANT INFO FILE ═══
+// Скриншоты в инструкциях кабинета. Доступны любому, кто вошёл в кабинет
+// ресторана, и сотрудникам портала: секретов в них нет, но и наружу отдавать
+// картинки интерфейса незачем.
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'restaurant_guides' && isset($parts[2])) {
+    $filename = basename($parts[2]);
+    if (!preg_match('/^[A-Za-z0-9._-]+$/', $filename)) respond(['error' => 'Файл не найден'], 404);
+    $filepath = __DIR__ . '/../uploads/restaurant_guides/' . $filename;
+    if (!file_exists($filepath)) respond(['error' => 'Файл не найден'], 404);
+
+    $isRestaurant = (bool)roReadActiveSessionRow($pdo);
+    $isStaff = !$isRestaurant && (bool)getSessionUser($pdo);
+    if (!$isRestaurant && !$isStaff) respond(['error' => 'Не авторизован'], 401);
+
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $mimes = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'webp' => 'image/webp'];
+    header('Content-Type: ' . ($mimes[$ext] ?? 'application/octet-stream'));
+    header('Content-Length: ' . filesize($filepath));
+    header('Cache-Control: private, max-age=86400');
+    readfile($filepath);
+    exit;
+}
+
 if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'restaurant_info' && isset($parts[2])) {
     $filename = basename($parts[2]);
     $filepath = __DIR__ . '/../uploads/restaurant_info/' . $filename;
