@@ -178,10 +178,11 @@ function soLsCollectDay(PDO $pdo, string $supplierId, string $deliveryDate): arr
         $rest['items']       = $built['items'];
         $rest['stacks']      = $built['stacks'];
         $rest['total_trays'] = $built['total_trays'];
-        // Подпись ресторана: «Минск 26». Если номер в ДОДО ИС не заполнен,
-        // подставляем номер ресторана на портале — лист всё равно нужен.
-        $rest['title'] = trim(($rest['region'] !== '' ? $rest['region'] . ' ' : '')
-            . ($rest['dodo_is_number'] !== '' ? $rest['dodo_is_number'] : formatRestaurantNumber((int)$num)));
+        // Подпись ресторана: «Минск 26» — регион и номер в ДОДО ИС. Если номер
+        // не заполнен, оставляем один регион: портальный номер (PS12) для ПРЦ
+        // ничего не значит, они работают номерами ДОДО ИС.
+        $rest['title'] = trim($rest['region'] . ' ' . $rest['dodo_is_number']);
+        if ($rest['title'] === '') $rest['title'] = formatRestaurantNumber((int)$num);
         $out[] = $rest;
     }
     return $out;
