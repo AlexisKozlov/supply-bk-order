@@ -1224,6 +1224,13 @@ const loadingSheetsAvailable = computed(() =>
  * Печать загрузочных листов одного ресторана прямо из браузера.
  * Открываем отдельное окно: одна стопка — одна страница, как в Excel.
  */
+function stickerWord(line) {
+  // Печать чёрно-белая: кодировку пишем словом, цвет ничего не даст.
+  const m = String(line.name || '').match(/(\d{2})\s*см/);
+  const bySize = { '25': 'ЖЁЛТЫЙ', '30': 'ЗЕЛЁНЫЙ', '35': 'КРАСНЫЙ' };
+  return (m && bySize[m[1]]) || '—';
+}
+
 function trayWord(n) {
   const n10 = n % 10, n100 = n % 100;
   if (n10 === 1 && n100 !== 11) return 'лоток';
@@ -1253,6 +1260,7 @@ async function printLoadingSheets(restaurantNumber) {
       const lines = st.lines.map(l => `<div class="ls-row">
             <div class="ls-name">${esc(l.name)}</div>
             <div class="ls-trays">${l.trays} ${trayWord(l.trays)}</div>
+            <div class="ls-sticker">${esc(stickerWord(l))}</div>
           </div>`).join('');
       return `<section class="ls-page">
         <div class="ls-title">${esc(rest.address)}</div>
@@ -1260,6 +1268,7 @@ async function printLoadingSheets(restaurantNumber) {
         <div class="ls-date">Отгрузка ${esc(dateFmt)}</div>
         <div class="ls-stack">
           <div class="ls-stack-head">${st.mixed ? 'СБОРНАЯ СТОПКА' : 'СТОПКА'} &nbsp;${idx + 1} / ${total}</div>
+          <div class="ls-cols"><div>Наименование</div><div>Количество</div><div>Стикер</div></div>
           ${lines}
           ${st.mixed ? `<div class="ls-total">ИТОГО В СТОПКЕ: ${st.total} ${trayWord(st.total)}</div>` : ''}
         </div>
@@ -1292,9 +1301,15 @@ async function printLoadingSheets(restaurantNumber) {
         .ls-date { text-align: center; font-size: 15px; font-weight: 700; border: 2px solid #000; background: #ececec; padding: 5px; }
         .ls-stack { margin-top: 14px; border: 3px solid #000; }
         .ls-stack-head { background: #000; color: #fff; font-size: 20px; font-weight: 800; text-align: center; padding: 7px; letter-spacing: 1px; }
-        .ls-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; padding: 14px 12px; min-height: 96px; }
+        .ls-cols { display: grid; grid-template-columns: 2fr 1.2fr 1fr; background: #f2f2f2;
+                   border-bottom: 1px solid #000; font-size: 12px; font-weight: 700; color: #444; }
+        .ls-cols > div { text-align: center; padding: 4px 2px; }
+        .ls-row { display: grid; grid-template-columns: 2fr 1.2fr 1fr; align-items: center;
+                  padding: 14px 8px; min-height: 96px; border-bottom: 1px solid #000; }
+        .ls-stack .ls-row:last-child { border-bottom: none; }
         .ls-name { font-size: 19px; font-weight: 700; text-align: center; line-height: 1.25; }
-        .ls-trays { font-size: 54px; font-weight: 800; text-align: center; line-height: 1.05; }
+        .ls-trays { font-size: 40px; font-weight: 800; text-align: center; line-height: 1.05; }
+        .ls-sticker { font-size: 20px; font-weight: 800; text-align: center; }
         .ls-sub { text-align: center; font-size: 12px; color: #444; border-bottom: 1px solid #000; padding-bottom: 5px; }
         .ls-stack .ls-sub:last-child { border-bottom: none; }
         .ls-total { font-size: 18px; font-weight: 800; text-align: center; padding: 8px; background: #ececec; border-top: 2px solid #000; }

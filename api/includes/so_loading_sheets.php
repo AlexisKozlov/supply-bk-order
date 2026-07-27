@@ -222,6 +222,12 @@ function soLsSafeSheetName(string $name, array $used): string {
  * Рисует на листе одну страницу-стопку начиная со строки $top.
  * Возвращает номер строки после страницы.
  */
+/** Цвет стикера одним словом для колонки: ЖЁЛТЫЙ / ЗЕЛЁНЫЙ / КРАСНЫЙ. */
+function soLsStickerWord(?string $sticker): string {
+    if (!$sticker) return '—';
+    return mb_strtoupper(trim(str_replace('стикер', '', $sticker)));
+}
+
 /** Короткое наименование для листа: «Тесто для пиццы 25 см». */
 function soLsShortName(string $name, string $sku): string {
     return preg_match('/(\d{2})\s*см/u', $name, $m) ? 'Тесто для пиццы ' . $m[1] . ' см' : ($name ?: $sku);
@@ -291,14 +297,25 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     $sheet->getStyle("A{$r}:D{$r}")->getFont()->getColor()->setRGB('FFFFFF');
     $r++;
 
+    // Шапка колонок: в сборной стопке позиций несколько, и без подписей
+    // непонятно, где количество, а где кодировка. Держим одинаково на всех
+    // листах, чтобы вид не «прыгал».
+    $sheet->mergeCells("A{$r}:B{$r}");
+    $text("A{$r}", 'Наименование', 11, true, true, '444444');
+    $text("C{$r}", 'Количество', 11, true, true, '444444');
+    $text("D{$r}", 'Стикер', 11, true, true, '444444');
+    $sheet->getRowDimension($r)->setRowHeight(18);
+    $band("A{$r}:D{$r}", 'F2F2F2');
+    $sheet->getStyle("A{$r}:D{$r}")->getBorders()->getBottom()->setBorderStyle($B)->getColor()->setRGB('000000');
+    $r++;
+
     foreach ($stack['lines'] as $line) {
-        // Наименование с размером и количество лотков — крупно, это главное,
-        // что читают при сборке стопки.
         // Полное название из карточки — чтобы на складе не путать позиции.
         $sheet->mergeCells("A{$r}:B{$r}");
         $text("A{$r}", $line['name'], 15, true, true);
-        $sheet->mergeCells("C{$r}:D{$r}");
-        $text("C{$r}", $line['trays'] . ' ' . soLsTrayWord($line['trays']), 42, true, true);
+        $text("C{$r}", $line['trays'] . ' ' . soLsTrayWord($line['trays']), 30, true, true);
+        // Печать чёрно-белая — кодировку пишем словом, а не цветом.
+        $text("D{$r}", soLsStickerWord(soLsStickerColor($line['sku'], $line['name'])), 16, true, true);
         $sheet->getRowDimension($r)->setRowHeight(76);
         $sheet->getStyle("A{$r}:B{$r}")->getAlignment()->setWrapText(true);
         $band("A{$r}:D{$r}", null, $B);
