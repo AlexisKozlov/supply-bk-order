@@ -203,7 +203,10 @@ const ManagerSupplierContactsTab = defineAsyncComponent(() => import('@/componen
 
 const route = useRoute();
 const router = useRouter();
-const VALID_TABS = ['info', 'contacts', 'settings'];
+// Список обязан содержать ВСЕ вкладки: значение из ?tab= проверяется по нему,
+// и вкладка, которой здесь нет, откатывается обратно на «info» — с виду
+// «кнопка нажимается, но ничего не происходит».
+const VALID_TABS = ['info', 'contacts', 'guides', 'settings'];
 const activeManagerTab = ref(VALID_TABS.includes(route.query.tab) ? route.query.tab : 'info');
 
 // При смене вкладки — обновляем ?tab= в URL (можно делиться ссылкой и жать «назад»).
