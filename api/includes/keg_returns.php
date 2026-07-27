@@ -1568,7 +1568,7 @@ function krFillTemplate(array $row): \PhpOffice\PhpSpreadsheet\Spreadsheet {
 
     // Используем единый шаблон БК и подставляем данные юрлица (Воглия Матта / Бургер БК)
     // динамически из legal_entity_details: full_name, address, unp.
-    $templatePath = __DIR__ . '/../../ТТН1.xls';
+    $templatePath = __DIR__ . '/../templates/ТТН1.xls';
     $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
     $reader->setReadDataOnly(false);
     $spreadsheet = $reader->load($templatePath);
