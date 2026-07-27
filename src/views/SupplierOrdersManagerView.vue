@@ -1242,7 +1242,8 @@ async function printLoadingSheets(restaurantNumber) {
     if (!rest) { toast.warning('Пусто', 'На этот день у ресторана нет заявки с тестом'); return; }
 
     const esc = (v) => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const dateFmt = formatDate(selectedDate.value);
+    // Формат как в Excel-версии листа: 04.08.2026.
+    const dateFmt = selectedDate.value.split('-').reverse().join('.');
     const total = rest.stacks.length;
     const orderLines = rest.items.map(i => `<div>${esc(i.sku)} ${esc(i.name)} — ${i.trays} лотков</div>`).join('');
     const stickerLines = rest.items.filter(i => i.sticker)
@@ -1290,15 +1291,15 @@ async function printLoadingSheets(restaurantNumber) {
         body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0; }
         .ls-page { page-break-after: always; display: flex; flex-direction: column; min-height: 265mm; }
         .ls-page:last-child { page-break-after: auto; }
-        .ls-title { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: 1px;
+        .ls-title { font-size: 40px; font-weight: 800; text-align: center; letter-spacing: 1px;
                     border: 2px solid #000; background: #ececec; padding: 8px 4px; }
         .ls-addr { text-align: center; font-size: 13px; padding: 4px; border-left: 2px solid #000; border-right: 2px solid #000; background: #ececec; }
         .ls-date { text-align: center; font-size: 15px; font-weight: 700; border: 2px solid #000; background: #ececec; padding: 5px; }
         .ls-stack { margin-top: 14px; border: 3px solid #000; }
-        .ls-stack-head { background: #000; color: #fff; font-size: 19px; font-weight: 800; text-align: center; padding: 7px; letter-spacing: 1px; }
-        .ls-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 22px; }
-        .ls-size { font-size: 52px; font-weight: 800; }
-        .ls-trays { font-size: 46px; font-weight: 800; }
+        .ls-stack-head { background: #000; color: #fff; font-size: 20px; font-weight: 800; text-align: center; padding: 7px; letter-spacing: 1px; }
+        .ls-row { display: grid; grid-template-columns: 1fr 1fr; align-items: center; padding: 12px 10px; }
+        .ls-size { font-size: 60px; font-weight: 800; text-align: center; line-height: 1.05; }
+        .ls-trays { font-size: 54px; font-weight: 800; text-align: center; line-height: 1.05; }
         .ls-sub { text-align: center; font-size: 12px; color: #444; border-bottom: 1px solid #000; padding-bottom: 5px; }
         .ls-stack .ls-sub:last-child { border-bottom: none; }
         .ls-total { font-size: 18px; font-weight: 800; text-align: center; padding: 8px; background: #ececec; border-top: 2px solid #000; }

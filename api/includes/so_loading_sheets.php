@@ -396,7 +396,7 @@ function soLsBuildDayXlsx(PDO $pdo, string $supplierId, string $deliveryDate): a
         $sheet->setTitle($sheetName);
         // Четыре равные колонки: макет строится на объединённых ячейках,
         // крупные надписи должны занимать всю ширину страницы A4.
-        foreach (['A', 'B', 'C', 'D'] as $col) $sheet->getColumnDimension($col)->setWidth(22);
+        foreach (['A', 'B', 'C', 'D'] as $col) $sheet->getColumnDimension($col)->setWidth(25);
         $sheet->setShowGridlines(false);
 
         $total = count($rest['stacks']);
@@ -416,7 +416,10 @@ function soLsBuildDayXlsx(PDO $pdo, string $supplierId, string $deliveryDate): a
         $ps->setPaperSize(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::PAPERSIZE_A4);
         $ps->setFitToWidth(1);
         $ps->setFitToHeight(0);
-        $sheet->getPageMargins()->setTop(0.4)->setBottom(0.4)->setLeft(0.4)->setRight(0.3);
+        // Блок уже ширины A4, поэтому без этого он прижимался к левому краю
+        // и справа оставалось больше поля. Центрируем и делаем поля равными.
+        $ps->setHorizontalCentered(true);
+        $sheet->getPageMargins()->setTop(0.4)->setBottom(0.4)->setLeft(0.35)->setRight(0.35);
 
         // Строка навигации
         $nav->setCellValue('A' . $navRow, $rest['title']);
