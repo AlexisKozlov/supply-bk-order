@@ -13,10 +13,12 @@
     <div class="rcm-tabs">
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'info' }" type="button" @click="activeManagerTab = 'info'">Важная информация</button>
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'contacts' }" type="button" @click="activeManagerTab = 'contacts'">Контакты поставщиков</button>
+      <button class="rcm-tab" :class="{ active: activeManagerTab === 'guides' }" type="button" @click="activeManagerTab = 'guides'">Инструкции</button>
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'settings' }" type="button" @click="activeManagerTab = 'settings'; loadAppSettings()">Настройки кабинета</button>
     </div>
 
     <ManagerSupplierContactsTab v-if="activeManagerTab === 'contacts'" />
+    <GuidesEditor v-if="activeManagerTab === 'guides'" />
 
     <div v-if="activeManagerTab === 'settings'" class="rcm-grid">
       <section class="rcm-panel">
@@ -195,6 +197,7 @@ import { onBeforeUnmount, onMounted, reactive, ref, watch, defineAsyncComponent 
 import { useRoute, useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { appConfirm, appAlert } from '@/lib/appDialogs.js';
+const GuidesEditor = defineAsyncComponent(() => import('@/components/admin/GuidesEditor.vue'));
 
 const ManagerSupplierContactsTab = defineAsyncComponent(() => import('@/components/admin/ManagerSupplierContactsTab.vue'));
 
