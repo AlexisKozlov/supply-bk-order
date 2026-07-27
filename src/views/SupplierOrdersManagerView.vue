@@ -245,6 +245,9 @@
                     <div class="so-th-prod">{{ p.product_name }}</div>
                     <div v-if="p.multiplicity" class="so-th-mult">×{{ p.multiplicity }}</div>
                   </th>
+                  <!-- Печать загрузочных листов по ресторану: последняя колонка,
+                       после всех позиций теста. Только у ПРЦ. -->
+                  <th v-if="loadingSheetsAvailable" class="so-th-print">Лист</th>
                 </tr>
               </thead>
               <tbody>
@@ -252,13 +255,6 @@
                   <td class="so-td-rest">
                     <span class="rom-td-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
                     <span class="so-rest-addr">{{ r.city || r.region }}{{ r.address ? ', ' + r.address : '' }}</span>
-                    <!-- Печать загрузочных листов одного ресторана: ПРЦ иногда
-                         нужно допечатать листы на конкретную точку. -->
-                    <button v-if="loadingSheetsAvailable && r.order_status" class="so-print-ls"
-                      @click.stop="printLoadingSheets(r.number)"
-                      :title="'Печать загрузочных листов — ' + formatRestaurantNumber(r.number, r.legal_entity_group)">
-                      <BkIcon name="document" size="xs" />
-                    </button>
                   </td>
                   <td>
                     <span v-if="isSkipOrder(r)" class="rom-status st-skip" title="Ресторан отметил, что поставка не нужна">
@@ -301,6 +297,13 @@
                       <span v-else class="so-qty-empty">—</span>
                     </template>
                   </td>
+                  <td v-if="loadingSheetsAvailable" class="so-td-print">
+                    <button v-if="r.order_status && !isSkipOrder(r)" class="so-print-ls"
+                      @click.stop="printLoadingSheets(r.number)"
+                      :title="'Печать загрузочных листов — ' + formatRestaurantNumber(r.number, r.legal_entity_group)">
+                      Печать
+                    </button>
+                  </td>
                 </tr>
               </tbody>
               <tfoot v-if="filteredRestaurants.length">
@@ -310,6 +313,7 @@
                   <td v-for="p in displayProducts" :key="p.display_key" class="so-td-qty so-td-total">
                     <strong>{{ getProductTotal(p) || '' }}</strong>
                   </td>
+                  <td v-if="loadingSheetsAvailable"></td>
                 </tr>
               </tfoot>
             </table>
@@ -1057,7 +1061,6 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
-import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
 import { buildSoOrderSheet } from '@/lib/soOrderXlsx.js';
@@ -3361,9 +3364,12 @@ watch(
 .so-modal-facts dt { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
 .so-modal-facts dd { margin: 0; font-size: var(--tk-fz-md); color: var(--tk-text); }
 .rom-row-submitted { background: var(--tk-success-soft); }
+.so-th-print { width: 78px; text-align: center; }
+.so-td-print { text-align: center; }
 .so-print-ls {
-  margin-left: 8px; padding: 2px 6px; border: 1px solid var(--tk-border);
-  border-radius: 6px; background: var(--tk-bg-card); cursor: pointer; line-height: 0;
+  padding: 3px 10px; border: 1px solid var(--tk-border); border-radius: 6px;
+  background: var(--tk-bg-card); cursor: pointer; font-size: var(--tk-fz-sm);
+  font-family: inherit; color: var(--tk-text); white-space: nowrap;
 }
 .so-print-ls:hover { border-color: var(--tk-accent); background: var(--tk-n-50); }
 .rom-status {
