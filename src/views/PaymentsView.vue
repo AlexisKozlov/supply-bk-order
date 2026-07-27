@@ -481,6 +481,14 @@ async function submitAddModal() {
   .pay-top { flex-direction: column; align-items: flex-start; }
   .pay-input { font-size: 14px; width: 100%; }
 
+  /* Фильтры стояли одной нерушимой строкой: два списка, кнопка и выгрузка
+     не помещались в 390px — подписи обрезались, часть уезжала за край.
+     Раскладываем сеткой: списки и кнопки во всю ширину. */
+  .pay-filters { display: grid; grid-template-columns: 1fr; gap: 8px; width: 100%; }
+  .pay-filters > .pay-input,
+  .pay-filters > .pay-add-btn { width: 100%; box-sizing: border-box; }
+  .pay-export .pay-input { width: 100%; box-sizing: border-box; }
+
   .pay-table-wrap { overflow-x: visible; }
   .pay-table { display: block; }
   .pay-table thead { display: none; }
@@ -532,7 +540,17 @@ async function submitAddModal() {
 .pay-export-btn { padding: 6px 14px; font-size: 13px; background: #502314; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .pay-export-btn:hover:not(:disabled) { background: #3d1a0f; }
 .pay-export-btn:disabled { opacity: .6; cursor: default; }
-@media (max-width: 640px) { .pay-export { margin-left: 0; width: 100%; } .pay-export-btn { flex: 1; } }
+/* Месяц и кнопка выгрузки — в один ряд, но кнопке нужна своя ширина: иначе
+   поле месяца забирает почти всё, а подпись «План оплат» режется.
+   Блок должен идти ПОСЛЕ .pay-export выше — та же специфичность,
+   выигрывает то правило, что ниже по файлу. */
+@media (max-width: 640px) {
+  .pay-export {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 8px; align-items: center; margin-left: 0; width: 100%;
+  }
+  .pay-export-btn { white-space: nowrap; }
+}
 
 /* Модалка ручного создания оплаты */
 .pay-modal-backdrop {

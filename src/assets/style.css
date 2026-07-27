@@ -1476,7 +1476,12 @@ input[type="number"]:focus {
   .param-group { min-width: 100%; }
 
   td.item-name { position: static !important; box-shadow: none !important; }
-  th:first-child { position: static !important; box-shadow: none !important; }
+  /* Отключает липкую первую колонку на узких экранах. Правило старое и
+     глобальное — бьёт по ЛЮБОЙ таблице портала, хотя писалось под таблицу
+     заказа. Если конкретной таблице липкая колонка нужна осознанно
+     (например, номер ресторана в «Возврате кег»), повесьте на её первую
+     ячейку-заголовок класс mobile-sticky-keep. */
+  th:first-child:not(.mobile-sticky-keep) { position: static !important; box-shadow: none !important; }
 
   input[type="number"] { font-size: 16px !important; min-height: 36px; }
   input, select { font-size: 16px !important; }

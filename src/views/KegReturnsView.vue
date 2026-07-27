@@ -38,8 +38,8 @@
     <table class="kr-table">
       <thead>
         <tr>
-          <th>Ресторан</th>
-          <th>Адрес погрузки</th>
+          <th class="kr-col-rest mobile-sticky-keep">Ресторан</th>
+          <th class="kr-col-pickup">Адрес погрузки</th>
           <th>Дата возврата</th>
           <th>№ БСО</th>
           <th>Статус</th>
@@ -52,8 +52,8 @@
       </thead>
       <tbody>
         <tr v-for="row in filteredRows" :key="row.id" @click="openEdit(row.id)" class="kr-row">
-          <td>{{ formatRestaurantNumber(row.restaurant_number) }} {{ row.restaurant_city }}<span v-if="row.restaurant_address">, {{ row.restaurant_address }}</span></td>
-          <td>{{ pickupAddressFor(row) }}</td>
+          <td class="kr-col-rest">{{ formatRestaurantNumber(row.restaurant_number) }} {{ row.restaurant_city }}<span v-if="row.restaurant_address">, {{ row.restaurant_address }}</span></td>
+          <td class="kr-col-pickup">{{ pickupAddressFor(row) }}</td>
           <td>{{ fmtDate(row.return_date) }}</td>
           <td>
             {{ row.bso_series }} {{ row.bso_number }}
@@ -795,5 +795,43 @@ onMounted(() => {
 .kr-import-progress-label {
   font-size: 12.5px;
   color: var(--text-secondary, #6B5344);
+}
+
+@media (max-width: 640px) {
+  .kr-page { padding: 12px; }
+
+  /* Шапка: заголовок отдельной строкой, иначе пять кнопок в одном ряду
+     с ним уезжают за правый край и становятся недоступными. */
+  .kr-page-header { flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .kr-page-header .page-title { flex: 1 0 100%; font-size: 19px; }
+
+  /* Кнопки — сетка в две колонки: в один ряд подписи режутся,
+     в один столбец получается простыня. «Создать» шире остальных. */
+  .kr-page-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .kr-page-actions > .btn { width: 100%; justify-content: center; text-align: center; padding-left: 6px; padding-right: 6px; font-size: 13px; }
+  .kr-page-actions > .btn.primary { grid-column: 1 / -1; }
+
+  /* Фильтры: списки во всю ширину — иначе «Все рестораны» растягивается
+     по самому длинному адресу и вылезает за экран. Даты — по половине. */
+  .kr-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kr-toolbar select { grid-column: 1 / -1; }
+  .kr-toolbar select,
+  .kr-toolbar input { width: 100%; min-width: 0; box-sizing: border-box; }
+
+  /* Таблица прокручивается вбок. Колонка с рестораном держится у левого
+     края, иначе, добравшись до статуса, уже не понять, чья это строка.
+     Фон непрозрачный — иначе содержимое просвечивает сквозь неё. */
+  .kr-table { min-width: 900px; }
+  .kr-table .kr-col-rest {
+    position: sticky; left: 0; z-index: 2;
+    max-width: 150px; background: var(--card, #fff);
+    box-shadow: inset -1px 0 0 var(--border-color, #eee);
+  }
+  .kr-table th.kr-col-rest { z-index: 3; }
+  .kr-row:hover td.kr-col-rest { background: var(--hover-bg, #f5f5f5); }
+  /* Адрес погрузки дублирует адрес ресторана — на телефоне прячем,
+     чтобы освободить место под статус, водителя и машину. */
+  .kr-col-pickup { display: none; }
+  .kr-table th, .kr-table td { padding: 8px 9px; }
 }
 </style>
