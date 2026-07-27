@@ -187,6 +187,14 @@
             <button class="rom-btn rom-btn-export" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
               {{ exporting ? 'Выгрузка...' : exportSelectedDates.size > 1 ? `Выгрузить ${exportSelectedDates.size} ${dayWord(exportSelectedDates.size)} в Excel` : 'Выгрузить в Excel' }}
             </button>
+            <!-- Загрузочные листы: только у ПРЦ (тесто) — остальным поставщикам
+                 раскладка по стопкам не нужна, кнопка им не показывается. -->
+            <button v-if="loadingSheetsAvailable" class="rom-btn" @click="downloadLoadingSheets"
+              :disabled="loadingSheetsBusy || !selectedDate"
+              title="Excel с загрузочными листами: по стопке на лист, первый лист — навигация">
+              <BurgerSpinner v-if="loadingSheetsBusy" size="xs" />
+              <span>{{ loadingSheetsBusy ? 'Готовлю...' : 'Загрузочные листы' }}</span>
+            </button>
             <button class="rom-btn"
               @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
               {{ exportDatePickerOpen ? 'Дни ▲' : 'Дни ▼' }}
@@ -244,6 +252,13 @@
                   <td class="so-td-rest">
                     <span class="rom-td-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
                     <span class="so-rest-addr">{{ r.city || r.region }}{{ r.address ? ', ' + r.address : '' }}</span>
+                    <!-- Печать загрузочных листов одного ресторана: ПРЦ иногда
+                         нужно допечатать листы на конкретную точку. -->
+                    <button v-if="loadingSheetsAvailable && r.order_status" class="so-print-ls"
+                      @click.stop="printLoadingSheets(r.number)"
+                      :title="'Печать загрузочных листов — ' + formatRestaurantNumber(r.number, r.legal_entity_group)">
+                      <BkIcon name="document" size="xs" />
+                    </button>
                   </td>
                   <td>
                     <span v-if="isSkipOrder(r)" class="rom-status st-skip" title="Ресторан отметил, что поставка не нужна">
@@ -1042,6 +1057,7 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
 import { buildSoOrderSheet } from '@/lib/soOrderXlsx.js';
@@ -1192,6 +1208,134 @@ const templateEntities = computed(() => {
   return LEGAL_ENTITIES.filter(e => !e.includes('Пицца Стар'));
 });
 const currentSupplier = computed(() => allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value)) || null);
+
+// ── Загрузочные листы (ПРЦ, тесто) ──
+// ПРЦ собирает заказ стопками по 22 лотка и клеит на них печатные листы.
+// Кнопка показывается только этому поставщику: остальным раскладка не нужна.
+const loadingSheetsBusy = ref(false);
+const loadingSheetsAvailable = computed(() =>
+  /ПРЦ/i.test(String(currentSupplier.value?.short_name || ''))
+);
+
+/**
+ * Печать загрузочных листов одного ресторана прямо из браузера.
+ * Открываем отдельное окно: одна стопка — одна страница, как в Excel.
+ */
+function trayWord(n) {
+  const n10 = n % 10, n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return 'лоток';
+  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return 'лотка';
+  return 'лотков';
+}
+
+async function printLoadingSheets(restaurantNumber) {
+  if (!currentSupplierId.value || !selectedDate.value) return;
+  try {
+    const url = `/api/so/admin/loading-sheets-data?supplier_id=${encodeURIComponent(currentSupplierId.value)}&date=${encodeURIComponent(selectedDate.value)}`;
+    const resp = await fetch(url, { headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' } });
+    const data = await resp.json();
+    if (!resp.ok || !data.enabled) { toast.error('Не получилось', data.error || 'Загрузочные листы недоступны'); return; }
+    const rest = (data.restaurants || []).find(r => String(r.restaurant_number) === String(restaurantNumber));
+    if (!rest) { toast.warning('Пусто', 'На этот день у ресторана нет заявки с тестом'); return; }
+
+    const esc = (v) => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const dateFmt = formatDate(selectedDate.value);
+    const total = rest.stacks.length;
+    const orderLines = rest.items.map(i => `<div>${esc(i.sku)} ${esc(i.name)} — ${i.trays} лотков</div>`).join('');
+    const stickerLines = rest.items.filter(i => i.sticker)
+      .map(i => `<div>${esc((i.name.match(/(\d{2})\s*см/) || [])[0] ? 'Тесто для пиццы ' + i.name.match(/(\d{2})\s*см/)[0] : i.name)} — ${esc(i.sticker)}</div>`).join('');
+
+    const pages = rest.stacks.map((st, idx) => {
+      const lines = st.lines.map(l => {
+        const m = l.name.match(/(\d{2})\s*см/);
+        const size = m ? m[1] + ' см' : l.sku;
+        return `<div class="ls-row">
+            <div class="ls-size">${esc(size)}</div>
+            <div class="ls-trays">${l.trays} ${trayWord(l.trays)}</div>
+          </div>
+          <div class="ls-sub">${esc(l.sku)} · ${l.per_tray} шт/лоток · ${l.trays * l.per_tray} шт</div>`;
+      }).join('');
+      return `<section class="ls-page">
+        <div class="ls-title">${esc(rest.title.toUpperCase())}</div>
+        <div class="ls-addr">${esc(rest.address)}</div>
+        <div class="ls-date">Отгрузка ${esc(dateFmt)}</div>
+        <div class="ls-stack">
+          <div class="ls-stack-head">${st.mixed ? 'СБОРНАЯ СТОПКА' : 'СТОПКА'} &nbsp;${idx + 1} / ${total}</div>
+          ${lines}
+          ${st.mixed ? `<div class="ls-total">ИТОГО В СТОПКЕ: ${st.total} ${trayWord(st.total)}</div>` : ''}
+        </div>
+        <div class="ls-all">
+          <div class="ls-all-head">ВСЯ ЗАЯВКА</div>
+          ${rest.items.map(i => {
+            const m = i.name.match(/(\d{2})\s*см/);
+            return `<div class="ls-all-row"><b>${esc(m ? m[1] + ' см' : i.sku)}</b>
+              <span>${i.trays} ${trayWord(i.trays)} · ${Math.round(i.qty)} шт${i.sticker ? ' · ' + esc(i.sticker) : ''}</span></div>`;
+          }).join('')}
+        </div>
+        <div class="ls-foot">Лист ${idx + 1} из ${total}</div>
+      </section>`;
+    }).join('');
+
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Не получилось', 'Браузер заблокировал окно печати'); return; }
+    // Печать чёрно-белая: акценты только размером, жирностью и рамками.
+    w.document.write(`<!doctype html><html lang="ru"><head><meta charset="utf-8">
+      <title>Загрузочный лист — ${esc(rest.title)} — ${esc(dateFmt)}</title>
+      <style>
+        @page { size: A4 portrait; margin: 12mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0; }
+        .ls-page { page-break-after: always; display: flex; flex-direction: column; min-height: 265mm; }
+        .ls-page:last-child { page-break-after: auto; }
+        .ls-title { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: 1px;
+                    border: 2px solid #000; background: #ececec; padding: 8px 4px; }
+        .ls-addr { text-align: center; font-size: 13px; padding: 4px; border-left: 2px solid #000; border-right: 2px solid #000; background: #ececec; }
+        .ls-date { text-align: center; font-size: 15px; font-weight: 700; border: 2px solid #000; background: #ececec; padding: 5px; }
+        .ls-stack { margin-top: 14px; border: 3px solid #000; }
+        .ls-stack-head { background: #000; color: #fff; font-size: 19px; font-weight: 800; text-align: center; padding: 7px; letter-spacing: 1px; }
+        .ls-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 22px; }
+        .ls-size { font-size: 52px; font-weight: 800; }
+        .ls-trays { font-size: 46px; font-weight: 800; }
+        .ls-sub { text-align: center; font-size: 12px; color: #444; border-bottom: 1px solid #000; padding-bottom: 5px; }
+        .ls-stack .ls-sub:last-child { border-bottom: none; }
+        .ls-total { font-size: 18px; font-weight: 800; text-align: center; padding: 8px; background: #ececec; border-top: 2px solid #000; }
+        .ls-all { margin-top: 20px; font-size: 12px; }
+        .ls-all-head { font-size: 11px; font-weight: 700; color: #444; letter-spacing: 1px; margin-bottom: 4px; }
+        .ls-all-row { display: flex; gap: 14px; border-bottom: 1px solid #ccc; padding: 3px 0; }
+        .ls-all-row b { min-width: 70px; }
+        .ls-foot { margin-top: auto; text-align: center; font-size: 15px; font-weight: 700; border-top: 1px solid #000; padding-top: 8px; }
+      </style></head><body>${pages}</body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
+  } catch (e) {
+    toast.error('Не получилось', e.message || String(e));
+  }
+}
+
+async function downloadLoadingSheets() {
+  if (!currentSupplierId.value || !selectedDate.value || loadingSheetsBusy.value) return;
+  loadingSheetsBusy.value = true;
+  try {
+    const url = `/api/so/admin/loading-sheets?supplier_id=${encodeURIComponent(currentSupplierId.value)}&date=${encodeURIComponent(selectedDate.value)}`;
+    const resp = await fetch(url, { headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' } });
+    if (!resp.ok) {
+      const msg = await resp.json().catch(() => ({}));
+      toast.error('Не получилось', msg.error || `Ошибка ${resp.status}`);
+      return;
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Загрузочный лист — ${formatDate(selectedDate.value)}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) {
+    toast.error('Не получилось', e.message || String(e));
+  } finally {
+    loadingSheetsBusy.value = false;
+  }
+}
 
 // Order modal
 const showOrderModal = ref(false);
@@ -3217,6 +3361,11 @@ watch(
 .so-modal-facts dt { font-size: var(--tk-fz-sm); color: var(--tk-text-muted); }
 .so-modal-facts dd { margin: 0; font-size: var(--tk-fz-md); color: var(--tk-text); }
 .rom-row-submitted { background: var(--tk-success-soft); }
+.so-print-ls {
+  margin-left: 8px; padding: 2px 6px; border: 1px solid var(--tk-border);
+  border-radius: 6px; background: var(--tk-bg-card); cursor: pointer; line-height: 0;
+}
+.so-print-ls:hover { border-color: var(--tk-accent); background: var(--tk-n-50); }
 .rom-status {
   padding: 2px var(--tk-s-2); border-radius: var(--tk-r-sm);
   font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold);

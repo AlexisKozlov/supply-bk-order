@@ -680,12 +680,31 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
         return ['success' => false, 'error' => 'attachment_too_large', 'restaurants_count' => $rc, 'items_count' => $ic];
     }
 
+    $attachments = [['filename' => $sum['filename'], 'content_b64' => $attachB64,
+        'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']];
+
+    // Для ПРЦ вторым файлом кладём загрузочные листы: по стопке на страницу,
+    // внутри разбито по ресторанам — можно печатать сразу, без обработки.
+    require_once __DIR__ . '/so_loading_sheets.php';
+    if (soLsSupplierEnabled($pdo, $supplierId)) {
+        try {
+            $ls = soLsBuildDayXlsx($pdo, $supplierId, $deliveryDate);
+            if ($ls['status'] === 'ok' && $ls['xlsx'] !== null) {
+                $attachments[] = ['filename' => $ls['filename'], 'content_b64' => base64_encode($ls['xlsx']),
+                    'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+            }
+        } catch (Throwable $e) {
+            // Загрузочные листы — дополнение. Если они не собрались, письмо с
+            // самой заявкой всё равно должно уйти.
+            error_log('[so_loading_sheets] ' . $e->getMessage());
+        }
+    }
+
     $res = sendEmail($toEmail, $subject, $bodyHtml, true, [
         'account' => 'order',
         'reply_to' => 'order@supply-department.online',
         'cc' => $ccList,
-        'attachments' => [['filename' => $sum['filename'], 'content_b64' => $attachB64,
-            'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']],
+        'attachments' => $attachments,
     ]);
     $ok = !empty($res['success']);
     soLogEmail($pdo, $supplierId, $deliveryDate, $sum, $toEmail, $ccList, $subject, $triggerType, $ok, $ok ? null : ($res['error'] ?? 'send_failed'), $senderName, $ip);
@@ -2008,6 +2027,44 @@ if ($soAction === 'admin') {
     $adminAction = $soParam1 ?? '';
     $adminParam = $soParam2 ?? null;
     $adminParam2 = $soParam3 ?? null;
+
+    // --- Загрузочные листы ПРЦ (тесто): книга Excel за день ---
+    // ПРЦ собирает заказ стопками по 22 лотка и клеит на них эти листы.
+    // Только для поставщика с признаком so_loading_sheets — остальным
+    // раскладка по стопкам не нужна.
+    if ($adminAction === 'loading-sheets' && $method === 'GET') {
+        $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
+        $date       = trim((string)($_GET['date'] ?? ''));
+        if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            soRespond(['error' => 'Нужны supplier_id и date (ГГГГ-ММ-ДД)'], 400);
+        }
+        require_once __DIR__ . '/so_loading_sheets.php';
+        if (!soLsSupplierEnabled($pdo, $supplierId)) {
+            soRespond(['error' => 'Для этого поставщика загрузочные листы не формируются'], 400);
+        }
+        $res = soLsBuildDayXlsx($pdo, $supplierId, $date);
+        if ($res['status'] !== 'ok') soRespond(['error' => 'На этот день нет заявок с тестом'], 404);
+
+        header_remove('Content-Type');
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="loading-sheets-' . $date . '.xlsx"; '
+            . "filename*=UTF-8''" . rawurlencode($res['filename']));
+        header('Cache-Control: no-store');
+        echo $res['xlsx'];
+        exit;
+    }
+
+    // --- Данные загрузочных листов (для печати из браузера) ---
+    if ($adminAction === 'loading-sheets-data' && $method === 'GET') {
+        $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
+        $date       = trim((string)($_GET['date'] ?? ''));
+        if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            soRespond(['error' => 'Нужны supplier_id и date (ГГГГ-ММ-ДД)'], 400);
+        }
+        require_once __DIR__ . '/so_loading_sheets.php';
+        if (!soLsSupplierEnabled($pdo, $supplierId)) soRespond(['enabled' => false, 'restaurants' => []]);
+        soRespond(['enabled' => true, 'date' => $date, 'restaurants' => soLsCollectDay($pdo, $supplierId, $date)]);
+    }
 
     // --- Список поставщиков с активными расписаниями ---
     if ($adminAction === 'suppliers' && $method === 'GET') {
