@@ -5,13 +5,9 @@
       <h1>Заявки поставщикам</h1>
     </div>
 
-    <!-- Page tabs.
-         Пользователю, привязанному к своему поставщику (например, сотруднику
-         производственного центра), настроечные вкладки не нужны: он приходит
-         посмотреть заявки и забрать файлы, а «Графики» — это редактор
-         дедлайнов, а не справка. -->
+    <!-- Page tabs -->
     <div class="rom-page-tabs">
-      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'overview' }" @click="pageTab = 'overview'; loadOverview()">
+      <button class="rom-page-tab" :class="{ active: pageTab === 'overview' }" @click="pageTab = 'overview'; loadOverview()">
         Обзор
       </button>
       <button class="rom-page-tab" :class="{ active: pageTab === 'status' }" @click="pageTab = 'status'; loadStatus()">
@@ -20,13 +16,13 @@
       <button class="rom-page-tab" :class="{ active: pageTab === 'list' }" @click="pageTab = 'list'; loadOrdersList()">
         Список заявок
       </button>
-      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'schedules' }" @click="pageTab = 'schedules'; loadSchedules()">
+      <button class="rom-page-tab" :class="{ active: pageTab === 'schedules' }" @click="pageTab = 'schedules'; loadSchedules()">
         Графики
       </button>
-      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadTemplates()">
+      <button class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadTemplates()">
         Шаблон товаров
       </button>
-      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'settings' }" @click="pageTab = 'settings'; loadSettings()">
+      <button class="rom-page-tab" :class="{ active: pageTab === 'settings' }" @click="pageTab = 'settings'; loadSettings()">
         Настройки
       </button>
     </div>
@@ -123,7 +119,7 @@
           :title="'Управление приёмом — во вкладке «Настройки»'">
           {{ settings.is_accepting_orders ? 'Приём включён' : 'Приём приостановлен' }}
         </span>
-        <div v-if="!isSupplierScoped" class="so-detail-actions">
+        <div class="so-detail-actions">
           <label class="so-inline-label">Дедлайн по умолчанию:</label>
           <input type="time" v-model="defaultDeadline" class="rom-input-sm" style="width:100px" />
           <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
@@ -143,10 +139,10 @@
           </button>
         </div>
         <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
-        <button v-if="selectedDate && !isSupplierScoped" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
+        <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
           Продлить дедлайн
         </button>
-        <button v-if="selectedDate && !isSupplierScoped" class="rom-btn-sm" :class="isDateForcedClosed(selectedDate) ? 'so-btn-open-day' : 'so-btn-close-day'"
+        <button v-if="selectedDate" class="rom-btn-sm" :class="isDateForcedClosed(selectedDate) ? 'so-btn-open-day' : 'so-btn-close-day'"
           @click="handleToggleCloseDay(selectedDate)" :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
           {{ isDateForcedClosed(selectedDate) ? 'Открыть день' : 'Закрыть день' }}
         </button>
@@ -203,23 +199,23 @@
               @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
               {{ exportDatePickerOpen ? 'Дни ▲' : 'Дни ▼' }}
             </button>
-            <button v-if="!isSupplierScoped" class="rom-btn rom-btn-primary"
+            <button class="rom-btn rom-btn-primary"
               @click="sendSummary" :disabled="sendingSummary || !selectedDate" title="Сгенерировать Excel и отправить подписчикам в Telegram">
               <BurgerSpinner v-if="sendingSummary" size="xs" />
               <span>{{ sendingSummary ? 'Отправка...' : 'Отправить сводку' }}</span>
             </button>
-            <button v-if="!isSupplierScoped" class="rom-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
+            <button class="rom-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
               title="Сгенерировать Excel и отправить на почту поставщика">
               {{ sendingSummaryEmail ? 'Отправка…' : 'На почту поставщику' }}
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
-            <button v-if="!isSupplierScoped" class="rom-btn rom-btn-primary" @click="openAdhocModal" title="Создать внеплановую заявку (довоз) для ресторана на любую дату вне графика">
+            <button class="rom-btn rom-btn-primary" @click="openAdhocModal" title="Создать внеплановую заявку (довоз) для ресторана на любую дату вне графика">
               + Довоз
             </button>
-            <button v-if="!isSupplierScoped" class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
+            <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
               Копировать не подавших
             </button>
-            <button v-if="!isSupplierScoped" class="rom-btn" @click="remindUnsubmitted" :disabled="!selectedDate || remindingStatus" title="Напомнить ресторанам, которые не подали заявку на эту дату">
+            <button class="rom-btn" @click="remindUnsubmitted" :disabled="!selectedDate || remindingStatus" title="Напомнить ресторанам, которые не подали заявку на эту дату">
               {{ remindingStatus ? 'Отправка…' : 'Напомнить не подавшим' }}
             </button>
             <label class="so-filter-check">
@@ -395,7 +391,7 @@
               <td>{{ o.total_qty ? (Number.isInteger(+o.total_qty) ? +o.total_qty : (+o.total_qty).toFixed(2)) : '—' }}</td>
               <td class="rom-td-actions">
                 <button class="rom-btn-sm" @click="viewOrder(o.id)">Открыть</button>
-                <button v-if="!isSupplierScoped" class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id, o.status)">Удалить</button>
+                <button class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id, o.status)">Удалить</button>
               </td>
             </tr>
           </tbody>
@@ -1064,7 +1060,6 @@ import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
-import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
@@ -1091,21 +1086,9 @@ const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'С
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
 const daysShort = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
 
-// Пользователь, привязанный к своим поставщикам (внешние сотрудники —
-// например, производственный центр). Ограничение всё равно проверяется на
-// сервере; здесь только убираем ненужные ему вкладки.
-const userStore = useUserStore();
-const isSupplierScoped = computed(() => {
-  const raw = userStore.currentUser?.supplier_scope;
-  if (!raw) return false;
-  const list = Array.isArray(raw) ? raw : (() => { try { return JSON.parse(raw) || []; } catch { return []; } })();
-  return list.length > 0;
-});
-
 // Стартовая вкладка: «Обзор» по умолчанию, но при входе по прямой ссылке
 // на конкретного поставщика (props.supplierId) — сразу «Приём».
-// Привязанному пользователю «Обзора» не видно, поэтому открываем «Приём».
-const pageTab = ref(props.supplierId || isSupplierScoped.value ? 'status' : 'overview');
+const pageTab = ref(props.supplierId ? 'status' : 'overview');
 const loading = ref(false);
 const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');
