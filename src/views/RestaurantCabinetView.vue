@@ -2692,11 +2692,22 @@ function supHasErrors(supId) { return (supProducts[supId] || []).some(p => supHa
 function supFilledCount(supId) { return Object.values(supQuantities[supId] || {}).filter(v => v > 0).length; }
 
 // Шаг количества кнопками − и +. Шаг равен кратности товара, поэтому набрать
-// некратное число случайно нельзя — раньше это была частая причина отказа.
+// некратное число случайно нельзя — это была частая причина отказа заявки.
+//
+// Если в поле уже вписали некратное вручную (например 7 при кратности 6),
+// кнопка не прибавляет шаг слепо, а ПОДТЯГИВАЕТ к ближайшему кратному:
+// «+» даёт 12, «−» даёт 6. Иначе из 7 получалось 13 — снова некратно.
 function supStepQty(supId, product, dir) {
   const step = Number(product.multiplicity) > 0 ? Number(product.multiplicity) : 1;
   const cur = Number(supQuantities[supId]?.[product.sku]) || 0;
-  const next = Math.max(0, cur + dir * step);
+  const offGrid = cur % step !== 0;
+  let next;
+  if (offGrid) {
+    next = dir > 0 ? Math.ceil(cur / step) * step : Math.floor(cur / step) * step;
+  } else {
+    next = cur + dir * step;
+  }
+  next = Math.max(0, next);
   supQuantities[supId][product.sku] = next === 0 ? null : next;
 }
 function supFilledTotal(supId) { return Object.values(supQuantities[supId] || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0); }
@@ -4583,9 +4594,9 @@ onUnmounted(() => {
 
 /* Кнопки: отправка — главная, отказ — спокойный вторичный вариант */
 .sof-skip {
-  background: #fff; border: 1px solid #E0DBD5; color: #6B6155; font-weight: 600;
+  background: #F7F1E8; border: 1.5px solid #E2D6C4; color: #6B5B4B; font-weight: 700;
 }
-.sof-skip:hover:not(:disabled) { border-color: #C9BBA8; background: #FBF8F3; }
+.sof-skip:hover:not(:disabled) { border-color: #C9B69F; background: #FDFAF6; color: #3A2418; }
 
 /* Кнопки шага: тач-цель 44px, работают по кратности товара */
 .sof-qty-wrap { display: flex; align-items: center; gap: 6px; }
@@ -4664,13 +4675,15 @@ onUnmounted(() => {
   .sof-submit { font-size: 16px; padding: 15px; border-radius: 13px; }
   /* Отказ от поставки — редкое действие: спокойная ссылка под главной
      кнопкой, чтобы не спорила с ней по весу. */
-  /* Отказ от поставки — редкое действие: мелкая спокойная ссылка,
-     она не должна конкурировать с главной кнопкой по весу. */
+  /* Отказ от поставки — действие редкое, но нужное: это полноценная кнопка
+     с рамкой, просто без заливки, чтобы не спорить с главной по весу. */
   .sof-skip {
-    background: transparent; border: none; color: #A2988B;
-    font-size: 12.5px; font-weight: 600; padding: 7px; text-decoration: none;
+    /* Панель белая, поэтому у кнопки бежевая заливка — иначе рамка теряется
+       и действие выглядит просто текстом. */
+    background: #F7F1E8; border: 1.5px solid #E2D6C4; color: #6B5B4B;
+    font-size: 14px; font-weight: 700; padding: 12px; border-radius: 12px;
   }
-  .sof-skip:hover:not(:disabled) { background: transparent; color: #E87A1E; }
+  .sof-skip:hover:not(:disabled) { border-color: #C9B69F; background: #FDFAF6; color: #3A2418; }
 
   /* Заблокированная кнопка не должна выглядеть «сломанной плитой»:
      светлый фон и читаемый текст — понятно, что действие просто ещё недоступно. */
