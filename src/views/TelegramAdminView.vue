@@ -389,6 +389,7 @@
                 <th title="Подтверждения заявок">✅</th>
                 <th title="Напоминания об остатках">📋</th>
                 <th title="Новые сборы остатков">📦</th>
+                <th title="Возврат кег">🛢</th>
               </tr>
             </thead>
             <tbody>
@@ -403,6 +404,7 @@
                 <td :class="cellClass(sub.notify_confirmations)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_confirmations')">{{ sub.notify_confirmations ? '✓' : '✕' }}</td>
                 <td :class="cellClass(sub.notify_stock_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_reminders')">{{ sub.notify_stock_reminders ? '✓' : '✕' }}</td>
                 <td :class="cellClass(sub.notify_stock_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_sessions')">{{ sub.notify_stock_sessions ? '✓' : '✕' }}</td>
+                <td :class="cellClass(sub.notify_keg_returns)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_keg_returns')">{{ sub.notify_keg_returns ? '✓' : '✕' }}</td>
               </tr>
             </tbody>
           </table>
@@ -413,6 +415,7 @@
           <span>✅ Подтверждения заявок</span>
           <span>📋 Напоминания об остатках</span>
           <span>📦 Новые сборы остатков</span>
+          <span>🛢 Возврат кег</span>
         </div>
       </template>
     </div>
@@ -838,6 +841,7 @@ const restaurantUniqueSubscribers = computed(() => {
         notify_so_sessions: s.notify_so_sessions,
         notify_confirmations: s.notify_confirmations,
         notify_stock_reminders: s.notify_stock_reminders,
+        notify_keg_returns: s.notify_keg_returns,
         notify_stock_sessions: s.notify_stock_sessions,
       }
     }

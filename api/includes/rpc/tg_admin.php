@@ -86,7 +86,7 @@
                 ELSE 'unverified'
             END AS verify_status,
             vs.notify_so_reminders, vs.notify_so_sessions, vs.notify_confirmations,
-            vs.notify_stock_reminders, vs.notify_stock_sessions,
+            vs.notify_stock_reminders, vs.notify_stock_sessions, vs.notify_keg_returns,
             r.address, r.city, r.region
             FROM ro_telegram_subs vs
             LEFT JOIN restaurants r
@@ -198,7 +198,7 @@
         // restaurant_number обязателен — у одного chat_id могут быть подписки на несколько ресторанов;
         // без него UPDATE влиял бы сразу на все его подписки.
         $restNumber = $body['restaurant_number'] ?? '';
-        $allowed = ['notify_so_reminders', 'notify_so_sessions', 'notify_confirmations', 'notify_stock_reminders', 'notify_stock_sessions'];
+        $allowed = ['notify_so_reminders', 'notify_so_sessions', 'notify_confirmations', 'notify_stock_reminders', 'notify_stock_sessions', 'notify_keg_returns'];
         if (!$chatId || !$restNumber || !in_array($field, $allowed)) respond(['error' => 'Неверные параметры'], 400);
         $pdo->prepare("UPDATE ro_telegram_subs SET `$field` = NOT `$field` WHERE chat_id = ? AND restaurant_number = ?")->execute([$chatId, $restNumber]);
         $newVal = $pdo->prepare("SELECT `$field` FROM ro_telegram_subs WHERE chat_id = ? AND restaurant_number = ? LIMIT 1");

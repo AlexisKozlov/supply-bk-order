@@ -255,6 +255,7 @@ function krNotifyRouted(PDO $pdo, array $row): void {
             SELECT DISTINCT chat_id FROM ro_telegram_subs
             WHERE restaurant_number = ?
               AND chat_id IS NOT NULL AND chat_id != ''
+              AND notify_keg_returns = 1
               AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
         ");
         $subStmt->execute([$rNumber]);
@@ -319,6 +320,7 @@ function krNotifyRestaurant(PDO $pdo, int $restaurantId, string $text) {
         SELECT DISTINCT chat_id FROM ro_telegram_subs
         WHERE restaurant_number = ?
           AND chat_id IS NOT NULL AND chat_id != ''
+          AND notify_keg_returns = 1
           AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
     ");
     $s->execute([$number]);
