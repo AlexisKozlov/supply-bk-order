@@ -308,6 +308,12 @@
                     }
                 }
             }
+            // Для уведомления ресторану о правке в ЗАКРЫТОМ сборе нужно знать,
+            // что было до правки: сумма по всем партиям этой позиции.
+            $wasStmt = $pdo->prepare("SELECT COALESCE(SUM(stock), 0) FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ?");
+            $wasStmt->execute([$collId, $productId, $restaurantNumber]);
+            $wasTotal = (float)$wasStmt->fetchColumn();
+
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ?")->execute([$collId, $productId, $restaurantNumber]);
             if ($hasExpiryDate) {
@@ -344,6 +350,19 @@
                 }
                 unset($row);
             }
+            // Сбор закрыт — ресторан его в кабинете не видит, поэтому о правке
+            // сообщаем в Telegram. Копим изменения и отправляем одним
+            // сообщением (крон cron_sc_edit_notify.php), иначе при правке
+            // десяти позиций прилетит десять сообщений.
+            if (($collRow['status'] ?? '') !== 'active') {
+                require_once __DIR__ . '/../sc_edit_notify.php';
+                $nowTotal = 0.0;
+                foreach ($normalized as $batch) $nowTotal += (float)$batch['stock'];
+                if (abs($nowTotal - $wasTotal) > 0.0001) {
+                    scQueueEditNotification($pdo, $collId, $restaurantNumber, $productId, $wasTotal, $nowTotal);
+                }
+            }
+
             auditLog($pdo, 'stock_collection_cell_saved', 'stock_collection', $collId, $authUserName, [
                 'product_id' => $productId,
                 'restaurant_number' => $restaurantNumber,
