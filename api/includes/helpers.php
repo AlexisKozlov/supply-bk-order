@@ -1041,7 +1041,7 @@ function getSessionUser($pdo) {
                         }
                         // Эмулируем сессию для скачивания: имя пользователя есть, остальное
                         // не нужно (uploads-обработчики не требуют role/legal_entities).
-                        $u = $pdo->prepare("SELECT name, role, display_role, legal_entities, permissions, created_at, telegram_chat_id, hidden_modules FROM users WHERE name = ? LIMIT 1");
+                        $u = $pdo->prepare("SELECT name, role, display_role, legal_entities, supplier_scope, permissions, created_at, telegram_chat_id, hidden_modules FROM users WHERE name = ? LIMIT 1");
                         $u->execute([$row['user_name']]);
                         $userRow = $u->fetch();
                         if ($userRow) {
@@ -1073,7 +1073,7 @@ function getSessionUser($pdo) {
     // expires_at сразу выбираем — раньше делали отдельный SELECT перед UPDATE,
     // что давало 3 запроса к user_sessions на каждый авторизованный hit.
     $s = $pdo->prepare("
-        SELECT u.name, u.email, u.role, u.display_role, u.legal_entities, u.permissions,
+        SELECT u.name, u.email, u.role, u.display_role, u.legal_entities, u.supplier_scope, u.permissions,
                u.created_at, u.telegram_chat_id, u.hidden_modules,
                s.created_at AS session_created_at,
                s.expires_at AS session_expires_at

@@ -5,9 +5,12 @@
       <h1>Заявки поставщикам</h1>
     </div>
 
-    <!-- Page tabs -->
+    <!-- Page tabs.
+         Пользователю, привязанному к своему поставщику (например, сотруднику
+         производственного центра), настроечные вкладки не нужны: он приходит
+         посмотреть заявки и забрать файлы. -->
     <div class="rom-page-tabs">
-      <button class="rom-page-tab" :class="{ active: pageTab === 'overview' }" @click="pageTab = 'overview'; loadOverview()">
+      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'overview' }" @click="pageTab = 'overview'; loadOverview()">
         Обзор
       </button>
       <button class="rom-page-tab" :class="{ active: pageTab === 'status' }" @click="pageTab = 'status'; loadStatus()">
@@ -19,10 +22,10 @@
       <button class="rom-page-tab" :class="{ active: pageTab === 'schedules' }" @click="pageTab = 'schedules'; loadSchedules()">
         Графики
       </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadTemplates()">
+      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadTemplates()">
         Шаблон товаров
       </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'settings' }" @click="pageTab = 'settings'; loadSettings()">
+      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'settings' }" @click="pageTab = 'settings'; loadSettings()">
         Настройки
       </button>
     </div>
@@ -1060,6 +1063,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
@@ -1086,9 +1090,21 @@ const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'С
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
 const daysShort = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
 
+// Пользователь, привязанный к своим поставщикам (внешние сотрудники —
+// например, производственный центр). Ограничение всё равно проверяется на
+// сервере; здесь только убираем ненужные ему вкладки.
+const userStore = useUserStore();
+const isSupplierScoped = computed(() => {
+  const raw = userStore.currentUser?.supplier_scope;
+  if (!raw) return false;
+  const list = Array.isArray(raw) ? raw : (() => { try { return JSON.parse(raw) || []; } catch { return []; } })();
+  return list.length > 0;
+});
+
 // Стартовая вкладка: «Обзор» по умолчанию, но при входе по прямой ссылке
 // на конкретного поставщика (props.supplierId) — сразу «Приём».
-const pageTab = ref(props.supplierId ? 'status' : 'overview');
+// Привязанному пользователю «Обзора» не видно, поэтому открываем «Приём».
+const pageTab = ref(props.supplierId || isSupplierScoped.value ? 'status' : 'overview');
 const loading = ref(false);
 const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');

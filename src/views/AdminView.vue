@@ -941,6 +941,23 @@
               <div class="adm-le-hint">Если ничего не выбрано — доступны все</div>
             </div>
 
+            <!-- Внешние пользователи (например, производственный центр) должны
+                 видеть в «Заявках поставщикам» только своего поставщика. -->
+            <div v-if="form.role !== 'admin'" class="modal-field">
+              <span class="modal-field-label">Только эти поставщики (для внешних сотрудников)</span>
+              <div class="adm-le-grid">
+                <label v-for="sup in scopeSuppliers" :key="sup.id" class="adm-le-option">
+                  <input type="checkbox" :value="sup.id" v-model="form.supplier_scope" />
+                  <span class="adm-le-box"><BkIcon name="success" size="sm"/></span>
+                  <span>{{ sup.short_name }} <small class="adm-sup-le">{{ shortEntity(sup.legal_entity) }}</small></span>
+                </label>
+              </div>
+              <div class="adm-le-hint">
+                Если ничего не выбрано — в модуле «Заявки поставщикам» видны все поставщики
+                доступных юр. лиц. Выбор ограничивает и данные, и выгрузки.
+              </div>
+            </div>
+
             <!-- Доступ к модулям -->
             <div class="modal-field">
               <span class="modal-field-label">Доступ к модулям</span>
@@ -1028,8 +1045,19 @@ const lockouts = ref({});
 
 const allEntities = LEGAL_ENTITIES;
 
+// Список поставщиков для привязки внешних пользователей. Берём только
+// подключённых к модулю заявок — привязывать к остальным нечего.
+const scopeSuppliers = ref([]);
+async function loadScopeSuppliers() {
+  if (scopeSuppliers.value.length) return;
+  const { data } = await db.from('suppliers')
+    .select('id,short_name,legal_entity,so_enabled,is_active')
+    .eq('so_enabled', 1).order('short_name').limit(500);
+  scopeSuppliers.value = (data || []).filter(s => Number(s.is_active) === 1);
+}
+
 const userModal = ref({ show: false, user: null });
-const form = ref({ name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [], permissions: {} });
+const form = ref({ name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [], supplier_scope: [], permissions: {} });
 let _userFormSnapshot = '';
 
 function tryCloseUserModal() {
@@ -1887,6 +1915,7 @@ async function saveMaintenanceMsg() {
 }
 
 function openUserModal(user) {
+  loadScopeSuppliers();
   userModal.value.user = user;
   if (user) {
     const perms = user.permissions;
@@ -1897,10 +1926,11 @@ function openUserModal(user) {
       role: user.role || 'user',
       display_role: user.display_role || '',
       legal_entities: parseLe(user.legal_entities),
+      supplier_scope: parseLe(user.supplier_scope),
       permissions: (perms && typeof perms === 'object') ? { ...perms } : {},
     };
   } else {
-    form.value = { name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [], permissions: {} };
+    form.value = { name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [], supplier_scope: [], permissions: {} };
   }
   userModal.value.show = true;
   _userFormSnapshot = JSON.stringify(form.value);
@@ -1919,6 +1949,7 @@ async function saveUser() {
       role: form.value.role,
       display_role: form.value.display_role.trim() || null,
       legal_entities: JSON.stringify(form.value.legal_entities),
+      supplier_scope: form.value.supplier_scope,
       permissions: getPermissionsDiff(),
     };
     if (form.value.password) payload.password = form.value.password;
@@ -3118,4 +3149,5 @@ onUnmounted(() => {
   .fb-sidebar { width: 100%; max-height: 300px; border-right: none; border-bottom: 1px solid var(--border-light); }
   .fb-chat { min-height: 400px; }
 }
+.adm-sup-le { color: var(--text-muted); font-size: 11px; margin-left: 4px; }
 </style>

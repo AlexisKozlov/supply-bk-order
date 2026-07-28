@@ -108,7 +108,7 @@ export const useUserStore = defineStore('user', () => {
         }
         if (data.session_token) setSessionToken(data.session_token);
         if (data.user) {
-          const updated = { ...stored, email: data.user.email || null, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
+          const updated = { ...stored, email: data.user.email || null, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, supplier_scope: data.user.supplier_scope || [], permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
           currentUser.value = updated;
           localStorage.setItem('bk_user', JSON.stringify(updated));
           return updated;
@@ -135,7 +135,7 @@ export const useUserStore = defineStore('user', () => {
       }
       if (data.session_token) setSessionToken(data.session_token);
       if (data.user && currentUser.value) {
-        const updated = { ...currentUser.value, email: data.user.email || null, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
+        const updated = { ...currentUser.value, email: data.user.email || null, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, supplier_scope: data.user.supplier_scope || [], permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
         currentUser.value = updated;
         localStorage.setItem('bk_user', JSON.stringify(updated));
         return updated;

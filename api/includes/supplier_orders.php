@@ -1081,6 +1081,39 @@ function soGetAllowedEntityGroups($sessionUser) {
     return array_keys($groups);
 }
 
+/**
+ * «Свои» поставщики пользователя. Пусто — ограничения нет.
+ *
+ * Нужно для внешних сотрудников: ПРЦ заходит смотреть заявки на тесто,
+ * и заявки других поставщиков Пицца Стар ему видеть незачем. Проверка
+ * серверная: спрятать вкладки на фронте недостаточно.
+ */
+function soUserSupplierScope($sessionUser) {
+    if (!$sessionUser || ($sessionUser['role'] ?? '') === 'admin') return [];
+    $raw = $sessionUser['supplier_scope'] ?? null;
+    if (is_string($raw)) $raw = json_decode($raw, true);
+    if (!is_array($raw)) return [];
+    $ids = array_values(array_filter(array_map('strval', $raw), fn($v) => trim($v) !== ''));
+    return $ids;
+}
+
+/**
+ * Запрещает привязанному пользователю трогать заявки чужих поставщиков.
+ * Заявки нумеруются подряд, поэтому одной проверки юрлица мало: по прямой
+ * ссылке на id можно было бы открыть чужую.
+ */
+function soRequireOrderSupplierScope($pdo, $sessionUser, $orderId) {
+    $scope = soUserSupplierScope($sessionUser);
+    if (!$scope) return;
+    $st = $pdo->prepare("SELECT supplier_id FROM so_orders WHERE id = ?");
+    $st->execute([(int)$orderId]);
+    $supId = $st->fetchColumn();
+    if ($supId === false) return; // «не найдено» вернёт сам обработчик
+    if (!in_array((string)$supId, $scope, true)) {
+        soRespond(['error' => 'Нет доступа к этой заявке'], 403);
+    }
+}
+
 function soRequireAdminEntityGroupAccess($sessionUser, $legalEntity) {
     if (!$legalEntity || !$sessionUser || ($sessionUser['role'] ?? '') === 'admin') {
         return;
@@ -1092,7 +1125,16 @@ function soRequireAdminEntityGroupAccess($sessionUser, $legalEntity) {
     }
 }
 
-function soAppendAllowedSupplierGroupFilter($sessionUser, $requestedLegalEntity, &$where, &$params, $column = 's.legal_entity_group') {
+function soAppendAllowedSupplierGroupFilter($sessionUser, $requestedLegalEntity, &$where, &$params,
+                                            $column = 's.legal_entity_group', $idColumn = 's.id') {
+    // Пользователь, привязанный к своим поставщикам, видит только их.
+    $scope = soUserSupplierScope($sessionUser);
+    if ($scope) {
+        $sph = implode(',', array_fill(0, count($scope), '?'));
+        $where[] = $idColumn . " IN ({$sph})";
+        foreach ($scope as $sid) $params[] = $sid;
+    }
+
     if ($requestedLegalEntity) {
         soRequireAdminEntityGroupAccess($sessionUser, $requestedLegalEntity);
         $where[] = $column . ' = ?';
@@ -1153,6 +1195,10 @@ function soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId) {
         $allowedGroups = soGetAllowedEntityGroups($sessionUser);
         $supplierGroup = $supplier['legal_entity_group'] ?: getEntityGroup($supplier['legal_entity'] ?? '');
         if (!in_array($supplierGroup, $allowedGroups, true)) {
+            soRespond(['error' => 'Нет доступа к этому поставщику'], 403);
+        }
+        $scope = soUserSupplierScope($sessionUser);
+        if ($scope && !in_array((string)$supplier['id'], $scope, true)) {
             soRespond(['error' => 'Нет доступа к этому поставщику'], 403);
         }
     }
@@ -2038,6 +2084,7 @@ if ($soAction === 'admin') {
         if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             soRespond(['error' => 'Нужны supplier_id и date (ГГГГ-ММ-ДД)'], 400);
         }
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         require_once __DIR__ . '/so_loading_sheets.php';
         if (!soLsSupplierEnabled($pdo, $supplierId)) {
             soRespond(['error' => 'Для этого поставщика загрузочные листы не формируются'], 400);
@@ -2061,6 +2108,7 @@ if ($soAction === 'admin') {
         if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             soRespond(['error' => 'Нужны supplier_id и date (ГГГГ-ММ-ДД)'], 400);
         }
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         require_once __DIR__ . '/so_loading_sheets.php';
         if (!soLsSupplierEnabled($pdo, $supplierId)) soRespond(['enabled' => false, 'restaurants' => []]);
         soRespond(['enabled' => true, 'date' => $date, 'restaurants' => soLsCollectDay($pdo, $supplierId, $date)]);
@@ -2146,7 +2194,7 @@ if ($soAction === 'admin') {
         $legalEntity = $_GET['legal_entity'] ?? null;
         $where = ["is_active = 1", "so_enabled = 0"];
         $params = [];
-        soAppendAllowedSupplierGroupFilter($sessionUser, $legalEntity, $where, $params, 'legal_entity_group');
+        soAppendAllowedSupplierGroupFilter($sessionUser, $legalEntity, $where, $params, 'legal_entity_group', 'id');
         $s = $pdo->prepare("
             SELECT id, short_name, full_name, legal_entity, legal_entity_group
             FROM suppliers
@@ -2991,6 +3039,7 @@ if ($soAction === 'admin') {
         if ($sessionUser && !checkLegalEntityAccess($sessionUser, $order['legal_entity'] ?? '')) {
             soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
+        soRequireOrderSupplierScope($pdo, $sessionUser, $order['id']);
 
         // Скрываем пустые позиции (quantity=0 и admin_qty не выставлен) — это мусор от старых правок.
         $items = $pdo->prepare("SELECT * FROM so_order_items WHERE order_id = ? AND (quantity > 0 OR admin_qty > 0) ORDER BY product_name");
@@ -3015,6 +3064,7 @@ if ($soAction === 'admin') {
             if (!checkLegalEntityAccess($sessionUser, $orderLE ?: '')) {
                 soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
             }
+            soRequireOrderSupplierScope($pdo, $sessionUser, $orderId);
         }
 
         // Валидация статуса
@@ -3462,6 +3512,7 @@ if ($soAction === 'admin') {
         if ($sessionUser && !checkLegalEntityAccess($sessionUser, $orderInfo['legal_entity'] ?? '')) {
             soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
+        soRequireOrderSupplierScope($pdo, $sessionUser, $orderId);
         // Статус 'locked' (день закрыт) удалению не мешает: блокировка нужна,
         // чтобы после дедлайна заявку не правил ресторан. Закупки — владелец
         // процесса и удаляют осознанно, предупреждение показывает фронт.

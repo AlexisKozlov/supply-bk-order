@@ -136,6 +136,15 @@ if ($fn === 'update_user') {
     if (isset($body['role']) && in_array($body['role'], ['admin', 'manager', 'user', 'viewer'])) { $sets[] = "role=?"; $params[] = $body['role']; }
     if (array_key_exists('display_role', $body)) { $sets[] = "display_role=?"; $params[] = $body['display_role']; }
     if (array_key_exists('legal_entities', $body)) { $sets[] = "legal_entities=?"; $params[] = is_array($body['legal_entities']) ? json_encode($body['legal_entities'], JSON_UNESCAPED_UNICODE) : $body['legal_entities']; }
+    // Привязка к «своим» поставщикам: внешние пользователи (например, ПРЦ)
+    // видят в модуле заявок только их. Пустой список — ограничения нет.
+    if (array_key_exists('supplier_scope', $body)) {
+        $sv = $body['supplier_scope'];
+        if (is_string($sv)) $sv = json_decode($sv, true);
+        $sv = is_array($sv) ? array_values(array_filter(array_map('strval', $sv), fn($v) => trim($v) !== '')) : [];
+        $sets[] = "supplier_scope=?";
+        $params[] = $sv ? json_encode($sv, JSON_UNESCAPED_UNICODE) : null;
+    }
     if (array_key_exists('permissions', $body)) {
         $pv = $body['permissions'];
         $sets[] = "permissions=?";
