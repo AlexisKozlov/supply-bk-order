@@ -29,7 +29,9 @@ class ComposerStaticInit980145ae5f8dc3ccd3c24b6716876ae8
             'Psr\\Http\\Message\\' => 17,
             'Psr\\Http\\Client\\' => 16,
             'Psr\\Clock\\' => 10,
+            'PhpOffice\\PhpWord\\' => 18,
             'PhpOffice\\PhpSpreadsheet\\' => 25,
+            'PhpOffice\\Math\\' => 15,
             'PHPMailer\\PHPMailer\\' => 20,
         ),
         'M' => 
@@ -89,9 +91,17 @@ class ComposerStaticInit980145ae5f8dc3ccd3c24b6716876ae8
         array (
             0 => __DIR__ . '/..' . '/psr/clock/src',
         ),
+        'PhpOffice\\PhpWord\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/phpoffice/phpword/src/PhpWord',
+        ),
         'PhpOffice\\PhpSpreadsheet\\' => 
         array (
             0 => __DIR__ . '/..' . '/phpoffice/phpspreadsheet/src/PhpSpreadsheet',
+        ),
+        'PhpOffice\\Math\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/phpoffice/math/src/Math',
         ),
         'PHPMailer\\PHPMailer\\' => 
         array (
