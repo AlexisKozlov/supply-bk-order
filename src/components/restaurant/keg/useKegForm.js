@@ -402,14 +402,16 @@ export function useKegForm(initialIdRef, emit) {
   }
 
   // Кнопка «Кеги не сдал» — только по маршрутизированной заявке и только
-  // со следующего дня после даты возврата (кеги уже должны были забрать).
+  // с дня вывоза (машина должна была приехать — значит уже видно, приехала ли).
   const canMarkNotReturned = computed(() => {
     if (form.status !== 'ROUTED' || !form.return_date) return false;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const [Y, M, D] = String(form.return_date).split('-').map(Number);
     if (!Y || !M || !D) return false;
     const rd = new Date(Y, M - 1, D); rd.setHours(0, 0, 0, 0);
-    return today.getTime() > rd.getTime();
+    // Кнопка доступна С ДНЯ вывоза, а не со следующего: если машина не
+    // приехала, ресторан отмечает это сразу, пока помнит.
+    return today.getTime() >= rd.getTime();
   });
 
   // Модалка причины «Не сдана» (обязательна для ресторана).
