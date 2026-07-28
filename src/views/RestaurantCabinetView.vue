@@ -735,7 +735,7 @@
                 </div>
                 </div>
 
-                <div class="sof-aside" :ref="bindSofAside">
+                <div class="sof-aside">
                 <!-- Сводка рядом с кнопкой: на компьютере видно, что уходит
                      поставщику, не возвращаясь глазами к списку. -->
                 <div v-if="supProducts[sup.id]?.length" class="sof-sum">
@@ -4031,41 +4031,6 @@ onMounted(async () => {
   } finally { globalLoading.value = false; }
 });
 
-/**
- * Панель отправки на телефоне закреплена внизу экрана, и её высота
- * «плавает»: строка итога, предупреждение о минимуме, вторая кнопка.
- * Фиксированный отступ под формой этого не покрывал — панель наезжала
- * на последние позиции заказа. Поэтому меряем панель и отдаём её высоту
- * форме как padding-bottom.
- */
-let sofAsideObserver = null;
-function applySofAsideSpacing(el) {
-  const form = el.closest('.order-form');
-  if (!form) return;
-  if (getComputedStyle(el).position !== 'fixed') { form.style.paddingBottom = ''; return; }
-  // Считаем не высоту панели, а расстояние от её верха до низа экрана:
-  // панель приподнята над нижним меню кабинета, и этот просвет тоже
-  // должен войти в запас, иначе последнюю позицию не долистать.
-  const gap = window.innerHeight - el.getBoundingClientRect().top;
-  form.style.paddingBottom = Math.max(0, Math.round(gap)) + 18 + 'px';
-}
-function bindSofAside(el) {
-  if (!el) return;
-  if (!sofAsideObserver) {
-    sofAsideObserver = new ResizeObserver(entries => {
-      for (const e of entries) applySofAsideSpacing(e.target);
-    });
-    // Поворот экрана меняет вёрстку панели, но не её размер — ResizeObserver
-    // тогда молчит, поэтому пересчитываем и по resize окна.
-    window.addEventListener('resize', recalcSofAsides);
-  }
-  sofAsideObserver.observe(el);
-  nextTick(() => applySofAsideSpacing(el));
-}
-function recalcSofAsides() {
-  document.querySelectorAll('.sof-aside').forEach(applySofAsideSpacing);
-}
-
 onUnmounted(() => {
   cabinetBackgroundRunId++;
   clearInterval(delEditTimerInterval);
@@ -4076,8 +4041,6 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', onBeforeUnload);
   window.removeEventListener('bk:ro-session-expired', onSessionExpiredFlushDraft);
   window.removeEventListener('online', flushStockDraftOnline);
-  window.removeEventListener('resize', recalcSofAsides);
-  if (sofAsideObserver) { sofAsideObserver.disconnect(); sofAsideObserver = null; }
   clearTimeout(stockDraftTimer);
 });
 </script>
@@ -4695,18 +4658,14 @@ onUnmounted(() => {
    а предупреждение о минимуме уходило под него. */
 @media (max-width: 899px) {
   .sof-sum { display: none; }
+  /* Панель действий идёт обычным блоком под списком позиций.
+     Закреплять её у нижнего края экрана оказалось неудобно: она
+     наезжала на заказ и отнимала место на маленьком экране. */
   .sof-aside {
-    position: fixed; left: 10px; right: 10px; z-index: 190;
-    bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+    margin-top: 10px;
     background: #fff; border: 1px solid #E5DCCF; border-radius: 16px;
     padding: 11px 13px 12px;
-    box-shadow: 0 10px 30px rgba(60,40,20,.14);
   }
-  /* Отступ под панелью задаётся из скрипта по её реальной высоте
-     (см. bindSofAside): панель то с предупреждением о минимуме, то без,
-     и фиксированной величины не хватало. Здесь — запас на случай,
-     если скрипт ещё не отработал. */
-  .order-form { padding-bottom: 132px; }
   .sof-warn-desk { display: none; }
   .sof-total { display: none; }
   .sof-aside .submit-area { padding: 0; border: none; }
@@ -5615,7 +5574,13 @@ tr.del-err { background: #fef2f2; }
   /* Mobile tab bar */
   .mob-tabbar { display: flex !important; }
   .cab-topbar { display: none; }
-  .cab-section { padding: 16px 12px 90px; }
+  /* Нижнее меню закреплено поверх страницы, поэтому каждая вкладка кабинета
+     заканчивается запасом на его высоту — иначе меню накрывает последнюю
+     кнопку. Селектор с двумя классами перебивает отступы отдельных вкладок. */
+  .cab-section,
+  .cab-section.cab-section-orders {
+    padding: 16px 12px calc(74px + env(safe-area-inset-bottom, 0px) + 20px);
+  }
 }
 
 /* ═══ Mobile tab bar ═══ */
