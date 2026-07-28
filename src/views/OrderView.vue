@@ -59,20 +59,25 @@
             <option value="boxes">Коробки</option>
           </select>
         </div>
-        <div class="pf-group pf-narrow">
+        <!-- Переключатель и сбор из заявок — одно поле: кнопка относится
+             именно к транзиту, отдельной колонкой она выглядела чужой. -->
+        <div class="pf-group pf-transit">
           <label>Транзит</label>
-          <select :value="orderStore.settings.hasTransit ? 'true' : 'false'" @change="(e) => { orderStore.settings.hasTransit = e.target.value === 'true'; draftStore.save(); }" :disabled="orderStore.viewOnlyMode">
-            <option value="false">Нет</option>
-            <option value="true">Да</option>
-          </select>
-        </div>
-        <!-- Заявки на несколько поставок вперёд: то, что приедет раньше
-             новой поставки, подставляем в «Транзит» одной кнопкой. -->
-        <div v-if="!orderStore.viewOnlyMode" class="pf-group pf-narrow">
-          <label>&nbsp;</label>
-          <button class="transit-pull-btn" :disabled="!canPullTransit || transitLoading" @click="openTransitModal">
-            {{ transitLoading ? 'Считаю…' : 'Транзит из заявок' }}
-          </button>
+          <div class="pf-transit-row">
+            <select :value="orderStore.settings.hasTransit ? 'true' : 'false'" @change="(e) => { orderStore.settings.hasTransit = e.target.value === 'true'; draftStore.save(); }" :disabled="orderStore.viewOnlyMode">
+              <option value="false">Нет</option>
+              <option value="true">Да</option>
+            </select>
+            <button
+              v-if="!orderStore.viewOnlyMode"
+              class="transit-pull-btn"
+              :disabled="!canPullTransit || transitLoading"
+              :title="canPullTransit ? 'Подставить то, что уже едет по другим заявкам' : 'Выберите поставщика, дату поставки и добавьте товары'"
+              @click="openTransitModal"
+            >
+              {{ transitLoading ? 'Считаю…' : 'из заявок' }}
+            </button>
+          </div>
         </div>
         <div v-if="showCollapseHint" class="params-collapse-hint" @click="settingsExpanded = false; showCollapseHint = false;">
           Параметры заполнены — нажмите чтобы свернуть ▲
@@ -1882,14 +1887,26 @@ async function exitEditMode() {
 }
 
 /* ── Транзит из заявок ── */
+.pf-transit-row { display: flex; align-items: stretch; gap: 6px; }
+.pf-transit-row select { flex: 0 0 72px; }
 .transit-pull-btn {
-  height: 38px; padding: 0 14px;
-  border: 1.5px solid #E4D9CB; border-radius: 8px; background: #fff;
-  font: inherit; font-size: 13px; font-weight: 700; color: #5F4B38;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  border: 1.5px solid #F0C89A; border-radius: 8px;
+  background: #FFF4E8; color: #C25E12;
+  font: inherit; font-size: 12.5px; font-weight: 700;
   cursor: pointer; white-space: nowrap;
+  transition: background .16s ease, border-color .16s ease;
 }
-.transit-pull-btn:hover:not(:disabled) { border-color: #E87A1E; color: #C25E12; }
-.transit-pull-btn:disabled { opacity: .5; cursor: default; }
+.transit-pull-btn:hover:not(:disabled) { background: #FFE9D2; border-color: #E87A1E; }
+.transit-pull-btn:disabled { opacity: .45; cursor: default; }
+
+/* На телефоне поля идут на всю ширину — кнопка тянется вместе с ними,
+   иначе строка транзита выглядит обрубленной посередине экрана. */
+@media (max-width: 640px) {
+  .pf-transit-row { width: 100%; }
+  .transit-pull-btn { flex: 1 1 auto; }
+}
 
 .transit-modal { max-width: 720px; width: 100%; max-height: 88vh; overflow: auto; text-align: left; }
 .transit-sub { margin: 4px 0 12px; font-size: 13px; color: #8A7F72; line-height: 1.45; }
