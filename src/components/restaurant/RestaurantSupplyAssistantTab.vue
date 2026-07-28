@@ -26,6 +26,15 @@
     </div>
 
     <template v-else>
+      <!-- Шапка-обложка: тот же приём, что на заявке поставщику и
+           корректировках — экран сразу говорит, где ты и что делаешь. -->
+      <header class="sa-hero">
+        <div class="sa-hero-main">
+          <h2 class="sa-hero-title">Сбор заказа основной поставки</h2>
+          <p class="sa-hero-sub">Помощник соберёт заявку и подготовит файл для загрузки в 1С УТ</p>
+        </div>
+      </header>
+
       <!-- ── Выбор даты (ближайшие 5) ── -->
       <div class="sa-section">
         <div class="sa-section-label">Дата поставки</div>
@@ -81,7 +90,7 @@
           <div class="sa-toolbar">
             <label class="sa-search">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-              <input v-model="searchQuery" type="text" placeholder="Поиск по названию или артикулу" />
+              <input v-model="searchQuery" type="text" :placeholder="isNarrow ? 'Поиск товара' : 'Поиск по названию или артикулу'" />
               <button v-if="searchQuery" class="sa-search-clear" @click="searchQuery = ''" aria-label="Очистить">&times;</button>
             </label>
             <button
@@ -130,18 +139,27 @@
                     {{ item.stock != null ? item.stock : '—' }}
                   </td>
                   <td class="sa-col-qty">
-                    <input
-                      v-model.number="item.quantity"
-                      type="number"
-                      inputmode="decimal"
-                      min="0"
-                      :step="item.multiplicity > 1 ? item.multiplicity : 1"
-                      class="sa-qty"
-                      :class="{ 'is-err': item._multError }"
-                      placeholder="0"
-                      @input="checkMult(item)"
-                      @focus="$event.target.select()"
-                    />
+                    <div class="sa-qty-wrap">
+                      <button
+                        class="sa-step"
+                        :disabled="!(item.quantity > 0)"
+                        @click="stepQty(item, -1)"
+                        aria-label="Убавить"
+                      >&minus;</button>
+                      <input
+                        v-model.number="item.quantity"
+                        type="number"
+                        inputmode="decimal"
+                        min="0"
+                        :step="item.multiplicity > 1 ? item.multiplicity : 1"
+                        class="sa-qty"
+                        :class="{ 'is-err': item._multError, 'is-on': item.quantity > 0 }"
+                        placeholder="0"
+                        @input="checkMult(item)"
+                        @focus="$event.target.select()"
+                      />
+                      <button class="sa-step" @click="stepQty(item, 1)" aria-label="Прибавить">+</button>
+                    </div>
                     <div v-if="item._multError" class="sa-mult-hint">
                       Кратно {{ item.multiplicity }} → {{ multSuggest(item) }}
                     </div>
@@ -172,7 +190,7 @@
             v-model="orderComment"
             type="text"
             class="sa-comment"
-            placeholder="Комментарий к заказу (необязательно)"
+            :placeholder="isNarrow ? 'Комментарий (необязательно)' : 'Комментарий к заказу (необязательно)'"
           />
 
           <div class="sa-submit-row">
@@ -509,8 +527,19 @@ onMounted(() => {
     onScroll();
   });
 });
+// На телефоне длинные подсказки в полях обрезаются многоточием, поэтому
+// для узкого экрана держим короткие варианты.
+const isNarrow = ref(false);
+let narrowMq = null;
+function syncNarrow(e) { isNarrow.value = e.matches; }
+onMounted(() => {
+  narrowMq = window.matchMedia('(max-width: 560px)');
+  isNarrow.value = narrowMq.matches;
+  narrowMq.addEventListener('change', syncNarrow);
+});
 onBeforeUnmount(() => {
   if (scrollTarget) scrollTarget.removeEventListener('scroll', onScroll);
+  if (narrowMq) narrowMq.removeEventListener('change', syncNarrow);
 });
 
 // ── Выбор даты и загрузка заказа ──
@@ -612,6 +641,23 @@ function checkMult(item) {
   const qty = Number(item.quantity) || 0;
   const mult = item.multiplicity || 1;
   item._multError = mult > 1 && qty > 0 && qty % mult !== 0;
+}
+/**
+ * Шаг количества кнопками. Если в поле уже стоит число не по кратности
+ * (набрали руками), кнопка не прибавляет сверху, а подтягивает к ближайшему
+ * кратному в свою сторону — иначе ошибка кратности так и остаётся.
+ */
+function stepQty(item, dir) {
+  const step = item.multiplicity > 1 ? item.multiplicity : 1;
+  const cur = Number(item.quantity) || 0;
+  let next;
+  if (cur % step !== 0) {
+    next = dir > 0 ? Math.ceil(cur / step) * step : Math.floor(cur / step) * step;
+  } else {
+    next = cur + dir * step;
+  }
+  item.quantity = Math.max(0, next);
+  checkMult(item);
 }
 function multSuggest(item) {
   const qty = Number(item.quantity) || 0;
@@ -882,6 +928,16 @@ function copyGroup(cat) {
   display: flex; gap: 8px; overflow-x: auto;
   padding: 9px 2px 4px; -webkit-overflow-scrolling: touch;
 }
+/* Шапка-обложка экрана */
+.sa-hero {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  background: linear-gradient(135deg, #4A2013 0%, #8A4526 100%);
+  color: #fff; border-radius: 16px; padding: 15px 16px; margin-bottom: 14px;
+}
+.sa-hero-main { min-width: 0; }
+.sa-hero-title { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.25; }
+.sa-hero-sub { margin: 5px 0 0; font-size: 12.5px; line-height: 1.45; opacity: .8; }
+
 .sa-day {
   position: relative; flex: 0 0 auto;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -892,13 +948,17 @@ function copyGroup(cat) {
 }
 .sa-day:hover { border-color: #d9cebf; }
 .sa-day:active { transform: scale(.97); }
-.sa-day-name { font-size: 13px; font-weight: 700; color: var(--sa-ink); }
+.sa-day-name { font-size: 14px; font-weight: 800; color: #3A2418; letter-spacing: -.2px; }
 .sa-day-name--short { display: none; }
-.sa-day-date { font-size: 12px; color: var(--sa-muted); font-variant-numeric: tabular-nums; }
+.sa-day-date { font-size: 11.5px; font-weight: 600; color: #9A8F80; font-variant-numeric: tabular-nums; }
 .sa-day.has-order { border-color: #cfe6cf; background: #F4FBF4; }
-.sa-day.is-active { border-color: var(--sa-brown); background: var(--sa-brown); }
+.sa-day.is-active {
+  border-color: transparent;
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
+  box-shadow: 0 6px 18px rgba(232,122,30,.28);
+}
 .sa-day.is-active .sa-day-name { color: #fff; }
-.sa-day.is-active .sa-day-date { color: rgba(255,255,255,.72); }
+.sa-day.is-active .sa-day-date { color: rgba(255,255,255,.85); }
 .sa-day-mark {
   position: absolute; top: -7px; right: -7px;
   width: 20px; height: 20px; padding: 3px;
@@ -982,7 +1042,14 @@ function copyGroup(cat) {
 .sa-btn--ghost:hover:not(:disabled) { background: var(--sa-bg-soft); border-color: var(--sa-brown); }
 .sa-btn--toggle { background: var(--sa-bg-soft); border-color: var(--sa-line); color: #5f4b38; }
 .sa-btn--toggle:hover:not(:disabled) { border-color: #d9cebf; }
-.sa-btn--toggle.is-on { background: var(--sa-brown); border-color: var(--sa-brown); color: #fff; }
+/* Включённый фильтр «В заказе» — фирменный акцент: видно, что список
+   сейчас показывает не всё, а только заполненные позиции. */
+.sa-btn--toggle.is-on {
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
+  border-color: transparent; color: #fff;
+  box-shadow: 0 4px 12px rgba(232,122,30,.24);
+}
+.sa-btn--toggle.is-on .sa-toggle-count { background: rgba(255,255,255,.25); }
 .sa-btn:disabled { opacity: .5; cursor: default; }
 .sa-toggle-count {
   display: inline-flex; align-items: center; justify-content: center;
@@ -990,7 +1057,7 @@ function copyGroup(cat) {
   border-radius: 10px; background: var(--sa-accent); color: #fff;
   font-size: 11px; font-weight: 800;
 }
-.sa-btn--toggle.is-on .sa-toggle-count { background: rgba(255,255,255,.22); }
+
 
 /* ── Таблица позиций ── */
 .sa-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -1000,6 +1067,8 @@ function copyGroup(cat) {
   padding: 8px 10px; text-align: center;
   font-size: 11px; font-weight: 800; letter-spacing: .03em;
   text-transform: uppercase; color: var(--sa-muted);
+  /* Заголовок должен стоять над своей колонкой: у текстовых колонок
+     содержимое слева, значит и подпись слева. */
   background: #fff; border-bottom: 1.5px solid var(--sa-line);
   white-space: nowrap;
 }
@@ -1014,6 +1083,8 @@ function copyGroup(cat) {
 
 .sa-col-name { min-width: 200px; white-space: normal; line-height: 1.4; text-align: left; }
 .sa-col-analog { font-size: 12px; color: var(--sa-muted); max-width: 160px; text-align: left; }
+.sa-table thead th.sa-col-name,
+.sa-table thead th.sa-col-analog { text-align: left; }
 .sa-col-mult { text-align: center; white-space: nowrap; }
 .sa-col-stock { text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sa-col-qty { width: 96px; }
@@ -1036,17 +1107,36 @@ function copyGroup(cat) {
   font-size: 11px; font-weight: 700; color: #3b6ea3; vertical-align: middle;
 }
 
+.sa-qty-wrap {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.sa-step {
+  flex: 0 0 auto;
+  width: 34px; height: 40px; padding: 0;
+  border: 1.5px solid var(--sa-line); border-radius: 9px;
+  background: #fff; color: #6B5544;
+  font-size: 19px; font-weight: 700; line-height: 1;
+  cursor: pointer; user-select: none;
+  transition: background .16s ease, border-color .16s ease, color .16s ease;
+}
+.sa-step:hover:not(:disabled) { background: rgba(232,122,30,.1); border-color: #E87A1E; color: #C25E12; }
+.sa-step:active:not(:disabled) { transform: translateY(1px); }
+.sa-step:disabled { opacity: .4; cursor: default; }
+
 .sa-qty {
-  width: 100%; min-height: 40px; padding: 6px 8px;
+  width: 72px; min-height: 40px; padding: 6px 8px;
   border: 1.5px solid var(--sa-line); border-radius: 9px;
   background: var(--sa-bg-soft);
   font: inherit; font-size: 15px; font-weight: 700; text-align: center;
   color: var(--sa-ink); font-variant-numeric: tabular-nums;
   transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
 }
+/* Заполненное поле видно с одного взгляда — как на экране заявки. */
+.sa-qty.is-on { border-color: #E87A1E; background: rgba(232,122,30,.08); }
+.sa-qty::placeholder { color: #C4B8A8; font-weight: 500; }
 .sa-qty:focus {
-  outline: 0; background: #fff; border-color: var(--sa-brown);
-  box-shadow: 0 0 0 3px rgba(80,35,20,.1);
+  outline: 0; background: #fff; border-color: #E87A1E;
+  box-shadow: 0 0 0 3px rgba(232,122,30,.14);
 }
 .sa-qty.is-err { border-color: #e5736b; background: #FFF1F0; color: #c0392b; }
 .sa-mult-hint { margin-top: 3px; font-size: 11px; color: #c0392b; font-weight: 600; text-align: center; }
@@ -1084,11 +1174,19 @@ function copyGroup(cat) {
   display: flex; align-items: center; justify-content: space-between;
   gap: 14px; flex-wrap: wrap;
 }
-.sa-totals { display: flex; gap: 20px; flex-wrap: wrap; }
-.sa-total { display: flex; flex-direction: column; }
+/* Итоги — плитками, а не голыми числами в ряд: на узком экране ряд
+   выдавливал последнюю подпись за край карточки. */
+.sa-totals { display: flex; gap: 10px; flex-wrap: wrap; }
+.sa-total {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 96px; padding: 8px 12px;
+  border: 1.5px solid var(--sa-line); border-radius: 12px;
+  background: var(--sa-bg-soft);
+}
 .sa-total-num { font-size: 22px; font-weight: 800; color: var(--sa-brown); line-height: 1.1; font-variant-numeric: tabular-nums; }
-.sa-total-lbl { font-size: 12px; color: var(--sa-muted); }
-.sa-total--est .sa-total-num { color: var(--sa-muted); }
+.sa-total-lbl { font-size: 11.5px; font-weight: 600; color: var(--sa-muted); }
+.sa-total--est { background: #fff; }
+.sa-total--est .sa-total-num { font-size: 18px; color: var(--sa-muted); }
 .sa-submit-row .sa-btn { flex: 0 0 auto; }
 
 /* ── Алерты ── */
@@ -1402,7 +1500,10 @@ function copyGroup(cat) {
   .sa-card { padding: 14px; border-radius: 14px; }
   .sa-submit-row { flex-direction: column; align-items: stretch; }
   .sa-submit-row .sa-btn { width: 100%; }
-  .sa-totals { justify-content: space-between; gap: 12px; }
+  .sa-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .sa-total { min-width: 0; }
+  /* Кнопка сохранения не должна прятаться под нижним меню кабинета. */
+  .sa-submit { margin-bottom: 18px; }
 
   /* Даты — 5 узких плиток в один ряд, без переноса и скролла */
   .sa-days { flex-wrap: nowrap; overflow-x: visible; gap: 6px; }
@@ -1425,9 +1526,11 @@ function copyGroup(cat) {
 
   /* Только товар, кратность, количество. Селекторы с .sa-table tbody td —
      иначе их по специфичности перебивает правило td выше. */
-  .sa-table tbody td.sa-col-analog,
-  .sa-table tbody td.sa-col-stock { display: none; }
-  .sa-table tbody td.sa-col-name { flex: 1 1 120px; min-width: 0; font-size: 13.5px; line-height: 1.35; }
+  .sa-table tbody td.sa-col-analog { display: none; }
+  /* Название занимает всю ширину карточки, под ним ряд: слева кратность и
+     остаток склада, справа количество. Иначе длинное название выдавливало
+     кнопки на отдельную строку с пустотой. */
+  .sa-table tbody td.sa-col-name { flex: 1 1 100%; min-width: 0; font-size: 13.5px; line-height: 1.35; }
   .sa-name-ag {
     display: block;
     margin-top: 3px;
@@ -1438,10 +1541,17 @@ function copyGroup(cat) {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .sa-table tbody td.sa-col-mult { width: auto; text-align: center; }
+  .sa-table tbody td.sa-col-mult { width: auto; text-align: left; }
   .sa-col-mult .sa-dim { display: none; }
-  .sa-table tbody td.sa-col-qty { display: flex; flex-direction: column; align-items: flex-end; width: auto; }
-  .sa-col-qty .sa-qty { width: 76px; }
+  .sa-table tbody td.sa-col-stock {
+    width: auto; margin-right: auto;
+    font-size: 11.5px; font-weight: 700; color: var(--sa-muted);
+  }
+  .sa-table tbody td.sa-col-stock::before { content: 'склад '; font-weight: 600; }
+  .sa-table tbody td.sa-col-stock.sa-dim { display: none; }
+  .sa-table tbody td.sa-col-qty { display: flex; flex-direction: column; align-items: flex-end; width: auto; margin-left: auto; }
+  .sa-col-qty .sa-qty { width: 58px; }
+  .sa-col-qty .sa-step { width: 34px; }
   .sa-mult-hint { width: 100%; text-align: right; margin-top: 4px; }
   .sa-table tbody td.sa-col-act { width: auto; }
 }
