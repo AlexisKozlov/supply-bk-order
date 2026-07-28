@@ -94,7 +94,10 @@ export default defineConfig({
           'edi-autofill.user.js',
         ],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        // /mockups/ — статические страницы-макеты для согласования дизайна.
+        // Без исключения service worker подменял их index.html приложения,
+        // и вместо макета открывалась 404 роутера.
+        navigateFallbackDenylist: [/^\/api\//, /^\/mockups\//],
         runtimeCaching: [
           {
             urlPattern: /\/api\/uploads\//,

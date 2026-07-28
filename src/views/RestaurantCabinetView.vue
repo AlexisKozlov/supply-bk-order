@@ -638,7 +638,6 @@
             <p style="margin-top:14px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок</p>
           </div>
           <template v-else>
-            <div class="cab-info-bar">{{ sup.name }}</div>
             <div class="day-tabs">
               <button v-for="d in sup.available_dates" :key="d.delivery_date" class="day-tab"
                 :class="{ active: supSelectedDates[sup.id] === d.delivery_date, done: !!d.order && !d.order?.is_skip, skipped: !!d.order?.is_skip, closed: d.deadline_status === 'closed' && !d.order }"
@@ -653,23 +652,27 @@
               </button>
             </div>
             <div v-if="supSelectedDates[sup.id]" class="order-form">
-              <div class="deadline-bar" :class="'dl-' + supCurrentDateInfo(sup)?.deadline_status">
-                <span class="deadline-icon" v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </span>
-                <span class="deadline-icon" v-else>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                </span>
-                <template v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'">
-                  Дедлайн: {{ formatDeadline(supCurrentDateInfo(sup)?.deadline) }}<span v-if="supDeadlineTimeLeft[sup.id]" class="deadline-timer"> · осталось {{ supDeadlineTimeLeft[sup.id] }}</span>
-                </template>
-                <template v-else>Приём заявок на эту дату закрыт</template>
-              </div>
-              <div v-if="supMinOrderValue(sup)" class="sup-minorder-note">
-                Минимальный заказ у поставщика — {{ supFmtNum(supMinOrderValue(sup)) }} {{ supMinOrderUnitLabel(sup) }}
+              <!-- Шапка-обложка: поставщик, дата поставки, таймер до дедлайна и
+                   условия в одном блоке. Раньше это были три отдельные полосы,
+                   которые занимали пол-экрана на телефоне. -->
+              <div class="sof-hero" :class="'sof-' + supCurrentDateInfo(sup)?.deadline_status">
+                <div class="sof-hero-main">
+                  <h2 class="sof-hero-title">{{ sup.name }}</h2>
+                  <div class="sof-hero-sub">Поставка {{ fmtDate(supSelectedDates[sup.id]) }}</div>
+                  <div class="sof-hero-cond">
+                    <span v-if="supMinOrderValue(sup)">Минимум {{ supFmtNum(supMinOrderValue(sup)) }} {{ supMinOrderUnitLabel(sup) }}</span>
+                    <span v-if="supCurrentDateInfo(sup)?.deadline_status !== 'open'" class="sof-closed-mark">Приём закрыт</span>
+                  </div>
+                </div>
+                <div v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="sof-timer">
+                  <div class="sof-timer-v">{{ supDeadlineTimeLeft[sup.id] || '—' }}</div>
+                  <div class="sof-timer-l">ДО {{ formatDeadline(supCurrentDateInfo(sup)?.deadline) }}</div>
+                </div>
               </div>
               <div v-if="supProductsLoading[sup.id]" class="mini-loader"><div class="cab-spin"></div></div>
               <template v-else>
+                <div class="sof-cols">
+                <div class="sof-main">
                 <SupplierPreviousOrder
                   v-if="supPreviousOrders[sup.id] && (!supCurrentDateInfo(sup)?.order || supCurrentDateInfo(sup)?.order?.status === 'draft')"
                   :previous-order="supPreviousOrders[sup.id]"
@@ -686,12 +689,12 @@
                   <strong>Поставка не нужна.</strong>
                   <span class="sup-skip-hint">Впишите количества, чтобы отменить.</span>
                 </div>
-                <div v-if="supProducts[sup.id]?.length" class="item-list">
+                <div v-if="supProducts[sup.id]?.length" class="item-list sof-list">
                   <div v-for="p in supProducts[sup.id]" :key="p.sku"
                     class="item-row" :class="{ 'item-filled': supQuantities[sup.id]?.[p.sku] > 0, 'item-error': supHasError(sup.id, p), 'item-admin-edited': supAdminEditInfo(sup.id, p.sku) }">
                     <div class="item-info">
                       <span class="item-name">{{ p.product_name || p.name }}</span>
-                      <span v-if="p.multiplicity" class="item-hint">кр. {{ supFmtNum(p.multiplicity) }}</span>
+                      <span v-if="p.multiplicity" class="item-hint">по {{ supFmtNum(p.multiplicity) }} шт</span>
                       <span v-if="p.min_qty" class="item-hint item-hint-warn">мин. {{ supFmtNum(p.min_qty) }}</span>
                       <span v-if="supAdminEditInfo(sup.id, p.sku)" class="item-edit-mark"
                         :title="`Изменено отделом закупок: было ${supFmtNum(supAdminEditInfo(sup.id, p.sku).original)}, стало ${supFmtNum(supAdminEditInfo(sup.id, p.sku).edited)}`">
@@ -701,39 +704,80 @@
                       <span v-if="p.note" class="item-note">{{ p.note }}</span>
                     </div>
                     <div class="item-input">
-                      <input type="number" class="item-qty" :class="{ 'item-qty-err': supHasError(sup.id, p) }"
-                        v-model.number="supQuantities[sup.id][p.sku]"
-                        :disabled="supCurrentDateInfo(sup)?.deadline_status === 'closed'"
-                        min="0" :step="p.multiplicity || 1" inputmode="numeric" @focus="$event.target.select()" />
+                      <!-- Поле с подписью единицы: раньше был пустой прямоугольник,
+                           и было непонятно, вводить штуки или упаковки. -->
+                      <div class="sof-qty-wrap">
+                        <button type="button" class="sof-step" tabindex="-1"
+                          :disabled="supCurrentDateInfo(sup)?.deadline_status === 'closed' || !(supQuantities[sup.id]?.[p.sku] > 0)"
+                          @click="supStepQty(sup.id, p, -1)" aria-label="Убавить">−</button>
+                        <label class="sof-qty" :class="{ 'sof-qty-on': supQuantities[sup.id]?.[p.sku] > 0, 'sof-qty-err': supHasError(sup.id, p) }">
+                          <input type="number" class="item-qty"
+                            v-model.number="supQuantities[sup.id][p.sku]"
+                            :disabled="supCurrentDateInfo(sup)?.deadline_status === 'closed'"
+                            min="0" :step="p.multiplicity || 1" inputmode="numeric" placeholder="—" @focus="$event.target.select()" />
+                          <span class="sof-qty-u">шт</span>
+                        </label>
+                        <button type="button" class="sof-step" tabindex="-1"
+                          :disabled="supCurrentDateInfo(sup)?.deadline_status === 'closed'"
+                          @click="supStepQty(sup.id, p, 1)" aria-label="Добавить">+</button>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div class="submit-area">
-                  <div v-if="supHasErrors(sup.id)" class="error-msg">Исправьте количество</div>
-                  <div v-if="supFilledCount(sup.id) > 0" class="submit-summary">
-                    <span><strong>{{ supFilledCount(sup.id) }}</strong> {{ pluralPositions(supFilledCount(sup.id)) }}</span>
-                    <span><strong>{{ supFilledTotal(sup.id) }}</strong> шт.</span>
-                    <!-- Итог по минимуму — только в кг: в штуках он совпал бы с «шт.» выше. -->
-                    <span v-if="supMinOrderValue(sup) && sup.min_order_unit === 'kg' && supMinOrderTotal(sup) > 0">
-                      <strong>{{ supMinOrderFmt(sup, supMinOrderTotal(sup)) }}</strong> {{ supMinOrderUnitLabel(sup) }}
-                    </span>
+                <!-- Итог прямо под списком: видно, сколько уже набрано,
+                     не доходя до кнопок. -->
+                <div v-if="supProducts[sup.id]?.length" class="sof-total">
+                  <span class="sof-total-l">Заполнено {{ supFilledCount(sup.id) }} из {{ supProducts[sup.id].length }}</span>
+                  <span class="sof-total-v">
+                    Итого {{ supFilledTotal(sup.id) }} шт.<template
+                      v-if="supMinOrderValue(sup) && sup.min_order_unit === 'kg' && supMinOrderTotal(sup) > 0"> · {{ supMinOrderFmt(sup, supMinOrderTotal(sup)) }} {{ supMinOrderUnitLabel(sup) }}</template>
+                  </span>
+                </div>
+                </div>
+
+                <div class="sof-aside">
+                <!-- Сводка рядом с кнопкой: на компьютере видно, что уходит
+                     поставщику, не возвращаясь глазами к списку. -->
+                <div v-if="supProducts[sup.id]?.length" class="sof-sum">
+                  <div class="sof-sum-row"><span>Позиций</span><b>{{ supFilledCount(sup.id) }} из {{ supProducts[sup.id].length }}</b></div>
+                  <div class="sof-sum-row"><span>В заявке</span><b>{{ supFilledTotal(sup.id) }} шт</b></div>
+                  <div v-if="supMinOrderValue(sup) && sup.min_order_unit === 'kg' && supMinOrderTotal(sup) > 0" class="sof-sum-row">
+                    <span>Вес</span><b>{{ supMinOrderFmt(sup, supMinOrderTotal(sup)) }} {{ supMinOrderUnitLabel(sup) }}</b>
                   </div>
-                  <div v-if="supBelowMinOrder(sup)" class="sup-minorder-warn">
+                </div>
+                <div class="submit-area">
+                  <!-- Итог в самой панели: на телефоне список выше перекрыт,
+                       и без этой строки не видно, что уже набрано. -->
+                  <div v-if="supProducts[sup.id]?.length" class="sof-bar-sum">
+                    <span class="sof-bar-l">В заявке</span>
+                    <span class="sof-bar-v">{{ supFilledTotal(sup.id) }} шт</span>
+                    <span v-if="supBelowMinOrder(sup)" class="sof-bar-need">
+                      не хватает {{ supMinOrderFmt(sup, supMinOrderValue(sup) - supMinOrderTotal(sup)) }} {{ supMinOrderUnitLabel(sup) }}
+                    </span>
+                    <span v-else-if="supFilledCount(sup.id) > 0" class="sof-bar-ok">минимум набран</span>
+                  </div>
+                  <div v-if="supHasErrors(sup.id)" class="error-msg">Исправьте количество</div>
+                  <div v-if="supBelowMinOrder(sup)" class="sup-minorder-warn sof-warn-desk">
                     До минимального заказа не хватает
                     <strong>{{ supMinOrderFmt(sup, supMinOrderValue(sup) - supMinOrderTotal(sup)) }} {{ supMinOrderUnitLabel(sup) }}</strong>.
                     Заявку не примут — добавьте количество.
                   </div>
                   <div class="submit-buttons-row">
-                    <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-danger-outline btn-lg"
+                    <!-- Главное действие — отправка, оно первым и акцентное.
+                         «Поставка не нужна» — обычный вторичный вариант, а не
+                         красная кнопка: это не ошибка и не опасное действие. -->
+                    <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-primary btn-lg sof-submit"
+                      :disabled="supFilledCount(sup.id) === 0 || supSubmitting[sup.id] || supHasErrors(sup.id) || supBelowMinOrder(sup)" @click="supHandleSubmit(sup)">
+                      <span v-if="supSubmitting[sup.id]" class="cab-spin cab-spin-sm"></span>
+                      {{ supCurrentDateInfo(sup)?.order ? 'Обновить заявку' : 'Отправить заявку' }}
+                    </button>
+                    <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-lg sof-skip"
                       :disabled="supSubmitting[sup.id]" @click="supSkipDelivery(sup)">
                       Поставка не нужна
                     </button>
-                    <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-primary btn-lg"
-                      :disabled="supFilledCount(sup.id) === 0 || supSubmitting[sup.id] || supHasErrors(sup.id) || supBelowMinOrder(sup)" @click="supHandleSubmit(sup)">
-                      <span v-if="supSubmitting[sup.id]" class="cab-spin cab-spin-sm"></span>
-                      {{ supCurrentDateInfo(sup)?.order ? 'Обновить' : 'Отправить' }}
-                    </button>
                   </div>
+                </div>
+                </div>
                 </div>
               </template>
             </div>
@@ -2646,6 +2690,15 @@ function supMinError(supId, p) { const min = parseFloat(p.min_qty); if (!min || 
 function supHasError(supId, p) { return supMultError(supId, p) || supMinError(supId, p); }
 function supHasErrors(supId) { return (supProducts[supId] || []).some(p => supHasError(supId, p)); }
 function supFilledCount(supId) { return Object.values(supQuantities[supId] || {}).filter(v => v > 0).length; }
+
+// Шаг количества кнопками − и +. Шаг равен кратности товара, поэтому набрать
+// некратное число случайно нельзя — раньше это была частая причина отказа.
+function supStepQty(supId, product, dir) {
+  const step = Number(product.multiplicity) > 0 ? Number(product.multiplicity) : 1;
+  const cur = Number(supQuantities[supId]?.[product.sku]) || 0;
+  const next = Math.max(0, cur + dir * step);
+  supQuantities[supId][product.sku] = next === 0 ? null : next;
+}
 function supFilledTotal(supId) { return Object.values(supQuantities[supId] || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0); }
 
 // ═══ Минимальный заказ поставщика ═══
@@ -4403,7 +4456,9 @@ onUnmounted(() => {
 .day-tabs,
 .order-form,
 .cab-empty-card {
-  max-width: 1000px;
+  /* Ширина как у остального кабинета: на 1000px справа оставалась
+     пустая треть экрана, а список сжимался. */
+  max-width: 1180px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -4412,10 +4467,27 @@ onUnmounted(() => {
 .cab-empty-card h2 { color: #502314; margin: 0 0 6px; font-size: 16px; }
 .cab-empty-card p { color: #8b7355; margin: 0; font-size: 13px; }
 
-.day-tabs { display: flex; gap: 6px; padding: 8px 8px 10px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.day-tab { flex-shrink: 0; padding: 8px 14px; border-radius: 11px; border: 1.5px solid #EDE8E3; background: white; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.18s; position: relative; font-size: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); min-width: 64px; }
-.day-tab:hover { border-color: #8b7355; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-.day-tab.active { background: #E76F51; color: white; border-color: #E76F51; box-shadow: 0 4px 16px rgba(231,111,81,0.25); }
+/* Выбор дня поставки — карточки, а не мелкие вкладки: день недели крупно,
+   дата под ним, статус отметкой в углу. Лента прокручивается, последняя
+   карточка не «обрезается» — справа есть воздух. */
+.day-tabs {
+  display: flex; gap: 8px; padding: 6px 14px 12px 0; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none; scroll-snap-type: x proximity;
+}
+.day-tabs::-webkit-scrollbar { display: none; }
+.day-tab {
+  flex-shrink: 0; scroll-snap-align: start;
+  padding: 10px 16px 11px; border-radius: 14px; border: 1.5px solid #EDE8E3;
+  background: white; cursor: pointer; text-align: center; font-family: inherit;
+  transition: transform .12s, box-shadow .18s, border-color .18s, background .18s;
+  position: relative; font-size: 12px; box-shadow: 0 1px 2px rgba(60,40,20,.04); min-width: 78px;
+}
+.day-tab:hover { border-color: #D8C4B0; box-shadow: 0 4px 12px rgba(60,40,20,.07); }
+.day-tab:active { transform: scale(.97); }
+.day-tab.active {
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%); color: white;
+  border-color: transparent; box-shadow: 0 6px 18px rgba(232,122,30,.28);
+}
 .day-tab.active .day-tab-name, .day-tab.active .day-tab-date, .day-tab.active .day-tab-label { color: white; }
 .day-tab.done { border-color: #16a34a; }
 .day-tab.skipped { border-color: #9ca3af; background: #f5f5f5; }
@@ -4424,9 +4496,10 @@ onUnmounted(() => {
 .day-tab.closed { opacity: 0.5; }
 .day-tab.closed .day-tab-name, .day-tab.closed .day-tab-label { text-decoration: line-through; }
 .day-tab.warn { border-color: #f59e0b; }
-.day-tab-label { display: flex; align-items: center; gap: 5px; }
-.day-tab-name { display: block; font-size: 12px; font-weight: 700; color: #502314; }
-.day-tab-date { display: block; font-size: 10px; color: #8b7355; margin-top: 1px; }
+.day-tab-label { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.day-tab-name { display: block; font-size: 14px; font-weight: 800; color: #3A2418; letter-spacing: -.2px; }
+.day-tab-date { display: block; font-size: 11.5px; color: #9A8F80; font-weight: 600; }
+.day-tab.active .day-tab-date { color: rgba(255,255,255,.85); }
 .day-tab-mark { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #F5F0EB; }
 .day-tab-mark svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 :deep(.day-tab-mark svg) { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
@@ -4457,6 +4530,154 @@ onUnmounted(() => {
 
 
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+
+/* ═══ Заявка поставщику: шапка-обложка и список ═══
+   Раньше экран был набором серых полос: имя поставщика, дедлайн, минимум —
+   три отдельные строки, поля ввода без подписи. Собираем всё в одну шапку,
+   а количество показываем с единицей измерения. */
+.sof-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: linear-gradient(135deg, #4A2013 0%, #8A4526 100%);
+  color: #fff; border-radius: 16px; padding: 15px 16px; margin: 0 0 12px;
+}
+.sof-hero.sof-closed { background: linear-gradient(135deg, #4A4440 0%, #6B625B 100%); }
+.sof-hero-main { min-width: 0; }
+.sof-hero-title { margin: 0; font-size: 19px; font-weight: 800; line-height: 1.2; }
+.sof-hero-sub { font-size: 12.5px; opacity: .78; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sof-hero-cond { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 12px; opacity: .86; }
+.sof-closed-mark { font-weight: 700; opacity: 1; }
+.sof-timer { flex: 0 0 auto; text-align: center; background: rgba(255,255,255,.15); border-radius: 12px; padding: 8px 12px; min-width: 92px; }
+.sof-timer-v { font-size: 16px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sof-timer-l { font-size: 9.5px; opacity: .78; margin-top: 4px; letter-spacing: .3px; white-space: nowrap; }
+
+.sof-list-head {
+  display: flex; justify-content: space-between; padding: 10px 14px;
+  font-size: 11px; font-weight: 800; letter-spacing: .5px; color: #9A8F80;
+  text-transform: uppercase; border-bottom: 1px solid #f3eeea;
+}
+.sof-list-head-qty { padding-right: 6px; }
+
+/* Поле количества с подписью единицы */
+.sof-qty {
+  display: flex; align-items: center; gap: 2px;
+  border: 1.5px solid #e0dbd5; border-radius: 10px; background: #FCFBF9;
+  transition: border-color .15s, background .15s;
+}
+.sof-qty-on { border-color: var(--bk-orange, #E87A1E); background: rgba(232,122,30,.08); }
+.sof-qty-err { border-color: #E53935; background: #FFF5F5; }
+.sof-qty .item-qty {
+  width: 62px; border: none; background: transparent; padding: 9px 2px 9px 8px;
+  font-size: 17px; font-weight: 700; text-align: right;
+}
+.sof-qty .item-qty:focus { outline: none; }
+.sof-qty-u { font-size: 11px; font-weight: 700; color: #9A8F80; padding-right: 10px; }
+
+/* Итог под списком */
+.sof-total {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 12px 14px; background: #FBF8F3; border-top: 1px solid #f3eeea;
+  font-size: 13px;
+}
+.sof-total-l { color: #6B6155; }
+.sof-total-v { font-weight: 800; font-size: 14.5px; }
+
+/* Кнопки: отправка — главная, отказ — спокойный вторичный вариант */
+.sof-skip {
+  background: #fff; border: 1px solid #E0DBD5; color: #6B6155; font-weight: 600;
+}
+.sof-skip:hover:not(:disabled) { border-color: #C9BBA8; background: #FBF8F3; }
+
+/* Кнопки шага: тач-цель 44px, работают по кратности товара */
+.sof-qty-wrap { display: flex; align-items: center; gap: 6px; }
+.sof-step {
+  width: 40px; height: 40px; flex: 0 0 auto;
+  border: 1px solid #E0DBD5; border-radius: 10px; background: #fff;
+  font-size: 20px; font-weight: 700; color: #6B6155; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.sof-step:hover:not(:disabled) { border-color: var(--bk-orange, #E87A1E); color: var(--bk-orange, #E87A1E); background: rgba(232,122,30,.06); }
+.sof-step:active:not(:disabled) { transform: scale(.94); }
+.sof-step:disabled { opacity: .35; cursor: default; }
+
+/* Строка товара: заполненная помечается полоской слева, а не «просто цветом» */
+.item-row.item-filled { background: rgba(232,122,30,.04); box-shadow: inset 3px 0 0 var(--bk-orange, #E87A1E); }
+.item-row.item-error { background: #FFF5F5; box-shadow: inset 3px 0 0 #E53935; }
+
+/* Раскладка: на телефоне одна колонка, на компьютере — список + сводка */
+.sof-cols { display: block; }
+.sof-aside .submit-area { border-top: none; }
+
+@media (min-width: 900px) {
+  /* На компьютере ширина не пропадает впустую: список слева, сводка справа. */
+  .sof-hero { padding: 20px 24px; }
+  .sof-hero-title { font-size: 22px; }
+  .sof-timer-v { font-size: 24px; }
+  .sof-qty .item-qty { width: 84px; font-size: 18px; }
+
+  /* На компьютере итог живёт в сводке выше — строка в панели дублировала бы её. */
+  .sof-bar-sum { display: none; }
+  .sof-cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+  .sof-main { min-width: 0; border: 1px solid #EDE8E3; border-radius: 14px; overflow: hidden; background: #fff; }
+  .sof-aside {
+    position: sticky; top: 16px;
+    border: 1px solid #EDE8E3; border-radius: 14px; background: #fff; overflow: hidden;
+  }
+  .sof-aside .submit-area { padding: 16px; }
+  .sof-aside .submit-buttons-row { flex-direction: column; gap: 8px; }
+  .sof-aside .submit-buttons-row .btn { width: 100%; }
+  /* Итог переезжает в правую колонку — в списке он дублировался бы. */
+  .sof-total { border-radius: 0 0 14px 14px; }
+}
+
+/* Строка итога внутри панели действий */
+.sof-bar-sum { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 9px; font-size: 13px; flex-wrap: wrap; }
+.sof-bar-l { color: #9A8F80; }
+.sof-bar-v { font-size: 16px; font-weight: 800; color: #2B2620; }
+.sof-bar-need { color: #C62828; font-weight: 700; margin-left: auto; }
+.sof-bar-ok { color: #2E7D4F; font-weight: 700; margin-left: auto; }
+
+/* Сводка в правой колонке (компьютер) */
+.sof-sum { padding: 14px 16px 4px; }
+.sof-sum-row { display: flex; justify-content: space-between; align-items: baseline; padding: 5px 0; font-size: 13.5px; color: #6B6155; }
+.sof-sum-row b { font-size: 15px; color: #2B2620; }
+
+/* Телефон: панель действий закреплена над нижним меню кабинета.
+   Высота таббара ~62px — без этого отступа кнопки налезали на меню,
+   а предупреждение о минимуме уходило под него. */
+@media (max-width: 899px) {
+  .sof-sum { display: none; }
+  .sof-aside {
+    position: fixed; left: 10px; right: 10px; z-index: 190;
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+    background: #fff; border: 1px solid #E5DCCF; border-radius: 16px;
+    padding: 11px 13px 12px;
+    box-shadow: 0 10px 30px rgba(60,40,20,.14);
+  }
+  /* Под панелью нужен воздух, иначе последняя позиция и итог прячутся. */
+  .order-form { margin-bottom: 132px; }
+  .sof-warn-desk { display: none; }
+  .sof-total { display: none; }
+  .sof-aside .submit-area { padding: 0; border: none; }
+  .sof-aside .submit-buttons-row { display: flex; flex-direction: column; gap: 4px; }
+  .sof-aside .submit-buttons-row .btn { width: 100%; }
+  .sof-submit { font-size: 16px; padding: 15px; border-radius: 13px; }
+  /* Отказ от поставки — редкое действие: спокойная ссылка под главной
+     кнопкой, чтобы не спорила с ней по весу. */
+  /* Отказ от поставки — редкое действие: мелкая спокойная ссылка,
+     она не должна конкурировать с главной кнопкой по весу. */
+  .sof-skip {
+    background: transparent; border: none; color: #A2988B;
+    font-size: 12.5px; font-weight: 600; padding: 7px; text-decoration: none;
+  }
+  .sof-skip:hover:not(:disabled) { background: transparent; color: #E87A1E; }
+
+  /* Заблокированная кнопка не должна выглядеть «сломанной плитой»:
+     светлый фон и читаемый текст — понятно, что действие просто ещё недоступно. */
+  .sof-submit:disabled {
+    background: #F3EDE4; color: #B0A597; box-shadow: none; opacity: 1;
+  }
+}
 
 .deadline-bar { padding: 8px 14px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 0; }
 .deadline-timer { font-variant-numeric: tabular-nums; opacity: 0.85; }
@@ -4655,25 +4876,28 @@ tr.del-err { background: #fef2f2; }
 
   /* Item list — узкие экраны */
   .cab-section { padding: 12px; }
-  .item-row { padding: 8px 10px; gap: 6px; }
+  .item-row { padding: 10px 12px; gap: 10px; }
   .item-info { margin-bottom: 4px; gap: 4px; }
   .item-name { font-size: 13px; line-height: 1.25; }
   .item-hint, .item-edit-mark { font-size: 9px; }
-  .item-input { width: 100%; justify-content: flex-end; }
-  .item-qty { width: 88px; height: 44px; font-size: 16px; }
+  .item-input { justify-content: flex-end; }
+
 }
 
 /* Unified item list (Планета, Камако, etc.) */
 .quick-actions { display: flex; gap: 6px; padding: 8px 12px; }
 .item-list { padding: 0; }
-.item-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #f3eeea; transition: background 0.1s; }
+/* Строка товара: слева название с метками, справа контролы. Сетка вместо
+   flex — колонка с текстом сжимается, контролы держат свою ширину и не
+   уезжают на отдельную строку. */
+.item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #f3eeea; transition: background 0.1s; }
 .item-row:last-child { border-bottom: none; }
 .item-row:hover { background: #faf8f5; }
 .item-filled { background: #f0fdf4; }
 .item-error { background: #fef2f2; }
-.item-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.item-info { min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .item-name { font-size: 14px; font-weight: 500; color: #502314; }
-.item-hint { font-size: 10px; color: #2563eb; background: #eff6ff; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
+.item-hint { font-size: 10.5px; color: #8A5A12; background: #FBF1E2; padding: 2px 7px; border-radius: 5px; font-weight: 700; white-space: nowrap; }
 .item-hint-warn { color: #92400e; background: #fef3c7; }
 /* Примечание закупок к товару — своей строкой под названием */
 .item-note { flex-basis: 100%; font-size: 12px; color: #8b7355; line-height: 1.35; }
@@ -5656,4 +5880,17 @@ tr.del-err { background: #fef2f2; }
 }
 .submit-summary { display: flex; align-items: center; justify-content: center; gap: 14px; font-size: 13px; color: #8b7355; margin-bottom: 8px; }
 .submit-summary strong { color: #502314; font-weight: 700; }
+
+/* ── Заявка поставщику на узком экране ──
+   Название товара длинное: рядом с контролами оно ломается на три строки.
+   Даём тексту всю ширину, контролы — под ним справа и крупными: попасть
+   пальцем важнее плотности. Блок идёт последним, иначе базовые правила
+   строки (сетка «текст | контролы») перебивают его. */
+@media (max-width: 560px) {
+  .order-form .item-row { grid-template-columns: 1fr; gap: 8px; padding: 12px 14px; }
+  .order-form .item-input { justify-content: flex-end; }
+  .order-form .item-name { font-size: 14px; }
+  .order-form .sof-qty .item-qty { width: 68px; height: 44px; font-size: 17px; }
+  .order-form .sof-step { width: 44px; height: 44px; font-size: 20px; }
+}
 </style>
