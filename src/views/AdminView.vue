@@ -942,19 +942,56 @@
             </div>
 
             <!-- Внешние пользователи (например, производственный центр) должны
-                 видеть в «Заявках поставщикам» только своего поставщика. -->
+                 видеть в «Заявках поставщикам» только своего поставщика.
+                 Случай редкий, поэтому блок свёрнут: обычным сотрудникам он
+                 не мешает, а списком всех поставщиков форму не забивает. -->
             <div v-if="form.role !== 'admin'" class="modal-field">
-              <span class="modal-field-label">Только эти поставщики (для внешних сотрудников)</span>
-              <div class="adm-le-grid">
-                <label v-for="sup in scopeSuppliers" :key="sup.id" class="adm-le-option">
-                  <input type="checkbox" :value="sup.id" v-model="form.supplier_scope" />
-                  <span class="adm-le-box"><BkIcon name="success" size="sm"/></span>
-                  <span>{{ sup.short_name }} <small class="adm-sup-le">{{ shortEntity(sup.legal_entity) }}</small></span>
-                </label>
+              <span class="modal-field-label">Заявки поставщикам: чьи заявки видит</span>
+
+              <div v-if="!scopeEditing" class="adm-scope-summary">
+                <span v-if="!form.supplier_scope.length" class="adm-scope-all">
+                  Всех поставщиков доступных юр. лиц
+                </span>
+                <span v-else class="adm-scope-chips">
+                  <span v-for="id in form.supplier_scope" :key="id" class="adm-scope-chip">
+                    {{ supplierName(id) }}
+                  </span>
+                </span>
+                <button class="btn small" @click="openScopeEditor">
+                  {{ form.supplier_scope.length ? 'Изменить' : 'Ограничить' }}
+                </button>
               </div>
+
+              <div v-else class="adm-scope-editor">
+                <div v-if="form.supplier_scope.length" class="adm-scope-chips">
+                  <span v-for="id in form.supplier_scope" :key="id" class="adm-scope-chip">
+                    {{ supplierName(id) }}
+                    <button class="adm-scope-x" @click="toggleScopeSupplier(id)" title="Убрать">×</button>
+                  </span>
+                </div>
+                <input v-model="scopeQuery" class="adm-scope-search" placeholder="Начните вводить название поставщика…" />
+                <div class="adm-scope-list">
+                  <button
+                    v-for="sup in scopeMatches"
+                    :key="sup.id"
+                    class="adm-scope-item"
+                    :class="{ 'is-on': form.supplier_scope.includes(sup.id) }"
+                    @click="toggleScopeSupplier(sup.id)"
+                  >
+                    <span>{{ sup.short_name }}</span>
+                    <small class="adm-sup-le">{{ shortEntity(sup.legal_entity) }}</small>
+                  </button>
+                  <div v-if="!scopeMatches.length" class="adm-scope-empty">Ничего не найдено</div>
+                </div>
+                <div class="adm-scope-actions">
+                  <button class="btn small secondary" @click="clearScope">Снять ограничение</button>
+                  <button class="btn small" @click="scopeEditing = false">Готово</button>
+                </div>
+              </div>
+
               <div class="adm-le-hint">
-                Если ничего не выбрано — в модуле «Заявки поставщикам» видны все поставщики
-                доступных юр. лиц. Выбор ограничивает и данные, и выгрузки.
+                Нужно только внешним сотрудникам — например, производственному центру.
+                Ограничение действует и на выгрузки, и на прямые ссылки.
               </div>
             </div>
 
@@ -1048,6 +1085,26 @@ const allEntities = LEGAL_ENTITIES;
 // Список поставщиков для привязки внешних пользователей. Берём только
 // подключённых к модулю заявок — привязывать к остальным нечего.
 const scopeSuppliers = ref([]);
+const scopeEditing = ref(false);
+const scopeQuery = ref('');
+
+const scopeMatches = computed(() => {
+  const q = scopeQuery.value.trim().toLowerCase();
+  const list = scopeSuppliers.value;
+  const filtered = q ? list.filter(s => (s.short_name || '').toLowerCase().includes(q)) : list;
+  return filtered.slice(0, 8);
+});
+
+function supplierName(id) {
+  return scopeSuppliers.value.find(s => s.id === id)?.short_name || id;
+}
+function openScopeEditor() { scopeEditing.value = true; scopeQuery.value = ''; }
+function toggleScopeSupplier(id) {
+  const list = form.value.supplier_scope;
+  const i = list.indexOf(id);
+  if (i === -1) list.push(id); else list.splice(i, 1);
+}
+function clearScope() { form.value.supplier_scope = []; scopeEditing.value = false; }
 async function loadScopeSuppliers() {
   if (scopeSuppliers.value.length) return;
   const { data } = await db.from('suppliers')
@@ -1916,6 +1973,8 @@ async function saveMaintenanceMsg() {
 
 function openUserModal(user) {
   loadScopeSuppliers();
+  scopeEditing.value = false;
+  scopeQuery.value = '';
   userModal.value.user = user;
   if (user) {
     const perms = user.permissions;
@@ -3150,4 +3209,25 @@ onUnmounted(() => {
   .fb-chat { min-height: 400px; }
 }
 .adm-sup-le { color: var(--text-muted); font-size: 11px; margin-left: 4px; }
+.adm-scope-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.adm-scope-all { font-size: 13px; color: var(--text-muted); }
+.adm-scope-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.adm-scope-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 20px;
+  background: #FFF4E8; color: #C25E12; font-size: 12px; font-weight: 700;
+}
+.adm-scope-x { border: 0; background: none; color: inherit; font-size: 14px; cursor: pointer; padding: 0 2px; }
+.adm-scope-editor { display: flex; flex-direction: column; gap: 8px; }
+.adm-scope-search { width: 100%; }
+.adm-scope-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; }
+.adm-scope-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 10px; border: 1.5px solid var(--border); border-radius: 8px;
+  background: #fff; font: inherit; font-size: 13px; cursor: pointer; text-align: left;
+}
+.adm-scope-item:hover { border-color: #E87A1E; }
+.adm-scope-item.is-on { background: #FFF4E8; border-color: #E87A1E; color: #C25E12; font-weight: 700; }
+.adm-scope-empty { padding: 8px 10px; font-size: 12.5px; color: var(--text-muted); }
+.adm-scope-actions { display: flex; justify-content: space-between; gap: 8px; }
 </style>

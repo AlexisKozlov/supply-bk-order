@@ -8,7 +8,8 @@
     <!-- Page tabs.
          Пользователю, привязанному к своему поставщику (например, сотруднику
          производственного центра), настроечные вкладки не нужны: он приходит
-         посмотреть заявки и забрать файлы. -->
+         посмотреть заявки и забрать файлы, а «Графики» — это редактор
+         дедлайнов, а не справка. -->
     <div class="rom-page-tabs">
       <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'overview' }" @click="pageTab = 'overview'; loadOverview()">
         Обзор
@@ -19,7 +20,7 @@
       <button class="rom-page-tab" :class="{ active: pageTab === 'list' }" @click="pageTab = 'list'; loadOrdersList()">
         Список заявок
       </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'schedules' }" @click="pageTab = 'schedules'; loadSchedules()">
+      <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'schedules' }" @click="pageTab = 'schedules'; loadSchedules()">
         Графики
       </button>
       <button v-if="!isSupplierScoped" class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadTemplates()">
@@ -122,7 +123,7 @@
           :title="'Управление приёмом — во вкладке «Настройки»'">
           {{ settings.is_accepting_orders ? 'Приём включён' : 'Приём приостановлен' }}
         </span>
-        <div class="so-detail-actions">
+        <div v-if="!isSupplierScoped" class="so-detail-actions">
           <label class="so-inline-label">Дедлайн по умолчанию:</label>
           <input type="time" v-model="defaultDeadline" class="rom-input-sm" style="width:100px" />
           <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
@@ -142,10 +143,10 @@
           </button>
         </div>
         <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
-        <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
+        <button v-if="selectedDate && !isSupplierScoped" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
           Продлить дедлайн
         </button>
-        <button v-if="selectedDate" class="rom-btn-sm" :class="isDateForcedClosed(selectedDate) ? 'so-btn-open-day' : 'so-btn-close-day'"
+        <button v-if="selectedDate && !isSupplierScoped" class="rom-btn-sm" :class="isDateForcedClosed(selectedDate) ? 'so-btn-open-day' : 'so-btn-close-day'"
           @click="handleToggleCloseDay(selectedDate)" :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
           {{ isDateForcedClosed(selectedDate) ? 'Открыть день' : 'Закрыть день' }}
         </button>
@@ -202,23 +203,23 @@
               @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
               {{ exportDatePickerOpen ? 'Дни ▲' : 'Дни ▼' }}
             </button>
-            <button class="rom-btn rom-btn-primary"
+            <button v-if="!isSupplierScoped" class="rom-btn rom-btn-primary"
               @click="sendSummary" :disabled="sendingSummary || !selectedDate" title="Сгенерировать Excel и отправить подписчикам в Telegram">
               <BurgerSpinner v-if="sendingSummary" size="xs" />
               <span>{{ sendingSummary ? 'Отправка...' : 'Отправить сводку' }}</span>
             </button>
-            <button class="rom-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
+            <button v-if="!isSupplierScoped" class="rom-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
               title="Сгенерировать Excel и отправить на почту поставщика">
               {{ sendingSummaryEmail ? 'Отправка…' : 'На почту поставщику' }}
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
-            <button class="rom-btn rom-btn-primary" @click="openAdhocModal" title="Создать внеплановую заявку (довоз) для ресторана на любую дату вне графика">
+            <button v-if="!isSupplierScoped" class="rom-btn rom-btn-primary" @click="openAdhocModal" title="Создать внеплановую заявку (довоз) для ресторана на любую дату вне графика">
               + Довоз
             </button>
-            <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
+            <button v-if="!isSupplierScoped" class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
               Копировать не подавших
             </button>
-            <button class="rom-btn" @click="remindUnsubmitted" :disabled="!selectedDate || remindingStatus" title="Напомнить ресторанам, которые не подали заявку на эту дату">
+            <button v-if="!isSupplierScoped" class="rom-btn" @click="remindUnsubmitted" :disabled="!selectedDate || remindingStatus" title="Напомнить ресторанам, которые не подали заявку на эту дату">
               {{ remindingStatus ? 'Отправка…' : 'Напомнить не подавшим' }}
             </button>
             <label class="so-filter-check">
@@ -394,7 +395,7 @@
               <td>{{ o.total_qty ? (Number.isInteger(+o.total_qty) ? +o.total_qty : (+o.total_qty).toFixed(2)) : '—' }}</td>
               <td class="rom-td-actions">
                 <button class="rom-btn-sm" @click="viewOrder(o.id)">Открыть</button>
-                <button class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id, o.status)">Удалить</button>
+                <button v-if="!isSupplierScoped" class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id, o.status)">Удалить</button>
               </td>
             </tr>
           </tbody>

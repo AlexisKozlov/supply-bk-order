@@ -2,7 +2,10 @@
   <div class="so-hub">
     <div class="so-hub-header">
       <h1>Заявки поставщикам</h1>
-      <div class="so-hub-header-actions">
+      <!-- Подключение и отключение поставщиков — работа закупок.
+           Внешнему сотруднику (привязан к своему поставщику) эти кнопки
+           только мешают: сервер их всё равно не пропустит. -->
+      <div v-if="!isSupplierScoped" class="so-hub-header-actions">
         <button
           v-if="selectedType === 'so' && selectedId"
           class="so-hub-disconnect-btn"
@@ -45,7 +48,8 @@
 </template>
 
 <script setup>
-import { ref, defineAsyncComponent, onMounted, watch } from 'vue';
+import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
+import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
@@ -56,6 +60,15 @@ const SupplierConnectModal = defineAsyncComponent(() => import('@/components/mod
 
 const soStore = useSupplierOrderStore();
 const orderStore = useOrderStore();
+
+// Внешний сотрудник, привязанный к своим поставщикам: настроечные действия ему не показываем.
+const userStore = useUserStore();
+const isSupplierScoped = computed(() => {
+  const raw = userStore.currentUser?.supplier_scope;
+  if (!raw) return false;
+  const list = Array.isArray(raw) ? raw : (() => { try { return JSON.parse(raw) || []; } catch { return []; } })();
+  return list.length > 0;
+});
 
 const suppliers = ref([]);
 const selectedId = ref('');
