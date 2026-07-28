@@ -48,14 +48,14 @@
       </div>
     </div>
 
-    <!-- Шапка: заголовок + короткое объяснение + кнопка «?» -->
-    <header class="rco-page-head" v-if="!loading">
-      <h2 class="rco-page-title">
-        <span class="rco-page-title-icon" aria-hidden="true">📦</span>
-        Корректировка заказа основной поставки
-      </h2>
-      <p class="rco-page-sub">Доставка со склада. Здесь можно изменить уже отправленный заказ — добавить, убрать или поправить позиции на ближайшую доставку до её дедлайна.</p>
-      <button type="button" class="rco-help-btn" @click="openTutorial" title="Как это работает" aria-label="Как это работает">?</button>
+    <!-- Шапка-обложка: как на экране заявки поставщику. Раньше это была
+         жёлтая плашка на полэкрана с эмодзи, который рисовался квадратом. -->
+    <header class="rco-hero" v-if="!loading">
+      <div class="rco-hero-main">
+        <h2 class="rco-hero-title">Корректировка основной поставки</h2>
+        <p class="rco-hero-sub">Изменить уже отправленный заказ со склада: добавить, убрать или поправить позиции</p>
+      </div>
+      <button type="button" class="rco-hero-help" @click="openTutorial" title="Как это работает" aria-label="Как это работает">?</button>
     </header>
 
     <!-- Переключатель «Активные / Вся история» -->
@@ -79,7 +79,7 @@
     <template v-else>
       <!-- ── Выбор даты поставки ── -->
       <section class="rco-deliveries">
-        <h3 class="rco-section-title">На какую дату основной поставки?</h3>
+        <h3 class="rco-section-title">Дата поставки</h3>
         <div class="rco-d-pills">
           <button v-for="d in deliveries"
                   :key="d.date"
@@ -134,14 +134,15 @@
 
         <div class="rco-form-rows">
           <div v-for="(it, idx) in formItems" :key="idx" class="rco-form-row">
-            <button type="button"
-                    class="rco-act-btn"
-                    :class="'rco-act-' + it.action"
-                    :title="it.action === 'add' ? 'Сейчас: добавить. Кликни, чтобы поменять на убрать' : 'Сейчас: убрать. Кликни, чтобы поменять на добавить'"
-                    @click="toggleAction(idx)">
-              <span class="rco-act-sign">{{ it.action === 'add' ? '+' : '−' }}</span>
-              <span class="rco-act-label">{{ it.action === 'add' ? 'Добавить' : 'Убрать' }}</span>
-            </button>
+            <!-- Выбор из двух вариантов, а не кнопка-действие: раньше это был
+                 один тумблер «+ Добавить», и рядом крестик удаления строки —
+                 их путали между собой. -->
+            <div class="rco-act-seg" role="group" aria-label="Что сделать с позицией">
+              <button type="button" class="rco-seg" :class="{ 'is-on': it.action === 'add' }"
+                      @click="it.action !== 'add' && toggleAction(idx)">+ Добавить</button>
+              <button type="button" class="rco-seg rco-seg-rem" :class="{ 'is-on': it.action !== 'add' }"
+                      @click="it.action === 'add' && toggleAction(idx)">− Убрать</button>
+            </div>
 
             <div class="rco-prod">
               <input type="text"
@@ -176,7 +177,7 @@
                    min="0"
                    step="0.5"
                    v-model.number="it.qty"
-                   placeholder="кол-во" />
+                   placeholder="Кол-во" />
 
             <button type="button"
                     class="rco-unit-btn"
@@ -608,31 +609,23 @@ onBeforeUnmount(() => {
 .rco { padding: 12px 4px 24px; display: flex; flex-direction: column; gap: 16px; }
 
 /* ── Заголовок страницы ── */
-.rco-page-head {
-  position: relative;
-  padding: 14px 16px 12px;
-  background: linear-gradient(180deg, #fff7e8 0%, #fff 90%);
-  border: 1px solid #f3d9a8;
-  border-radius: 12px;
+/* Шапка-обложка — тот же приём, что на экране заявки поставщику:
+   один тёмный блок вместо жёлтой плашки во весь экран. */
+.rco-hero {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  background: linear-gradient(135deg, #4A2013 0%, #8A4526 100%);
+  color: #fff; border-radius: 16px; padding: 15px 16px; margin-bottom: 12px;
 }
-.rco-page-title {
-  margin: 0 36px 4px 0;
-  font-size: 17px; font-weight: 800; color: #5a3a10; line-height: 1.25;
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+.rco-hero-main { min-width: 0; }
+.rco-hero-title { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.25; }
+.rco-hero-sub { margin: 5px 0 0; font-size: 12.5px; line-height: 1.45; opacity: .8; }
+.rco-hero-help {
+  flex: 0 0 auto; width: 30px; height: 30px; padding: 0;
+  border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.12);
+  color: #fff; border-radius: 50%; cursor: pointer; font-weight: 700; font-size: 15px;
+  transition: background .15s;
 }
-.rco-page-title-icon { font-size: 20px; line-height: 1; }
-.rco-page-sub {
-  margin: 0; font-size: 13px; line-height: 1.5; color: #6b5b3a;
-}
-.rco-help-btn {
-  position: absolute; top: 12px; right: 12px;
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; padding: 0; border: 1px solid #d1b87a;
-  background: #fff; color: #5a3a10; border-radius: 50%;
-  cursor: pointer; font-weight: 700; font-size: 15px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.rco-help-btn:hover { background: #c8862a; color: #fff; border-color: #c8862a; }
+.rco-hero-help:hover { background: rgba(255,255,255,.24); }
 
 /* Лид-параграф в туториале */
 .rco-tut-lead {
@@ -710,15 +703,15 @@ onBeforeUnmount(() => {
 
 /* ── Режимы «Активные / Вся история» ── */
 .rco-mode-tabs {
-  display: inline-flex; gap: 0; padding: 3px; background: #eef2f6; border-radius: 10px; align-self: flex-start;
+  display: inline-flex; gap: 0; padding: 3px; background: #F1EAE0; border-radius: 12px; align-self: flex-start;
 }
 .rco-mode-tab {
   padding: 6px 14px; border: none; background: transparent; cursor: pointer;
   font-size: 13px; font-weight: 600; color: #5a6b7c; border-radius: 8px;
   transition: background 0.12s, color 0.12s;
 }
-.rco-mode-tab:hover { color: #2d3a48; }
-.rco-mode-tab.is-active { background: #fff; color: #1976d2; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.rco-mode-tab:hover { color: #6B5B4B; }
+.rco-mode-tab.is-active { background: #fff; color: #B85A0E; box-shadow: 0 1px 3px rgba(60,40,20,.08); }
 
 /* ── Тулбар истории ── */
 .rco-history { display: flex; flex-direction: column; gap: 12px; }
@@ -748,16 +741,25 @@ onBeforeUnmount(() => {
 .rco-deliveries { background: #fff; border: 1px solid #e8e8e8; border-radius: 10px; padding: 12px 14px; }
 .rco-d-pills { display: flex; gap: 8px; flex-wrap: wrap; }
 .rco-d-pill {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  padding: 8px 14px; border: 1px solid #d8dee5; border-radius: 10px;
-  background: #fff; cursor: pointer; transition: background 0.15s, border-color 0.15s;
-  text-align: left;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  padding: 10px 15px; border: 1.5px solid #EDE8E3; border-radius: 14px;
+  background: #fff; cursor: pointer; text-align: left;
+  transition: transform .12s, box-shadow .18s, border-color .18s, background .18s;
+  box-shadow: 0 1px 2px rgba(60,40,20,.04);
 }
+.rco-d-pill:hover { border-color: #D8C4B0; box-shadow: 0 4px 12px rgba(60,40,20,.07); }
+.rco-d-pill:active { transform: scale(.97); }
 .rco-d-pill:hover { background: #f4f7fb; border-color: #b3c0cf; }
-.rco-d-pill.is-active { background: #1976d2; border-color: #1976d2; color: #fff; }
-.rco-d-pill.is-active .rco-d-deadline { color: rgba(255,255,255,0.85); }
-.rco-d-date { font-size: 13px; font-weight: 700; }
-.rco-d-deadline { font-size: 11px; color: #888; }
+.rco-d-pill.is-active {
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
+  border-color: transparent; color: #fff;
+  box-shadow: 0 6px 18px rgba(232,122,30,.28);
+}
+.rco-d-pill.is-active .rco-d-date,
+.rco-d-pill.is-active .rco-d-deadline { color: #fff; }
+.rco-d-pill.is-active .rco-d-deadline { color: rgba(255,255,255,.85); }
+.rco-d-date { font-size: 14px; font-weight: 800; color: #3A2418; letter-spacing: -.2px; }
+.rco-d-deadline { font-size: 11.5px; color: #9A8F80; font-weight: 600; }
 
 /* ── Карточка батча ── */
 .rco-batches { display: flex; flex-direction: column; gap: 10px; }
@@ -822,20 +824,36 @@ onBeforeUnmount(() => {
 .rco-form-rows { display: flex; flex-direction: column; gap: 8px; }
 .rco-form-row {
   display: grid;
-  grid-template-columns: 130px 1fr 100px 70px 28px;
+  grid-template-columns: 196px minmax(0, 1fr) 110px 76px 32px;
   gap: 8px;
   align-items: stretch;
 }
 
+/* Сегментированный выбор действия */
+.rco-act-seg {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+  padding: 3px; background: #F1EAE0; border-radius: 11px;
+}
+.rco-seg {
+  padding: 9px 4px; border: none; background: transparent; border-radius: 9px;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: #8C7B6E; cursor: pointer;
+  white-space: nowrap;
+  transition: background .14s, color .14s, box-shadow .14s;
+}
+.rco-seg:hover { color: #5A4838; }
+.rco-seg.is-on { background: #fff; color: #2E7D4F; box-shadow: 0 1px 3px rgba(60,40,20,.1); }
+.rco-seg-rem.is-on { color: #C0392B; }
+
 .rco-act-btn {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid; border-radius: 6px;
-  font-size: 12px; font-weight: 700; cursor: pointer;
-  transition: filter 0.12s;
+  padding: 11px 12px;
+  border: 1.5px solid; border-radius: 10px;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+  transition: filter .12s, transform .1s;
 }
-.rco-act-add { background: #e7f5e8; color: #2e7d32; border-color: #c4e6c8; }
-.rco-act-remove { background: #fff4e0; color: #b35900; border-color: #ffe0b2; }
+.rco-act-btn:active { transform: scale(.97); }
+.rco-act-add { background: #E9F5EC; color: #2E7D4F; border-color: #C3E3CD; }
+.rco-act-remove { background: #FDEBE9; color: #C0392B; border-color: #F5CFC9; }
 .rco-act-btn:hover { filter: brightness(0.97); }
 .rco-act-sign { font-size: 16px; line-height: 1; }
 .rco-act-label { font-size: 12px; }
@@ -865,17 +883,21 @@ onBeforeUnmount(() => {
 .rco-prod-opt-name { color: #2b2b2b; }
 
 .rco-qty {
-  width: 100%; padding: 8px 10px; border: 1px solid #d8dee5; border-radius: 6px;
-  font-size: 13px; outline: none; box-sizing: border-box; text-align: right;
+  width: 100%; padding: 11px 12px; border: 1.5px solid #E5DCCF; border-radius: 10px;
+  font-size: 16px; font-weight: 700; outline: none; box-sizing: border-box; text-align: right;
+  background: #FCFBF9; color: #2B2620; transition: border-color .15s, background .15s;
 }
+.rco-qty:focus { border-color: #E87A1E; background: rgba(232,122,30,.06); }
+/* Подсказка в поле — тонкая и бледная, иначе жирным читается как заголовок. */
+.rco-qty::placeholder { font-weight: 500; color: #B0A597; }
 .rco-qty:focus { border-color: #1976d2; }
 .rco-unit-btn {
-  padding: 8px 0; border: 1px solid #d8dee5; border-radius: 6px;
+  padding: 11px 0; border: 1.5px solid #E5DCCF; border-radius: 10px;
   background: #fff; cursor: pointer;
-  font-size: 12px; font-weight: 600; color: #455565;
-  transition: background 0.12s;
+  font-size: 12.5px; font-weight: 700; color: #6B5B4B;
+  transition: background .12s, border-color .12s, color .12s;
 }
-.rco-unit-btn:hover { background: #f4f7fb; }
+.rco-unit-btn:hover { background: #FBF6EF; border-color: #D8C4B0; color: #3A2418; }
 
 .rco-row-del {
   width: 28px; height: 100%;
@@ -887,11 +909,11 @@ onBeforeUnmount(() => {
 
 .rco-add-row {
   margin-top: 8px;
-  padding: 7px 14px; border: 1px dashed #b3c0cf; background: #fff;
-  border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; color: #1976d2;
-  transition: background 0.12s, border-color 0.12s;
+  padding: 11px 14px; border: 1.5px dashed #D8C4B0; background: #fff;
+  border-radius: 11px; cursor: pointer; font-size: 13px; font-weight: 700; color: #B85A0E;
+  transition: background .12s, border-color .12s;
 }
-.rco-add-row:hover { background: #f4f7fb; border-style: solid; }
+.rco-add-row:hover { background: #FBF6EF; border-style: solid; border-color: #E87A1E; }
 
 .rco-comment-label { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 12px; color: #455565; font-weight: 600; }
 .rco-comment-label textarea {
@@ -970,19 +992,21 @@ onBeforeUnmount(() => {
   .rco-form { padding: 12px; }
   .rco-form-rows { gap: 10px; }
   .rco-form-row {
-    grid-template-columns: 1fr 80px;
+    grid-template-columns: 1fr 44px;
     grid-template-areas:
       'act del'
       'prod prod'
       'qty unit';
-    gap: 6px 8px;
-    padding: 10px;
-    background: #fafbfc;
-    border: 1px solid #eef0f3;
-    border-radius: 10px;
+    gap: 8px;
+    padding: 12px;
+    background: #FCFAF7;
+    border: 1px solid #EFE7DC;
+    border-radius: 12px;
     align-items: stretch;
   }
-  .rco-form-row > :nth-child(1) { grid-area: act; justify-self: start; min-width: 140px; }
+  /* Выбор действия занимает всю строку: два сегмента должны быть крупными,
+     иначе на телефоне в них тяжело попасть. */
+  .rco-form-row > :nth-child(1) { grid-area: act; justify-self: stretch; }
   .rco-form-row > :nth-child(2) { grid-area: prod; }
   .rco-form-row > :nth-child(3) { grid-area: qty; }
   .rco-form-row > :nth-child(4) { grid-area: unit; }
