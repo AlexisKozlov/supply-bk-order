@@ -146,6 +146,9 @@ require_once __DIR__ . '/includes/keg_returns.php';
 // OCR (распознавание скриншотов)
 require_once __DIR__ . '/includes/ocr.php';
 
+// Передача дел (отпуск, больничный)
+require_once __DIR__ . '/includes/handover.php';
+
 // Авторизация для REST
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 

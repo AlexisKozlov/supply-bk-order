@@ -27,6 +27,7 @@ export const SIDEBAR_SECTIONS = [
     { module: 'plan-fact', route: 'plan-fact', icon: 'delivery', label: 'Поставки', keywords: 'план факт' },
     { module: 'history', route: 'history', icon: 'history', label: 'История', keywords: 'история заказов' },
     { module: 'tasks', route: 'tasks', icon: 'clipboard', label: 'Задачи', keywords: 'таск доска канбан' },
+    { module: 'handover', route: 'handover', icon: 'handover', label: 'Передача дел', keywords: 'отпуск замещение больничный передача' },
   ]},
   { title: 'Данные', items: [
     { module: 'database', route: 'database', icon: 'database', label: 'База данных', keywords: 'товары поставщики рестораны справочник база товаров' },

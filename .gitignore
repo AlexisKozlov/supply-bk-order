@@ -22,3 +22,6 @@ api/health_state.json
 __pycache__/
 public/releases/*.exe
 api/disk_state.json
+
+# Рабочие документы с контактами и объёмами — не в репозиторий
+Передача дел*.docx

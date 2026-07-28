@@ -4,6 +4,7 @@
  */
 
 export const icons = {
+  handover: `<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="7" width="19" height="12" rx="2.5" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.6"/><path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7" stroke="#E76F51" stroke-width="1.6" stroke-linecap="round"/><path d="M7.5 13h6.5" stroke="#F4A261" stroke-width="1.8" stroke-linecap="round"/><path d="M12.2 10.8L14.8 13l-2.6 2.2" stroke="#E76F51" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   // ─── Navigation / Modules ───
   archive: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="5" rx="1.5" fill="#F4A261" stroke="#E76F51" stroke-width="1.5"/><path d="M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.5"/><rect x="9" y="12" width="6" height="2" rx="1" fill="#E76F51"/></svg>`,
   restore: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 0115.36-6.36" stroke="#E76F51" stroke-width="2" stroke-linecap="round"/><path d="M21 12a9 9 0 01-15.36 6.36" stroke="#F4A261" stroke-width="2" stroke-linecap="round"/><polyline points="18 2 18 6 14 6" stroke="#E76F51" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="6 22 6 18 10 18" stroke="#F4A261" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
@@ -168,6 +169,7 @@ export const icons = {
  * Каждая иконка в сайдбаре уникальна, чтобы они не путались между собой.
  */
 export const iconsLight = {
+  handover: `<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="7" width="19" height="12" rx="2.5" fill="rgba(255,213,79,0.18)" stroke="#FFD54F" stroke-width="1.9"/><path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round"/><path d="M7.5 13h6.5" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round" opacity="0.55"/><path d="M12.2 10.8L14.8 13l-2.6 2.2" stroke="#FFD54F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   // ─── Заказы (жёлтый акцент #FFD54F) ───
 
   package: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 2.5L3.5 7v10L12 21.5 20.5 17V7L12 2.5z" fill="rgba(255,213,79,0.22)" stroke="#FFD54F" stroke-width="1.9" stroke-linejoin="round"/><path d="M3.5 7L12 11.5 20.5 7" stroke="#FFD54F" stroke-width="1.9" stroke-linejoin="round"/><line x1="12" y1="11.5" x2="12" y2="21.5" stroke="#FFD54F" stroke-width="1.9"/></svg>`,

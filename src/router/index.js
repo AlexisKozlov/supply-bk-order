@@ -70,6 +70,7 @@ const routes = [
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },
       { path: 'tasks', name: 'tasks', component: () => import('@/views/TasksView.vue'), meta: { title: 'Задачи', module: 'tasks' } },
+      { path: 'handover', name: 'handover', component: () => import('@/views/HandoverView.vue'), meta: { title: 'Передача дел', module: 'handover' } },
       { path: 'keg-returns', name: 'keg-returns', component: () => import('@/views/KegReturnsView.vue'), meta: { title: 'Возврат кег', module: 'keg-returns' } },
       { path: 'keg-returns/schedule', name: 'keg-returns-schedule', component: () => import('@/views/KegReturnsScheduleView.vue'), meta: { title: 'График возврата кег', module: 'keg-returns' } },
       { path: 'tit-requests', name: 'tit-requests', component: () => import('@/views/TitRequestsView.vue'), meta: { title: 'Заявка на пропуск', module: 'tit-requests' } },
@@ -254,7 +255,7 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'supplier-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks', 'supply-assistant'];
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'supplier-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks', 'supply-assistant', 'handover'];
 
 router.beforeEach(async (to) => {
   const userStore = useUserStore();
