@@ -276,7 +276,11 @@
         $collCheck->execute([$collId]);
         $collRow = $collCheck->fetch();
         if (!$collRow) respond(['error' => 'Сбор не найден'], 404);
-        if ($collRow['status'] !== 'active') respond(['error' => 'Сбор закрыт'], 400);
+        // Закрытый сбор закупщик править МОЖЕТ: он отвечает за цифры и часто
+        // правит их после закрытия (ресторан ошибся, прислал уточнение позже).
+        // Ресторану и боту это по-прежнему запрещено — у них свой путь записи
+        // с проверкой статуса (bot_rest.php), сюда они не попадают: метод
+        // требует право «Сбор остатков» уровня «редактирование».
         if (!checkLegalEntityGroupAccess($authUser, $collRow['legal_entity_group'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
         $productCheck = $pdo->prepare("SELECT id, need_expiry FROM stock_collection_products WHERE id = ? AND collection_id = ?");

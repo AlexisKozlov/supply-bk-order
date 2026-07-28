@@ -191,8 +191,8 @@
                       v-for="date in expiryDatesFor(prod.id)"
                       :key="prod.id + '_' + date"
                       class="col-prod col-prod-date-cell"
-                      :class="{ editable: activeCollection.status === 'active' }"
-                      @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
+                      :class="{ editable: true }"
+                      @dblclick="openCellEditor(row, prod.id)"
                     >
                       <div class="sc-cell-date-val">
                         {{ getCellByDate(row, prod.id, date) || '' }}
@@ -200,8 +200,8 @@
                     </td>
                     <td
                       class="col-prod col-prod-total-cell"
-                      :class="{ editable: activeCollection.status === 'active' }"
-                      @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
+                      :class="{ editable: true }"
+                      @dblclick="openCellEditor(row, prod.id)"
                     >
                       <div class="sc-cell-total">
                         {{ getCellBatches(row, prod.id).length ? getCellTotal(row, prod.id) : '—' }}
@@ -211,8 +211,8 @@
                   <td v-else class="col-prod">
                     <div
                       class="sc-cell"
-                      :class="{ editable: activeCollection.status === 'active' }"
-                      @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
+                      :class="{ editable: true }"
+                      @dblclick="openCellEditor(row, prod.id)"
                     >
                       <div class="sc-cell-total">
                         {{ getCellBatches(row, prod.id).length ? getCellTotal(row, prod.id) : '—' }}
@@ -332,6 +332,11 @@
             <div class="sc-cell-editor-title">{{ cellEditor.productName }}</div>
             <div class="sc-cell-editor-meta">
               Ресторан {{ formatRestaurantNumber(cellEditor.restaurantNumber) }}
+            </div>
+            <!-- Закрытый сбор править можно, но пусть это будет осознанно:
+                 ресторан уже видит его закрытым и свои цифры не изменит. -->
+            <div v-if="activeCollection?.status !== 'active'" class="sc-cell-editor-closed">
+              Сбор закрыт. Правка сохранится, но ресторан её не увидит и изменить не сможет.
             </div>
           </div>
           <div v-if="cellEditor.needExpiry" class="sc-cell-editor-batches">
@@ -2146,6 +2151,11 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-cell-editor-head { margin-bottom: 12px; }
 .sc-cell-editor-title { font-size: 15px; font-weight: 700; color: #502314; }
 .sc-cell-editor-meta { font-size: 12px; color: #8c7b6e; margin-top: 2px; }
+.sc-cell-editor-closed {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: #FFF3E0; border: 1px solid #FFCC80;
+  font-size: 12.5px; color: #8a5322; line-height: 1.4;
+}
 .sc-cell-editor-batches { display: flex; flex-direction: column; gap: 8px; }
 .sc-cell-editor-row { display: flex; align-items: center; gap: 8px; }
 .sc-cell-editor-date { width: 180px; }
