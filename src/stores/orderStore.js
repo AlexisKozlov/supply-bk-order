@@ -395,12 +395,83 @@ export const useOrderStore = defineStore('order', () => {
   const dataVersion = ref(0);
   function bumpDataVersion() { dataVersion.value++; }
 
+  // ─── Транзит из ранее созданных заявок ───
+  // Когда заявки делают на несколько поставок вперёд (например, перед
+  // отпуском), товар, который приедет до новой поставки, должен попадать
+  // в «Транзит» — иначе его закажут повторно.
+
+  /** Формат даты для сервера: 2026-08-04 */
+  function _ymd(d) {
+    if (!d) return '';
+    const dt = new Date(d);
+    const p = n => String(n).padStart(2, '0');
+    return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+  }
+
+  /**
+   * Спрашивает сервер, что уже едет от этого поставщика до даты новой
+   * поставки. Ничего не меняет — только собирает данные для окна.
+   */
+  async function fetchIncomingTransit(includeSameDay = false) {
+    if (!settings.supplier || !settings.legalEntity || !settings.deliveryDate) {
+      return { orders: [], totals: [], matched: [], unmatched: [], willOverwrite: 0 };
+    }
+    const { data, error } = await db.rpc('get_incoming_transit', {
+      supplier: settings.supplier,
+      legal_entity: settings.legalEntity,
+      date_from: _ymd(settings.today || new Date()),
+      date_to: _ymd(settings.deliveryDate),
+      include_same_day: includeSameDay,
+      exclude_order_id: editingOrderId.value || '',
+    });
+    if (error) throw new Error(error);
+
+    const bySku = new Map(items.value.map(i => [String(i.sku), i]));
+    const matched = [];
+    const unmatched = [];
+    for (const t of (data?.totals || [])) {
+      const item = bySku.get(String(t.sku));
+      if (!item) { unmatched.push(t); continue; }
+      // Транзит хранится в тех же единицах, что и заказ.
+      const qpb = getQpb(item) || 1;
+      const value = settings.unit === 'boxes'
+        ? Math.round((t.pieces / qpb) * 100) / 100
+        : t.pieces;
+      matched.push({ sku: String(t.sku), name: item.name, pieces: t.pieces, value, was: item.transit || 0 });
+    }
+    return {
+      orders: data?.orders || [],
+      totals: data?.totals || [],
+      matched,
+      unmatched,
+      willOverwrite: matched.filter(m => (m.was || 0) > 0 && m.was !== m.value).length,
+    };
+  }
+
+  /** Проставляет посчитанные значения в колонку «Транзит». */
+  function applyIncomingTransit(matched) {
+    if (!matched?.length) return 0;
+    _flushSnapshot();
+    const bySku = new Map(items.value.map(i => [String(i.sku), i]));
+    let changed = 0;
+    for (const m of matched) {
+      const item = bySku.get(m.sku);
+      if (!item) continue;
+      if (item.transit !== m.value) changed++;
+      item.transit = m.value;
+    }
+    settings.hasTransit = true;
+    _snapshot();
+    dataVersion.value++;
+    return changed;
+  }
+
   return {
     settings, items, editingOrderId, editingOrderUpdatedAt, viewOnlyMode, dataVersion,
     canUndo, canRedo, pageTitle, finalSummary,
     addItem, removeItem, updateItemField, applyAllCalculated,
     moveItem, clearItems, clearAllData, resetOrder, clearHistory, undo, redo,
     saveItemOrder, restoreItemOrder, loadOrderIntoForm, auditLog,
-    bumpDataVersion,
+    bumpDataVersion, fetchIncomingTransit, applyIncomingTransit,
   };
 });

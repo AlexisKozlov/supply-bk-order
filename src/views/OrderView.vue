@@ -66,6 +66,14 @@
             <option value="true">Да</option>
           </select>
         </div>
+        <!-- Заявки на несколько поставок вперёд: то, что приедет раньше
+             новой поставки, подставляем в «Транзит» одной кнопкой. -->
+        <div v-if="!orderStore.viewOnlyMode" class="pf-group pf-narrow">
+          <label>&nbsp;</label>
+          <button class="transit-pull-btn" :disabled="!canPullTransit || transitLoading" @click="openTransitModal">
+            {{ transitLoading ? 'Считаю…' : 'Транзит из заявок' }}
+          </button>
+        </div>
         <div v-if="showCollapseHint" class="params-collapse-hint" @click="settingsExpanded = false; showCollapseHint = false;">
           Параметры заполнены — нажмите чтобы свернуть ▲
         </div>
@@ -291,6 +299,86 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- Транзит из ранее созданных заявок -->
+    <Teleport to="body">
+      <div v-if="transitModal.show" class="modal" @click.self="transitModal.show = false">
+        <div class="modal-box transit-modal">
+          <h3>Транзит из заявок</h3>
+          <p class="transit-sub">
+            Что уже заказано у поставщика «{{ orderStore.settings.supplier }}» и приедет
+            до поставки {{ fmtDate(orderStore.settings.deliveryDate) }}.
+          </p>
+
+          <!-- Не label: глобальные стили модалок выносят подпись поля вбок,
+               и текст галочки уезжал за край окна. -->
+          <div class="transit-check" @click="toggleSameDay">
+            <input type="checkbox" :checked="transitModal.includeSameDay" @click.stop="toggleSameDay" />
+            <span>Считать и заявки на саму дату поставки ({{ fmtDate(orderStore.settings.deliveryDate) }})</span>
+          </div>
+
+          <div v-if="transitLoading" class="transit-empty">Считаю…</div>
+
+          <template v-else>
+            <div v-if="!transitModal.orders.length" class="transit-empty">
+              До этой даты поставок от этого поставщика не найдено.
+              Возможно, заявки ещё не созданы или уже приняты на склад.
+            </div>
+
+            <template v-else>
+              <div class="transit-orders">
+                <div class="transit-orders-title">Найденные заявки</div>
+                <div v-for="o in transitModal.orders" :key="o.id" class="transit-order">
+                  <b>{{ fmtDate(o.delivery_date) }}</b>
+                  <span>{{ o.items }} {{ plural(o.items, 'позиция', 'позиции', 'позиций') }}</span>
+                </div>
+              </div>
+
+              <div class="transit-stats">
+                <span><b>{{ transitModal.matched.length }}</b> из {{ transitModal.totals.length }} артикулов есть в текущем заказе</span>
+                <span v-if="transitModal.unmatched.length" class="transit-dim">
+                  {{ transitModal.unmatched.length }} едет, но в заказ не добавлено
+                </span>
+              </div>
+
+              <div v-if="!transitModal.matched.length" class="transit-empty">
+                Товары из этих заявок в текущем заказе не встречаются. Добавьте нужные
+                позиции в заказ и нажмите «Транзит из заявок» ещё раз.
+              </div>
+
+              <div v-if="transitModal.willOverwrite" class="transit-warn">
+                У {{ transitModal.willOverwrite }}
+                {{ plural(transitModal.willOverwrite, 'позиции', 'позиций', 'позиций') }}
+                транзит уже заполнен вручную — эти значения будут заменены.
+              </div>
+
+              <div v-if="transitModal.matched.length" class="transit-list">
+                <table>
+                  <thead>
+                    <tr><th>Артикул</th><th>Товар</th><th>Было</th><th>Станет</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="m in transitModal.matched" :key="m.sku">
+                      <td class="transit-sku">{{ m.sku }}</td>
+                      <td>{{ m.name }}</td>
+                      <td class="transit-num transit-dim">{{ m.was || '—' }}</td>
+                      <td class="transit-num"><b>{{ m.value }}</b></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </template>
+
+          <div class="transit-actions">
+            <button class="btn secondary" @click="transitModal.show = false">Отмена</button>
+            <button class="btn primary" :disabled="!transitModal.matched.length" @click="applyTransit">
+              Подставить в транзит
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -441,6 +529,69 @@ const draftStatusText = computed(() => {
   return '';
 });
 const orderResultModal      = ref({ show: false, text: '', supplier: '', deliveryDate: '', lines: [] });
+
+// ─── Транзит из ранее созданных заявок ───
+// Заявки часто делают на 2-3 поставки вперёд. То, что приедет раньше новой
+// поставки, должно лежать в «Транзите», иначе тот же товар закажут дважды.
+const transitLoading = ref(false);
+const transitModal = ref({
+  show: false, includeSameDay: false,
+  orders: [], totals: [], matched: [], unmatched: [], willOverwrite: 0,
+});
+
+const canPullTransit = computed(() =>
+  !!orderStore.settings.supplier &&
+  !!orderStore.settings.legalEntity &&
+  !!orderStore.settings.deliveryDate &&
+  orderStore.items.length > 0
+);
+
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return '—';
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+}
+
+async function loadTransitData() {
+  transitLoading.value = true;
+  try {
+    const res = await orderStore.fetchIncomingTransit(transitModal.value.includeSameDay);
+    Object.assign(transitModal.value, res);
+  } catch (e) {
+    toast.error('Не удалось получить заявки', e.message || '');
+    transitModal.value.show = false;
+  } finally {
+    transitLoading.value = false;
+  }
+}
+
+async function openTransitModal() {
+  transitModal.value.show = true;
+  transitModal.value.includeSameDay = false;
+  await loadTransitData();
+}
+
+function toggleSameDay() {
+  transitModal.value.includeSameDay = !transitModal.value.includeSameDay;
+  loadTransitData();
+}
+
+function applyTransit() {
+  const changed = orderStore.applyIncomingTransit(transitModal.value.matched);
+  transitModal.value.show = false;
+  draftStore.save();
+  toast.success('Транзит подставлен', `Обновлено позиций: ${changed}`);
+}
+
 const isFullscreen          = ref(false);
 const compactMode           = ref(localStorage.getItem('bk_compact_mode') === '1');
 
@@ -1728,5 +1879,71 @@ async function exitEditMode() {
   .osc-date-item { padding: 8px 10px; }
   .osc-item { padding: 6px 14px; }
   .osc-actions { padding: 12px 14px; }
+}
+
+/* ── Транзит из заявок ── */
+.transit-pull-btn {
+  height: 38px; padding: 0 14px;
+  border: 1.5px solid #E4D9CB; border-radius: 8px; background: #fff;
+  font: inherit; font-size: 13px; font-weight: 700; color: #5F4B38;
+  cursor: pointer; white-space: nowrap;
+}
+.transit-pull-btn:hover:not(:disabled) { border-color: #E87A1E; color: #C25E12; }
+.transit-pull-btn:disabled { opacity: .5; cursor: default; }
+
+.transit-modal { max-width: 720px; width: 100%; max-height: 88vh; overflow: auto; text-align: left; }
+.transit-sub { margin: 4px 0 12px; font-size: 13px; color: #8A7F72; line-height: 1.45; }
+/* Глобальные стили модалок делают label заглавными и разряженными —
+   для строки с галочкой это выглядит как заголовок, поэтому сбрасываем. */
+.transit-check {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 8px; margin-bottom: 12px; cursor: pointer;
+  text-transform: none; letter-spacing: 0;
+}
+.transit-check span {
+  font-size: 13px; font-weight: 500; color: #5F4B38;
+  text-transform: none; letter-spacing: 0;
+}
+/* Глобальное правило .modal-box input растягивает поле на всю ширину,
+   из-за чего подпись галочки выдавливало за край окна. Селектор ниже
+   специфичнее, поэтому побеждает независимо от порядка стилей. */
+.transit-modal .transit-check input[type="checkbox"] {
+  /* Общее правило модалок растягивает поля через !important — для галочки
+     это ломает строку, поэтому перебиваем тем же весом. */
+  width: 16px !important; min-width: 16px !important;
+  height: 16px; margin: 0; flex: 0 0 auto; padding: 0;
+}
+.transit-modal .transit-check span { flex: 1 1 auto; width: auto; }
+.transit-empty { padding: 14px; border-radius: 10px; background: #FBF6F0; font-size: 13px; color: #8A7F72; }
+.transit-orders { margin-bottom: 10px; }
+.transit-orders-title { font-size: 11px; font-weight: 800; text-transform: uppercase; color: #8A7F72; margin-bottom: 6px; }
+.transit-order {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 6px 10px; border: 1px solid #EFE7DC; border-radius: 8px;
+  margin-bottom: 4px; font-size: 13px; background: #FDFAF6;
+}
+.transit-order span { color: #8A7F72; font-size: 12.5px; }
+.transit-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; margin: 10px 0; }
+.transit-dim { color: #8A7F72; }
+.transit-warn {
+  padding: 9px 12px; border-radius: 10px; background: #FFF4E8;
+  color: #C25E12; font-size: 12.5px; font-weight: 600; margin-bottom: 10px;
+}
+.transit-list { max-height: 320px; overflow: auto; border: 1px solid #EFE7DC; border-radius: 10px; }
+.transit-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.transit-list th {
+  position: sticky; top: 0; background: #FBF6F0; padding: 7px 10px;
+  font-size: 11px; text-transform: uppercase; color: #8A7F72; text-align: left;
+}
+.transit-list td { padding: 6px 10px; border-top: 1px solid #F2EAE0; text-align: left; }
+.transit-sku { color: #C25E12; font-weight: 700; white-space: nowrap; }
+.transit-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.transit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+@media (max-width: 620px) {
+  .transit-list th:nth-child(2), .transit-list td:nth-child(2) { max-width: 140px; }
+  /* В строку кнопки не помещаются — «Подставить в транзит» обрезалось. */
+  .transit-actions { flex-direction: column-reverse; }
+  .transit-actions .btn { width: 100%; }
 }
 </style>

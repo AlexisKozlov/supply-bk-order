@@ -502,3 +502,88 @@
             respond(['error' => 'Ошибка обновления заказа'], 500);
         }
     }
+
+// chunk N: incoming_transit — что уже едет к нам до новой поставки
+    /**
+     * Суммы по артикулам из ранее созданных заказов того же поставщика,
+     * которые придут до даты новой поставки.
+     *
+     * Нужно, когда заявки делают на несколько поставок вперёд (например,
+     * перед отпуском): при расчёте следующего заказа то, что уже в пути,
+     * должно попадать в колонку «Транзит», иначе товар закажут дважды.
+     *
+     * Считаем в ШТУКАХ — фронт сам переведёт в единицы текущего заказа.
+     * Осторожно с размером коробки: где qty_per_box не заполнен (стоит 1),
+     * количество в заказе и так хранится штуками.
+     */
+    if ($fn === 'get_incoming_transit') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['order'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['view']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
+
+        $supplier     = trim((string)($body['supplier'] ?? ''));
+        $legalEntity  = trim((string)($body['legal_entity'] ?? ''));
+        $dateFrom     = trim((string)($body['date_from'] ?? ''));
+        $dateTo       = trim((string)($body['date_to'] ?? ''));
+        $includeSame  = !empty($body['include_same_day']);
+        $excludeId    = trim((string)($body['exclude_order_id'] ?? ''));
+
+        if ($supplier === '' || $legalEntity === '') respond(['error' => 'Не указан поставщик или юр. лицо'], 400);
+        foreach ([$dateFrom, $dateTo] as $d) {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) respond(['error' => 'Некорректные даты периода'], 400);
+        }
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+
+        $where = [
+            'o.supplier = ?',
+            'o.legal_entity = ?',
+            'o.delivery_date >= ?',
+            $includeSame ? 'o.delivery_date <= ?' : 'o.delivery_date < ?',
+            // Принятые поставки уже лежат на складе и попадают в «Остаток»,
+            // второй раз считать их нельзя.
+            'o.received_at IS NULL',
+        ];
+        $params = [$supplier, $legalEntity, $dateFrom, $dateTo];
+        if ($excludeId !== '') { $where[] = 'o.id != ?'; $params[] = $excludeId; }
+
+        $sql = "SELECT o.id, o.delivery_date, o.note,
+                       oi.sku, oi.name, oi.final_order, oi.qty_per_box, oi.unit_of_measure
+                FROM orders o
+                JOIN order_items oi ON oi.order_id = o.id
+                WHERE " . implode(' AND ', $where) . "
+                  AND COALESCE(oi.final_order, 0) > 0
+                ORDER BY o.delivery_date, oi.sku";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+
+        $orders = [];
+        $totals = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $oid = (string)$row['id'];
+            if (!isset($orders[$oid])) {
+                $orders[$oid] = [
+                    'id'            => $oid,
+                    'delivery_date' => $row['delivery_date'],
+                    'note'          => $row['note'],
+                    'items'         => 0,
+                ];
+            }
+            $orders[$oid]['items']++;
+
+            $perBox = (float)($row['qty_per_box'] ?? 0);
+            $qty    = (float)$row['final_order'];
+            $pieces = ($row['unit_of_measure'] === 'boxes' && $perBox > 1) ? $qty * $perBox : $qty;
+
+            $sku = (string)$row['sku'];
+            if (!isset($totals[$sku])) $totals[$sku] = ['sku' => $sku, 'name' => $row['name'], 'pieces' => 0];
+            $totals[$sku]['pieces'] += $pieces;
+        }
+
+        respond([
+            'orders' => array_values($orders),
+            'totals' => array_values($totals),
+        ]);
+    }
