@@ -860,13 +860,18 @@ onBeforeUnmount(() => {
 
 .rco-prod { position: relative; }
 .rco-prod-input {
-  width: 100%; padding: 8px 10px; border: 1px solid #d8dee5; border-radius: 6px;
-  font-size: 13px; outline: none; box-sizing: border-box;
+  /* Высота и рамка как у поля количества — раньше строка артикула была
+     заметно ниже соседних полей и ряд выглядел рваным. */
+  width: 100%; height: 100%; min-height: 44px;
+  padding: 11px 12px; border: 1.5px solid #E5DCCF; border-radius: 10px;
+  font-size: 15px; outline: none; box-sizing: border-box;
+  background: #FCFBF9; color: #2B2620; transition: border-color .15s, background .15s;
 }
-.rco-prod-input:focus { border-color: #1976d2; }
+.rco-prod-input::placeholder { color: #B0A597; }
+.rco-prod-input:focus { border-color: #E87A1E; background: rgba(232,122,30,.06); }
 .rco-prod-pop {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px);
-  background: #fff; border: 1px solid #d8dee5; border-radius: 6px;
+  background: #fff; border: 1.5px solid #E5DCCF; border-radius: 10px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.08);
   max-height: 240px; overflow-y: auto;
   z-index: 20;
@@ -992,7 +997,10 @@ onBeforeUnmount(() => {
   .rco-form { padding: 12px; }
   .rco-form-rows { gap: 10px; }
   .rco-form-row {
-    grid-template-columns: 1fr 44px;
+    /* Вторая колонка держит кнопку единицы («кор.»/«шт»): на 44px её текст
+       не помещался и вылезал за карточку. Крестик удаления в этой же колонке
+       не растягиваем — он остаётся компактным. */
+    grid-template-columns: minmax(0, 1fr) 92px;
     grid-template-areas:
       'act del'
       'prod prod'
@@ -1010,7 +1018,7 @@ onBeforeUnmount(() => {
   .rco-form-row > :nth-child(2) { grid-area: prod; }
   .rco-form-row > :nth-child(3) { grid-area: qty; }
   .rco-form-row > :nth-child(4) { grid-area: unit; }
-  .rco-form-row > :nth-child(5) { grid-area: del; justify-self: end; }
+  .rco-form-row > :nth-child(5) { grid-area: del; justify-self: end; width: 44px; }
 
   .rco-qty { padding: 11px 12px; font-size: 15px; min-height: 42px; text-align: center; }
   .rco-unit-btn { padding: 11px 6px; min-height: 42px; width: 80px; font-size: 13px; }
