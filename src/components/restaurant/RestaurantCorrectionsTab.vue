@@ -557,7 +557,9 @@ function fmtDateShort(iso) {
   const days = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   return days[d.getDay()] + ' ' + d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 }
-const STATUS_ICONS = { pending: '⏳', in_progress: '🛠', approved: '✅', rejected: '❌', cancelled: '⛔' };
+// Символы, а не эмодзи: часть эмодзи в системных шрифтах рисуется пустым
+// квадратом — на экране это выглядело как ошибка вёрстки.
+const STATUS_ICONS = { pending: '•', in_progress: '•', approved: '✓', rejected: '✕', cancelled: '—' };
 const STATUS_LABELS = { pending: 'Ожидает', in_progress: 'В работе', approved: 'Принято', rejected: 'Отклонено', cancelled: 'Отменено' };
 function statusIcon(s) { return STATUS_ICONS[s] || '•'; }
 function statusLabel(s) { return STATUS_LABELS[s] || s; }
@@ -721,12 +723,16 @@ onBeforeUnmount(() => {
 }
 .rco-history-toolbar-label { font-size: 12px; color: #888; margin-right: 4px; }
 .rco-history-chip {
-  padding: 4px 12px; border-radius: 999px;
-  background: #f1f4f8; border: 1px solid transparent; color: #455565;
-  font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.12s;
+  padding: 7px 14px; border-radius: 999px;
+  background: #fff; border: 1.5px solid #EDE8E3; color: #6B5B4B;
+  font-size: 12.5px; font-weight: 700; cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
 }
-.rco-history-chip:hover { background: #e7ecf2; }
-.rco-history-chip.is-active { background: #1976d2; color: #fff; }
+.rco-history-chip:hover { border-color: #D8C4B0; background: #FBF6EF; }
+.rco-history-chip.is-active {
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
+  border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(232,122,30,.24);
+}
 
 .rco-batch-when-strong { font-size: 12px; font-weight: 600; color: #2b2b2b; }
 
@@ -763,11 +769,11 @@ onBeforeUnmount(() => {
 
 /* ── Карточка батча ── */
 .rco-batches { display: flex; flex-direction: column; gap: 10px; }
-.rco-batch { background: #fff; border: 1px solid #e8e8e8; border-radius: 10px; padding: 12px 14px; }
-.rco-batch--pending { border-left: 4px solid #ffa000; }
-.rco-batch--in_progress { border-left: 4px solid #1976d2; }
-.rco-batch--approved { border-left: 4px solid #4caf50; }
-.rco-batch--rejected { border-left: 4px solid #c62828; }
+.rco-batch { background: #fff; border: 1px solid #EDE8E3; border-radius: 14px; padding: 13px 15px; box-shadow: 0 1px 3px rgba(60,40,20,.04); }
+.rco-batch--pending { border-left: 4px solid #E0A020; }
+.rco-batch--in_progress { border-left: 4px solid #E87A1E; }
+.rco-batch--approved { border-left: 4px solid #2E7D4F; }
+.rco-batch--rejected { border-left: 4px solid #C0392B; }
 .rco-batch--cancelled { border-left: 4px solid #888; opacity: 0.75; }
 
 .rco-batch-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -796,10 +802,19 @@ onBeforeUnmount(() => {
 .rco-batch-item.is-approved { background: #f1f8e9; }
 .rco-batch-item.is-rejected { background: #fdecea; }
 .rco-batch-item.is-cancelled { background: #f3f3f3; opacity: 0.7; }
-.rco-batch-item-icon { font-size: 14px; }
+/* Кружок со знаком статуса вместо голого эмодзи: одинаково выглядит
+   в любом шрифте и не «прыгает» по высоте строки. */
+.rco-batch-item-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; flex: 0 0 auto;
+  background: #F1EAE0; color: #6B5B4B; font-size: 11px; font-weight: 800; line-height: 1;
+}
+.rco-batch-item.is-approved .rco-batch-item-icon { background: #E9F5EC; color: #2E7D4F; }
+.rco-batch-item.is-rejected .rco-batch-item-icon { background: #FDEBE9; color: #C0392B; }
+.rco-batch-item.is-cancelled .rco-batch-item-icon { background: #F1EFEC; color: #9A8F80; }
 .rco-batch-item-act { font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.03em; }
-.rco-batch-item-act.add { background: #e7f5e8; color: #2e7d32; }
-.rco-batch-item-act.remove { background: #fff4e0; color: #b35900; }
+.rco-batch-item-act.add { background: #E9F5EC; color: #2E7D4F; }
+.rco-batch-item-act.remove { background: #FDEBE9; color: #C0392B; }
 .rco-batch-item-name { color: #2b2b2b; }
 .rco-batch-item-sku { font-family: ui-monospace, monospace; color: #888; font-size: 11px; margin-right: 4px; }
 .rco-batch-item-qty { font-weight: 600; color: #2b2b2b; white-space: nowrap; }
