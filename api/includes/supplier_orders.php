@@ -194,11 +194,11 @@ function soGetSupplierSettings($pdo, $supplierId) {
  * настроек поставщика (so_supplier_settings) — единый источник для скачивания,
  * ручной отправки и крона. Аргумента с опциями у функции больше нет.
  */
-function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate): array {
+function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate, bool $renderXlsx = true): array {
     $out = [
         'status' => 'ok', 'supplier' => null, 'xlsx' => null, 'filename' => '',
         'date_fmt' => '', 'restaurants_count' => 0, 'submitted_count' => 0,
-        'items_count' => 0, 'error' => null,
+        'items_count' => 0, 'error' => null, 'payload' => null,
     ];
 
     $supRow = $pdo->prepare("SELECT short_name, full_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
@@ -384,6 +384,10 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
             'palletMetrics' => array_values($palletMetrics),
         ],
     ];
+    $out['payload'] = $payload;
+    // Недельное письмо собирает книгу сразу из нескольких дней, поэтому ему нужен
+    // только payload — файл на день в этом случае не строим.
+    if (!$renderXlsx) return $out;
 
     $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
     $tmpXlsx = tempnam(sys_get_temp_dir(), 'so_xlsx_') . '.xlsx';
@@ -395,6 +399,128 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate):
     if ($rc !== 0 || !file_exists($tmpXlsx)) {
         @unlink($tmpXlsx);
         error_log('[soBuildSummaryXlsx] node failed (rc=' . $rc . '): ' . implode("\n", $outLines));
+        $out['status'] = 'xlsx_error';
+        $out['error'] = implode(' ', $outLines);
+        return $out;
+    }
+    $out['xlsx'] = file_get_contents($tmpXlsx);
+    @unlink($tmpXlsx);
+    return $out;
+}
+
+/** Русские названия месяцев в родительном падеже: «3 августа». */
+function soMonthGenitive(int $m): string {
+    $names = [1 => 'января', 2 => 'февраля', 3 => 'марта', 4 => 'апреля', 5 => 'мая', 6 => 'июня',
+              7 => 'июля', 8 => 'августа', 9 => 'сентября', 10 => 'октября', 11 => 'ноября', 12 => 'декабря'];
+    return $names[$m] ?? '';
+}
+
+/** Подпись вкладки Excel для дня недельной книги: «ПН 3 авг.». */
+function soWeekSheetLabel(string $date): string {
+    $dow = [1 => 'ПН', 2 => 'ВТ', 3 => 'СР', 4 => 'ЧТ', 5 => 'ПТ', 6 => 'СБ', 7 => 'ВС'];
+    $mon = [1 => 'янв', 2 => 'фев', 3 => 'мар', 4 => 'апр', 5 => 'мая', 6 => 'июн',
+            7 => 'июл', 8 => 'авг', 9 => 'сен', 10 => 'окт', 11 => 'ноя', 12 => 'дек'];
+    $d = new DateTime($date);
+    return ($dow[(int)$d->format('N')] ?? '') . ' ' . (int)$d->format('j') . ' ' . ($mon[(int)$d->format('n')] ?? '');
+}
+
+/** Человеческий диапазон дат: «3–8 августа» или «30 июля – 5 августа». */
+function soDateRangeLabel(string $from, string $to): string {
+    $a = new DateTime($from); $b = new DateTime($to);
+    if ($a->format('Y-m-d') === $b->format('Y-m-d')) {
+        return (int)$a->format('j') . ' ' . soMonthGenitive((int)$a->format('n'));
+    }
+    if ($a->format('Y-m') === $b->format('Y-m')) {
+        return (int)$a->format('j') . '–' . (int)$b->format('j') . ' ' . soMonthGenitive((int)$b->format('n'));
+    }
+    return (int)$a->format('j') . ' ' . soMonthGenitive((int)$a->format('n'))
+         . ' – ' . (int)$b->format('j') . ' ' . soMonthGenitive((int)$b->format('n'));
+}
+
+/**
+ * Книга заявок сразу за несколько дней доставки: вкладка на день.
+ *
+ * Нужна поставщикам с недельным приёмом (ПРЦ): один дедлайн закрывает всю
+ * неделю доставки, поэтому и письмо должно быть одно, а не шесть подряд.
+ * Данные каждого дня собирает та же soBuildSummaryXlsx (в режиме «только
+ * payload»), поэтому содержимое вкладки в точности совпадает с обычным
+ * дневным файлом — расхождений между недельным и дневным письмом нет.
+ *
+ * Дни без заявок в книгу не попадают. Если заявок нет ни в одном дне —
+ * status = 'empty', письмо не отправляется.
+ */
+function soBuildWeekSummaryXlsx(PDO $pdo, string $supplierId, array $dates): array {
+    $out = [
+        'status' => 'ok', 'supplier' => null, 'supplier_full_name' => '', 'xlsx' => null,
+        'filename' => '', 'date_fmt' => '', 'range_label' => '', 'from_legal_entity' => '',
+        'days' => [], 'restaurants_count' => 0, 'submitted_count' => 0, 'real_count' => 0,
+        'skip_count' => 0, 'items_count' => 0, 'error' => null,
+    ];
+
+    $dates = array_values(array_unique(array_filter(array_map('strval', $dates))));
+    sort($dates);
+    if (!$dates) { $out['status'] = 'empty'; return $out; }
+
+    $payloads = [];
+    $restNums = [];
+    $fromEntities = [];
+    foreach ($dates as $date) {
+        $one = soBuildSummaryXlsx($pdo, $supplierId, $date, false);
+        if ($out['supplier'] === null && !empty($one['supplier'])) {
+            $out['supplier'] = $one['supplier'];
+            $out['supplier_full_name'] = $one['supplier_full_name'] ?? '';
+        }
+        // Дни без заявок, закрытые и без графика в книгу не идут — вкладка с
+        // пустой таблицей поставщику ничего не говорит.
+        if ($one['status'] !== 'ok' || empty($one['payload'])) continue;
+
+        $payload = $one['payload'];
+        $payload['sheet_name'] = soWeekSheetLabel($date);
+        $payloads[] = $payload;
+
+        foreach (($payload['restaurants'] ?? []) as $r) {
+            if (!empty($r['submitted'])) $restNums[(string)$r['number']] = true;
+        }
+        $le = trim((string)($one['from_legal_entity'] ?? ''));
+        if ($le !== '' && !in_array($le, $fromEntities, true)) $fromEntities[] = $le;
+
+        $out['days'][] = [
+            'date' => $date,
+            'date_fmt' => $one['date_fmt'],
+            'label' => soWeekSheetLabel($date),
+            'restaurants_count' => (int)$one['restaurants_count'],
+            'real_count' => (int)($one['real_count'] ?? 0),
+            'skip_count' => (int)($one['skip_count'] ?? 0),
+            'items_count' => (int)$one['items_count'],
+        ];
+        $out['restaurants_count'] += (int)$one['restaurants_count'];
+        $out['submitted_count'] += (int)$one['submitted_count'];
+        $out['real_count'] += (int)($one['real_count'] ?? 0);
+        $out['skip_count'] += (int)($one['skip_count'] ?? 0);
+        $out['items_count'] += (int)$one['items_count'];
+    }
+
+    if (!$payloads) { $out['status'] = 'empty'; return $out; }
+
+    $supName = $out['supplier']['short_name'] ?? 'Поставщик';
+    $firstDate = $out['days'][0]['date'];
+    $lastDate = $out['days'][count($out['days']) - 1]['date'];
+    $out['range_label'] = soDateRangeLabel($firstDate, $lastDate);
+    $out['date_fmt'] = $out['range_label'];
+    $out['unique_restaurants'] = count($restNums);
+    sort($fromEntities);
+    $out['from_legal_entity'] = $fromEntities ? implode(', ', $fromEntities) : trim((string)($out['supplier']['legal_entity'] ?? ''));
+    $out['filename'] = "Заявка {$supName} на неделю {$out['range_label']}.xlsx";
+
+    $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
+    $tmpXlsx = tempnam(sys_get_temp_dir(), 'so_xlsx_') . '.xlsx';
+    file_put_contents($tmpJson, json_encode(['days' => $payloads], JSON_UNESCAPED_UNICODE));
+    $scriptPath = escapeshellarg(__DIR__ . '/../../scripts/build_so_order_xlsx.mjs');
+    exec('node ' . $scriptPath . ' ' . escapeshellarg($tmpJson) . ' ' . escapeshellarg($tmpXlsx) . ' 2>&1', $outLines, $rc);
+    @unlink($tmpJson);
+    if ($rc !== 0 || !file_exists($tmpXlsx)) {
+        @unlink($tmpXlsx);
+        error_log('[soBuildWeekSummaryXlsx] node failed (rc=' . $rc . '): ' . implode("\n", $outLines));
         $out['status'] = 'xlsx_error';
         $out['error'] = implode(' ', $outLines);
         return $out;
@@ -718,6 +844,205 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     // SMTP-отправка не удалась — временный сбой, освобождаем замок для повтора кроном.
     if (!$ok) $releaseAutoLock();
     return ['success' => $ok, 'error' => $ok ? null : ($res['error'] ?? 'send_failed'), 'restaurants_count' => $rc, 'items_count' => $ic];
+}
+
+/** Включён ли у поставщика недельный приём заявок (один дедлайн на всю неделю). */
+function soSupplierIsWeekly(PDO $pdo, string $supplierId): bool {
+    $cfg = soGetSupplierSettings($pdo, $supplierId);
+    $dow = $cfg['weekly_deadline_dow'] ?? null;
+    return $dow !== null && $dow !== '' && (int)$dow >= 1 && (int)$dow <= 7;
+}
+
+/**
+ * Все дни доставки, которые закрывает тот же дедлайн, что и переданный день.
+ *
+ * В недельном режиме дедлайн один на неделю, поэтому «отправить за день» на
+ * самом деле означает «за всю неделю». Собираем дни не по календарю, а по
+ * совпадению момента дедлайна — так переносы и разовые правки графика
+ * учитываются сами собой.
+ */
+function soWeekDeliveryDates(PDO $pdo, string $supplierId, string $deliveryDate): array {
+    $base = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+    if (empty($base['deadline_dt'])) return [$deliveryDate];
+    $key = $base['deadline_dt']->format('Y-m-d H:i');
+    $out = [];
+    $start = (new DateTime($deliveryDate))->modify('-10 days');
+    for ($i = 0; $i <= 20; $i++) {
+        $d = (clone $start)->modify("+{$i} days")->format('Y-m-d');
+        $r = soCalculateDeadline($pdo, $supplierId, $d);
+        if (!empty($r['forced_closed']) || empty($r['deadline_dt'])) continue;
+        if ($r['deadline_dt']->format('Y-m-d H:i') === $key) $out[] = $d;
+    }
+    return $out ?: [$deliveryDate];
+}
+
+/**
+ * Одно письмо поставщику сразу за несколько дней доставки.
+ *
+ * Для недельного приёма (ПРЦ): дедлайн один на всю неделю, значит и письмо
+ * одно. Заявки идут одной книгой — вкладка на день. Загрузочные листы внутри
+ * устроены по-другому (вкладка = ресторан), поэтому они прикладываются
+ * отдельным файлом на каждый день: их печатают в день отгрузки, а не всю
+ * неделю разом.
+ *
+ * Замок авто-отправки берётся на все дни пачки: если хотя бы один день уже
+ * отмечен как отправленный, письмо не дублируем.
+ */
+function soSendWeekSummaryEmail(PDO $pdo, string $supplierId, array $dates, string $triggerType, ?string $senderName = null, ?string $ip = null): array {
+    require_once __DIR__ . '/mail_send.php';
+    require_once __DIR__ . '/mail_templates.php';
+
+    $dates = array_values(array_unique(array_filter(array_map('strval', $dates))));
+    sort($dates);
+    if (!$dates) return ['success' => false, 'skipped' => 'empty', 'restaurants_count' => 0, 'items_count' => 0];
+
+    $lockedDates = [];
+    if ($triggerType === 'auto') {
+        $lock = $pdo->prepare("INSERT IGNORE INTO so_email_auto_log (supplier_id, delivery_date) VALUES (?, ?)");
+        foreach ($dates as $d) {
+            $lock->execute([$supplierId, $d]);
+            if ($lock->rowCount() > 0) $lockedDates[] = $d;
+        }
+        // Ни одного нового дня — за эту неделю письмо уже уходило.
+        if (!$lockedDates) return ['success' => false, 'skipped' => 'already_sent', 'restaurants_count' => 0, 'items_count' => 0];
+    }
+    $releaseAutoLock = function () use ($pdo, $triggerType, $supplierId, &$lockedDates) {
+        if ($triggerType !== 'auto' || !$lockedDates) return;
+        $del = $pdo->prepare("DELETE FROM so_email_auto_log WHERE supplier_id = ? AND delivery_date = ?");
+        foreach ($lockedDates as $d) $del->execute([$supplierId, $d]);
+    };
+
+    $sum = soBuildWeekSummaryXlsx($pdo, $supplierId, $dates);
+    $rc = (int)$sum['restaurants_count']; $ic = (int)$sum['items_count'];
+    if ($sum['status'] !== 'ok') {
+        if ($sum['status'] === 'xlsx_error') $releaseAutoLock();
+        return ['success' => false, 'skipped' => $sum['status'], 'error' => $sum['error'] ?? null, 'restaurants_count' => $rc, 'items_count' => $ic];
+    }
+
+    $addr = $pdo->prepare("SELECT short_name, full_name, email, cc_emails FROM suppliers WHERE id = ?");
+    $addr->execute([$supplierId]);
+    $s = $addr->fetch();
+    $toList = soParseEmailList($s['email'] ?? '');
+    if (!$toList) return ['success' => false, 'skipped' => 'no_email', 'restaurants_count' => $rc, 'items_count' => $ic];
+    $toEmail = implode(', ', $toList);
+    $ccList = array_values(array_diff(soParseEmailList($s['cc_emails'] ?? ''), $toList));
+
+    // Копия ресторанам — те же правила, что и в дневном письме, но за все дни.
+    $ccSettings = soGetSupplierSettings($pdo, $supplierId);
+    if (!empty($ccSettings['email_cc_restaurants'])) {
+        $datePh = implode(',', array_fill(0, count($dates), '?'));
+        $ordersSt = $pdo->prepare("
+            SELECT DISTINCT o.restaurant_number, o.legal_entity
+            FROM so_orders o
+            WHERE o.supplier_id = ? AND o.delivery_date IN ({$datePh})
+              AND EXISTS (
+                SELECT 1 FROM so_order_items oi
+                WHERE oi.order_id = o.id AND COALESCE(oi.admin_qty, oi.quantity) > 0
+              )
+        ");
+        $ordersSt->execute(array_merge([$supplierId], $dates));
+        $userSt = $pdo->prepare("
+            SELECT email FROM ro_users
+            WHERE restaurant_number = ? AND legal_entity_group = ?
+              AND is_active = 1 AND email IS NOT NULL AND email <> ''
+        ");
+        foreach ($ordersSt->fetchAll() as $o) {
+            $userSt->execute([$o['restaurant_number'], getEntityGroup($o['legal_entity'] ?? '')]);
+            foreach ($userSt->fetchAll(PDO::FETCH_COLUMN) as $email) {
+                $email = trim((string)$email);
+                if ($email !== '' && !in_array($email, $toList, true) && !in_array($email, $ccList, true)) $ccList[] = $email;
+            }
+        }
+    }
+
+    $supName = trim((string)($sum['supplier_full_name'] ?? '')) ?: ($s['short_name'] ?? 'Поставщик');
+    $range = $sum['range_label'];
+    $subject = "Заявки на неделю {$range} — {$supName}";
+    $esc = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    // Список дней прямо в письме: поставщику сразу видно, что внутри книги и
+    // сколько ресторанов заказало в каждый день.
+    $daysHtml = '';
+    foreach ($sum['days'] as $d) {
+        $daysHtml .= "<li>{$esc($d['date_fmt'])} — ресторанов: {$esc($d['real_count'])}, позиций: {$esc($d['items_count'])}</li>";
+    }
+    $fromLegal = trim((string)($sum['from_legal_entity'] ?? ''));
+    $bodyHtml = "<html><body>"
+              . "<p>Здравствуйте!</p>"
+              . "<p>Направляем заявки ресторанов на неделю доставки {$esc($range)}.</p>"
+              . ($fromLegal !== '' ? "<p>От кого: {$esc($fromLegal)}</p>" : '')
+              . "<p>Кому: {$esc($supName)}</p>"
+              . "<p>Дней доставки: {$esc(count($sum['days']))}. Позиций всего: {$esc($ic)}.</p>"
+              . "<ul>{$daysHtml}</ul>"
+              . "<p>Подробности — в приложенном файле Excel: на каждый день своя вкладка.</p>"
+              . "<p>Отдел закупок</p>"
+              . "</body></html>";
+
+    $attachB64 = base64_encode($sum['xlsx']);
+    $limit = (int)(4 * 1024 * 1024 * 4 / 3);
+    if (strlen($attachB64) > $limit) {
+        soLogWeekEmail($pdo, $supplierId, $sum, $toEmail, $ccList, $subject, $triggerType, false, 'attachment_too_large', $senderName, $ip);
+        return ['success' => false, 'error' => 'attachment_too_large', 'restaurants_count' => $rc, 'items_count' => $ic];
+    }
+    $attachments = [['filename' => $sum['filename'], 'content_b64' => $attachB64,
+        'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']];
+    $totalB64 = strlen($attachB64);
+
+    // Загрузочные листы — по файлу на день. Если в лимит не помещаются, письмо
+    // с заявкой всё равно уходит: заявка важнее.
+    require_once __DIR__ . '/so_loading_sheets.php';
+    if (soLsSupplierEnabled($pdo, $supplierId)) {
+        foreach ($sum['days'] as $d) {
+            try {
+                $ls = soLsBuildDayXlsx($pdo, $supplierId, $d['date']);
+                if ($ls['status'] !== 'ok' || $ls['xlsx'] === null) continue;
+                $lsB64 = base64_encode($ls['xlsx']);
+                if ($totalB64 + strlen($lsB64) > $limit) {
+                    error_log("[so week-email] загрузочные листы не влезли: supplier={$supplierId} date={$d['date']}");
+                    break;
+                }
+                $totalB64 += strlen($lsB64);
+                $attachments[] = ['filename' => $ls['filename'], 'content_b64' => $lsB64,
+                    'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+            } catch (Throwable $e) {
+                error_log('[so_loading_sheets] ' . $e->getMessage());
+            }
+        }
+    }
+
+    $res = sendEmail($toList, $subject, $bodyHtml, true, [
+        'account' => 'order',
+        'reply_to' => 'order@supply-department.online',
+        'cc' => $ccList,
+        'attachments' => $attachments,
+    ]);
+    $ok = !empty($res['success']);
+    soLogWeekEmail($pdo, $supplierId, $sum, $toEmail, $ccList, $subject, $triggerType, $ok, $ok ? null : ($res['error'] ?? 'send_failed'), $senderName, $ip);
+    if (!$ok) $releaseAutoLock();
+    return ['success' => $ok, 'error' => $ok ? null : ($res['error'] ?? 'send_failed'),
+            'restaurants_count' => $rc, 'items_count' => $ic, 'days' => count($sum['days'])];
+}
+
+/**
+ * Журнал недельного письма: по строке на каждый день недели.
+ *
+ * Так статус «письмо ушло» виден на вкладке «Приём» в любом из дней недели —
+ * закупщику не нужно помнить, какой день считается «главным».
+ */
+function soLogWeekEmail(PDO $pdo, string $supplierId, array $sum, string $to, array $cc, string $subject, string $trigger, bool $success, ?string $err, ?string $senderName, ?string $ip): void {
+    $le = $sum['supplier']['legal_entity'] ?? null;
+    // Только дни, реально попавшие в книгу. Дни без заявок в письме не участвуют,
+    // и отмечать их как «письмо отправлено» нельзя — на вкладке «Приём» это
+    // читалось бы как отправленная, но пустая заявка.
+    $days = $sum['days'] ?? [];
+    if (!$days) return;
+    $st = $pdo->prepare("INSERT INTO so_email_log
+        (supplier_id, delivery_date, legal_entity, recipients, cc_recipients, subject, restaurants_count, items_count, trigger_type, success, error_message, sender_user_name, ip_address)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    foreach ($days as $d) {
+        $st->execute([$supplierId, $d['date'], $le, $to, implode(',', $cc), mb_substr($subject, 0, 255),
+            (int)($d['restaurants_count'] ?? 0), (int)($d['items_count'] ?? 0), $trigger, $success ? 1 : 0,
+            $err ? mb_substr($err, 0, 1000) : null, $senderName, $ip]);
+    }
 }
 
 /** Пишет строку в so_email_log. */
@@ -4561,15 +4886,24 @@ if ($soAction === 'admin') {
 
         $ip = $_SERVER['REMOTE_ADDR'] ?? null;
         $senderName = $sessionUser['name'] ?? null;
-        // Опции Excel-отчёта берутся из настроек поставщика внутри soBuildSummaryXlsx
-        $r = soSendSummaryEmail($pdo, $supplierId, $deliveryDate, 'manual', $senderName, $ip);
+        // Опции Excel-отчёта берутся из настроек поставщика внутри soBuildSummaryXlsx.
+        // При недельном приёме дедлайн один на всю неделю — шлём её целиком одним
+        // письмом, иначе поставщик получит шесть писем подряд про одну поставку.
+        $isWeekly = soSupplierIsWeekly($pdo, $supplierId);
+        if ($isWeekly) {
+            $weekDatesForMail = soWeekDeliveryDates($pdo, $supplierId, $deliveryDate);
+            $r = soSendWeekSummaryEmail($pdo, $supplierId, $weekDatesForMail, 'manual', $senderName, $ip);
+        } else {
+            $r = soSendSummaryEmail($pdo, $supplierId, $deliveryDate, 'manual', $senderName, $ip);
+        }
 
         if (!empty($r['success'])) {
-            soRespond(['success' => true, 'restaurants_count' => $r['restaurants_count'], 'items_count' => $r['items_count']]);
+            soRespond(['success' => true, 'restaurants_count' => $r['restaurants_count'],
+                       'items_count' => $r['items_count'], 'days' => $r['days'] ?? 1, 'weekly' => $isWeekly]);
         }
         $map = [
             'no_email'    => 'У поставщика не указана почта',
-            'empty'       => 'Нет заявок за этот день',
+            'empty'       => $isWeekly ? 'Нет заявок за эту неделю' : 'Нет заявок за этот день',
             'closed'      => 'Дата доставки закрыта',
             'no_schedule' => 'Нет ресторанов в графике на этот день',
             'xlsx_error'  => 'Не удалось сформировать Excel',

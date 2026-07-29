@@ -47,79 +47,112 @@ if (!jsonPath || !outPath) {
 }
 
 const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-const supplierName = data.supplier_name || 'Поставщик';
-const dateFmt = data.delivery_date_fmt || '';
-const fromLegalEntity = data.from_legal_entity || '';
+
+// Два входных формата:
+//   • один день  — поля payload лежат в корне (так было всегда);
+//   • неделя     — {"days": [payload, payload, ...]}, вкладка на каждый день.
+// Недельный формат нужен поставщикам с недельным приёмом заявок (ПРЦ): у них
+// один дедлайн закрывает всю неделю доставки, и слать шесть писем подряд
+// вместо одного — только мешать.
+const days = Array.isArray(data.days) && data.days.length ? data.days : [data];
+
 // Имя листа Excel не может содержать : \ / ? * [ ] — иначе XLSX.write падает.
 // Чистим их (заменяем на пробел), схлопываем пробелы, обрезаем до 28 символов.
 // Если после чистки пусто — берём запасное имя, лист не может быть безымянным.
-const rawSheetName = String(data.sheet_name || supplierName || '');
-const sheetName = (rawSheetName.replace(/[:\\/?*[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28)) || 'Заявка';
-
-// ── Опции: PHP шлёт snake_case, модуль ждёт camelCase; принимаем оба вида. ──
-const rawOptions = data.options || {};
-const rawMetrics = rawOptions.palletMetrics ?? rawOptions.pallet_metrics ?? [];
-const options = {
-    dropEmptyRows: !!(rawOptions.dropEmptyRows ?? rawOptions.drop_empty_rows ?? false),
-    palletMetrics: Array.isArray(rawMetrics) ? rawMetrics : [],
-};
-
-// ── Товары: name → product_name, плоские (без группировки). ──
-const products = (data.products || []).map(p => ({
-    sku: p.sku,
-    product_name: p.product_name ?? p.name ?? '',
-    is_grouped: false,
-    unit_of_measure: p.unit_of_measure,
-    qty_per_box: p.qty_per_box,
-    boxes_per_pallet: p.boxes_per_pallet,
-    weight_netto: p.weight_netto,
-    weight_brutto: p.weight_brutto,
-}));
-
-// ── Рестораны: флаг submitted → order_status (модуль смотрит order_status). ──
-const restaurants = (data.restaurants || []).map(r => ({
-    number: r.number,
-    city: r.city,
-    region: r.region,
-    address: r.address,
-    order_status: r.order_status ?? (r.submitted ? 'submitted' : 'draft'),
-}));
-
-// ── Позиции: объект {"{rn}_{sku}": {qty, is_admin}} → массив контракта модуля.
-// Ключ = номер ресторана + "_" + sku; sku может содержать "_", поэтому режем
-// по ПЕРВОМУ подчёркиванию (номер ресторана — число, без "_"). ──
-const rawItems = data.items || {};
-const items = [];
-for (const key of Object.keys(rawItems)) {
-    const idx = key.indexOf('_');
-    if (idx < 0) continue;
-    const rn = key.slice(0, idx);
-    const sku = key.slice(idx + 1);
-    const v = rawItems[key] || {};
-    const isAdmin = !!(v.is_admin ?? v.isAdmin ?? false);
-    const qty = v.qty;
-    items.push({
-        restaurant_number: rn,
-        sku,
-        quantity: qty,
-        admin_qty: isAdmin ? qty : null,
-    });
+function cleanSheetName(raw, fallback) {
+    const s = String(raw || '').replace(/[:\\/?*[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28);
+    return s || fallback;
 }
 
-// ── Один лист общим модулем; на сервере авто-подача не подсвечивается. ──
-const ws = buildSoOrderSheet(XLSX, {
-    supplierName,
-    fromLegalEntity,
-    dateFmt,
-    products,
-    restaurants,
-    items,
-    isAutoSubmitted: () => false,
-    options,
-});
+// Одинаковые имена вкладок Excel не допускает — добавляем номер.
+function uniqueSheetName(name, used) {
+    if (!used.has(name)) { used.add(name); return name; }
+    for (let i = 2; i < 100; i++) {
+        const candidate = `${name.slice(0, 24)} ${i}`;
+        if (!used.has(candidate)) { used.add(candidate); return candidate; }
+    }
+    used.add(name);
+    return name;
+}
+
+// Строит один лист из payload одного дня.
+function sheetForDay(day) {
+    const supplierName = day.supplier_name || 'Поставщик';
+    const dateFmt = day.delivery_date_fmt || '';
+    const fromLegalEntity = day.from_legal_entity || '';
+
+    // ── Опции: PHP шлёт snake_case, модуль ждёт camelCase; принимаем оба вида. ──
+    const rawOptions = day.options || {};
+    const rawMetrics = rawOptions.palletMetrics ?? rawOptions.pallet_metrics ?? [];
+    const options = {
+        dropEmptyRows: !!(rawOptions.dropEmptyRows ?? rawOptions.drop_empty_rows ?? false),
+        palletMetrics: Array.isArray(rawMetrics) ? rawMetrics : [],
+    };
+
+    // ── Товары: name → product_name, плоские (без группировки). ──
+    const products = (day.products || []).map(p => ({
+        sku: p.sku,
+        product_name: p.product_name ?? p.name ?? '',
+        is_grouped: false,
+        unit_of_measure: p.unit_of_measure,
+        qty_per_box: p.qty_per_box,
+        boxes_per_pallet: p.boxes_per_pallet,
+        weight_netto: p.weight_netto,
+        weight_brutto: p.weight_brutto,
+    }));
+
+    // ── Рестораны: флаг submitted → order_status (модуль смотрит order_status). ──
+    const restaurants = (day.restaurants || []).map(r => ({
+        number: r.number,
+        city: r.city,
+        region: r.region,
+        address: r.address,
+        order_status: r.order_status ?? (r.submitted ? 'submitted' : 'draft'),
+    }));
+
+    // ── Позиции: объект {"{rn}_{sku}": {qty, is_admin}} → массив контракта модуля.
+    // Ключ = номер ресторана + "_" + sku; sku может содержать "_", поэтому режем
+    // по ПЕРВОМУ подчёркиванию (номер ресторана — число, без "_"). ──
+    const rawItems = day.items || {};
+    const items = [];
+    for (const key of Object.keys(rawItems)) {
+        const idx = key.indexOf('_');
+        if (idx < 0) continue;
+        const rn = key.slice(0, idx);
+        const sku = key.slice(idx + 1);
+        const v = rawItems[key] || {};
+        const isAdmin = !!(v.is_admin ?? v.isAdmin ?? false);
+        const qty = v.qty;
+        items.push({
+            restaurant_number: rn,
+            sku,
+            quantity: qty,
+            admin_qty: isAdmin ? qty : null,
+        });
+    }
+
+    // ── Лист общим модулем; на сервере авто-подача не подсвечивается. ──
+    return {
+        ws: buildSoOrderSheet(XLSX, {
+            supplierName,
+            fromLegalEntity,
+            dateFmt,
+            products,
+            restaurants,
+            items,
+            isAutoSubmitted: () => false,
+            options,
+        }),
+        name: cleanSheetName(day.sheet_name || supplierName, 'Заявка'),
+    };
+}
 
 const wb = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb, ws, sheetName);
+const usedNames = new Set();
+for (const day of days) {
+    const { ws, name } = sheetForDay(day);
+    XLSX.utils.book_append_sheet(wb, ws, uniqueSheetName(name, usedNames));
+}
 const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 fs.writeFileSync(outPath, buf);
 console.log(`OK ${outPath} ${buf.length}`);

@@ -199,8 +199,10 @@
               <span>{{ sendingSummary ? 'Отправка…' : 'Отправить сводку' }}</span>
             </button>
             <button class="so-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
-                    title="Сгенерировать Excel и отправить на почту поставщика">
-              {{ sendingSummaryEmail ? 'Отправка…' : 'На почту' }}
+                    :title="supplierIsWeekly
+                      ? 'Собрать Excel за всю неделю доставки (вкладка на день) и отправить одним письмом'
+                      : 'Сгенерировать Excel и отправить на почту поставщика'">
+              {{ sendingSummaryEmail ? 'Отправка…' : (supplierIsWeekly ? 'На почту за неделю' : 'На почту') }}
             </button>
             <span v-if="dayEmailLabel" class="so-mail-state" :class="dayEmailLabel.ok ? 'is-ok' : 'is-bad'"
                   :title="dayEmailStatus?.recipients || ''">
@@ -1909,6 +1911,14 @@ async function saveReminders() {
   }
 }
 
+// Недельный приём по сохранённым настройкам (не по полям формы): при таком
+// режиме дедлайн один на всю неделю, поэтому и письмо поставщику уходит одно —
+// сразу за все дни доставки этой недели.
+const supplierIsWeekly = computed(() => {
+  const dow = settings.value?.weekly_deadline_dow;
+  return dow != null && dow !== '' && Number(dow) >= 1 && Number(dow) <= 7;
+});
+
 // Синхронизация локальных полей недельного режима из settings.value.
 // PDO может вернуть dow строкой — приводим к Number.
 function syncWeeklyFromSettings() {
@@ -2995,7 +3005,11 @@ async function sendSummaryEmail() {
   try {
     // Опции Excel сервер берёт из настроек поставщика
     const r = await store.adminSendSummaryEmail(currentSupplierId.value, selectedDate.value);
-    toast.success('Отправлено', `Сводка ушла на почту поставщика (ресторанов: ${r.restaurants_count ?? '—'})`);
+    const what = r?.weekly
+      ? `Одно письмо за всю неделю: дней ${r.days ?? '—'}, позиций ${r.items_count ?? '—'}`
+      : `Ресторанов: ${r.restaurants_count ?? '—'}`;
+    toast.success('Отправлено', `Сводка ушла на почту поставщика. ${what}`);
+    await loadStatus();
   } catch (e) {
     toast.error('Ошибка', e?.message || 'Не удалось отправить письмо');
   } finally {

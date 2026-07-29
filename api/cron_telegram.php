@@ -1452,6 +1452,9 @@ try {
         // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null), время — строка|null
         $weeklyDow = (isset($sup['weekly_deadline_dow']) && $sup['weekly_deadline_dow'] !== null && $sup['weekly_deadline_dow'] !== '' && (int)$sup['weekly_deadline_dow'] >= 1 && (int)$sup['weekly_deadline_dow'] <= 7) ? (int)$sup['weekly_deadline_dow'] : null;
         $weeklyTime = !empty($sup['weekly_deadline_time']) ? $sup['weekly_deadline_time'] : null;
+        // Дни, у которых дедлайн только что наступил. В недельном режиме их
+        // сразу несколько — они уйдут одним письмом.
+        $dueDates = [];
         for ($iDay = 0; $iDay < 15; $iDay++) {
             $dObj = (clone $now)->setTime(0, 0, 0)->modify("+{$iDay} days");
             $deliveryDate = $dObj->format('Y-m-d');
@@ -1469,6 +1472,26 @@ try {
             $minutesSinceDeadline = ($now->getTimestamp() - $r['deadline_dt']->getTimestamp()) / 60;
             if ($minutesSinceDeadline < -1 || $minutesSinceDeadline > 15) continue;
 
+            $dueDates[] = $deliveryDate;
+        }
+
+        if (!$dueDates) continue;
+
+        // Недельный приём: один дедлайн закрывает всю неделю доставки, поэтому
+        // и письмо одно — книга с вкладкой на каждый день. Обычный режим шлёт
+        // по письму на день, как и раньше.
+        if ($weeklyDow !== null) {
+            $res = soSendWeekSummaryEmail($pdo, $supId, $dueDates, 'auto', null, null);
+            $range = $dueDates[0] . '..' . $dueDates[count($dueDates) - 1];
+            if (!empty($res['success'])) {
+                error_log("[so auto-email] sent week supplier={$supId} {$range} days={$res['days']} rests={$res['restaurants_count']}");
+            } elseif (!empty($res['skipped']) && $res['skipped'] !== 'already_sent' && $res['skipped'] !== 'empty') {
+                error_log("[so auto-email] skip week supplier={$supId} {$range} reason={$res['skipped']}");
+            }
+            continue;
+        }
+
+        foreach ($dueDates as $deliveryDate) {
             // Одно письмо на поставщика+день; skipped='already_sent' при повторе.
             $res = soSendSummaryEmail($pdo, $supId, $deliveryDate, 'auto', null, null);
             if (!empty($res['success'])) {
@@ -1517,11 +1540,19 @@ try {
         if (!$subs) {
             // Подписчики выбраны, но ни у кого нет привязанного Telegram (или все
             // заблокировали бота) — сводка молча не уходит. Пишем в лог, чтобы
-            // такую тишину можно было объяснить, а не искать вслепую.
+            // такую тишину можно было объяснить, а не искать вслепую. Крон ходит
+            // каждые 5 минут, поэтому предупреждаем раз в сутки на поставщика.
             $totalSubs = $pdo->prepare("SELECT COUNT(*) FROM so_supplier_summary_subscribers WHERE supplier_id = ?");
             $totalSubs->execute([$sup['id']]);
             if ((int)$totalSubs->fetchColumn() > 0) {
-                error_log("[so summary] нет получателей с Telegram: supplier={$sup['id']} ({$sup['short_name']})");
+                $noTgKey = 'so_no_tg_' . $sup['id'] . '_' . $now->format('Y-m-d');
+                $seen = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary_no_tg' AND notification_key = ? LIMIT 1");
+                $seen->execute([$noTgKey]);
+                if (!$seen->fetch()) {
+                    error_log("[so summary] нет получателей с Telegram: supplier={$sup['id']} ({$sup['short_name']})");
+                    $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary_no_tg', '', 0, ?)")
+                        ->execute([$noTgKey]);
+                }
             }
             continue;
         }
@@ -1535,6 +1566,76 @@ try {
             $supplierGroup = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
             $supplierEntities = getEntitiesInGroup($supplierGroup);
             $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
+
+            // ── Недельный приём: одна сводка на всю неделю ──
+            // Дедлайн здесь один на все дни доставки, поэтому и сообщение одно:
+            // книга с вкладкой на день плюс короткий текст по дням. Иначе после
+            // дедлайна в чат прилетало шесть сообщений про одну поставку.
+            if ($weeklyDow !== null) {
+                $weekDue = [];
+                $weekDeadline = null;
+                for ($iDay = 0; $iDay < 15; $iDay++) {
+                    $dObj = (clone $now)->setTime(0, 0, 0)->modify("+{$iDay} days");
+                    $dStr = $dObj->format('Y-m-d');
+                    $ovS = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                    $ovS->execute([$supId, $dStr]);
+                    $rlS = $pdo->prepare("SELECT deadline_dow, deadline_time FROM supplier_default_deadlines WHERE supplier_id = ? AND delivery_dow = ?");
+                    $rlS->execute([$supId, (int)$dObj->format('N')]);
+                    $rr = soCalculateDeadlineCore($ovS->fetch() ?: null, $rlS->fetch() ?: null, $defaultDeadlineTime, $dStr, $tz, $weeklyDow, $weeklyTime);
+                    if (!empty($rr['forced_closed']) || !$rr['deadline_dt']) continue;
+                    $mins = ($now->getTimestamp() - $rr['deadline_dt']->getTimestamp()) / 60;
+                    if ($mins < 0 || $mins > SO_SUMMARY_MAX_LATE_MINUTES) continue;
+                    // Берём только ближайший прошедший дедлайн: если крон долго
+                    // молчал, соседние недели не склеиваются в одну сводку.
+                    if ($weekDeadline === null) $weekDeadline = $rr['deadline_dt'];
+                    if ($rr['deadline_dt']->format('Y-m-d H:i') !== $weekDeadline->format('Y-m-d H:i')) continue;
+                    $weekDue[] = $dStr;
+                }
+                if (!$weekDue) continue;
+
+                $dedupKey = "so_summary_week_{$supId}_{$weekDue[0]}";
+                $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary' AND notification_key = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
+                $dup->execute([$dedupKey]);
+                if ($dup->fetch()) continue;
+
+                // Подписавшиеся уже после дедлайна сводку задним числом не получают.
+                $weekSubs = array_values(array_filter($subs, function ($s) use ($weekDeadline) {
+                    if (empty($s['subscribed_at'])) return true;
+                    $ts = strtotime($s['subscribed_at']);
+                    return $ts === false || $ts <= $weekDeadline->getTimestamp();
+                }));
+                $markSent = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)");
+                if (!$weekSubs) { $markSent->execute([$dedupKey]); continue; }
+
+                $weekSum = soBuildWeekSummaryXlsx($pdo, $supId, $weekDue);
+                $range = $weekSum['range_label'] ?: ($weekDue[0] . '..' . $weekDue[count($weekDue) - 1]);
+                if ($weekSum['status'] !== 'ok') {
+                    // Никто не подал за всю неделю — это тоже новость, но файла нет.
+                    $caption = "⚠️ <b>За неделю заявок нет</b>\n"
+                             . "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n"
+                             . "📅 Доставка: <b>{$range}</b>";
+                    foreach ($weekSubs as $sub) tgSend($sub['telegram_chat_id'], $caption, true);
+                    $markSent->execute([$dedupKey]);
+                    continue;
+                }
+
+                $caption = "📋 <b>Заявки на неделю</b>\n"
+                         . "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n"
+                         . "📅 Доставка: <b>{$range}</b>\n"
+                         . "📊 Позиций: <b>{$weekSum['items_count']}</b>\n\n";
+                foreach ($weekSum['days'] as $wd) {
+                    $caption .= "• {$wd['date_fmt']} — ресторанов <b>{$wd['real_count']}</b>";
+                    if ($wd['skip_count'] > 0) $caption .= ", «не нужна» {$wd['skip_count']}";
+                    $caption .= ", позиций {$wd['items_count']}\n";
+                }
+                $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
+                foreach ($weekSubs as $sub) {
+                    $ok = tgSendDocument($sub['telegram_chat_id'], $weekSum['filename'], $weekSum['xlsx'], $caption);
+                    $perUser->execute([$ok ? 'so_summary_sent' : 'so_summary_fail', $sub['telegram_chat_id'], $dedupKey]);
+                }
+                $markSent->execute([$dedupKey]);
+                continue;
+            }
 
             // Ближайшие даты поставки (2 недели вперёд) с учётом ЭФФЕКТИВНОГО графика:
             // внутри активного временного периода — временные дни/рестораны, иначе основные.
