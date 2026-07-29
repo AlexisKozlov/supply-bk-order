@@ -2763,12 +2763,20 @@ if ($soAction === 'admin') {
             if ($r['order_status'] === 'submitted' || $r['order_status'] === 'locked') $submitted++;
         }
 
-        $weekDates = array_map(function ($item) use ($dayNames, $dayNamesFull) {
+        // Вместе с датой отдаём состояние приёма: открыт, закрыт по дедлайну
+        // или закрыт вручную. Раньше это было видно только в колонке статуса
+        // таблицы, и по ленте дат нельзя было понять, где приём ещё идёт.
+        $weekDates = array_map(function ($item) use ($dayNames, $dayNamesFull, $pdo, $supplierId) {
             $dow = (int)$item['delivery_day'];
+            $date = $item['delivery_date'];
+            $dl = soCalculateDeadline($pdo, $supplierId, $date);
             return [
-                'date' => $item['delivery_date'],
+                'date' => $date,
                 'day_name' => $dayNames[$dow] ?? '',
                 'day_name_full' => $dayNamesFull[$dow] ?? '',
+                'is_closed' => !empty($dl['is_closed']),
+                'forced_closed' => !empty($dl['forced_closed']),
+                'deadline_str' => $dl['deadline_str'] ?? null,
             ];
         }, $weekDates);
         // Внеплановые даты (довоз) вне графика — добавляем в выбор дат, чтобы
@@ -2784,11 +2792,15 @@ if ($soAction === 'admin') {
         foreach ($adhocDatesStmt->fetchAll(PDO::FETCH_COLUMN) as $adhocDate) {
             if (isset($weekDateSet[$adhocDate])) continue;
             $dow = (int)(new DateTime($adhocDate))->format('N');
+            $adhocDl = soCalculateDeadline($pdo, $supplierId, $adhocDate);
             $weekDates[] = [
                 'date' => $adhocDate,
                 'day_name' => $dayNames[$dow] ?? '',
                 'day_name_full' => $dayNamesFull[$dow] ?? '',
                 'is_adhoc' => true,
+                'is_closed' => !empty($adhocDl['is_closed']),
+                'forced_closed' => !empty($adhocDl['forced_closed']),
+                'deadline_str' => $adhocDl['deadline_str'] ?? null,
             ];
         }
         usort($weekDates, fn($a, $b) => strcmp($a['date'], $b['date']));

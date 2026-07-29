@@ -118,11 +118,19 @@
         <div class="so-dates-strip">
           <button v-for="wd in weekDates" :key="wd.date"
             class="so-date"
-            :class="{ 'is-active': selectedDate === wd.date, 'is-closed': isDateForcedClosed(wd.date), 'is-adhoc': wd.is_adhoc }"
+            :class="{
+              'is-active': selectedDate === wd.date,
+              'is-closed': wdClosed(wd),
+              'is-forced': wdForced(wd),
+              'is-adhoc': wd.is_adhoc,
+            }"
             @click="selectedDate = wd.date; loadStatus()"
-            :title="wd.is_adhoc ? 'Внеплановая дата (довоз)' : (isDateForcedClosed(wd.date) ? 'День закрыт' : '')">
+            :title="wdTitle(wd)">
             <span class="so-date-day">{{ wd.day_name }}</span>
             <span class="so-date-num">{{ formatDateShort(wd.date) }}</span>
+            <span class="so-date-state" :class="wdClosed(wd) ? 'closed' : 'open'">
+              {{ wdForced(wd) ? 'закрыт' : (wdClosed(wd) ? 'приём окончен' : 'приём идёт') }}
+            </span>
             <span v-if="wd.is_adhoc" class="so-date-tag">довоз</span>
           </button>
         </div>
@@ -131,10 +139,17 @@
           <button v-if="selectedDate" class="so-mini-btn" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
             Продлить дедлайн
           </button>
-          <button v-if="selectedDate" class="so-mini-btn" :class="isDateForcedClosed(selectedDate) ? 'is-open-day' : 'is-close-day'"
-            @click="handleToggleCloseDay(selectedDate)" :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
+          <!-- Кнопка соответствует состоянию: закрывать день, где приём уже
+               окончился по дедлайну, незачем — там предлагаем продлить. -->
+          <button v-if="selectedDate && (isDateForcedClosed(selectedDate) || !dayIsClosed)"
+            class="so-mini-btn" :class="isDateForcedClosed(selectedDate) ? 'is-open-day' : 'is-close-day'"
+            @click="handleToggleCloseDay(selectedDate)"
+            :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
             {{ isDateForcedClosed(selectedDate) ? 'Открыть день' : 'Закрыть день' }}
           </button>
+          <span v-else-if="selectedDate && dayIsClosed" class="so-day-note">
+            приём окончен{{ selectedDayDeadlineFmt ? ' · ' + selectedDayDeadlineFmt : '' }}
+          </span>
         </div>
       </div>
 
@@ -172,7 +187,8 @@
             </div>
           </div>
 
-          <!-- Действия: слева то, чем пользуются каждый день, остальное — под «Ещё» -->
+          <!-- Действия. Всё на виду: пряталось в меню — приходилось искать.
+               Редкое и второстепенное сделано короче и собрано по смыслу. -->
           <div class="so-actions">
             <button class="so-btn so-btn-primary" @click="sendSummary"
                     :disabled="sendingSummary || !selectedDate"
@@ -182,11 +198,21 @@
             </button>
             <button class="so-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
                     title="Сгенерировать Excel и отправить на почту поставщика">
-              {{ sendingSummaryEmail ? 'Отправка…' : 'На почту поставщику' }}
+              {{ sendingSummaryEmail ? 'Отправка…' : 'На почту' }}
             </button>
-            <button class="so-btn" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
-              {{ exporting ? 'Выгрузка…' : exportSelectedDates.size > 1 ? `Excel · ${exportSelectedDates.size} ${dayWord(exportSelectedDates.size)}` : 'Выгрузить в Excel' }}
-            </button>
+
+            <!-- Excel и выбор дней — одна кнопка со стрелкой: действие одно,
+                 просто с настройкой, сколько дней выгружать. -->
+            <div class="so-split">
+              <button class="so-btn so-split-main" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
+                {{ exporting ? 'Выгрузка…' : 'Excel' }}
+                <span v-if="!exporting" class="so-split-count">{{ exportLabel }}</span>
+              </button>
+              <button class="so-btn so-split-arrow" :class="{ active: exportDatePickerOpen }"
+                      title="Выбрать дни для выгрузки"
+                      @click="exportDatePickerOpen = !exportDatePickerOpen">▾</button>
+            </div>
+
             <button v-if="loadingSheetsAvailable" class="so-btn" @click="downloadLoadingSheets"
                     :disabled="loadingSheetsBusy || !selectedDate"
                     title="Excel с загрузочными листами: по стопке на лист, первый лист — навигация">
@@ -198,20 +224,15 @@
               + Довоз
             </button>
 
-            <div class="so-more">
-              <button class="so-btn" @click="moreOpen = !moreOpen">Ещё ▾</button>
-              <div v-if="moreOpen" class="so-more-menu">
-                <button @click="moreOpen = false; exportDatePickerOpen = !exportDatePickerOpen">
-                  Выбрать дни для выгрузки
-                </button>
-                <button :disabled="!selectedDate" @click="moreOpen = false; copyMissingRestaurants()">
-                  Копировать не подавших
-                </button>
-                <button :disabled="!selectedDate || remindingStatus" @click="moreOpen = false; remindUnsubmitted()">
-                  {{ remindingStatus ? 'Отправка…' : 'Напомнить не подавшим' }}
-                </button>
-                <button :disabled="loading" @click="moreOpen = false; loadStatus()">Обновить данные</button>
-              </div>
+            <!-- Всё про тех, кто не подал заявку, — одной группой. -->
+            <div class="so-group">
+              <span class="so-group-label">Не подавшим:</span>
+              <button class="so-chip-btn" :disabled="!selectedDate" @click="copyMissingRestaurants"
+                      title="Скопировать номера ресторанов, которые не подали заявку">копировать</button>
+              <button class="so-chip-btn" :disabled="!selectedDate || remindingStatus" @click="remindUnsubmitted"
+                      title="Напомнить ресторанам, которые не подали заявку">
+                {{ remindingStatus ? 'отправка…' : 'напомнить' }}
+              </button>
             </div>
 
             <div class="so-actions-right">
@@ -219,6 +240,9 @@
                 <input type="checkbox" v-model="showMissing" /> Только не подавшие
               </label>
               <input v-model="filterText" type="text" class="rom-input-sm so-filter-input" placeholder="Поиск ресторана" />
+              <button class="so-icon-btn" :disabled="loading" @click="loadStatus" title="Обновить данные" aria-label="Обновить">
+                <span :class="{ 'is-spin': loading }">⟳</span>
+              </button>
             </div>
           </div>
           <div v-if="exportDatePickerOpen" class="so-export-date-picker">
@@ -227,8 +251,9 @@
               <input type="checkbox" :checked="exportSelectedDates.has(wd.date)" @change="toggleExportDate(wd.date)" />
               {{ wd.day_name }} {{ formatDateShort(wd.date) }}
             </label>
-            <button class="rom-btn-sm" @click="exportSelectAll">Все</button>
-            <button class="rom-btn-sm" @click="exportSelectNone">Ни одного</button>
+            <button class="rom-btn-sm" @click="exportSelectCurrent">Только выбранный день</button>
+            <button class="rom-btn-sm" @click="exportSelectAll">Все дни</button>
+            <button class="rom-btn-sm" @click="exportSelectNone">Снять всё</button>
           </div>
 
           <!-- Pivot table: restaurants × products -->
@@ -1132,12 +1157,8 @@ const TAB_LOADERS = {
 };
 function switchPageTab(key) {
   pageTab.value = key;
-  moreOpen.value = false;
   TAB_LOADERS[key]?.();
 }
-
-// Меню «Ещё»: редкие действия не должны занимать место в панели.
-const moreOpen = ref(false);
 const loading = ref(false);
 const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');
@@ -1428,10 +1449,13 @@ function dayWord(n) {
 // Опции формирования Excel (скачивание и отправка) живут в настройках поставщика —
 // см. settings.xlsx_drop_empty / settings.xlsx_pallet_metrics.
 
-// Когда weekDates подгружаются — инициализируем все даты как выбранные
-watch(weekDates, (dates) => {
-  exportSelectedDates.value = new Set(dates.map(d => d.date));
-}, { deep: true });
+// По умолчанию выгружаем ОДИН выбранный день. Раньше отмечались все даты
+// графика — кнопка предлагала «17 дней», и это почти никогда не нужно.
+watch([weekDates, selectedDate], ([dates, date]) => {
+  if (!dates?.length) { exportSelectedDates.value = new Set(); return; }
+  const has = date && dates.some(d => d.date === date);
+  exportSelectedDates.value = new Set(has ? [date] : [dates[0].date]);
+}, { deep: true, immediate: true });
 
 function toggleExportDate(date) {
   const s = new Set(exportSelectedDates.value);
@@ -1441,6 +1465,16 @@ function toggleExportDate(date) {
 }
 function exportSelectAll() { exportSelectedDates.value = new Set(weekDates.value.map(d => d.date)); }
 function exportSelectNone() { exportSelectedDates.value = new Set(); }
+function exportSelectCurrent() {
+  exportSelectedDates.value = new Set(selectedDate.value ? [selectedDate.value] : []);
+}
+/** Подпись на кнопке: один день — датой, несколько — числом. */
+const exportLabel = computed(() => {
+  const n = exportSelectedDates.value.size;
+  if (n === 0) return 'выберите день';
+  if (n === 1) return formatDateShort([...exportSelectedDates.value][0]);
+  return `${n} ${dayWord(n)}`;
+});
 
 // Pivot table data
 const products = ref([]);
@@ -1965,6 +1999,34 @@ function overviewSubmittedClass(row) {
 function isDateForcedClosed(date) {
   return deadlineOverrides.value.some(o => o.delivery_date === date && o.is_closed);
 }
+
+// Состояние КАЖДОГО дня в ленте дат. Признаки приходят с сервера вместе с
+// датами: is_closed — приём окончен (дедлайн прошёл или день закрыт),
+// forced_closed — день закрыли вручную.
+// Не путать с dayIsClosed ниже — там только про выбранный день, по живому времени.
+function wdForced(wd) {
+  return !!wd.forced_closed || isDateForcedClosed(wd.date);
+}
+function wdClosed(wd) {
+  return wdForced(wd) || !!wd.is_closed;
+}
+function wdTitle(wd) {
+  const parts = [];
+  if (wd.is_adhoc) parts.push('Внеплановая дата (довоз)');
+  if (wdForced(wd)) parts.push('День закрыт вручную');
+  else if (wd.is_closed) parts.push('Приём заявок окончен');
+  else if (wd.deadline_str) parts.push('Приём до ' + wd.deadline_str);
+  return parts.join(' · ');
+}
+const selectedDayInfo = computed(() => weekDates.value.find(w => w.date === selectedDate.value) || null);
+const selectedDayDeadline = computed(() => selectedDayInfo.value?.deadline_str || '');
+/** «2026-07-28 14:00» → «28.07 в 14:00» — читать в спешке проще. */
+const selectedDayDeadlineFmt = computed(() => {
+  const raw = selectedDayDeadline.value;
+  if (!raw) return '';
+  const m = String(raw).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+  return m ? `${m[3]}.${m[2]} в ${m[4]}` : raw;
+});
 
 async function handleToggleCloseDay(date) {
   if (!date) return;
@@ -3847,13 +3909,18 @@ watch(
 .so-pivot-table td:last-child { border-right: none; }
 
 .so-pivot-table tbody tr:nth-child(even) { background: var(--tk-n-50); }
-.so-pivot-table tbody tr:hover { background: var(--tk-accent-soft); }
-/* Зелёная подсветка подавших заявку обязана быть сильнее зебры и наведения:
+/* Зелёная подсветка подавших заявку обязана быть сильнее зебры:
    иначе серая полоска чётных строк перекрывает её, и зелёными выглядят
    только нечётные строки — со стороны это читается как случайный набор. */
 .so-pivot-table tbody tr.rom-row-submitted { background: var(--tk-success-soft); }
-.so-pivot-table tbody tr.rom-row-submitted:hover {
-  background: linear-gradient(var(--tk-success-soft), var(--tk-success-soft)), var(--tk-success-soft);
+/* Наведение НЕ меняет фон строки, а кладёт поверх лёгкий слой: иначе цвет
+   статуса (зелёный «подал», серый «не нужна») пропадал под курсором и
+   таблица теряла читаемость ровно там, куда смотрит человек. */
+.so-pivot-table tbody tr:hover td {
+  box-shadow: inset 0 0 0 9999px rgba(232, 122, 30, .07);
+}
+.so-pivot-table tbody tr:hover td.so-td-bad {
+  box-shadow: inset 0 0 0 9999px rgba(232, 122, 30, .07), inset 0 0 0 1.5px rgba(217, 102, 26, .55);
 }
 
 .so-th-rest { min-width: 200px; }
@@ -4188,16 +4255,28 @@ watch(
   transition: border-color .14s ease, box-shadow .14s ease;
 }
 .so-date:hover { border-color: #C4B8A8; }
+.so-date.is-active:hover { border-color: transparent; filter: brightness(1.04); }
+.so-date.is-adhoc:hover { border-color: #E8A765; }
 .so-date-day { font-size: 12px; font-weight: 800; color: #3A2418; text-transform: uppercase; }
 .so-date-num { font-size: 11.5px; font-weight: 600; color: #9A8F80; }
+.so-date.is-closed { background: #F7F3ED; }
+.so-date.is-closed .so-date-day { color: #8A7F72; }
+/* Выбранный день сильнее любого состояния: иначе закрытый день, на который
+   смотрит закупщик, сливался с остальными и было непонятно, что выбрано. */
 .so-date.is-active {
   border-color: transparent; background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
   box-shadow: 0 5px 14px rgba(232, 122, 30, .26);
 }
 .so-date.is-active .so-date-day,
 .so-date.is-active .so-date-num { color: #fff; }
-.so-date.is-closed { background: #F4EDE4; border-style: dashed; }
-.so-date.is-closed .so-date-day { color: #9A8F80; }
+/* День, закрытый вручную, отличаем пунктиром — это решение человека,
+   а не наступивший дедлайн. */
+.so-date.is-forced { border-style: dashed; border-color: #C4B8A8; }
+.so-date-state { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; }
+.so-date-state.open { color: #2E7D32; }
+.so-date-state.closed { color: #A8988A; }
+.so-date.is-active .so-date-state { color: rgba(255, 255, 255, .85); }
+.so-day-note { font-size: 12.5px; font-weight: 700; color: #8A7F72; }
 .so-date.is-adhoc { border-color: #F0C89A; }
 .so-date-tag {
   margin-top: 2px; padding: 1px 6px; border-radius: 8px;
@@ -4241,6 +4320,44 @@ watch(
   box-shadow: 0 4px 12px rgba(232, 122, 30, .22);
 }
 .so-btn-accent:hover:not(:disabled) { filter: brightness(1.06); }
+
+/* Excel + выбор дней: одна кнопка со стрелкой */
+.so-split { display: inline-flex; }
+.so-split-main { border-radius: 10px 0 0 10px; border-right-width: 0; }
+.so-split-arrow {
+  border-radius: 0 10px 10px 0; padding: 9px 10px; font-size: 12px; color: #8A7F72;
+}
+.so-split-arrow.active { background: #FBF6F0; color: #C25E12; border-color: #E0C9AE; }
+.so-split-count {
+  min-width: 20px; height: 19px; padding: 0 6px; border-radius: 10px;
+  background: rgba(232, 122, 30, .16); color: #C25E12;
+  font-size: 11.5px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Действия про не подавших — вместе, с общей подписью */
+.so-group {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px 5px 12px; border: 1.5px dashed #E4D9CB; border-radius: 10px;
+}
+.so-group-label { font-size: 12px; font-weight: 700; color: #8A7F72; }
+.so-chip-btn {
+  padding: 5px 10px; border: 1.5px solid #E4D9CB; border-radius: 8px; background: #fff;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: #5F4B38; cursor: pointer;
+}
+.so-chip-btn:hover:not(:disabled) { border-color: #E87A1E; color: #C25E12; }
+.so-chip-btn:disabled { opacity: .45; cursor: default; }
+
+/* Обновление — значок рядом с поиском, чтобы не занимать место кнопкой */
+.so-icon-btn {
+  width: 38px; height: 38px; border: 1.5px solid #E4D9CB; border-radius: 10px;
+  background: #fff; color: #6B5544; font-size: 18px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.so-icon-btn:hover:not(:disabled) { border-color: #E87A1E; color: #C25E12; }
+.so-icon-btn:disabled { opacity: .55; cursor: default; }
+.so-icon-btn .is-spin { display: inline-block; animation: so-spin 1s linear infinite; }
+@keyframes so-spin { to { transform: rotate(360deg); } }
 
 .so-more { position: relative; }
 .so-more-menu {
