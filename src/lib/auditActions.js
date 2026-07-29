@@ -57,6 +57,7 @@ export const ACTIVITY_LABELS = {
   correction_rejected: 'отклонил корректировку',
   correction_reviewed: 'рассмотрел корректировку',
   correction_submit_cabinet: 'подал корректировку',
+  correction_deadline_changed: 'изменил дедлайн корректировок',
   // Сбор остатков
   stock_collection_created: 'создал сбор остатков',
   collection_created: 'создал сбор остатков',

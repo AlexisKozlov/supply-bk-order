@@ -18,7 +18,7 @@
             <strong>Когда успеть.</strong> Подать можно до <em>дедлайна корректировки</em> — он указан под датой каждой поставки. После дедлайна доставка уходит в работу и менять её нельзя.
           </li>
           <li>
-            <strong>Как заполнить.</strong> Жми «Ещё позиция», для каждой выбери действие <span class="rco-tut-chip rco-tut-chip-add">+ Добавить</span> или <span class="rco-tut-chip rco-tut-chip-rem">− Убрать</span>, найди товар по артикулу или названию, укажи количество и единицу (коробки/штуки). Если товара нет в базе — отправится тем, как написал.
+            <strong>Как заполнить.</strong> Жми «Ещё позиция», для каждой выбери действие <span class="rco-tut-chip rco-tut-chip-add">+ Добавить</span> или <span class="rco-tut-chip rco-tut-chip-rem">− Убрать</span>, найди товар по артикулу или названию и укажи количество. Мера (коробки или штуки) подставится сама — она у каждого товара своя, менять её не нужно. Если товара нет в базе — отправится тем, как написал, и меру выберешь сам.
           </li>
           <li>
             <strong>Причина.</strong> Поле внизу — необязательное, но если есть нюанс («запуск меню», «мероприятие в пятницу»), напиши — закупки увидят это рядом с заявкой.
@@ -73,7 +73,7 @@
     <div v-if="!deliveries.length && !batches.length" class="rco-state rco-state-empty">
       <h3>Корректировок не подать</h3>
       <p>Сейчас нет ближайших поставок, по которым дедлайн ещё впереди.</p>
-      <p class="rco-state-hint">Корректировка возможна до 11:30 рабочего дня перед поставкой.</p>
+      <p v-if="deadlineTime" class="rco-state-hint">Корректировка возможна до {{ deadlineTime }} рабочего дня перед поставкой.</p>
     </div>
 
     <template v-else>
@@ -179,7 +179,13 @@
                    v-model.number="it.qty"
                    placeholder="Кол-во" />
 
-            <button type="button"
+            <!-- Товар из каталога — мера его собственная, менять нечего.
+                 Вписанный руками товар мы не знаем, там выбор остаётся. -->
+            <span v-if="it.unitLocked"
+                  class="rco-unit-fixed"
+                  :title="it.unitHint || 'Мера задана карточкой товара'">{{ it.unit }}</span>
+            <button v-else
+                    type="button"
                     class="rco-unit-btn"
                     :title="it.unit === 'кор.' ? 'Кликни, чтобы поменять на штуки' : 'Кликни, чтобы поменять на коробки'"
                     @click="toggleUnit(idx)">{{ it.unit }}</button>
@@ -283,6 +289,7 @@ function dismissTutorial() {
 function onTutorialEsc(e) { if (e.key === 'Escape' && showTutorial.value) dismissTutorial(); }
 
 const deliveries = ref([]);
+const deadlineTime = ref('');   // время дедлайна, задаёт отдел закупок
 const selectedDate = ref('');
 const batches = ref([]);
 
@@ -317,7 +324,7 @@ const prodRefs = reactive({});
 let prodTimer = null;
 
 function newEmptyRow() {
-  return { action: 'add', sku: '-', name: '', label: '', qty: null, unit: 'кор.' };
+  return { action: 'add', sku: '-', name: '', label: '', qty: null, unit: 'кор.', unitLocked: false, unitHint: '' };
 }
 
 const canSubmit = computed(() => {
@@ -340,6 +347,7 @@ async function loadDeliveries() {
   try {
     const data = await roFetch('/api/restaurant-corrections/deliveries');
     deliveries.value = data.deliveries || [];
+    deadlineTime.value = data.deadline_time || '';
     if (deliveries.value.length && !selectedDate.value) {
       selectedDate.value = deliveries.value[0].date;
     }
@@ -397,6 +405,8 @@ function onProdInput(idx, val) {
   formItems[idx].label = val;
   formItems[idx].sku = '-';   // сброс выбора при ручном вводе
   formItems[idx].name = val;
+  formItems[idx].unitLocked = false;   // товара из каталога больше нет — меру снова выбирает ресторан
+  formItems[idx].unitHint = '';
   prodOpen.value = idx;
   prodHighlight.value = 0;
   if (prodTimer) clearTimeout(prodTimer);
@@ -438,6 +448,8 @@ function pickProd(idx, prod) {
   formItems[idx].label = prod.sku + ' · ' + prod.name;
   if (prod.default_unit && (prod.default_unit === 'шт.' || prod.default_unit === 'кор.')) {
     formItems[idx].unit = prod.default_unit;
+    formItems[idx].unitLocked = true;
+    formItems[idx].unitHint = prod.unit_hint || '';
   }
   prodOpen.value = -1;
   prodResults.value = [];
@@ -471,6 +483,9 @@ function startEdit(batch) {
       label: it.sku && it.sku !== '-' ? (it.sku + ' · ' + it.name) : it.name,
       qty: it.qty,
       unit: it.unit,
+      // Товар из каталога — мера пришла с сервера по карточке, менять её нельзя.
+      unitLocked: !!(it.sku && it.sku !== '-'),
+      unitHint: '',
     });
   }
   if (!formItems.length) formItems.push(newEmptyRow());
@@ -918,6 +933,15 @@ onBeforeUnmount(() => {
   transition: background .12s, border-color .12s, color .12s;
 }
 .rco-unit-btn:hover { background: #FBF6EF; border-color: #D8C4B0; color: #3A2418; }
+/* Мера товара из каталога: не поле ввода, а факт из карточки — поэтому
+   без рамки-кнопки и с курсором-подсказкой. */
+.rco-unit-fixed {
+  display: flex; align-items: center; justify-content: center;
+  padding: 11px 0; border: 1.5px solid transparent; border-radius: 10px;
+  background: #F4EFE7; color: #6B5B4B;
+  font-size: 12.5px; font-weight: 700; white-space: nowrap;
+  cursor: help;
+}
 
 .rco-row-del {
   width: 28px; height: 100%;
@@ -1036,7 +1060,8 @@ onBeforeUnmount(() => {
   .rco-form-row > :nth-child(5) { grid-area: del; justify-self: end; width: 44px; }
 
   .rco-qty { padding: 11px 12px; font-size: 15px; min-height: 42px; text-align: center; }
-  .rco-unit-btn { padding: 11px 6px; min-height: 42px; width: 80px; font-size: 13px; }
+  .rco-unit-btn,
+  .rco-unit-fixed { padding: 11px 6px; min-height: 42px; width: 80px; font-size: 13px; }
   .rco-act-btn { padding: 9px 14px; min-height: 38px; }
   .rco-act-label { font-size: 12px; }
   .rco-act-sign { font-size: 15px; }
@@ -1076,6 +1101,7 @@ onBeforeUnmount(() => {
   .rco-form-row > :nth-child(1) { min-width: 120px; }
   .rco-act-btn { padding: 9px 10px; }
   .rco-act-label { font-size: 11.5px; }
-  .rco-unit-btn { min-width: 70px; padding: 11px 4px; }
+  .rco-unit-btn,
+  .rco-unit-fixed { min-width: 70px; padding: 11px 4px; }
 }
 </style>

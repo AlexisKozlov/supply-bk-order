@@ -1306,6 +1306,7 @@ const AUDIT_ACTION_LABELS = {
   distribution_created: 'Создано',
   // Корректировки (кабинет ресторана)
   correction_submit_cabinet: 'Подана из кабинета',
+  correction_deadline_changed: 'Дедлайн изменён',
   // Система
   broadcast_sent: 'Рассылка', session_terminated: 'Сессия завершена', maintenance_toggled: 'Тех. работы',
 };

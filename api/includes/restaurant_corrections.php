@@ -59,6 +59,31 @@ function rcValidateDeliveryDate($pdo, $restNum, $date) {
     return false;
 }
 
+/**
+ * Мера позиции задаётся карточкой товара, а не тем, что прислал клиент:
+ * иначе подделанным запросом можно было бы поменять коробки на штуки.
+ * Товары не из каталога (sku = '-') оставляют выбор ресторану.
+ */
+function rcApplyCatalogUnits($pdo, $group, $items) {
+    $skus = [];
+    foreach ($items as $it) {
+        if (($it['sku'] ?? '-') !== '-') $skus[$it['sku']] = true;
+    }
+    if (!$skus) return $items;
+    $skus = array_keys($skus);
+    $ph = implode(',', array_fill(0, count($skus), '?'));
+    $st = $pdo->prepare("SELECT sku, multiplicity FROM products WHERE is_active = 1 AND legal_entity_group = ? AND sku IN ($ph)");
+    $st->execute(array_merge([$group], $skus));
+    $byS = [];
+    foreach ($st->fetchAll() as $r) $byS[$r['sku']] = corrUnitForProduct($r);
+    foreach ($items as &$it) {
+        $sku = $it['sku'] ?? '-';
+        if ($sku !== '-' && isset($byS[$sku])) $it['unit'] = $byS[$sku];
+    }
+    unset($it);
+    return $items;
+}
+
 function rcNormalizeItems($items) {
     if (!is_array($items)) return [['error' => 'Список позиций должен быть массивом']];
     if (!count($items)) return [['error' => 'Нет ни одной позиции']];
@@ -102,7 +127,8 @@ if ($subpoint === 'deliveries' && $method === 'GET') {
             'delivery_time' => $d['time'],
         ];
     }
-    rcRespond(['deliveries' => $out]);
+    // deadline_time нужен и когда список пуст — подписью «до какого времени принимаем».
+    rcRespond(['deliveries' => $out, 'deadline_time' => corrDeadlineTime($pdo)['str']]);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -183,7 +209,7 @@ if ($subpoint === 'products' && $method === 'GET') {
     // Точное совпадение по SKU вперёд, потом частичное по name.
     $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
     $st = $pdo->prepare("
-        SELECT sku, name, unit_of_measure
+        SELECT sku, name, unit_of_measure, multiplicity, qty_per_box
         FROM products
         WHERE is_active = 1
           AND legal_entity_group = ?
@@ -197,10 +223,17 @@ if ($subpoint === 'products' && $method === 'GET') {
     $rows = $st->fetchAll();
     $out = [];
     foreach ($rows as $r) {
+        $mult = (int)($r['multiplicity'] ?? 0);
+        $unit = corrUnitForProduct($r);
+        // Подсказка ресторану, почему мера именно такая.
+        $hint = $mult > 1
+            ? 'Товар заказывается штуками, кратно ' . $mult
+            : 'Товар заказывается коробками';
         $out[] = [
             'sku' => $r['sku'],
             'name' => $r['name'],
-            'default_unit' => ($r['unit_of_measure'] === 'шт' || $r['unit_of_measure'] === 'шт.') ? 'шт.' : 'кор.',
+            'default_unit' => $unit,
+            'unit_hint' => $hint,
         ];
     }
     rcRespond(['products' => $out]);
@@ -218,6 +251,7 @@ if ($subpoint === 'save' && $method === 'POST') {
     $itemsRaw = $body['items'] ?? [];
     $items = rcNormalizeItems($itemsRaw);
     if (isset($items[0]['error'])) rcRespond(['error' => $items[0]['error']], 400);
+    $items = rcApplyCatalogUnits($pdo, $rcGroup, $items);
 
     $comment = trim((string)($body['comment'] ?? ''));
     if (mb_strlen($comment) > RC_MAX_COMMENT_LEN) $comment = mb_substr($comment, 0, RC_MAX_COMMENT_LEN);
@@ -277,6 +311,7 @@ if ($subpoint === 'update' && $method === 'POST') {
     $itemsRaw = $body['items'] ?? [];
     $items = rcNormalizeItems($itemsRaw);
     if (isset($items[0]['error'])) rcRespond(['error' => $items[0]['error']], 400);
+    $items = rcApplyCatalogUnits($pdo, $rcGroup, $items);
 
     $comment = trim((string)($body['comment'] ?? ''));
     if (mb_strlen($comment) > RC_MAX_COMMENT_LEN) $comment = mb_substr($comment, 0, RC_MAX_COMMENT_LEN);

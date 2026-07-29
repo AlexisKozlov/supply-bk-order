@@ -201,6 +201,35 @@
         respond($st->fetchAll());
     }
 
+    // Дедлайн корректировок — время в рабочий день перед поставкой.
+    // Одно значение на весь портал (app_settings), правит тот же, кто работает
+    // с корректировками: это рабочая настройка закупок, а не админская.
+    if ($fn === 'correction_get_deadline') {
+        requireModuleAccess($authUser, 'corrections', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        require_once __DIR__ . '/../bot_rest.php';
+        respond(['deadline_time' => corrDeadlineTime($pdo)['str']]);
+    }
+
+    if ($fn === 'correction_set_deadline') {
+        requireModuleAccess($authUser, 'corrections', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $raw = trim((string)($body['deadline_time'] ?? ''));
+        if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw, $m)) {
+            respond(['error' => 'Укажите время в формате ЧЧ:ММ'], 400);
+        }
+        $val = sprintf('%02d:%02d', (int)$m[1], (int)$m[2]);
+        $st = $pdo->prepare("
+            INSERT INTO app_settings (skey, svalue, updated_by)
+            VALUES ('corrections_deadline_time', ?, ?)
+            ON DUPLICATE KEY UPDATE
+              svalue = VALUES(svalue),
+              updated_by = VALUES(updated_by),
+              updated_at = CURRENT_TIMESTAMP
+        ");
+        $st->execute([$val, $authUserName]);
+        auditLog($pdo, 'correction_deadline_changed', 'correction', null, $authUserName, ['deadline_time' => $val]);
+        respond(['success' => true, 'deadline_time' => $val]);
+    }
+
     if ($fn === 'correction_toggle_notification') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);

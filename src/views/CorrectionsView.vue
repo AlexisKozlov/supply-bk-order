@@ -120,7 +120,20 @@
     <!-- Настройки -->
     <template v-if="tab === 'settings'">
       <div class="corr-settings">
-        <h3 class="corr-section-title">Кто получает уведомления о корректировках</h3>
+        <h3 class="corr-section-title">Дедлайн корректировок</h3>
+        <p class="corr-hint">
+          До этого времени в рабочий день перед поставкой рестораны могут подать корректировку.
+          Позже даты пропадают у них из кабинета и из бота.
+        </p>
+        <div class="corr-deadline-row">
+          <input v-model="deadlineTime" type="time" class="corr-input corr-deadline-input" step="300" />
+          <button class="btn primary" @click="saveDeadline" :disabled="deadlineSaving || !deadlineTime || deadlineTime === deadlineSaved">
+            {{ deadlineSaving ? 'Сохраняем…' : 'Сохранить' }}
+          </button>
+          <span v-if="deadlineSaved" class="corr-deadline-current">сейчас {{ deadlineSaved }}</span>
+        </div>
+
+        <h3 class="corr-section-title corr-section-title-next">Кто получает уведомления о корректировках</h3>
         <p class="corr-hint">Отмеченные пользователи будут получать заявки в Telegram-бот с возможностью принять или отклонить.</p>
         <div v-if="settingsLoading" class="corr-empty"><BurgerSpinner text="Загрузка..." /></div>
         <div v-else-if="!settingsUsers.length" class="corr-empty">Нет привязанных пользователей</div>
@@ -155,6 +168,9 @@ const sourceFilter = ref('')
 const restFilter = ref('')
 const settingsLoading = ref(false)
 const settingsUsers = ref([])
+const deadlineTime = ref('')     // что сейчас в поле
+const deadlineSaved = ref('')    // что сохранено на сервере
+const deadlineSaving = ref(false)
 const rejectModal = ref({ show: false, ids: [], comment: '' })
 
 const pendingCount = computed(() => corrections.value.filter(c => c.status === 'pending').length)
@@ -284,6 +300,26 @@ async function loadSettings() {
     settingsUsers.value = data || []
   } catch { settingsUsers.value = [] }
   finally { settingsLoading.value = false }
+  loadDeadline()
+}
+
+async function loadDeadline() {
+  try {
+    const { data } = await db.rpc('correction_get_deadline')
+    deadlineTime.value = data?.deadline_time || ''
+    deadlineSaved.value = deadlineTime.value
+  } catch { /* оставляем поле пустым — сохранение всё равно проверит формат */ }
+}
+
+async function saveDeadline() {
+  deadlineSaving.value = true
+  try {
+    const { data } = await db.rpc('correction_set_deadline', { deadline_time: deadlineTime.value })
+    deadlineSaved.value = data?.deadline_time || deadlineTime.value
+    deadlineTime.value = deadlineSaved.value
+    toastStore.show('Дедлайн корректировок: ' + deadlineSaved.value)
+  } catch (e) { toastStore.show('Ошибка: ' + (e.message || e), 'error') }
+  finally { deadlineSaving.value = false }
 }
 
 async function toggleNotification(user) {
@@ -401,6 +437,10 @@ watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 
 /* Настройки */
 .corr-section-title { font-size: 16px; margin-bottom: 4px; }
+.corr-section-title-next { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border-light); }
+.corr-deadline-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.corr-deadline-input { width: 110px; font-size: 14px; }
+.corr-deadline-current { font-size: 12px; color: var(--text-muted); }
 .corr-hint { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
 .corr-settings-list { display: flex; flex-direction: column; gap: 2px; max-width: 400px; }
 .corr-settings-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-radius: 8px; }

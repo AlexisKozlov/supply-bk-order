@@ -2059,10 +2059,32 @@ function restNotifySubscribers($pdo, $botToken, $restaurantNumber, $text, $reply
 // ═══ КОРРЕКТИРОВКИ ЗАКАЗОВ ═══
 // ═══════════════════════════════════════════════
 
+// Время дедлайна корректировок. Настраивается закупкой в модуле «Корректировки»
+// (app_settings.corrections_deadline_time, формат ЧЧ:ММ). Одно на весь портал.
+const CORR_DEADLINE_DEFAULT = '10:00';
+
+function corrDeadlineTime($pdo) {
+    $raw = trim((string)getAppSetting($pdo, 'corrections_deadline_time', CORR_DEADLINE_DEFAULT));
+    if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw, $m)) {
+        $raw = CORR_DEADLINE_DEFAULT;
+        preg_match('/^(\d\d):(\d\d)$/', $raw, $m);
+    }
+    return ['h' => (int)$m[1], 'm' => (int)$m[2], 'str' => sprintf('%02d:%02d', (int)$m[1], (int)$m[2])];
+}
+
+// Мера позиции корректировки берётся из карточки товара: кратность больше 1
+// означает, что товар заказывается штуками (кратно), иначе — коробками.
+// Не путать с products.unit_of_measure — там базовая мера товара (шт/кг/л),
+// а не тара, в которой ресторан просит довезти.
+function corrUnitForProduct($product) {
+    return ((int)($product['multiplicity'] ?? 0) > 1) ? 'шт.' : 'кор.';
+}
+
 // Ближайшие доставки ресторана с дедлайнами корректировок
 function corrGetNextDeliveries($pdo, $restNum, $limit = 3) {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
+    $dl = corrDeadlineTime($pdo);
     $st = $pdo->prepare("SELECT ds.day_of_week, ds.delivery_time FROM delivery_schedule ds JOIN restaurants r ON r.id = ds.restaurant_id WHERE r.number = ?");
     $st->execute([$restNum]);
     $schedule = [];
@@ -2079,7 +2101,7 @@ function corrGetNextDeliveries($pdo, $restNum, $limit = 3) {
         $deadline = clone $check;
         $deadline->modify('-1 day');
         while ((int)$deadline->format('N') >= 6) $deadline->modify('-1 day');
-        $deadline->setTime(11, 30, 0);
+        $deadline->setTime($dl['h'], $dl['m'], 0);
         if ($now > $deadline) continue;
         $results[] = [
             'date' => $check->format('Y-m-d'),
@@ -2456,12 +2478,14 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
             $q = $item['name'];
             // Подбираем только если похоже на артикул (4+ цифр)
             if (preg_match('/^\d{4,}$/', $q)) {
-                $st = $pdo->prepare("SELECT sku, name FROM products WHERE sku = ? AND is_active = 1 LIMIT 1");
+                $st = $pdo->prepare("SELECT sku, name, multiplicity FROM products WHERE sku = ? AND is_active = 1 LIMIT 1");
                 $st->execute([$q]);
                 $found = $st->fetch();
                 if ($found) {
                     $item['sku'] = $found['sku'];
                     $item['product_name'] = $found['name'];
+                    // Товар из каталога — мера его, а не та, что написал ресторан.
+                    $item['unit'] = corrUnitForProduct($found);
                     continue;
                 }
             }
