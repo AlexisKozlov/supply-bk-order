@@ -614,9 +614,16 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     $addr = $pdo->prepare("SELECT short_name, full_name, email, cc_emails FROM suppliers WHERE id = ?");
     $addr->execute([$supplierId]);
     $s = $addr->fetch();
-    $toEmail = trim((string)($s['email'] ?? ''));
-    if ($toEmail === '') return ['success' => false, 'skipped' => 'no_email', 'restaurants_count' => $rc, 'items_count' => $ic];
+    // В карточке поставщика в поле «Email» пишут и один адрес, и несколько через
+    // запятую/точку с запятой. Раньше строка уходила в отправку целиком и PHPMailer
+    // отбрасывал её как невалидный адрес — письмо молча не уходило («Нет валидных
+    // получателей» в so_email_log). Разбираем так же, как копию.
+    $toList = soParseEmailList($s['email'] ?? '');
+    if (!$toList) return ['success' => false, 'skipped' => 'no_email', 'restaurants_count' => $rc, 'items_count' => $ic];
+    $toEmail = implode(', ', $toList);
     $ccList = soParseEmailList($s['cc_emails'] ?? '');
+    // Адрес, попавший и в «кому», и в «копию», дублировать не нужно.
+    $ccList = array_values(array_diff($ccList, $toList));
 
     // Копия ресторанам, если включено в настройках поставщика. Берём только тех,
     // кто реально что-то заказал на эту дату: отметившие «Поставка не нужна»
@@ -700,7 +707,7 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
         }
     }
 
-    $res = sendEmail($toEmail, $subject, $bodyHtml, true, [
+    $res = sendEmail($toList, $subject, $bodyHtml, true, [
         'account' => 'order',
         'reply_to' => 'order@supply-department.online',
         'cc' => $ccList,
@@ -2955,6 +2962,24 @@ if ($soAction === 'admin') {
             unset($r);
         }
 
+        // Чем закончилась последняя отправка письма поставщику за этот день.
+        // Без этого сбой автоотправки виден только в базе: дедлайн проходит,
+        // письмо не уходит, и закупщик узнаёт об этом от поставщика.
+        $emStmt = $pdo->prepare("
+            SELECT success, error_message, recipients, trigger_type, created_at
+            FROM so_email_log WHERE supplier_id = ? AND delivery_date = ?
+            ORDER BY id DESC LIMIT 1
+        ");
+        $emStmt->execute([$supplierId, $date]);
+        $emRow = $emStmt->fetch() ?: null;
+        $emailStatus = $emRow ? [
+            'success' => (int)$emRow['success'] === 1,
+            'error' => $emRow['error_message'],
+            'recipients' => $emRow['recipients'],
+            'trigger_type' => $emRow['trigger_type'],
+            'at' => $emRow['created_at'],
+        ] : null;
+
         soRespond([
             'settings' => $settings,
             'date' => $date,
@@ -2966,6 +2991,7 @@ if ($soAction === 'admin') {
             'order_items' => $orderItems,
             'stats' => ['total' => $total, 'submitted' => $submitted, 'pending' => $total - $submitted],
             'week_dates' => $weekDates,
+            'email_status' => $emailStatus,
         ]);
     }
 

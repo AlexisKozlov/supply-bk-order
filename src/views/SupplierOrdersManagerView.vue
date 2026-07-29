@@ -202,6 +202,10 @@
                     title="Сгенерировать Excel и отправить на почту поставщика">
               {{ sendingSummaryEmail ? 'Отправка…' : 'На почту' }}
             </button>
+            <span v-if="dayEmailLabel" class="so-mail-state" :class="dayEmailLabel.ok ? 'is-ok' : 'is-bad'"
+                  :title="dayEmailStatus?.recipients || ''">
+              {{ dayEmailLabel.text }}
+            </span>
 
             <!-- Excel и выбор дней — одна кнопка со стрелкой: действие одно,
                  просто с настройкой, сколько дней выгружать. -->
@@ -903,6 +907,13 @@
               </span>
             </label>
           </div>
+          <div v-if="!loadingNotifyUsers && notifyNobodyReachable" class="so-notify-warn">
+            Сводка не уйдёт: ни у кого из отмеченных не привязан Telegram.
+            Нужно, чтобы сотрудник открыл бота и привязал аккаунт, либо отметьте того, у кого Telegram уже есть.
+          </div>
+          <div v-else-if="!loadingNotifyUsers && notifyUsersWithoutTelegram.length" class="so-notify-warn">
+            Без Telegram, сводку не получат: {{ notifyUsersWithoutTelegram.join(', ') }}.
+          </div>
         </div>
 
         <!-- Напоминания о подаче заявок -->
@@ -1211,6 +1222,18 @@ const selectedDeadlineAt = ref('');
 // Состояние приёма на выбранную дату: 'open' | 'closed' (сервер считает по
 // дедлайну с учётом переносов и принудительного закрытия дня).
 const selectedDeadlineStatus = ref('');
+// Чем закончилась последняя отправка письма поставщику за выбранный день.
+const dayEmailStatus = ref(null);
+const dayEmailLabel = computed(() => {
+  const st = dayEmailStatus.value;
+  if (!st) return null;
+  const time = st.at ? String(st.at).slice(11, 16) : '';
+  if (st.success) return { ok: true, text: `Письмо отправлено${time ? ' в ' + time : ''}` };
+  const reason = st.error === 'Нет валидных получателей'
+    ? 'неверный адрес в карточке поставщика'
+    : (st.error || 'сбой отправки');
+  return { ok: false, text: `Письмо не ушло${time ? ' (' + time + ')' : ''}: ${reason}` };
+});
 const stats = ref({ total: 0, submitted: 0, pending: 0 });
 const restaurants = ref([]);
 const weekDates = ref([]);
@@ -1242,6 +1265,18 @@ const deadlineOverrides = ref([]);
 const allNotifyUsers = ref([]);
 const loadingNotifyUsers = ref(false);
 const notifyUsers = ref([]);
+
+// Сводка после дедлайна уходит только в Telegram. Если у всех отмеченных
+// сотрудников Telegram не привязан, бот промолчит и никто об этом не узнает —
+// поэтому предупреждаем прямо в настройках.
+const notifyUsersWithoutTelegram = computed(() => {
+  const chosen = new Set(notifyUsers.value || []);
+  return (allNotifyUsers.value || []).filter(u => chosen.has(u.name) && !u.has_telegram).map(u => u.name);
+});
+const notifyNobodyReachable = computed(() =>
+  (notifyUsers.value || []).length > 0 &&
+  notifyUsersWithoutTelegram.value.length === (notifyUsers.value || []).length
+);
 
 // Напоминания о подаче заявок (массивы выбранных таймингов и каналов)
 const reminderOffsets = ref([]);
@@ -1981,6 +2016,7 @@ async function loadStatus() {
     selectedDeadline.value = data.deadline || '';
     selectedDeadlineAt.value = data.deadline_at || '';
     selectedDeadlineStatus.value = data.deadline_status || '';
+    dayEmailStatus.value = data.email_status || null;
   } catch (e) {
     console.error(e);
   } finally {
@@ -4164,6 +4200,21 @@ watch(
 /* «нет Telegram» — справочная пометка, а не предупреждение: жёлтым она
    повторялась в каждой второй карточке и превращалась в шум. */
 .so-notify-muted { color: var(--tk-text-muted) !important; }
+/* Итог последней отправки письма за день — рядом с кнопкой «На почту». */
+.so-mail-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 10px; height: 32px; border-radius: 8px;
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-medium); white-space: nowrap;
+}
+.so-mail-state.is-ok { background: rgba(22, 163, 74, .10); color: #15803d; border: 1px solid rgba(22, 163, 74, .28); }
+.so-mail-state.is-bad { background: rgba(220, 38, 38, .10); color: #b91c1c; border: 1px solid rgba(220, 38, 38, .30); }
+
+/* А вот когда сводке некуда уйти — это уже предупреждение, его видно сразу. */
+.so-notify-warn {
+  margin-top: 10px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid rgba(217, 119, 6, .35); background: rgba(245, 158, 11, .10);
+  color: #92400e; font-size: var(--tk-fz-sm); line-height: 1.45;
+}
 
 /* Предупреждение о неверном размере коробки в справочнике */
 .so-autosave-bar {

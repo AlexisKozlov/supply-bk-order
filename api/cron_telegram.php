@@ -1515,6 +1515,14 @@ try {
         $subsStmt->execute([$sup['id']]);
         $subs = $subsStmt->fetchAll();
         if (!$subs) {
+            // Подписчики выбраны, но ни у кого нет привязанного Telegram (или все
+            // заблокировали бота) — сводка молча не уходит. Пишем в лог, чтобы
+            // такую тишину можно было объяснить, а не искать вслепую.
+            $totalSubs = $pdo->prepare("SELECT COUNT(*) FROM so_supplier_summary_subscribers WHERE supplier_id = ?");
+            $totalSubs->execute([$sup['id']]);
+            if ((int)$totalSubs->fetchColumn() > 0) {
+                error_log("[so summary] нет получателей с Telegram: supplier={$sup['id']} ({$sup['short_name']})");
+            }
             continue;
         }
 
