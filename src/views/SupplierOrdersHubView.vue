@@ -228,12 +228,16 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
   border-color: var(--tk-n-300);
   color: var(--tk-text);
 }
+/* Выбранный поставщик — фирменным акцентом: это главный переключатель
+   модуля, бледная подсветка терялась среди прочих кнопок. */
 .so-hub-pill.active {
-  background: var(--tk-accent-soft);
-  color: var(--tk-accent-text);
-  border-color: var(--tk-accent);
-  font-weight: var(--tk-fw-semibold);
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(232, 122, 30, .24);
 }
+.so-hub-pill.active:hover { background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%); color: #fff; }
 .so-hub-pill:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 
 .so-hub-empty {

@@ -5,25 +5,12 @@
       <h1>Заявки поставщикам</h1>
     </div>
 
-    <!-- Page tabs -->
-    <div class="rom-page-tabs">
-      <button class="rom-page-tab" :class="{ active: pageTab === 'overview' }" @click="pageTab = 'overview'; loadOverview()">
-        Обзор
-      </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'status' }" @click="pageTab = 'status'; loadStatus()">
-        Приём
-      </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'list' }" @click="pageTab = 'list'; loadOrdersList()">
-        Список заявок
-      </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'schedules' }" @click="pageTab = 'schedules'; loadSchedules()">
-        Графики
-      </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadTemplates()">
-        Шаблон товаров
-      </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'settings' }" @click="pageTab = 'settings'; loadSettings()">
-        Настройки
+    <!-- Разделы модуля -->
+    <div class="so-seg so-seg-tabs">
+      <button v-for="t in PAGE_TABS" :key="t.key"
+              class="so-seg-btn" :class="{ active: pageTab === t.key }"
+              @click="switchPageTab(t.key)">
+        {{ t.label }}
       </button>
     </div>
 
@@ -126,26 +113,29 @@
         </div>
       </div>
 
-      <!-- Date nav -->
-      <div class="rom-date-row">
-        <label>Дата поставки:</label>
-        <div class="so-date-nav">
+      <!-- Даты поставки: лента, прокручивается вбок -->
+      <div class="so-dates">
+        <div class="so-dates-strip">
           <button v-for="wd in weekDates" :key="wd.date"
-            class="rom-btn-sm"
-            :class="{ 'so-date-active': selectedDate === wd.date, 'so-day-closed-btn': isDateForcedClosed(wd.date), 'so-date-adhoc': wd.is_adhoc }"
+            class="so-date"
+            :class="{ 'is-active': selectedDate === wd.date, 'is-closed': isDateForcedClosed(wd.date), 'is-adhoc': wd.is_adhoc }"
             @click="selectedDate = wd.date; loadStatus()"
             :title="wd.is_adhoc ? 'Внеплановая дата (довоз)' : (isDateForcedClosed(wd.date) ? 'День закрыт' : '')">
-            {{ wd.day_name }} {{ formatDateShort(wd.date) }}<span v-if="wd.is_adhoc" class="so-adhoc-tag">довоз</span>
+            <span class="so-date-day">{{ wd.day_name }}</span>
+            <span class="so-date-num">{{ formatDateShort(wd.date) }}</span>
+            <span v-if="wd.is_adhoc" class="so-date-tag">довоз</span>
           </button>
         </div>
-        <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
-        <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
-          Продлить дедлайн
-        </button>
-        <button v-if="selectedDate" class="rom-btn-sm" :class="isDateForcedClosed(selectedDate) ? 'so-btn-open-day' : 'so-btn-close-day'"
-          @click="handleToggleCloseDay(selectedDate)" :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
-          {{ isDateForcedClosed(selectedDate) ? 'Открыть день' : 'Закрыть день' }}
-        </button>
+        <div class="so-dates-side">
+          <input type="date" v-model="selectedDate" @change="loadStatus" class="rom-input-sm so-date-picker" />
+          <button v-if="selectedDate" class="so-mini-btn" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
+            Продлить дедлайн
+          </button>
+          <button v-if="selectedDate" class="so-mini-btn" :class="isDateForcedClosed(selectedDate) ? 'is-open-day' : 'is-close-day'"
+            @click="handleToggleCloseDay(selectedDate)" :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
+            {{ isDateForcedClosed(selectedDate) ? 'Открыть день' : 'Закрыть день' }}
+          </button>
+        </div>
       </div>
 
       <!-- Существующие переопределения дедлайна -->
@@ -182,46 +172,54 @@
             </div>
           </div>
 
-          <!-- Export + controls -->
-          <div class="rom-export-row">
-            <button class="rom-btn rom-btn-export" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
-              {{ exporting ? 'Выгрузка...' : exportSelectedDates.size > 1 ? `Выгрузить ${exportSelectedDates.size} ${dayWord(exportSelectedDates.size)} в Excel` : 'Выгрузить в Excel' }}
-            </button>
-            <!-- Загрузочные листы: только у ПРЦ (тесто) — остальным поставщикам
-                 раскладка по стопкам не нужна, кнопка им не показывается. -->
-            <button v-if="loadingSheetsAvailable" class="rom-btn" @click="downloadLoadingSheets"
-              :disabled="loadingSheetsBusy || !selectedDate"
-              title="Excel с загрузочными листами: по стопке на лист, первый лист — навигация">
-              <BurgerSpinner v-if="loadingSheetsBusy" size="xs" />
-              <span>{{ loadingSheetsBusy ? 'Готовлю...' : 'Загрузочные листы' }}</span>
-            </button>
-            <button class="rom-btn"
-              @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
-              {{ exportDatePickerOpen ? 'Дни ▲' : 'Дни ▼' }}
-            </button>
-            <button class="rom-btn rom-btn-primary"
-              @click="sendSummary" :disabled="sendingSummary || !selectedDate" title="Сгенерировать Excel и отправить подписчикам в Telegram">
+          <!-- Действия: слева то, чем пользуются каждый день, остальное — под «Ещё» -->
+          <div class="so-actions">
+            <button class="so-btn so-btn-primary" @click="sendSummary"
+                    :disabled="sendingSummary || !selectedDate"
+                    title="Сгенерировать Excel и отправить подписчикам в Telegram">
               <BurgerSpinner v-if="sendingSummary" size="xs" />
-              <span>{{ sendingSummary ? 'Отправка...' : 'Отправить сводку' }}</span>
+              <span>{{ sendingSummary ? 'Отправка…' : 'Отправить сводку' }}</span>
             </button>
-            <button class="rom-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
-              title="Сгенерировать Excel и отправить на почту поставщика">
+            <button class="so-btn" @click="sendSummaryEmail" :disabled="sendingSummaryEmail || !selectedDate"
+                    title="Сгенерировать Excel и отправить на почту поставщика">
               {{ sendingSummaryEmail ? 'Отправка…' : 'На почту поставщику' }}
             </button>
-            <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
-            <button class="rom-btn rom-btn-primary" @click="openAdhocModal" title="Создать внеплановую заявку (довоз) для ресторана на любую дату вне графика">
+            <button class="so-btn" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
+              {{ exporting ? 'Выгрузка…' : exportSelectedDates.size > 1 ? `Excel · ${exportSelectedDates.size} ${dayWord(exportSelectedDates.size)}` : 'Выгрузить в Excel' }}
+            </button>
+            <button v-if="loadingSheetsAvailable" class="so-btn" @click="downloadLoadingSheets"
+                    :disabled="loadingSheetsBusy || !selectedDate"
+                    title="Excel с загрузочными листами: по стопке на лист, первый лист — навигация">
+              <BurgerSpinner v-if="loadingSheetsBusy" size="xs" />
+              <span>{{ loadingSheetsBusy ? 'Готовлю…' : 'Загрузочные листы' }}</span>
+            </button>
+            <button class="so-btn so-btn-accent" @click="openAdhocModal"
+                    title="Создать внеплановую заявку (довоз) для ресторана на любую дату вне графика">
               + Довоз
             </button>
-            <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
-              Копировать не подавших
-            </button>
-            <button class="rom-btn" @click="remindUnsubmitted" :disabled="!selectedDate || remindingStatus" title="Напомнить ресторанам, которые не подали заявку на эту дату">
-              {{ remindingStatus ? 'Отправка…' : 'Напомнить не подавшим' }}
-            </button>
-            <label class="so-filter-check">
-              <input type="checkbox" v-model="showMissing" /> Не подавшие
-            </label>
-            <input v-model="filterText" type="text" class="rom-input-sm so-filter-input" placeholder="Поиск..." />
+
+            <div class="so-more">
+              <button class="so-btn" @click="moreOpen = !moreOpen">Ещё ▾</button>
+              <div v-if="moreOpen" class="so-more-menu">
+                <button @click="moreOpen = false; exportDatePickerOpen = !exportDatePickerOpen">
+                  Выбрать дни для выгрузки
+                </button>
+                <button :disabled="!selectedDate" @click="moreOpen = false; copyMissingRestaurants()">
+                  Копировать не подавших
+                </button>
+                <button :disabled="!selectedDate || remindingStatus" @click="moreOpen = false; remindUnsubmitted()">
+                  {{ remindingStatus ? 'Отправка…' : 'Напомнить не подавшим' }}
+                </button>
+                <button :disabled="loading" @click="moreOpen = false; loadStatus()">Обновить данные</button>
+              </div>
+            </div>
+
+            <div class="so-actions-right">
+              <label class="so-filter-check">
+                <input type="checkbox" v-model="showMissing" /> Только не подавшие
+              </label>
+              <input v-model="filterText" type="text" class="rom-input-sm so-filter-input" placeholder="Поиск ресторана" />
+            </div>
           </div>
           <div v-if="exportDatePickerOpen" class="so-export-date-picker">
             <span class="so-export-date-hint">Выберите дни для выгрузки:</span>
@@ -1114,6 +1112,32 @@ const daysShort = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: '�
 // Стартовая вкладка: «Обзор» по умолчанию, но при входе по прямой ссылке
 // на конкретного поставщика (props.supplierId) — сразу «Приём».
 const pageTab = ref(props.supplierId ? 'status' : 'overview');
+
+// Разделы модуля: один список — и для кнопок, и для загрузки данных вкладки.
+const PAGE_TABS = [
+  { key: 'overview', label: 'Обзор' },
+  { key: 'status', label: 'Приём' },
+  { key: 'list', label: 'Список заявок' },
+  { key: 'schedules', label: 'Графики' },
+  { key: 'templates', label: 'Шаблон товаров' },
+  { key: 'settings', label: 'Настройки' },
+];
+const TAB_LOADERS = {
+  overview: () => loadOverview(),
+  status: () => loadStatus(),
+  list: () => loadOrdersList(),
+  schedules: () => loadSchedules(),
+  templates: () => loadTemplates(),
+  settings: () => loadSettings(),
+};
+function switchPageTab(key) {
+  pageTab.value = key;
+  moreOpen.value = false;
+  TAB_LOADERS[key]?.();
+}
+
+// Меню «Ещё»: редкие действия не должны занимать место в панели.
+const moreOpen = ref(false);
 const loading = ref(false);
 const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');
@@ -4126,4 +4150,129 @@ watch(
 .so-qty-opt b { font-size: 15px; }
 .so-qty-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .so-qty-keep { border-color: #E4D9CB; }
+
+/* ═══ Оформление модуля: разделы, даты, действия ═══ */
+.so-seg {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: #F4EDE4; border-radius: 12px; max-width: 100%;
+  overflow-x: auto; flex-wrap: nowrap;
+}
+.so-seg-tabs { margin-bottom: 14px; }
+.so-seg-btn {
+  flex: 0 0 auto; padding: 7px 15px; border: 0; border-radius: 9px;
+  background: transparent; font: inherit; font-size: 13px; font-weight: 700;
+  color: #6B5544; cursor: pointer; white-space: nowrap;
+}
+.so-seg-btn:hover { color: #C25E12; }
+.so-seg-btn.active { background: #fff; color: #3A2418; box-shadow: 0 1px 4px rgba(74, 32, 19, .12); }
+
+/* Даты: одна лента с прокруткой вместо двух рядов кнопок */
+.so-dates {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 12px 0 14px;
+}
+/* Лента занимает всю ширину и прокручивается, а кнопки управления днём
+   уходят на свою строку: рядом они «обрезали» последнюю дату. */
+.so-dates-strip {
+  display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px;
+  flex: 1 1 100%; min-width: 0;
+  scrollbar-width: thin;
+}
+.so-dates-strip::-webkit-scrollbar { height: 6px; }
+.so-dates-strip::-webkit-scrollbar-thumb { background: #E4D9CB; border-radius: 3px; }
+.so-date {
+  flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 74px; padding: 7px 11px;
+  border: 1.5px solid #E4D9CB; border-radius: 11px; background: #fff;
+  font: inherit; cursor: pointer; position: relative;
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+.so-date:hover { border-color: #C4B8A8; }
+.so-date-day { font-size: 12px; font-weight: 800; color: #3A2418; text-transform: uppercase; }
+.so-date-num { font-size: 11.5px; font-weight: 600; color: #9A8F80; }
+.so-date.is-active {
+  border-color: transparent; background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
+  box-shadow: 0 5px 14px rgba(232, 122, 30, .26);
+}
+.so-date.is-active .so-date-day,
+.so-date.is-active .so-date-num { color: #fff; }
+.so-date.is-closed { background: #F4EDE4; border-style: dashed; }
+.so-date.is-closed .so-date-day { color: #9A8F80; }
+.so-date.is-adhoc { border-color: #F0C89A; }
+.so-date-tag {
+  margin-top: 2px; padding: 1px 6px; border-radius: 8px;
+  background: rgba(232, 122, 30, .16); color: #C25E12;
+  font-size: 9.5px; font-weight: 800; text-transform: uppercase;
+}
+.so-date.is-active .so-date-tag { background: rgba(255, 255, 255, .25); color: #fff; }
+.so-dates-side { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1 1 100%; }
+.so-date-picker { width: 150px; }
+.so-mini-btn {
+  padding: 7px 12px; border: 1.5px solid #E4D9CB; border-radius: 9px; background: #fff;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: #5F4B38; cursor: pointer;
+}
+.so-mini-btn:hover { border-color: #C4B8A8; }
+.so-mini-btn.is-close-day { color: #C0392B; border-color: #E9B4AF; }
+.so-mini-btn.is-close-day:hover { background: #FFF1F0; }
+.so-mini-btn.is-open-day { color: #2E7D32; border-color: #A5D6A7; }
+
+/* Действия: главные кнопки на виду, редкие — в меню «Ещё» */
+.so-actions {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.so-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 15px; border: 1.5px solid #E4D9CB; border-radius: 10px;
+  background: #fff; font: inherit; font-size: 13px; font-weight: 700;
+  color: #5F4B38; cursor: pointer; white-space: nowrap;
+  transition: border-color .14s ease, color .14s ease, filter .14s ease;
+}
+.so-btn:hover:not(:disabled) { border-color: #C4B8A8; }
+.so-btn:disabled { opacity: .5; cursor: default; }
+.so-btn-primary {
+  background: linear-gradient(135deg, #4A2013 0%, #7A3D22 100%);
+  border-color: transparent; color: #fff;
+}
+.so-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+.so-btn-accent {
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
+  border-color: transparent; color: #fff;
+  box-shadow: 0 4px 12px rgba(232, 122, 30, .22);
+}
+.so-btn-accent:hover:not(:disabled) { filter: brightness(1.06); }
+
+.so-more { position: relative; }
+.so-more-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  min-width: 230px; padding: 6px;
+  border: 1.5px solid #EFE7DC; border-radius: 12px; background: #fff;
+  box-shadow: 0 10px 28px rgba(74, 32, 19, .14);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.so-more-menu button {
+  padding: 9px 11px; border: 0; border-radius: 8px; background: transparent;
+  font: inherit; font-size: 13px; font-weight: 600; color: #3A2418;
+  text-align: left; cursor: pointer;
+}
+.so-more-menu button:hover:not(:disabled) { background: #FBF6F0; color: #C25E12; }
+.so-more-menu button:disabled { opacity: .45; cursor: default; }
+
+.so-actions-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+
+@media (max-width: 760px) {
+  .so-actions-right { margin-left: 0; width: 100%; }
+  .so-filter-input { flex: 1 1 auto; }
+  .so-dates-side { width: 100%; }
+}
+
+/* Плитки «подано / не подано / всего» — тем же языком, что карточки */
+.rom-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.rom-stat {
+  display: flex; align-items: baseline; gap: 7px;
+  padding: 9px 15px; border: 1.5px solid #EFE7DC; border-radius: 12px; background: #fff;
+}
+.rom-stat-value { font-size: 20px; font-weight: 800; color: #3A2418; font-variant-numeric: tabular-nums; }
+.rom-stat-label { font-size: 12.5px; font-weight: 600; color: #8A7F72; }
+.rom-stat-pending { color: #C25E12; }
 </style>
