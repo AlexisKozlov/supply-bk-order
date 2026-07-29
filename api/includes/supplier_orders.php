@@ -2807,7 +2807,7 @@ if ($soAction === 'admin') {
 
         // Все позиции заявок для этой даты
         $itemsStmt = $pdo->prepare("
-            SELECT o.restaurant_number, o.delivery_date,
+            SELECT o.restaurant_number, o.delivery_date, o.legal_entity,
                    oi.sku, oi.product_name, oi.quantity, oi.admin_qty, oi.id as item_id, o.id as order_id
             FROM so_orders o
             JOIN so_order_items oi ON oi.order_id = o.id
@@ -2821,14 +2821,40 @@ if ($soAction === 'admin') {
         // 2. плюс реальные SKU из заявок на выбранную дату, которых в шаблоне уже нет
         // Это нужно для старых заявок Планеты и других исторических данных, чтобы
         // отдел закупок видел позиции, даже если шаблон потом поменяли.
+        // Кратность и минимум задаются отдельно для каждого юрлица: у «Бургер БК»
+        // и «Воглия Матта» один и тот же товар может иметь разные условия.
+        // Раньше строки склеивались по артикулу, и правило одного юрлица
+        // применялось ко всем — сводка ругалась на нормальные количества.
         $tplStmt = $pdo->prepare("
-            SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.min_qty, t.product_id
+            SELECT t.sku, t.product_name, t.sort_order, t.multiplicity, t.min_qty, t.product_id, t.legal_entity
             FROM so_templates t
             WHERE t.supplier_id = ? AND t.legal_entity IN ({$entityPh}) AND t.is_active = 1
             ORDER BY t.sort_order, t.product_name
         ");
         $tplStmt->execute(array_merge([$supplierId], $supplierEntities));
-        $products = $tplStmt->fetchAll();
+        $tplRows = $tplStmt->fetchAll();
+
+        $products = [];
+        $bySku = [];
+        foreach ($tplRows as $row) {
+            $sku = (string)$row['sku'];
+            if (!isset($bySku[$sku])) {
+                $bySku[$sku] = count($products);
+                $products[] = [
+                    'sku' => $sku,
+                    'product_name' => $row['product_name'],
+                    'sort_order' => $row['sort_order'],
+                    'multiplicity' => $row['multiplicity'],
+                    'min_qty' => $row['min_qty'],
+                    'product_id' => $row['product_id'],
+                    'rules' => [],
+                ];
+            }
+            $products[$bySku[$sku]]['rules'][$row['legal_entity']] = [
+                'multiplicity' => $row['multiplicity'],
+                'min_qty' => $row['min_qty'],
+            ];
+        }
 
         $productMap = [];
         $maxSortOrder = 0;

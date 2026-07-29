@@ -300,7 +300,7 @@
                       'so-td-bad': !isSkipOrder(r) && cellViolates(r.number, p),
                     }"
                     :title="cellViolates(r.number, p)
-                      ? `Не по правилам товара: ${qtyRuleHint(p)}`
+                      ? `Не по правилам товара: ${qtyRuleHint(p, cellLegalEntity(r.number, p))}`
                       : (p.is_grouped ? `Объединено из SKU: ${p.source_skus.join(', ')}` : '')"
                     @dblclick="canEditProduct(p) && startEdit(r.number, p.sku)">
                     <template v-if="editCell === `${r.number}_${p.sku}`">
@@ -354,23 +354,26 @@
 
     <!-- ═══ TAB: Список заявок ═══ -->
     <template v-if="pageTab === 'list' && currentSupplierId">
-      <div class="rom-date-row">
-        <label>Подано:</label>
-        <input type="date" v-model="listSubmittedFrom" />
-        <span>—</span>
-        <input type="date" v-model="listSubmittedTo" />
-        <button class="rom-btn-sm" @click="loadOrdersList">Загрузить</button>
-      </div>
-      <div class="rom-date-row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
-        <div>
-          <label class="so-field-label">Доставка от</label>
-          <input type="date" v-model="listDeliveryFrom" />
+      <!-- Фильтры одной панелью: раньше они шли двумя рядами с разными
+           отступами, и было неясно, где заканчивается один и начинается другой. -->
+      <div class="so-panel so-filters">
+        <div class="so-field">
+          <label class="so-field-label">Подано</label>
+          <div class="so-field-pair">
+            <input type="date" v-model="listSubmittedFrom" class="rom-input-sm" />
+            <span class="so-field-dash">—</span>
+            <input type="date" v-model="listSubmittedTo" class="rom-input-sm" />
+          </div>
         </div>
-        <div>
-          <label class="so-field-label">Доставка до</label>
-          <input type="date" v-model="listDeliveryTo" />
+        <div class="so-field">
+          <label class="so-field-label">Доставка</label>
+          <div class="so-field-pair">
+            <input type="date" v-model="listDeliveryFrom" class="rom-input-sm" />
+            <span class="so-field-dash">—</span>
+            <input type="date" v-model="listDeliveryTo" class="rom-input-sm" />
+          </div>
         </div>
-        <div>
+        <div class="so-field">
           <label class="so-field-label">Статус</label>
           <select v-model="listStatus" class="rom-select">
             <option value="">Все</option>
@@ -379,54 +382,65 @@
             <option value="draft">Черновик</option>
           </select>
         </div>
-        <div style="min-width:240px">
-          <label class="so-field-label">Ресторан / адрес</label>
-          <input type="text" v-model="listQuery" class="rom-input-sm" placeholder="Номер, город, адрес" style="min-width:240px" />
+        <div class="so-field so-field-grow">
+          <label class="so-field-label">Ресторан или адрес</label>
+          <input type="text" v-model="listQuery" class="rom-input-sm" placeholder="Номер, город, адрес" />
         </div>
-        <label class="so-filter-check" style="margin-bottom:6px">
-          <input type="checkbox" v-model="listSkipOnly" /> Только "не нужна"
+        <label class="so-filter-check so-field-inline">
+          <input type="checkbox" v-model="listSkipOnly" /> Только «не нужна»
         </label>
-        <button class="rom-btn-sm" @click="resetOrdersFilters">Сбросить</button>
+        <div class="so-filters-actions">
+          <button class="so-btn so-btn-accent" @click="loadOrdersList" :disabled="loadingList">
+            {{ loadingList ? 'Загрузка…' : 'Показать' }}
+          </button>
+          <button class="so-chip-btn" @click="resetOrdersFilters">Сбросить</button>
+        </div>
       </div>
+
       <div v-if="loadingList" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="ordersList.length === 0" class="rom-empty">Заявок за выбранный период нет.</div>
-      <div v-else class="rom-table-wrap">
-        <table class="rom-table so-list-table">
-          <thead>
-            <tr>
-              <th>Рест.</th>
-              <th>Адрес</th>
-              <th>Подано</th>
-              <th>Дата доставки</th>
-              <th>Статус</th>
-              <th>Позиций</th>
-              <th>Кол-во</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="o in ordersList" :key="o.id">
-              <td class="rom-td-num">{{ formatRestaurantNumber(o.restaurant_number, o.legal_entity_group) }}</td>
-              <td>{{ o.address }}</td>
-              <td>{{ o.submitted_at ? formatDateTime(o.submitted_at) : '—' }}</td>
-              <td>{{ formatDate(o.delivery_date) }}</td>
-              <td>
-                <span v-if="Number(o.item_count || 0) === 0 && (o.status === 'submitted' || o.status === 'locked')" class="rom-status st-skip">Не нужна</span>
-                <span v-else class="rom-status" :class="'st-' + o.status">{{ statusLabel(o.status) }}</span>
-                <span v-if="isAutoSubmitted(o)" class="so-auto-badge" :title="autoSubmitTitle(o)">
-                  АВТО-ПОДАЧА
-                </span>
-              </td>
-              <td>{{ o.item_count || '—' }}</td>
-              <td>{{ o.total_qty ? (Number.isInteger(+o.total_qty) ? +o.total_qty : (+o.total_qty).toFixed(2)) : '—' }}</td>
-              <td class="rom-td-actions">
-                <button class="rom-btn-sm" @click="viewOrder(o.id)">Открыть</button>
-                <button class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id, o.status)">Удалить</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-else-if="ordersList.length === 0" class="so-card so-empty-block">
+        <div class="so-empty-title">Заявок нет</div>
+        <p>За выбранный период заявок не найдено. Попробуйте другие даты или сбросьте фильтры.</p>
       </div>
+      <template v-else>
+        <div class="so-list-count">Найдено заявок: <b>{{ ordersList.length }}</b></div>
+        <div class="so-card so-card-flush">
+          <table class="rom-table so-list-table">
+            <thead>
+              <tr>
+                <th>Ресторан</th>
+                <th>Подано</th>
+                <th>Доставка</th>
+                <th>Статус</th>
+                <th class="so-list-num">Позиций</th>
+                <th class="so-list-num">Кол-во</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="o in ordersList" :key="o.id">
+                <td class="so-list-rest">
+                  <span class="so-list-rest-num">{{ formatRestaurantNumber(o.restaurant_number, o.legal_entity_group) }}</span>
+                  <span class="so-list-rest-addr">{{ o.address }}</span>
+                </td>
+                <td class="so-list-dim">{{ o.submitted_at ? formatDateTime(o.submitted_at) : '—' }}</td>
+                <td>{{ formatDate(o.delivery_date) }}</td>
+                <td>
+                  <span v-if="Number(o.item_count || 0) === 0 && (o.status === 'submitted' || o.status === 'locked')" class="rom-status st-skip">Не нужна</span>
+                  <span v-else class="rom-status" :class="'st-' + o.status">{{ statusLabel(o.status) }}</span>
+                  <span v-if="isAutoSubmitted(o)" class="so-auto-badge" :title="autoSubmitTitle(o)">АВТО</span>
+                </td>
+                <td class="so-list-num">{{ o.item_count || '—' }}</td>
+                <td class="so-list-num">{{ o.total_qty ? (Number.isInteger(+o.total_qty) ? +o.total_qty : (+o.total_qty).toFixed(2)) : '—' }}</td>
+                <td class="rom-td-actions">
+                  <button class="so-chip-btn" @click="viewOrder(o.id)">Открыть</button>
+                  <button class="so-chip-btn is-close-day" @click="deleteOrder(o.id, o.status)">Удалить</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
     </template>
 
     <!-- ═══ TAB: Графики ═══ -->
@@ -1052,18 +1066,42 @@
           <p v-if="isAutoSubmitted(viewedOrder)" class="so-auto-detail">
             АВТО-ПОДАЧА: скопировано из заявки #{{ viewedOrder.auto_source_order_id }}<template v-if="viewedOrder.auto_source_delivery_date"> от {{ formatDate(viewedOrder.auto_source_delivery_date) }}</template>
           </p>
+          <!-- Количества правятся прямо здесь: раньше ради изменения одной
+               позиции приходилось идти во вкладку «Приём» и искать ячейку. -->
           <table class="rom-table so-modal-table">
-            <thead><tr><th>Товар</th><th>Кол-во</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Товар</th>
+                <th class="so-modal-qty-col">Кол-во ресторана</th>
+                <th class="so-modal-qty-col">Наше значение</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="item in viewedOrder.items" :key="item.id">
-                <td><span class="so-tpl-sku">{{ item.sku }}</span> {{ item.product_name }}</td>
                 <td>
-                  <span v-if="item.admin_qty !== null && item.admin_qty !== undefined" class="so-qty-admin" :title="'Исходное: ' + item.quantity">{{ item.admin_qty }}</span>
-                  <span v-else>{{ item.quantity }}</span>
+                  <span class="so-tpl-sku">{{ item.sku }}</span> {{ item.product_name }}
+                  <span v-if="orderItemRuleHint(item)" class="so-modal-rule">{{ orderItemRuleHint(item) }}</span>
+                </td>
+                <td class="so-modal-qty-col so-list-dim">{{ formatQtyValue(item.quantity) }}</td>
+                <td class="so-modal-qty-col">
+                  <input
+                    class="so-modal-qty-input"
+                    :class="{ 'is-bad': orderItemViolates(item) }"
+                    type="text" inputmode="decimal"
+                    :value="orderItemInput(item)"
+                    :disabled="orderItemSaving === item.id"
+                    :placeholder="formatQtyValue(item.quantity)"
+                    @keydown.enter="$event.target.blur()"
+                    @change="saveOrderItemQty(item, $event.target.value)"
+                  />
                 </td>
               </tr>
             </tbody>
           </table>
+          <p class="so-modal-note">
+            Пустое поле — количество ресторана без изменений. Введите своё число, чтобы поправить заявку;
+            изменения сразу уходят в сводку поставщику.
+          </p>
         </div>
       </div>
     </div>
@@ -1544,8 +1582,11 @@ function buildDisplayProducts(list) {
 }
 
 function formatQtyValue(value) {
-  if (!Number.isFinite(value)) return '';
-  return value === Math.floor(value) ? Math.floor(value) : +value.toFixed(2);
+  // Количество приходит из базы строкой («2.00»), поэтому приводим к числу:
+  // раньше при строке функция возвращала пустоту и колонка выглядела пустой.
+  const num = typeof value === 'number' ? value : parseFloat(String(value ?? '').replace(',', '.'));
+  if (!Number.isFinite(num)) return '';
+  return num === Math.floor(num) ? Math.floor(num) : +num.toFixed(2);
 }
 
 function todayStr(offsetDays = 0) {
@@ -3139,12 +3180,37 @@ function canEditProduct(product) {
 // эти правила проверяет форма заявки, а правки закупщика раньше шли мимо
 // проверок — так в заявку поставщику попадали числа, которые он не отгрузит.
 
-/** Правила товара из шаблона: { mult, min } (0 — правила нет). */
-function qtyRules(product) {
+/**
+ * Правила товара из шаблона: { mult, min } (0 — правила нет).
+ *
+ * Кратность и минимум задаются по юрлицам: у «Бургер БК» и «Воглия Матта»
+ * один товар может идти на разных условиях. Если юрлицо известно — берём
+ * его правило. Если нет и условия у юрлиц разные, правило не применяем:
+ * лучше не проверить, чем поругаться на нормальное количество.
+ */
+function qtyRules(product, legalEntity = null) {
   if (!product) return { mult: 0, min: 0 };
-  const mult = parseFloat(product.multiplicity) || 0;
-  const min = parseFloat(product.min_qty) || 0;
-  return { mult: mult > 1 ? mult : 0, min: min > 0 ? min : 0 };
+  const norm = (raw) => {
+    const mult = parseFloat(raw?.multiplicity) || 0;
+    const min = parseFloat(raw?.min_qty) || 0;
+    return { mult: mult > 1 ? mult : 0, min: min > 0 ? min : 0 };
+  };
+  const rules = product.rules;
+  if (rules && typeof rules === 'object') {
+    if (legalEntity && rules[legalEntity]) return norm(rules[legalEntity]);
+    const list = Object.values(rules);
+    if (list.length > 1) {
+      const first = norm(list[0]);
+      const same = list.every(r => {
+        const n = norm(r);
+        return n.mult === first.mult && n.min === first.min;
+      });
+      if (!same) return { mult: 0, min: 0 };
+      return first;
+    }
+    if (list.length === 1) return norm(list[0]);
+  }
+  return norm(product);
 }
 
 /**
@@ -3152,10 +3218,10 @@ function qtyRules(product) {
  * их не трогаем.
  * @returns null | { text, options: [{ value, label }] }
  */
-function qtyIssue(product, value) {
+function qtyIssue(product, value, legalEntity = null) {
   const qty = parseFloat(value);
   if (!isFinite(qty) || qty <= 0) return null;
-  const { mult, min } = qtyRules(product);
+  const { mult, min } = qtyRules(product, legalEntity);
   if (!mult && !min) return null;
 
   const offGrid = mult > 0 && Math.abs(qty % mult) > 1e-9;
@@ -3202,11 +3268,21 @@ function cellViolates(restNum, product) {
   const item = getDisplayItem(restNum, product);
   if (!item) return false;
   const qty = item.admin_qty !== null && item.admin_qty !== undefined ? item.admin_qty : item.quantity;
-  return qtyIssue(product, qty) !== null;
+  return qtyIssue(product, qty, cellLegalEntity(restNum, product)) !== null;
 }
 
-function qtyRuleHint(product) {
-  const { mult, min } = qtyRules(product);
+/** Юрлицо заявки ресторана — по нему выбирается правило товара. */
+function cellLegalEntity(restNum, product) {
+  const skus = product?.source_skus?.length ? product.source_skus : [product?.sku];
+  for (const sku of skus) {
+    const item = itemLookup.value[`${restNum}_${sku}`];
+    if (item?.legal_entity) return item.legal_entity;
+  }
+  return null;
+}
+
+function qtyRuleHint(product, legalEntity = null) {
+  const { mult, min } = qtyRules(product, legalEntity);
   const parts = [];
   if (mult) parts.push(`кратно ${fmtNum(mult)}`);
   if (min) parts.push(`минимум ${fmtNum(min)}`);
@@ -3223,7 +3299,66 @@ async function applyQtyChoice(value) {
   const ctx = qtyModal.value.ctx;
   qtyModal.value.show = false;
   if (!ctx) return;
+  // Окно одно на два места: ячейка сводки и позиция в карточке заявки.
+  if (ctx.kind === 'order-item') {
+    await commitOrderItemQty(ctx.item, value);
+    return;
+  }
   await commitQty(ctx.restNum, ctx.sku, value, ctx.item);
+}
+
+
+// ─── Правка заявки из списка ───
+// Закупщик меняет количество прямо в карточке заявки. Правила товара
+// (кратность, минимум) берём из шаблона поставщика — те же, что в сводке.
+const orderItemSaving = ref(null);
+
+function orderItemProduct(item) {
+  return products.value.find(p => String(p.sku) === String(item.sku)) || null;
+}
+function orderItemRuleHint(item) {
+  const hint = qtyRuleHint(orderItemProduct(item), viewedOrder.value?.legal_entity || null);
+  return hint ? `(${hint})` : '';
+}
+function orderItemValue(item) {
+  return item.admin_qty !== null && item.admin_qty !== undefined ? item.admin_qty : item.quantity;
+}
+function orderItemInput(item) {
+  return item.admin_qty !== null && item.admin_qty !== undefined ? formatQtyValue(item.admin_qty) : '';
+}
+function orderItemViolates(item) {
+  return qtyIssue(orderItemProduct(item), orderItemValue(item), viewedOrder.value?.legal_entity || null) !== null;
+}
+
+async function saveOrderItemQty(item, raw) {
+  const text = String(raw ?? '').trim().replace(',', '.');
+  // Пустое поле — снимаем нашу правку, остаётся то, что подал ресторан.
+  const val = text === '' ? null : parseFloat(text);
+  if (text !== '' && !isFinite(val)) { toast.error('Не число', 'Введите количество цифрами'); return; }
+
+  const issue = val !== null
+    ? qtyIssue(orderItemProduct(item), val, viewedOrder.value?.legal_entity || null)
+    : null;
+  if (issue) {
+    askQtyFix({ kind: 'order-item', item, val }, issue);
+    return;
+  }
+  await commitOrderItemQty(item, val);
+}
+
+async function commitOrderItemQty(item, val) {
+  orderItemSaving.value = item.id;
+  try {
+    await store.adminUpdateQty({ item_id: item.id, admin_qty: val });
+    item.admin_qty = val;
+    toast.success('Сохранено', val === null ? 'Вернули количество ресторана' : `${item.sku}: ${formatQtyValue(val)}`);
+    // Сводка приёма и список заявок должны показать то же самое.
+    if (pageTab.value === 'status') loadStatus();
+  } catch (e) {
+    toast.error('Не сохранилось', e.message);
+  } finally {
+    orderItemSaving.value = null;
+  }
 }
 
 function startEdit(restNum, sku) {
@@ -3251,7 +3386,7 @@ async function saveEdit() {
   // Кратность и минимум: предупреждаем сразу, но последнее слово за закупщиком —
   // бывают договорённости с поставщиком в обход обычных правил.
   const product = products.value.find(p => p.sku === sku);
-  const issue = qtyIssue(product, val);
+  const issue = qtyIssue(product, val, item?.legal_entity || null);
   if (issue) {
     askQtyFix({ restNum, sku, val, item }, issue);
     return;
@@ -3580,6 +3715,10 @@ watch(
    (шапка и строки расходятся), поэтому оставляем ячейку ячейкой. */
 .rom-td-actions { white-space: nowrap; }
 .rom-td-actions .rom-btn-sm + .rom-btn-sm { margin-left: var(--tk-s-1); }
+/* Действия в строке — с зазором и по правому краю, иначе кнопки слипаются. */
+.so-list-table .rom-td-actions {
+  display: flex; gap: 6px; justify-content: flex-end; align-items: center;
+}
 /* В таблицах-списках содержимое читается слева: глобальное правило
    `td { text-align: center }` из старых стилей здесь неуместно. */
 /* !important — в старом глобальном style.css есть
@@ -4435,4 +4574,37 @@ watch(
   font-size: 12.5px; font-weight: 600;
 }
 .so-autosave-chip.busy { background: rgba(232, 122, 30, .14); color: #C25E12; }
+
+/* ── Список заявок ── */
+.so-filters { align-items: flex-end; row-gap: 10px; }
+.so-field { display: flex; flex-direction: column; gap: 4px; }
+.so-field-grow { flex: 1 1 220px; min-width: 180px; }
+.so-field-label { font-size: 11.5px; font-weight: 700; color: #8A7F72; }
+.so-field-pair { display: flex; align-items: center; gap: 5px; }
+.so-field-dash { color: #C4B8A8; }
+.so-field-inline { align-self: center; }
+.so-filters-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.so-list-count { font-size: 13px; color: #6B5544; margin-bottom: 8px; }
+.so-list-count b { color: #3A2418; }
+.so-list-rest { white-space: normal; }
+.so-list-rest-num {
+  display: inline-block; margin-right: 8px; padding: 2px 8px; border-radius: 8px;
+  background: #F4EDE4; color: #3A2418; font-size: 12px; font-weight: 800;
+}
+.so-list-rest-addr { color: #5F4B38; }
+.so-list-dim { color: #8A7F72; }
+.so-list-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.so-empty-block { text-align: center; color: #8A7F72; font-size: 13.5px; padding: 30px 20px; }
+.so-empty-title { font-size: 16px; font-weight: 800; color: #3A2418; margin-bottom: 6px; }
+
+/* ── Правка количеств в карточке заявки ── */
+.so-modal-qty-col { width: 150px; text-align: right !important; }
+.so-modal-qty-input {
+  width: 110px; padding: 7px 9px; border: 1.5px solid #E4D9CB; border-radius: 9px;
+  font: inherit; font-size: 13.5px; font-weight: 700; text-align: right; color: #2E1C10;
+}
+.so-modal-qty-input:focus { outline: 0; border-color: #E87A1E; box-shadow: 0 0 0 3px rgba(232, 122, 30, .14); }
+.so-modal-qty-input.is-bad { border-color: #D9661A; background: rgba(232, 122, 30, .09); }
+.so-modal-rule { margin-left: 6px; font-size: 11.5px; color: #8A7F72; }
+.so-modal-note { margin: 10px 0 0; font-size: 12px; color: #8A7F72; line-height: 1.45; }
 </style>
