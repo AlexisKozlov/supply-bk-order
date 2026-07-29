@@ -60,7 +60,7 @@
                   <strong>{{ fmtQty(c.quantity) }} {{ c.unit_of_measure }}</strong>
                   <template v-if="c.status === 'pending' || c.status === 'in_progress'">
                     <button class="corr-item-btn approve" @click.stop="reviewBatch([c.id], 'approve')" title="Принять">✓</button>
-                    <button class="corr-item-btn reject" @click.stop="openReject([c.id])" title="Отклонить">✕</button>
+                    <button class="corr-item-btn reject" @click.stop="openReview([c.id], 'reject')" title="Отклонить">✕</button>
                   </template>
                   <span v-if="c.reviewer_name && (c.status === 'in_progress' || c.status === 'approved' || c.status === 'rejected')" class="corr-item-reviewer">{{ c.reviewer_name }}</span>
                 </div>
@@ -92,7 +92,8 @@
                   <button v-if="g.hasUntaken" class="corr-btn take" @click="takeInWork(g.untakenIds)" title="Взять в работу">🔄</button>
                   <template v-if="g.hasOpen">
                     <button class="corr-btn approve" @click="reviewBatch(g.openIds, 'approve')" title="Принять всё">✓</button>
-                    <button class="corr-btn reject" @click="openReject(g.openIds)" title="Отклонить всё">✕</button>
+                    <button class="corr-btn comment" @click="openReview(g.openIds, 'approve')" title="Принять с комментарием">💬</button>
+                    <button class="corr-btn reject" @click="openReview(g.openIds, 'reject')" title="Отклонить всё">✕</button>
                   </template>
                   <button class="corr-btn delete" @click="deleteGroup(g)" title="Удалить">🗑</button>
                 </div>
@@ -103,15 +104,23 @@
       </div>
     </template>
 
-    <!-- Модалка отклонения -->
+    <!-- Решение по заявке: принять или отклонить, с комментарием ресторану -->
     <Teleport to="body">
-      <div v-if="rejectModal.show" class="modal">
-        <div class="modal-box" style="max-width:400px;">
-          <h3 style="margin-bottom:12px;">Отклонить заявку</h3>
-          <textarea v-model="rejectModal.comment" class="corr-textarea" placeholder="Комментарий (необязательно)" rows="3"></textarea>
+      <div v-if="reviewModal.show" class="modal">
+        <div class="modal-box" style="max-width:420px;">
+          <h3 style="margin-bottom:12px;">
+            {{ reviewModal.action === 'approve' ? 'Принять заявку' : 'Отклонить заявку' }}
+          </h3>
+          <p class="corr-hint" style="margin-bottom:8px;">
+            Комментарий увидит ресторан в кабинете и в боте.
+          </p>
+          <textarea v-model="reviewModal.comment" class="corr-textarea"
+                    placeholder="Комментарий (необязательно)" rows="3"></textarea>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
-            <button class="btn" @click="rejectModal.show = false">Отмена</button>
-            <button class="btn primary" @click="submitReject">Отклонить</button>
+            <button class="btn" @click="reviewModal.show = false">Отмена</button>
+            <button class="btn primary" @click="submitReview">
+              {{ reviewModal.action === 'approve' ? 'Принять' : 'Отклонить' }}
+            </button>
           </div>
         </div>
       </div>
@@ -189,7 +198,7 @@ const deadlineGroups = computed(() => {
 const deadlineTime = ref({})      // что сейчас в полях
 const deadlineSaved = ref({})     // что сохранено на сервере
 const deadlineSaving = ref('')    // код группы, которая сейчас сохраняется
-const rejectModal = ref({ show: false, ids: [], comment: '' })
+const reviewModal = ref({ show: false, ids: [], action: 'reject', comment: '' })
 
 const pendingCount = computed(() => corrections.value.filter(c => c.status === 'pending').length)
 
@@ -282,10 +291,12 @@ async function reviewBatch(ids, action, comment = '') {
   } catch (e) { toastStore.show('Ошибка: ' + (e.message || e), 'error') }
 }
 
-function openReject(ids) { rejectModal.value = { show: true, ids, comment: '' } }
-async function submitReject() {
-  await reviewBatch(rejectModal.value.ids, 'reject', rejectModal.value.comment)
-  rejectModal.value.show = false
+function openReview(ids, action) {
+  reviewModal.value = { show: true, ids, action, comment: '' }
+}
+async function submitReview() {
+  await reviewBatch(reviewModal.value.ids, reviewModal.value.action, reviewModal.value.comment)
+  reviewModal.value.show = false
 }
 
 async function deleteGroup(g) {
@@ -457,6 +468,8 @@ watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 .corr-btn { width: 30px; height: 30px; border: none; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 15px; color: #fff; }
 .corr-btn.approve { background: #4CAF50; }
 .corr-btn.approve:hover { background: #388E3C; }
+.corr-btn.comment { background: #FFF; border: 1px solid var(--border); font-size: 13px; }
+.corr-btn.comment:hover { border-color: #E87A1E; }
 .corr-btn.reject { background: #F44336; }
 .corr-btn.reject:hover { background: #D32F2F; }
 .corr-btn.delete { background: none; border: 1px solid var(--border); color: var(--text-muted); font-size: 13px; }

@@ -2744,6 +2744,25 @@ if (isset($input['callback_query'])) {
         exit;
     }
     // Проверка: только взявший может рецензировать
+    /**
+     * Текст для случая, когда по заявке уже нечего обрабатывать: кто-то
+     * закрыл её на портале или в другом чате. Раньше бот писал сухое
+     * «Все позиции уже обработаны», и было непонятно, куда делись кнопки.
+     */
+    function corrAlreadyHandledText($pdo, $corrId) {
+        $st = $pdo->prepare("SELECT reviewer_name, status, reviewed_at FROM order_corrections WHERE id = ?");
+        $st->execute([$corrId]);
+        $r = $st->fetch();
+        if (!$r) return "⚠️ Заявка не найдена — возможно, её удалили.";
+        $who = trim((string)($r['reviewer_name'] ?? ''));
+        $when = !empty($r['reviewed_at']) ? date('d.m H:i', strtotime($r['reviewed_at'])) : '';
+        $statusText = $r['status'] === 'approved' ? 'принята' : ($r['status'] === 'rejected' ? 'отклонена' : 'обработана');
+        $txt = "✅ Заявка уже {$statusText}";
+        if ($who !== '') $txt .= " — {$who}";
+        if ($when !== '') $txt .= ", {$when}";
+        return $txt . ".\nПовторно обрабатывать не нужно.";
+    }
+
     function corrCheckReviewer($pdo, $corrId, $chatId, $cbId) {
         $chk = $pdo->prepare("SELECT reviewer_chat_id, reviewer_name FROM order_corrections WHERE id = ?");
         $chk->execute([$corrId]);
@@ -2781,6 +2800,7 @@ if (isset($input['callback_query'])) {
         answerCallback($cb['id']);
         $ids = corrGetBatchPendingIds($pdo, $corrId);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'approve');
+        else editMessage($chatId, $msgId, corrAlreadyHandledText($pdo, $corrId));
         exit;
     }
     // Отклонить все pending в батче
@@ -2791,15 +2811,19 @@ if (isset($input['callback_query'])) {
         answerCallback($cb['id']);
         $ids = corrGetBatchPendingIds($pdo, $corrId);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'reject');
+        else editMessage($chatId, $msgId, corrAlreadyHandledText($pdo, $corrId));
         exit;
     }
     // Комментарий ко всем pending в батче
     if (str_starts_with($data, 'corr_cm_')) {
         $corrId = intval(substr($data, 8));
         if (!corrCheckBotAccess($pdo, $chatId, $corrId, $cb['id'])) exit;
+        // Заявку мог взять другой сотрудник — тогда и комментарий писать нельзя,
+        // иначе двое пишут разные решения по одним и тем же позициям.
+        if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
         $ids = corrGetBatchPendingIds($pdo, $corrId);
-        if (empty($ids)) { editMessage($chatId, $msgId, "⚠️ Все позиции уже обработаны."); exit; }
+        if (empty($ids)) { editMessage($chatId, $msgId, corrAlreadyHandledText($pdo, $corrId)); exit; }
         $state = ['step' => 'review_comment', 'corr_ids' => $ids, 'msg_id' => $msgId];
         tgStateSet($chatId, 'corr', ['mode' => 'corr_review', 'state' => $state]);
         editMessage($chatId, $msgId, "💬 Введите комментарий.\nПосле ввода выберите действие:", ['inline_keyboard' => [

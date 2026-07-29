@@ -2439,6 +2439,18 @@ function corrReplace($chatId, $userMsgId, &$state, $text, $keyboard = null) {
     return $newMsgId;
 }
 
+/**
+ * Сохраняет состояние диалога корректировки.
+ *
+ * Раньше здесь стоял @file_put_contents($dataFile, ...) — остаток от старой
+ * файловой реализации. Переменной $dataFile в функции нет, ошибка глушилась
+ * «собакой», и состояние молча терялось: накопленные позиции пропадали,
+ * а комментарий закупщика не доходил до кнопок «Принять/Отклонить».
+ */
+function corrSaveState($chatId, array $state, $mode = 'corr_items') {
+    tgStateSet($chatId, 'corr', ['mode' => $mode ?: 'corr_items', 'state' => $state], 1800);
+}
+
 // Обработка текстового ввода
 function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
     global $pdo;
@@ -2488,7 +2500,7 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
             $errText = $errors ? "⚠️ " . implode("\n", $errors) . "\n\n" : '';
             $errText .= "Введите позиции в формате:\n<code>молоко 5</code>";
             corrReplace($chatId, $userMsgId, $state, $errText);
-            @file_put_contents($dataFile, json_encode($state));
+            corrSaveState($chatId, $state, $mode);
             return;
         }
 
@@ -2540,7 +2552,7 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
         ]];
 
         corrReplace($chatId, $userMsgId, $state, $summary, $btns);
-        @file_put_contents($dataFile, json_encode($state));
+        corrSaveState($chatId, $state, $mode);
         return;
     }
 
@@ -2556,7 +2568,7 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
             [['text' => '◂ Отмена', 'callback_data' => 'corr_rev_cancel']],
         ]];
         corrReplace($chatId, $userMsgId, $state, $reviewText, $btns);
-        @file_put_contents($dataFile, json_encode($state));
+        corrSaveState($chatId, $state, $mode);
         return;
     }
 
