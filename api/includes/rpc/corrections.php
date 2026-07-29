@@ -202,12 +202,19 @@
     }
 
     // Дедлайн корректировок — время в рабочий день перед поставкой.
-    // Одно значение на весь портал (app_settings), правит тот же, кто работает
-    // с корректировками: это рабочая настройка закупок, а не админская.
+    // Своё у каждой группы юрлиц: у БК/ВМ и Пицца Стар разные графики.
+    // Правит тот же, кто работает с корректировками: это рабочая настройка
+    // закупок, а не админская.
     if ($fn === 'correction_get_deadline') {
         requireModuleAccess($authUser, 'corrections', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         require_once __DIR__ . '/../bot_rest.php';
-        respond(['deadline_time' => corrDeadlineTime($pdo)['str']]);
+        $deadlines = [];
+        foreach (['BK_VM', 'PS'] as $g) $deadlines[$g] = corrDeadlineTime($pdo, $g)['str'];
+        respond([
+            // deadline_time оставлен для совместимости со старым фронтом
+            'deadline_time' => corrDeadlineTime($pdo)['str'],
+            'deadlines'     => $deadlines,
+        ]);
     }
 
     if ($fn === 'correction_set_deadline') {
@@ -217,17 +224,35 @@
             respond(['error' => 'Укажите время в формате ЧЧ:ММ'], 400);
         }
         $val = sprintf('%02d:%02d', (int)$m[1], (int)$m[2]);
+
+        $group = trim((string)($body['group'] ?? ''));
+        if ($group !== '' && !in_array($group, ['BK_VM', 'PS'], true)) {
+            respond(['error' => 'Неизвестная группа юрлиц'], 400);
+        }
+        // Сотрудник может менять время только своей группы юрлиц.
+        if ($group !== '' && ($authUser['role'] ?? '') !== 'admin') {
+            $entities = $authUser['legal_entities'] ?? [];
+            if (is_string($entities)) $entities = json_decode($entities, true) ?: [];
+            $allowed = [];
+            foreach ((array)$entities as $e) $allowed[getEntityGroup($e)] = true;
+            if (!isset($allowed[$group])) {
+                respond(['error' => 'Нет доступа к этой группе юрлиц'], 403);
+            }
+        }
+        $key = $group !== '' ? 'corrections_deadline_time_' . $group : 'corrections_deadline_time';
+
         $st = $pdo->prepare("
             INSERT INTO app_settings (skey, svalue, updated_by)
-            VALUES ('corrections_deadline_time', ?, ?)
+            VALUES (?, ?, ?)
             ON DUPLICATE KEY UPDATE
               svalue = VALUES(svalue),
               updated_by = VALUES(updated_by),
               updated_at = CURRENT_TIMESTAMP
         ");
-        $st->execute([$val, $authUserName]);
-        auditLog($pdo, 'correction_deadline_changed', 'correction', null, $authUserName, ['deadline_time' => $val]);
-        respond(['success' => true, 'deadline_time' => $val]);
+        $st->execute([$key, $val, $authUserName]);
+        auditLog($pdo, 'correction_deadline_changed', 'correction', null, $authUserName,
+                 ['deadline_time' => $val, 'group' => $group ?: 'все']);
+        respond(['success' => true, 'deadline_time' => $val, 'group' => $group]);
     }
 
     if ($fn === 'correction_toggle_notification') {

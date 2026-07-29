@@ -52,7 +52,7 @@ const RC_VALID_ACTIONS = ['add', 'remove'];
 
 function rcValidateDeliveryDate($pdo, $restNum, $date) {
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return false;
-    $deliveries = corrGetNextDeliveries($pdo, $restNum, 10);
+    $deliveries = corrGetNextDeliveries($pdo, $restNum, 10, $rcGroup);
     foreach ($deliveries as $d) {
         if ($d['date'] === $date) return $d;
     }
@@ -116,7 +116,7 @@ function rcNormalizeItems($items) {
 // Возвращает ближайшие даты поставки, на которые ещё можно подать корректировку.
 // ═══════════════════════════════════════════════════════════════
 if ($subpoint === 'deliveries' && $method === 'GET') {
-    $deliveries = corrGetNextDeliveries($pdo, $rcRestNum, 5);
+    $deliveries = corrGetNextDeliveries($pdo, $rcRestNum, 5, $rcGroup);
     $out = [];
     foreach ($deliveries as $d) {
         $out[] = [
@@ -128,7 +128,7 @@ if ($subpoint === 'deliveries' && $method === 'GET') {
         ];
     }
     // deadline_time нужен и когда список пуст — подписью «до какого времени принимаем».
-    rcRespond(['deliveries' => $out, 'deadline_time' => corrDeadlineTime($pdo)['str']]);
+    rcRespond(['deliveries' => $out, 'deadline_time' => corrDeadlineTime($pdo, $rcGroup)['str']]);
 }
 
 // ═══════════════════════════════════════════════════════════════

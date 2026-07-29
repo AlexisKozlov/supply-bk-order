@@ -123,14 +123,17 @@
         <h3 class="corr-section-title">Дедлайн корректировок</h3>
         <p class="corr-hint">
           До этого времени в рабочий день перед поставкой рестораны могут подать корректировку.
-          Позже даты пропадают у них из кабинета и из бота.
+          Позже даты пропадают у них из кабинета и из бота. У каждой группы юрлиц своё время.
         </p>
-        <div class="corr-deadline-row">
-          <input v-model="deadlineTime" type="time" class="corr-input corr-deadline-input" step="300" />
-          <button class="btn primary" @click="saveDeadline" :disabled="deadlineSaving || !deadlineTime || deadlineTime === deadlineSaved">
-            {{ deadlineSaving ? 'Сохраняем…' : 'Сохранить' }}
+        <div v-for="g in deadlineGroups" :key="g.code" class="corr-deadline-row">
+          <span class="corr-deadline-group">{{ g.label }}</span>
+          <input v-model="deadlineTime[g.code]" type="time" class="corr-input corr-deadline-input" step="300" />
+          <button class="btn primary"
+                  :disabled="deadlineSaving === g.code || !deadlineTime[g.code] || deadlineTime[g.code] === deadlineSaved[g.code]"
+                  @click="saveDeadline(g.code)">
+            {{ deadlineSaving === g.code ? 'Сохраняем…' : 'Сохранить' }}
           </button>
-          <span v-if="deadlineSaved" class="corr-deadline-current">сейчас {{ deadlineSaved }}</span>
+          <span v-if="deadlineSaved[g.code]" class="corr-deadline-current">сейчас {{ deadlineSaved[g.code] }}</span>
         </div>
 
         <h3 class="corr-section-title corr-section-title-next">Кто получает уведомления о корректировках</h3>
@@ -156,10 +159,12 @@ import { appConfirm } from '@/lib/appDialogs.js'
 import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useOrderStore } from '@/stores/orderStore.js'
+import { useUserStore } from '@/stores/userStore.js'
 
 const orderStore = useOrderStore()
 
 const toastStore = useToastStore()
+const userStore = useUserStore()
 const tab = useTabRoute('requests', ['requests', 'settings'])
 const loading = ref(false)
 const corrections = ref([])
@@ -168,9 +173,22 @@ const sourceFilter = ref('')
 const restFilter = ref('')
 const settingsLoading = ref(false)
 const settingsUsers = ref([])
-const deadlineTime = ref('')     // что сейчас в поле
-const deadlineSaved = ref('')    // что сохранено на сервере
-const deadlineSaving = ref(false)
+// Показываем только те группы юрлиц, к которым у сотрудника есть доступ:
+// закупщик «Пицца Стар» не должен менять время «Бургер БК».
+const deadlineGroups = computed(() => {
+  const all = [
+    { code: 'BK_VM', label: 'Бургер БК и Воглия Матта' },
+    { code: 'PS', label: 'Пицца Стар' },
+  ]
+  const allowed = new Set((userStore.getAllowedEntities?.() || []).map(getEntityGroupCode))
+  const mine = all.filter(g => allowed.has(g.code))
+  return mine.length ? mine : all
+})
+
+// Дедлайн свой у каждой группы юрлиц: { BK_VM: '10:00', PS: '11:00' }
+const deadlineTime = ref({})      // что сейчас в полях
+const deadlineSaved = ref({})     // что сохранено на сервере
+const deadlineSaving = ref('')    // код группы, которая сейчас сохраняется
 const rejectModal = ref({ show: false, ids: [], comment: '' })
 
 const pendingCount = computed(() => corrections.value.filter(c => c.status === 'pending').length)
@@ -306,20 +324,29 @@ async function loadSettings() {
 async function loadDeadline() {
   try {
     const { data } = await db.rpc('correction_get_deadline')
-    deadlineTime.value = data?.deadline_time || ''
-    deadlineSaved.value = deadlineTime.value
-  } catch { /* оставляем поле пустым — сохранение всё равно проверит формат */ }
+    const byGroup = data?.deadlines || {}
+    const fallback = data?.deadline_time || ''
+    const next = {}
+    for (const g of deadlineGroups.value) next[g.code] = byGroup[g.code] || fallback
+    deadlineTime.value = { ...next }
+    deadlineSaved.value = { ...next }
+  } catch { /* оставляем поля пустыми — сохранение всё равно проверит формат */ }
 }
 
-async function saveDeadline() {
-  deadlineSaving.value = true
+async function saveDeadline(group) {
+  deadlineSaving.value = group
   try {
-    const { data } = await db.rpc('correction_set_deadline', { deadline_time: deadlineTime.value })
-    deadlineSaved.value = data?.deadline_time || deadlineTime.value
-    deadlineTime.value = deadlineSaved.value
-    toastStore.show('Дедлайн корректировок: ' + deadlineSaved.value)
+    const { data } = await db.rpc('correction_set_deadline', {
+      deadline_time: deadlineTime.value[group],
+      group,
+    })
+    const saved = data?.deadline_time || deadlineTime.value[group]
+    deadlineSaved.value = { ...deadlineSaved.value, [group]: saved }
+    deadlineTime.value = { ...deadlineTime.value, [group]: saved }
+    const label = deadlineGroups.value.find(g => g.code === group)?.label || ''
+    toastStore.show(`Дедлайн корректировок (${label}): ${saved}`)
   } catch (e) { toastStore.show('Ошибка: ' + (e.message || e), 'error') }
-  finally { deadlineSaving.value = false }
+  finally { deadlineSaving.value = '' }
 }
 
 async function toggleNotification(user) {
@@ -438,6 +465,9 @@ watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 /* Настройки */
 .corr-section-title { font-size: 16px; margin-bottom: 4px; }
 .corr-section-title-next { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border-light); }
+.corr-deadline-group {
+  min-width: 190px; font-size: 13px; font-weight: 700; color: #5F4B38;
+}
 .corr-deadline-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .corr-deadline-input { width: 110px; font-size: 14px; }
 .corr-deadline-current { font-size: 12px; color: var(--text-muted); }

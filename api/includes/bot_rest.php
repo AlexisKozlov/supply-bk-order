@@ -2060,16 +2060,36 @@ function restNotifySubscribers($pdo, $botToken, $restaurantNumber, $text, $reply
 // ═══════════════════════════════════════════════
 
 // Время дедлайна корректировок. Настраивается закупкой в модуле «Корректировки»
-// (app_settings.corrections_deadline_time, формат ЧЧ:ММ). Одно на весь портал.
+// и хранится в app_settings. У каждой группы юрлиц своё время: у «Бургер БК» /
+// «Воглия Матта» и «Пицца Стар» разные графики работы.
+//   corrections_deadline_time_BK_VM / _PS — время группы;
+//   corrections_deadline_time            — общее (запасное, от старой версии);
+//   CORR_DEADLINE_DEFAULT                — если не задано вообще ничего.
 const CORR_DEADLINE_DEFAULT = '10:00';
 
-function corrDeadlineTime($pdo) {
-    $raw = trim((string)getAppSetting($pdo, 'corrections_deadline_time', CORR_DEADLINE_DEFAULT));
+/** @param string|null $group BK_VM | PS; null — общее значение портала */
+function corrDeadlineTime($pdo, $group = null) {
+    $raw = '';
+    if ($group === 'BK_VM' || $group === 'PS') {
+        $raw = trim((string)getAppSetting($pdo, 'corrections_deadline_time_' . $group, ''));
+    }
+    if ($raw === '') $raw = trim((string)getAppSetting($pdo, 'corrections_deadline_time', CORR_DEADLINE_DEFAULT));
     if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw, $m)) {
         $raw = CORR_DEADLINE_DEFAULT;
         preg_match('/^(\d\d):(\d\d)$/', $raw, $m);
     }
     return ['h' => (int)$m[1], 'm' => (int)$m[2], 'str' => sprintf('%02d:%02d', (int)$m[1], (int)$m[2])];
+}
+
+/** Группа юрлиц ресторана — по ней выбирается дедлайн. */
+function corrRestaurantGroup($pdo, $restNum) {
+    static $cache = [];
+    $key = (string)$restNum;
+    if (isset($cache[$key])) return $cache[$key];
+    $st = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? LIMIT 1");
+    $st->execute([$restNum]);
+    $g = (string)($st->fetchColumn() ?: '');
+    return $cache[$key] = ($g === 'PS' ? 'PS' : 'BK_VM');
 }
 
 // Мера позиции корректировки берётся из карточки товара: кратность больше 1
@@ -2081,10 +2101,10 @@ function corrUnitForProduct($product) {
 }
 
 // Ближайшие доставки ресторана с дедлайнами корректировок
-function corrGetNextDeliveries($pdo, $restNum, $limit = 3) {
+function corrGetNextDeliveries($pdo, $restNum, $limit = 3, $group = null) {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
-    $dl = corrDeadlineTime($pdo);
+    $dl = corrDeadlineTime($pdo, $group ?: corrRestaurantGroup($pdo, $restNum));
     $st = $pdo->prepare("SELECT ds.day_of_week, ds.delivery_time FROM delivery_schedule ds JOIN restaurants r ON r.id = ds.restaurant_id WHERE r.number = ?");
     $st->execute([$restNum]);
     $schedule = [];
