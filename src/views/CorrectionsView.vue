@@ -2,105 +2,98 @@
   <div class="corr">
     <div class="corr-top">
       <h1 class="page-title">Корректировки заказов</h1>
-      <div class="corr-top-actions">
-        <button class="corr-tab" :class="{ active: tab === 'requests' }" @click="tab = 'requests'">Заявки</button>
-        <button class="corr-tab" :class="{ active: tab === 'settings' }" @click="tab = 'settings'; loadSettings()">Настройки</button>
+      <div class="corr-seg corr-seg-tabs">
+        <button class="corr-seg-btn" :class="{ active: tab === 'requests' }" @click="tab = 'requests'">Заявки</button>
+        <button class="corr-seg-btn" :class="{ active: tab === 'settings' }" @click="tab = 'settings'; loadSettings()">Настройки</button>
       </div>
     </div>
 
     <!-- Заявки -->
     <template v-if="tab === 'requests'">
       <div class="corr-toolbar">
-        <select v-model="statusFilter" class="corr-input" @change="loadCorrections">
-          <option value="">Все статусы</option>
-          <option value="pending">Ожидают</option>
-          <option value="approved">Приняты</option>
-          <option value="rejected">Отклонены</option>
-          <option value="cancelled">Отменены рестораном</option>
-        </select>
-        <select v-model="sourceFilter" class="corr-input" @change="loadCorrections">
-          <option value="">Все источники</option>
-          <option value="cabinet">Из кабинета</option>
-          <option value="telegram">Из Telegram</option>
-        </select>
-        <input v-model="restFilter" class="corr-input" placeholder="Ресторан..." style="width:90px;" @input="debounceLoad"/>
-        <span v-if="pendingCount" class="corr-pending-badge">{{ pendingCount }} ожидают</span>
-        <div style="margin-left:auto;">
-          <button v-if="corrections.length" class="corr-btn-text danger" @click="clearAll">Очистить всё</button>
+        <!-- Статусы вкладками: по ним фильтруют чаще всего, выпадающий
+             список ради двух кликов здесь только мешал. -->
+        <div class="corr-seg">
+          <button v-for="f in STATUS_FILTERS" :key="f.value"
+                  class="corr-seg-btn" :class="{ active: statusFilter === f.value }"
+                  @click="statusFilter = f.value; loadCorrections()">
+            {{ f.label }}
+            <span v-if="f.value === 'pending' && pendingCount" class="corr-seg-count">{{ pendingCount }}</span>
+          </button>
         </div>
+        <select v-model="sourceFilter" class="corr-input corr-input-sm" @change="loadCorrections">
+          <option value="">Откуда угодно</option>
+          <option value="cabinet">Из кабинета</option>
+          <option value="telegram">Из бота</option>
+        </select>
+        <input v-model="restFilter" class="corr-input corr-input-sm" placeholder="Ресторан" style="width:110px;" @input="debounceLoad"/>
+        <button v-if="corrections.length" class="corr-btn-text danger corr-clear" @click="clearAll">Очистить всё</button>
       </div>
 
       <div v-if="loading" class="corr-empty"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!groupedCorrections.length" class="corr-empty">Нет заявок</div>
+      <div v-else-if="!groupedCorrections.length" class="corr-empty">
+        <div class="corr-empty-title">Заявок нет</div>
+        <p>Здесь появятся корректировки, которые рестораны подают из кабинета и из бота.</p>
+      </div>
 
-      <div v-else class="corr-table-wrap">
-        <table class="corr-table">
-          <thead>
-            <tr>
-              <th class="col-rest">Рест.</th>
-              <th class="col-date">Доставка</th>
-              <th class="col-items">Позиции</th>
-              <th class="col-comment">Комментарий</th>
-              <th class="col-who">Подал</th>
-              <th class="col-status">Статус</th>
-              <th class="col-reviewer">Обработал</th>
-              <th class="col-actions">Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="g in groupedCorrections" :key="g.key" :class="'row-' + g.overallStatus">
-              <td class="col-rest"><strong>{{ formatRestaurantNumber(g.restaurant_number, g.legal_entity_group) }}</strong></td>
-              <td class="col-date">{{ g.dateLabel }}</td>
-              <td class="col-items">
-                <div v-for="c in g.items" :key="c.id" class="corr-item-line">
-                  <span class="corr-status-icon">{{ {pending:'⏳',in_progress:'🔄',approved:'✅',rejected:'❌',cancelled:'⛔'}[c.status] || '•' }}</span>
-                  <span :class="c.action === 'add' ? 'act-add' : 'act-rem'">{{ c.action === 'add' ? '+' : '−' }}</span>
-                  <span v-if="c.product_sku && c.product_sku !== '-'" class="corr-sku">{{ c.product_sku }}</span>
-                  <span>{{ c.product_name }}</span>
-                  <strong>{{ fmtQty(c.quantity) }} {{ c.unit_of_measure }}</strong>
-                  <template v-if="c.status === 'pending' || c.status === 'in_progress'">
-                    <button class="corr-item-btn approve" @click.stop="reviewBatch([c.id], 'approve')" title="Принять">✓</button>
-                    <button class="corr-item-btn reject" @click.stop="openReview([c.id], 'reject')" title="Отклонить">✕</button>
-                  </template>
-                  <span v-if="c.reviewer_name && (c.status === 'in_progress' || c.status === 'approved' || c.status === 'rejected')" class="corr-item-reviewer">{{ c.reviewer_name }}</span>
-                </div>
-              </td>
-              <td class="col-comment">
-                <div v-if="g.submitterComment" class="corr-submitter-comment" :title="g.submitterComment">💬 {{ g.submitterComment }}</div>
-                <div v-for="c in g.items" :key="'cm'+c.id" class="corr-comment-line">
-                  <span v-if="c.comment" class="corr-comment-text" :title="c.comment">{{ c.comment }}</span>
-                  <span v-if="c.review_comment" class="corr-review-text">{{ c.review_comment }}</span>
-                </div>
-              </td>
-              <td class="col-who">
-                <div class="corr-meta">
-                  <span class="corr-source-badge" :class="'src-' + g.source" :title="g.source === 'cabinet' ? 'Подано из кабинета ресторана' : 'Подано из Telegram-бота'">
-                    {{ g.source === 'cabinet' ? '🌐' : '✈' }}
-                  </span>
-                  {{ g.submitter || '—' }}
-                </div>
-                <div class="corr-meta-sub">{{ fmtDateTime(g.created_at) }}</div>
-              </td>
-              <td class="col-status">
-                <span class="corr-badge" :class="g.overallStatus">{{ statusLabel(g.overallStatus) }}</span>
-              </td>
-              <td class="col-reviewer">
-                <span v-if="g.reviewer" class="corr-meta">{{ g.reviewer }}</span>
-              </td>
-              <td class="col-actions">
-                <div class="corr-action-btns">
-                  <button v-if="g.hasUntaken" class="corr-btn take" @click="takeInWork(g.untakenIds)" title="Взять в работу">🔄</button>
-                  <template v-if="g.hasOpen">
-                    <button class="corr-btn approve" @click="reviewBatch(g.openIds, 'approve')" title="Принять всё">✓</button>
-                    <button class="corr-btn comment" @click="openReview(g.openIds, 'approve')" title="Принять с комментарием">💬</button>
-                    <button class="corr-btn reject" @click="openReview(g.openIds, 'reject')" title="Отклонить всё">✕</button>
-                  </template>
-                  <button class="corr-btn delete" @click="deleteGroup(g)" title="Удалить">🗑</button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-else class="corr-cards">
+        <article v-for="g in groupedCorrections" :key="g.key" class="corr-card" :class="'st-' + g.overallStatus">
+          <header class="corr-card-head">
+            <div class="corr-card-rest">
+              <span class="corr-card-num">{{ restLabel(g.restaurant_number) }}</span>
+              <span class="corr-card-date">{{ g.dateLabel }}</span>
+            </div>
+            <div class="corr-card-head-right">
+              <span class="corr-badge" :class="g.overallStatus">{{ statusLabel(g.overallStatus) }}</span>
+              <button class="corr-card-del" title="Удалить заявку" @click="deleteGroup(g)">×</button>
+            </div>
+          </header>
+
+          <div class="corr-card-items">
+            <div v-for="c in g.items" :key="c.id" class="corr-line" :class="'st-' + c.status">
+              <span class="corr-line-act" :class="c.action">{{ c.action === 'add' ? '+' : '−' }}</span>
+              <span v-if="c.product_sku && c.product_sku !== '-'" class="corr-line-sku">{{ c.product_sku }}</span>
+              <span class="corr-line-name">{{ c.product_name }}</span>
+              <span class="corr-line-qty">{{ fmtQty(c.quantity) }} {{ c.unit_of_measure }}</span>
+              <span class="corr-line-state" :class="c.status">{{ shortStatus(c.status) }}</span>
+              <span class="corr-line-btns">
+                <template v-if="c.status === 'pending' || c.status === 'in_progress'">
+                  <button class="corr-line-btn ok" @click.stop="reviewBatch([c.id], 'approve')" title="Принять позицию">✓</button>
+                  <button class="corr-line-btn no" @click.stop="openReview([c.id], 'reject')" title="Отклонить позицию">✕</button>
+                </template>
+              </span>
+            </div>
+          </div>
+
+          <div v-if="g.submitterComment || anyReviewComment(g)" class="corr-card-notes">
+            <p v-if="g.submitterComment" class="corr-note from-rest">
+              <span class="corr-note-label">Ресторан:</span> {{ g.submitterComment }}
+            </p>
+            <p v-if="anyReviewComment(g)" class="corr-note from-us">
+              <span class="corr-note-label">Ответ закупок:</span> {{ anyReviewComment(g) }}
+            </p>
+          </div>
+
+          <footer class="corr-card-foot">
+            <div class="corr-card-meta">
+              <span class="corr-source" :class="'src-' + g.source">
+                {{ g.source === 'cabinet' ? 'кабинет' : 'бот' }}
+              </span>
+              <span>{{ g.submitter || '—' }}</span>
+              <span class="corr-dim">{{ fmtDateTime(g.created_at) }}</span>
+              <span v-if="g.reviewer" class="corr-dim">· обработал {{ g.reviewer }}</span>
+            </div>
+            <div class="corr-card-actions">
+              <button v-if="g.hasUntaken" class="corr-act take" @click="takeInWork(g.untakenIds)">Взять в работу</button>
+              <template v-if="g.hasOpen">
+                <button class="corr-act approve" @click="reviewBatch(g.openIds, 'approve')">Принять</button>
+                <button class="corr-act comment" @click="openReview(g.openIds, 'approve')"
+                        title="Принять и написать ресторану">С комментарием</button>
+                <button class="corr-act reject" @click="openReview(g.openIds, 'reject')">Отклонить</button>
+              </template>
+            </div>
+          </footer>
+        </article>
       </div>
     </template>
 
@@ -199,6 +192,14 @@ const deadlineTime = ref({})      // что сейчас в полях
 const deadlineSaved = ref({})     // что сохранено на сервере
 const deadlineSaving = ref('')    // код группы, которая сейчас сохраняется
 const reviewModal = ref({ show: false, ids: [], action: 'reject', comment: '' })
+
+const STATUS_FILTERS = [
+  { value: '', label: 'Все' },
+  { value: 'pending', label: 'Ожидают' },
+  { value: 'in_progress', label: 'В работе' },
+  { value: 'approved', label: 'Приняты' },
+  { value: 'rejected', label: 'Отклонены' },
+]
 
 const pendingCount = computed(() => corrections.value.filter(c => c.status === 'pending').length)
 
@@ -385,6 +386,21 @@ function fmtDateTime(d) {
 
 function fmtQty(q) { const n = parseFloat(q); return n % 1 === 0 ? n.toFixed(0) : n.toFixed(1) }
 
+// Номер ресторана в привычном виде: у «Пицца Стар» это PS01…PS52.
+function restLabel(num) { return formatRestaurantNumber(num) }
+
+// Короткая пометка у позиции: у заявки статус общий, а решения бывают
+// разными по каждой строке.
+function shortStatus(s) {
+  return { pending: '', in_progress: 'в работе', approved: 'принято', rejected: 'отклонено', cancelled: 'отменено' }[s] || ''
+}
+
+// Ответ закупок мог быть записан не во все позиции — берём первый непустой.
+function anyReviewComment(g) {
+  const found = g.items.find(i => i.review_comment && String(i.review_comment).trim())
+  return found ? found.review_comment : ''
+}
+
 onMounted(() => {
   loadCorrections();
   // Догружаем данные текущей вкладки, если она пришла из URL `?tab=...`
@@ -474,6 +490,181 @@ watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 .corr-btn.reject:hover { background: #D32F2F; }
 .corr-btn.delete { background: none; border: 1px solid var(--border); color: var(--text-muted); font-size: 13px; }
 .corr-btn.delete:hover { background: #FFEBEE; color: #F44336; border-color: #F44336; }
+
+.corr-seg-tabs { margin-left: auto; }
+.corr-seg {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: #F4EDE4; border-radius: 11px;
+}
+.corr-seg-btn {
+  padding: 6px 13px; border: 0; border-radius: 8px; background: transparent;
+  font: inherit; font-size: 12.5px; font-weight: 700; color: #6B5544; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.corr-seg-btn:hover { color: #C25E12; }
+.corr-seg-btn.active { background: #fff; color: #3A2418; box-shadow: 0 1px 4px rgba(74,32,19,.1); }
+.corr-seg-count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: #E87A1E; color: #fff; font-size: 11px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.corr-input-sm { font-size: 13px; }
+.corr-clear { margin-left: auto; }
+
+/* ═══ Карточки заявок ═══
+   Раньше это была широкая таблица на восемь колонок: «Подал» ужимался
+   в четыре строки, комментарии не читались, кнопки-иконки без подписей.
+   Заявка — цельная сущность, поэтому показываем её карточкой. */
+.corr-cards { display: flex; flex-direction: column; gap: 10px; }
+
+.corr-card {
+  border: 1.5px solid #EFE7DC; border-left: 4px solid #D9CFC0;
+  border-radius: 14px; background: #fff; overflow: hidden;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+.corr-card:hover { box-shadow: 0 4px 16px rgba(74, 32, 19, .07); }
+.corr-card.st-approved,
+.corr-card.st-rejected,
+.corr-card.st-cancelled { background: #FDFBF8; }
+.corr-card.st-approved .corr-card-num,
+.corr-card.st-rejected .corr-card-num,
+.corr-card.st-cancelled .corr-card-num { background: #8A7F72; }
+/* Полоса слева — статус заявки, видно ещё до чтения текста. */
+.corr-card.st-pending { border-left-color: #E87A1E; background: #FFFDF9; }
+.corr-card.st-in_progress { border-left-color: #4A90D9; }
+.corr-card.st-approved { border-left-color: #4CAF50; }
+.corr-card.st-rejected { border-left-color: #E5736B; }
+.corr-card.st-mixed { border-left-color: #4A90D9; }
+.corr-card.st-cancelled { border-left-color: #B9AEA0; }
+
+.corr-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 14px 9px;
+}
+.corr-card-rest { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.corr-card-num {
+  padding: 3px 11px; border-radius: 9px;
+  background: #3A2418; color: #fff;
+  font-size: 14px; font-weight: 800; letter-spacing: .01em;
+}
+.corr-card-date {
+  padding: 3px 10px; border-radius: 9px;
+  background: rgba(232,122,30,.12); color: #C25E12;
+  font-size: 12.5px; font-weight: 700;
+}
+.corr-card-head-right { display: flex; align-items: center; gap: 8px; }
+.corr-card-del {
+  width: 26px; height: 26px; border: 0; border-radius: 8px;
+  background: transparent; color: #C4B8A8;
+  font-size: 19px; line-height: 1; cursor: pointer;
+}
+.corr-card-del:hover { background: #FFF1F0; color: #C0392B; }
+
+.corr-card-items { padding: 0 14px 4px; }
+/* Сетка, а не флекс: количество и статус позиции выстраиваются в колонку,
+   иначе они прыгали в зависимости от длины названия товара. */
+.corr-line {
+  display: grid; align-items: center; gap: 8px;
+  grid-template-columns: 20px auto minmax(0, 1fr) 84px 76px 62px;
+  padding: 6px 0; border-top: 1px solid #F4EDE4; font-size: 13.5px;
+}
+.corr-line:first-child { border-top: 0; }
+.corr-line.st-rejected { opacity: .55; }
+.corr-line-act {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 14px; line-height: 1;
+}
+.corr-line-act.add { background: rgba(76,175,80,.14); color: #2E7D32; }
+.corr-line-act.remove { background: rgba(229,115,107,.16); color: #C0392B; }
+.corr-line-sku { font-size: 12px; font-weight: 700; color: #C25E12; }
+.corr-line-name { min-width: 0; color: #2E1C10; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.corr-line-qty { font-weight: 800; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; overflow: visible; }
+.corr-line-state { font-size: 11.5px; font-weight: 700; text-align: right; }
+.corr-line-state.approved { color: #2E7D32; }
+.corr-line-state.rejected { color: #C0392B; }
+.corr-line-state.in_progress { color: #1565C0; }
+.corr-line-btns { display: inline-flex; gap: 5px; justify-content: flex-end; }
+.corr-line-btn {
+  width: 26px; height: 26px; border-radius: 7px; border: 1.5px solid #E4D9CB;
+  background: #fff; cursor: pointer; font-size: 13px; font-weight: 700; line-height: 1;
+}
+.corr-line-btn.ok { color: #2E7D32; }
+.corr-line-btn.ok:hover { background: rgba(76,175,80,.12); border-color: #4CAF50; }
+.corr-line-btn.no { color: #C0392B; }
+.corr-line-btn.no:hover { background: rgba(229,115,107,.12); border-color: #E5736B; }
+
+.corr-card-notes { padding: 8px 14px 2px; display: flex; flex-direction: column; gap: 5px; }
+.corr-note {
+  margin: 0; padding: 7px 10px; border-radius: 9px;
+  font-size: 12.5px; line-height: 1.45;
+}
+.corr-note.from-rest { background: #FBF6F0; color: #5F4B38; }
+.corr-note.from-us { background: rgba(232,122,30,.09); color: #8A4A12; }
+.corr-note-label { font-weight: 800; }
+
+.corr-card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 9px 14px 11px; margin-top: 4px; border-top: 1px solid #F4EDE4;
+}
+.corr-card-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 12px; color: #6B5544; }
+.corr-dim { color: #9A8F80; }
+.corr-source {
+  padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 800;
+  background: #EFE7DC; color: #6B5544;
+}
+.corr-source.src-cabinet { background: rgba(76,175,80,.14); color: #2E7D32; }
+.corr-source.src-telegram { background: rgba(74,144,217,.14); color: #1565C0; }
+
+.corr-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.corr-act {
+  padding: 7px 13px; border-radius: 9px; border: 1.5px solid #E4D9CB;
+  background: #fff; font: inherit; font-size: 12.5px; font-weight: 700;
+  color: #5F4B38; cursor: pointer; white-space: nowrap;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
+}
+.corr-act:hover { border-color: #C4B8A8; }
+.corr-act.approve { background: linear-gradient(135deg, #4CAF50 0%, #3E9142 100%); border-color: transparent; color: #fff; }
+.corr-act.approve:hover { filter: brightness(1.06); }
+.corr-act.reject { color: #C0392B; border-color: #E9B4AF; }
+.corr-act.reject:hover { background: #FFF1F0; }
+.corr-act.comment:hover { border-color: #E87A1E; color: #C25E12; }
+.corr-act.take { background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%); border-color: transparent; color: #fff; }
+.corr-act.take:hover { filter: brightness(1.06); }
+.corr-act.delete { color: #9A8F80; }
+.corr-act.delete:hover { color: #C0392B; border-color: #E9B4AF; }
+
+.corr-empty-title { font-size: 16px; font-weight: 800; color: #3A2418; margin-bottom: 6px; }
+
+@media (max-width: 700px) {
+  .corr-card-foot { flex-direction: column; align-items: stretch; }
+  .corr-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .corr-act { text-align: center; }
+
+  /* На телефоне строка позиции идёт в два ряда: сверху артикул,
+     количество и кнопки, снизу — название целиком. В одну строку
+     название сжималось до «ТЕСТ Б…». */
+  .corr-line {
+    grid-template-columns: 20px auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "act sku qty btns"
+      "name name name state";
+    row-gap: 3px;
+  }
+  .corr-line-act { grid-area: act; }
+  .corr-line-sku { grid-area: sku; }
+  .corr-line-qty { grid-area: qty; }
+  .corr-line-btns { grid-area: btns; }
+  .corr-line-state { grid-area: state; }
+  .corr-line-name { grid-area: name; white-space: normal; }
+
+  /* Фильтры не переносим — прокручиваем, иначе «В работе» ломается пополам. */
+  .corr-seg { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+  /* Без этого кнопки сжимаются и подписи наезжают друг на друга. */
+  .corr-seg-btn { white-space: nowrap; flex: 0 0 auto; }
+  .corr-seg-tabs { margin-left: 0; }
+}
 
 /* Настройки */
 .corr-section-title { font-size: 16px; margin-bottom: 4px; }
