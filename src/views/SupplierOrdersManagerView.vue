@@ -270,8 +270,13 @@
                   </td>
                   <td v-for="p in displayProducts" :key="p.display_key"
                     class="so-td-qty"
-                    :class="{ 'so-td-skip-cell': isSkipOrder(r) }"
-                    :title="p.is_grouped ? `Объединено из SKU: ${p.source_skus.join(', ')}` : ''"
+                    :class="{
+                      'so-td-skip-cell': isSkipOrder(r),
+                      'so-td-bad': !isSkipOrder(r) && cellViolates(r.number, p),
+                    }"
+                    :title="cellViolates(r.number, p)
+                      ? `Не по правилам товара: ${qtyRuleHint(p)}`
+                      : (p.is_grouped ? `Объединено из SKU: ${p.source_skus.join(', ')}` : '')"
                     @dblclick="canEditProduct(p) && startEdit(r.number, p.sku)">
                     <template v-if="editCell === `${r.number}_${p.sku}`">
                       <input
@@ -1038,6 +1043,26 @@
 
     <div v-if="!currentSupplierId" class="rom-empty" style="margin-top: 40px">
       Выберите поставщика для просмотра заявок
+    </div>
+
+    <!-- Количество не по правилам товара: округлить или оставить как есть -->
+    <div v-if="qtyModal.show" class="rom-modal-overlay" @click.self="qtyModal.show = false">
+      <div class="rom-modal so-qty-modal">
+        <h3 class="so-qty-modal-title">Количество не по правилам</h3>
+        <p class="so-qty-modal-text">{{ qtyModal.text }}</p>
+        <div class="so-qty-options">
+          <button v-for="o in qtyModal.options" :key="o.value"
+                  class="so-qty-opt" @click="applyQtyChoice(o.value)">
+            Поставить <b>{{ o.label }}</b>
+          </button>
+        </div>
+        <div class="so-qty-modal-actions">
+          <button class="rom-btn" @click="qtyModal.show = false">Отмена</button>
+          <button class="rom-btn so-qty-keep" @click="applyQtyChoice(qtyModal.value)">
+            Оставить {{ fmtNum(qtyModal.value) }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <ConfirmModal
@@ -3018,6 +3043,99 @@ function canEditProduct(product) {
   return !product?.is_grouped;
 }
 
+
+// ─── Кратность и минимальное количество ───
+// У товара в шаблоне могут стоять кратность отгрузки и минимум. Ресторану
+// эти правила проверяет форма заявки, а правки закупщика раньше шли мимо
+// проверок — так в заявку поставщику попадали числа, которые он не отгрузит.
+
+/** Правила товара из шаблона: { mult, min } (0 — правила нет). */
+function qtyRules(product) {
+  if (!product) return { mult: 0, min: 0 };
+  const mult = parseFloat(product.multiplicity) || 0;
+  const min = parseFloat(product.min_qty) || 0;
+  return { mult: mult > 1 ? mult : 0, min: min > 0 ? min : 0 };
+}
+
+/**
+ * Что не так с количеством. Ноль и пустое — это отказ от позиции,
+ * их не трогаем.
+ * @returns null | { text, options: [{ value, label }] }
+ */
+function qtyIssue(product, value) {
+  const qty = parseFloat(value);
+  if (!isFinite(qty) || qty <= 0) return null;
+  const { mult, min } = qtyRules(product);
+  if (!mult && !min) return null;
+
+  const offGrid = mult > 0 && Math.abs(qty % mult) > 1e-9;
+  const belowMin = min > 0 && qty < min;
+  if (!offGrid && !belowMin) return null;
+
+  const parts = [];
+  if (offGrid) parts.push(`кратность ${fmtNum(mult)}`);
+  if (belowMin) parts.push(`минимум ${fmtNum(min)}`);
+
+  // Варианты: ближайшее вниз, ближайшее вверх и минимум (тоже кратный).
+  const candidates = [];
+  if (offGrid) {
+    const down = Math.floor(qty / mult) * mult;
+    const up = Math.ceil(qty / mult) * mult;
+    if (down > 0 && (!min || down >= min)) candidates.push(down);
+    if (!min || up >= min) candidates.push(up);
+  }
+  if (belowMin) {
+    const target = mult ? Math.ceil(min / mult) * mult : min;
+    candidates.push(target);
+  }
+  const seen = new Set();
+  const options = [];
+  for (const v of candidates.sort((a, b) => a - b)) {
+    const key = v.toFixed(4);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push({ value: v, label: fmtNum(v) });
+  }
+  return {
+    text: `Товар отгружают по правилам: ${parts.join(', ')}. Введено ${fmtNum(qty)}.`,
+    options,
+  };
+}
+
+function fmtNum(v) {
+  const n = Number(v);
+  return Number.isInteger(n) ? String(n) : String(parseFloat(n.toFixed(2)));
+}
+
+/** Нарушает ли значение в ячейке правила товара — для подсветки. */
+function cellViolates(restNum, product) {
+  const item = getDisplayItem(restNum, product);
+  if (!item) return false;
+  const qty = item.admin_qty !== null && item.admin_qty !== undefined ? item.admin_qty : item.quantity;
+  return qtyIssue(product, qty) !== null;
+}
+
+function qtyRuleHint(product) {
+  const { mult, min } = qtyRules(product);
+  const parts = [];
+  if (mult) parts.push(`кратно ${fmtNum(mult)}`);
+  if (min) parts.push(`минимум ${fmtNum(min)}`);
+  return parts.join(', ');
+}
+
+const qtyModal = ref({ show: false, text: '', options: [], value: 0, ctx: null });
+
+function askQtyFix(ctx, issue) {
+  qtyModal.value = { show: true, text: issue.text, options: issue.options, value: ctx.val, ctx };
+}
+
+async function applyQtyChoice(value) {
+  const ctx = qtyModal.value.ctx;
+  qtyModal.value.show = false;
+  if (!ctx) return;
+  await commitQty(ctx.restNum, ctx.sku, value, ctx.item);
+}
+
 function startEdit(restNum, sku) {
   const key = `${restNum}_${sku}`;
   const item = itemLookup.value[key];
@@ -3040,6 +3158,19 @@ async function saveEdit() {
   const val = parseFloat(String(editValue.value).replace(',', '.'));
   editCell.value = '';
 
+  // Кратность и минимум: предупреждаем сразу, но последнее слово за закупщиком —
+  // бывают договорённости с поставщиком в обход обычных правил.
+  const product = products.value.find(p => p.sku === sku);
+  const issue = qtyIssue(product, val);
+  if (issue) {
+    askQtyFix({ restNum, sku, val, item }, issue);
+    return;
+  }
+  await commitQty(restNum, sku, val, item);
+}
+
+/** Собственно запись количества (после проверок или выбора в окне). */
+async function commitQty(restNum, sku, val, item) {
   try {
     if (item?.item_id) {
       // Обновляем существующую позицию
@@ -3975,4 +4106,24 @@ watch(
     transition: none;
   }
 }
+
+/* ── Количество не по правилам товара ── */
+.so-td-bad {
+  background: rgba(232, 122, 30, .12);
+  box-shadow: inset 0 0 0 1.5px rgba(217, 102, 26, .55);
+}
+.so-qty-modal { max-width: 460px; padding: 20px 22px; }
+.so-qty-modal-title { margin: 0 0 8px; font-size: 17px; font-weight: 800; color: #3A2418; }
+.so-qty-modal-text { margin: 0 0 14px; font-size: 13.5px; line-height: 1.5; color: #5F4B38; }
+.so-qty-options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.so-qty-opt {
+  flex: 1 1 130px; padding: 11px 14px; border: 0; border-radius: 11px;
+  background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%); color: #fff;
+  font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(232, 122, 30, .22);
+}
+.so-qty-opt:hover { filter: brightness(1.06); }
+.so-qty-opt b { font-size: 15px; }
+.so-qty-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.so-qty-keep { border-color: #E4D9CB; }
 </style>

@@ -2810,7 +2810,7 @@ if ($soAction === 'admin') {
         // Это нужно для старых заявок Планеты и других исторических данных, чтобы
         // отдел закупок видел позиции, даже если шаблон потом поменяли.
         $tplStmt = $pdo->prepare("
-            SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.product_id
+            SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.min_qty, t.product_id
             FROM so_templates t
             WHERE t.supplier_id = ? AND t.legal_entity IN ({$entityPh}) AND t.is_active = 1
             ORDER BY t.sort_order, t.product_name
@@ -2839,6 +2839,7 @@ if ($soAction === 'admin') {
                 'product_name' => $item['product_name'] ?: $sku,
                 'sort_order' => $maxSortOrder,
                 'multiplicity' => null,
+                'min_qty' => null,
                 'product_id' => null,
                 'is_legacy' => 1,
             ];
