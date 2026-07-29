@@ -1293,31 +1293,34 @@ async function printLoadingSheets(restaurantNumber) {
         @page { size: A4 portrait; margin: 12mm; }
         * { box-sizing: border-box; }
         body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0; }
-        .ls-page { page-break-after: always; display: flex; flex-direction: column; min-height: 265mm; }
+        /* Лист вешают на верхний край лотка, верх загибается — поэтому
+           содержимое стоит по середине страницы, а не сверху. */
+        .ls-page { page-break-after: always; display: flex; flex-direction: column;
+                   justify-content: center; min-height: 265mm; }
         .ls-page:last-child { page-break-after: auto; }
-        .ls-title { font-size: 28px; font-weight: 800; text-align: center; letter-spacing: 1px;
+        .ls-title { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: 1px;
                     border: 2px solid #000; background: #ececec; padding: 8px 4px; }
-        .ls-addr { text-align: center; font-size: 15px; padding: 4px; border-left: 2px solid #000; border-right: 2px solid #000; background: #ececec; }
-        .ls-date { text-align: center; font-size: 15px; font-weight: 700; border: 2px solid #000; background: #ececec; padding: 5px; }
+        .ls-addr { text-align: center; font-size: 18px; padding: 4px; border-left: 2px solid #000; border-right: 2px solid #000; background: #ececec; }
+        .ls-date { text-align: center; font-size: 18px; font-weight: 700; border: 2px solid #000; background: #ececec; padding: 5px; }
         .ls-stack { margin-top: 14px; border: 3px solid #000; }
-        .ls-stack-head { background: #000; color: #fff; font-size: 20px; font-weight: 800; text-align: center; padding: 7px; letter-spacing: 1px; }
+        .ls-stack-head { background: #000; color: #fff; font-size: 25px; font-weight: 800; text-align: center; padding: 7px; letter-spacing: 1px; }
         .ls-cols { display: grid; grid-template-columns: 2fr 1.2fr 1fr; background: #f2f2f2;
-                   border-bottom: 1px solid #000; font-size: 12px; font-weight: 700; color: #444; }
+                   border-bottom: 1px solid #000; font-size: 14px; font-weight: 700; color: #444; }
         .ls-cols > div { text-align: center; padding: 4px 2px; }
         .ls-row { display: grid; grid-template-columns: 2fr 1.2fr 1fr; align-items: center;
                   padding: 14px 8px; min-height: 96px; border-bottom: 1px solid #000; }
         .ls-stack .ls-row:last-child { border-bottom: none; }
-        .ls-name { font-size: 19px; font-weight: 700; text-align: center; line-height: 1.25; }
-        .ls-trays { font-size: 40px; font-weight: 800; text-align: center; line-height: 1.05; }
-        .ls-sticker { font-size: 20px; font-weight: 800; text-align: center; }
+        .ls-name { font-size: 22px; font-weight: 700; text-align: center; line-height: 1.25; }
+        .ls-trays { font-size: 46px; font-weight: 800; text-align: center; line-height: 1.05; }
+        .ls-sticker { font-size: 24px; font-weight: 800; text-align: center; }
         .ls-sub { text-align: center; font-size: 12px; color: #444; border-bottom: 1px solid #000; padding-bottom: 5px; }
         .ls-stack .ls-sub:last-child { border-bottom: none; }
-        .ls-total { font-size: 18px; font-weight: 800; text-align: center; padding: 8px; background: #ececec; border-top: 2px solid #000; }
-        .ls-all { margin-top: 20px; font-size: 18px; }
-        .ls-all-head { font-size: 12px; font-weight: 700; color: #444; letter-spacing: 1px; margin-bottom: 4px; }
+        .ls-total { font-size: 22px; font-weight: 800; text-align: center; padding: 8px; background: #ececec; border-top: 2px solid #000; }
+        .ls-all { margin-top: 20px; font-size: 19px; }
+        .ls-all-head { font-size: 14px; font-weight: 700; color: #444; letter-spacing: 1px; margin-bottom: 4px; }
         .ls-all-row { display: flex; gap: 16px; border-bottom: 1px solid #ccc; padding: 5px 0; }
         .ls-all-row b { min-width: 240px; }
-        .ls-foot { margin-top: auto; text-align: center; font-size: 15px; font-weight: 700; border-top: 1px solid #000; padding-top: 8px; }
+        .ls-foot { margin-top: 14px; text-align: center; font-size: 17px; font-weight: 700; border-top: 1px solid #000; padding-top: 8px; }
       </style></head><body>${pages}</body></html>`);
     w.document.close();
     w.focus();

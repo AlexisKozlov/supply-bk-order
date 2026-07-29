@@ -193,8 +193,6 @@ function soLsCollectDay(PDO $pdo, string $supplierId, string $deliveryDate): arr
 // ─────────────────────────────────────────────────────────────
 
 /** Строк на одну печатную страницу (одна стопка = одна страница A4). */
-const SO_LS_ROWS_PER_PAGE = 32;
-
 /** Заливка и цвет для «Итого/шапка». */
 const SO_LS_BROWN = '502314';
 const SO_LS_SAND  = 'FFF3E0';
@@ -271,28 +269,28 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     // Наверху адрес — по нему водитель и грузчик находят точку. Номер в
     // ДОДО ИС строкой ниже и мельче: он нужен для сверки, а не для поиска.
     $sheet->mergeCells("A{$r}:D{$r}");
-    $text("A{$r}", $rest['address'], 22, true, true);
-    $sheet->getRowDimension($r)->setRowHeight(36);
+    $text("A{$r}", $rest['address'], 28, true, true);
+    $sheet->getRowDimension($r)->setRowHeight(44);
     $band("A{$r}:D{$r}", 'E8E8E8', $BM);
     $r++;
 
     $sheet->mergeCells("A{$r}:D{$r}");
-    $text("A{$r}", $rest['title'], 14, false, true);
-    $sheet->getRowDimension($r)->setRowHeight(22);
+    $text("A{$r}", $rest['title'], 17, false, true);
+    $sheet->getRowDimension($r)->setRowHeight(26);
     $band("A{$r}:D{$r}", 'E8E8E8');
     $r++;
 
     $sheet->mergeCells("A{$r}:D{$r}");
-    $text("A{$r}", 'Отгрузка ' . $dateFmt, 14, true, true);
-    $sheet->getRowDimension($r)->setRowHeight(24);
+    $text("A{$r}", 'Отгрузка ' . $dateFmt, 17, true, true);
+    $sheet->getRowDimension($r)->setRowHeight(28);
     $band("A{$r}:D{$r}", 'E8E8E8', $BM);
     $r += 2;
 
     // ── Главный блок: что кладём в эту стопку. Читается с расстояния ──
     $stackTop = $r;
     $sheet->mergeCells("A{$r}:D{$r}");
-    $text("A{$r}", ($stack['mixed'] ? 'СБОРНАЯ СТОПКА' : 'СТОПКА') . '  ' . $index . ' / ' . $total, 18, true, true);
-    $sheet->getRowDimension($r)->setRowHeight(30);
+    $text("A{$r}", ($stack['mixed'] ? 'СБОРНАЯ СТОПКА' : 'СТОПКА') . '  ' . $index . ' / ' . $total, 22, true, true);
+    $sheet->getRowDimension($r)->setRowHeight(36);
     $band("A{$r}:D{$r}", '000000');
     $sheet->getStyle("A{$r}:D{$r}")->getFont()->getColor()->setRGB('FFFFFF');
     $r++;
@@ -301,10 +299,10 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     // непонятно, где количество, а где кодировка. Держим одинаково на всех
     // листах, чтобы вид не «прыгал».
     $sheet->mergeCells("A{$r}:B{$r}");
-    $text("A{$r}", 'Наименование', 11, true, true, '444444');
-    $text("C{$r}", 'Количество', 11, true, true, '444444');
-    $text("D{$r}", 'Стикер', 11, true, true, '444444');
-    $sheet->getRowDimension($r)->setRowHeight(18);
+    $text("A{$r}", 'Наименование', 13, true, true, '444444');
+    $text("C{$r}", 'Количество', 13, true, true, '444444');
+    $text("D{$r}", 'Стикер', 13, true, true, '444444');
+    $sheet->getRowDimension($r)->setRowHeight(21);
     $band("A{$r}:D{$r}", 'F2F2F2');
     $sheet->getStyle("A{$r}:D{$r}")->getBorders()->getBottom()->setBorderStyle($B)->getColor()->setRGB('000000');
     $r++;
@@ -312,11 +310,14 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     foreach ($stack['lines'] as $line) {
         // Полное название из карточки — чтобы на складе не путать позиции.
         $sheet->mergeCells("A{$r}:B{$r}");
-        $text("A{$r}", $line['name'], 15, true, true);
-        $text("C{$r}", $line['trays'] . ' ' . soLsTrayWord($line['trays']), 30, true, true);
+        $text("A{$r}", $line['name'], 19, true, true);
+        // «22 лотка» помещается крупно, «10 лотков» — длиннее, ему нужен
+        // размер поменьше, иначе текст обрезается по краю колонки.
+        $qtyText = $line['trays'] . ' ' . soLsTrayWord($line['trays']);
+        $text("C{$r}", $qtyText, mb_strlen($qtyText) > 8 ? 30 : 36, true, true);
         // Печать чёрно-белая — кодировку пишем словом, а не цветом.
-        $text("D{$r}", soLsStickerWord(soLsStickerColor($line['sku'], $line['name'])), 16, true, true);
-        $sheet->getRowDimension($r)->setRowHeight(76);
+        $text("D{$r}", soLsStickerWord(soLsStickerColor($line['sku'], $line['name'])), 20, true, true);
+        $sheet->getRowDimension($r)->setRowHeight(96);
         $sheet->getStyle("A{$r}:B{$r}")->getAlignment()->setWrapText(true);
         $band("A{$r}:D{$r}", null, $B);
         $r++;
@@ -324,8 +325,8 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
 
     if ($stack['mixed']) {
         $sheet->mergeCells("A{$r}:D{$r}");
-        $text("A{$r}", 'ИТОГО В СТОПКЕ: ' . $stack['total'] . ' ' . soLsTrayWord($stack['total']), 16, true, true);
-        $sheet->getRowDimension($r)->setRowHeight(26);
+        $text("A{$r}", 'ИТОГО В СТОПКЕ: ' . $stack['total'] . ' ' . soLsTrayWord($stack['total']), 20, true, true);
+        $sheet->getRowDimension($r)->setRowHeight(32);
         $band("A{$r}:D{$r}", 'E8E8E8');
         $r++;
     }
@@ -334,27 +335,30 @@ function soLsRenderStackPage($sheet, array $rest, array $stack, int $index, int 
     $r += 2;
 
     // ── Справка мелким: весь заказ и цветовая кодировка ──
-    $text("A{$r}", 'ВСЯ ЗАЯВКА', 11, true, false, '444444');
+    $text("A{$r}", 'ВСЯ ЗАЯВКА', 13, true, false, '444444');
     $r++;
     foreach ($rest['items'] as $it) {
         // Штуки («плюшки») на листе не показываем — ПРЦ считает лотками.
         $sheet->mergeCells("A{$r}:B{$r}");
-        $text("A{$r}", soLsShortName($it['name'], $it['sku']), 14, true);
+        $text("A{$r}", soLsShortName($it['name'], $it['sku']), 16, true);
         $sheet->mergeCells("C{$r}:D{$r}");
         $text("C{$r}", $it['trays'] . ' ' . soLsTrayWord($it['trays'])
-            . ($it['sticker'] ? ' · ' . $it['sticker'] : ''), 14);
-        $sheet->getRowDimension($r)->setRowHeight(20);
+            . ($it['sticker'] ? ' · ' . $it['sticker'] : ''), 16);
+        $sheet->getRowDimension($r)->setRowHeight(23);
         $sheet->getStyle("A{$r}:D{$r}")->getBorders()->getBottom()->setBorderStyle($B)->getColor()->setRGB('BBBBBB');
         $r++;
     }
 
-    // ── Подпись листа внизу страницы ──
-    $bottom = $top + SO_LS_ROWS_PER_PAGE - 1;
-    $sheet->mergeCells("A{$bottom}:D{$bottom}");
-    $text("A{$bottom}", 'Лист ' . $index . ' из ' . $total, 14, true, true);
-    $sheet->getStyle("A{$bottom}:D{$bottom}")->getBorders()->getTop()->setBorderStyle($B)->getColor()->setRGB('000000');
+    // ── Подпись листа ──
+    // Раньше страница была ровно 32 строки, а подпись стояла
+    // в последней. После укрупнения шрифтов такая страница перестала влезать
+    // в A4, поэтому подпись идёт сразу за содержимым, а разрыв ставится по
+    // фактическому концу страницы.
+    $sheet->mergeCells("A{$r}:D{$r}");
+    $text("A{$r}", 'Лист ' . $index . ' из ' . $total, 16, true, true);
+    $sheet->getStyle("A{$r}:D{$r}")->getBorders()->getTop()->setBorderStyle($B)->getColor()->setRGB('000000');
 
-    return $top + SO_LS_ROWS_PER_PAGE;
+    return $r + 1;
 }
 
 function soLsTrayWord(int $n): string {
@@ -417,7 +421,11 @@ function soLsBuildDayXlsx(PDO $pdo, string $supplierId, string $deliveryDate): a
         $sheet->setTitle($sheetName);
         // Четыре равные колонки: макет строится на объединённых ячейках,
         // крупные надписи должны занимать всю ширину страницы A4.
-        foreach (['A', 'B', 'C', 'D'] as $col) $sheet->getColumnDimension($col)->setWidth(25);
+        // Ширины подобраны под содержимое: A+B — название с переносом,
+        // C — крупное количество («10 лотков» шире, чем «22 лотка»),
+        // D — слово-стикер.
+        $colWidths = ['A' => 23, 'B' => 23, 'C' => 34, 'D' => 20];
+        foreach ($colWidths as $col => $w) $sheet->getColumnDimension($col)->setWidth($w);
         $sheet->setShowGridlines(false);
 
         $total = count($rest['stacks']);
@@ -440,6 +448,11 @@ function soLsBuildDayXlsx(PDO $pdo, string $supplierId, string $deliveryDate): a
         // Блок уже ширины A4, поэтому без этого он прижимался к левому краю
         // и справа оставалось больше поля. Центрируем и делаем поля равными.
         $ps->setHorizontalCentered(true);
+        // Листы вешают на верхний край лотка, и верх загибается — то, что
+        // напечатано вверху, не читается. Поэтому содержимое ставим по
+        // середине листа: страница теперь заканчивается сразу за подписью,
+        // и центрирование срабатывает.
+        $ps->setVerticalCentered(true);
         $sheet->getPageMargins()->setTop(0.4)->setBottom(0.4)->setLeft(0.35)->setRight(0.35);
 
         // Строка навигации
