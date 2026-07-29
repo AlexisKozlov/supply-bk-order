@@ -27,14 +27,16 @@
 
     <!-- ═══ TAB: Обзор ═══ -->
     <template v-if="pageTab === 'overview'">
-      <div class="rom-date-row">
-        <label>Дата доставки:</label>
+      <div class="so-panel">
+        <label class="so-panel-label">Дата доставки:</label>
         <input type="date" v-model="overviewDate" @change="loadOverview" class="rom-input-sm" style="width:160px" />
-        <button class="rom-btn-sm" @click="loadOverview">Обновить</button>
+        <button class="so-icon-btn" :disabled="overviewLoading" @click="loadOverview" title="Обновить" aria-label="Обновить">
+          <span :class="{ 'is-spin': overviewLoading }">⟳</span>
+        </button>
       </div>
 
       <div v-if="overviewLoading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else class="rom-table-wrap">
+      <div v-else class="so-card so-card-flush">
         <table class="rom-table so-ov-table">
           <thead>
             <tr>
@@ -62,7 +64,7 @@
                 <template v-else>
                   <!-- Дата остаётся нейтральной: красным подсвечиваем только статус
                        под ней, иначе в одной ячейке два одинаковых сигнала. -->
-                  <span :class="{ 'so-ov-date-passed': overviewIsPassed(row) }">{{ row.deadline_str || '—' }}</span>
+                  <span :class="{ 'so-ov-date-passed': overviewIsPassed(row) }">{{ fmtDeadlineHuman(row.deadline_str) || '—' }}</span>
                   <span v-if="row.deadline_at" class="so-ov-countdown" :class="{ 'so-ov-bad': overviewIsPassed(row) }">
                     {{ overviewCountdown(row) }}
                   </span>
@@ -76,17 +78,17 @@
               </td>
               <td>
                 <div class="so-ov-actions">
-                  <button class="rom-btn-sm" @click="overviewSendEmail(row)"
+                  <button class="so-chip-btn" @click="overviewSendEmail(row)"
                     :disabled="!row.has_email || isOverviewBusy(row)"
                     :title="!row.has_email ? 'У поставщика не указана почта' : 'Отправить сводку на почту поставщика'">Почта</button>
-                  <button class="rom-btn-sm" @click="overviewSendTelegram(row)"
+                  <button class="so-chip-btn" @click="overviewSendTelegram(row)"
                     :disabled="isOverviewBusy(row)" title="Отправить сводку в Telegram">Telegram</button>
-                  <button class="rom-btn-sm" @click="overviewExtend(row)"
+                  <button class="so-chip-btn" @click="overviewExtend(row)"
                     :disabled="isOverviewBusy(row)" title="Продлить дедлайн">Дедлайн</button>
-                  <button class="rom-btn-sm" @click="overviewRemind(row)"
+                  <button class="so-chip-btn" @click="overviewRemind(row)"
                     :disabled="isOverviewBusy(row) || !(row.has_schedule && row.submitted_count < row.expected_count && !row.forced_closed && !overviewIsPassed(row))"
                     title="Напомнить не подавшим заявку">Напомнить</button>
-                  <button class="rom-btn-sm" :class="row.forced_closed ? 'so-btn-open-day' : 'so-btn-close-day'"
+                  <button class="so-chip-btn" :class="row.forced_closed ? 'is-open-day' : 'is-close-day'"
                     @click="overviewToggleClose(row)" :disabled="isOverviewBusy(row)"
                     :title="row.forced_closed ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
                     {{ row.forced_closed ? 'Открыть' : 'Закрыть' }}</button>
@@ -432,7 +434,7 @@
       <div v-if="loadingSchedules" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else>
         <!-- Дедлайны по дням недели -->
-        <div class="so-deadline-section">
+        <div class="so-card so-deadline-section">
           <h3 class="so-section-title">Дедлайны по дням доставки</h3>
           <p class="so-section-hint">Для каждого дня доставки укажите день и время дедлайна подачи заявки</p>
           <div class="so-deadline-grid">
@@ -450,20 +452,21 @@
               <button v-else class="so-dl-toggle so-dl-on" @click="deadlineRulesMap[dow].active = false" title="Выключить">вкл</button>
             </div>
           </div>
-          <button class="rom-btn rom-btn-export" @click="saveDeadlineRules" :disabled="savingDeadlines" style="margin-top:10px">
+          <button class="so-btn so-btn-accent" @click="saveDeadlineRules" :disabled="savingDeadlines" style="margin-top:12px">
             <BurgerSpinner v-if="savingDeadlines" size="xs" />
             <span>{{ savingDeadlines ? 'Сохранение...' : 'Сохранить дедлайны' }}</span>
           </button>
         </div>
 
         <!-- Графики по ресторанам -->
-        <h3 class="so-section-title" style="margin-top:20px">Дни доставки по ресторанам</h3>
+        <div class="so-card">
+        <h3 class="so-section-title">Дни доставки по ресторанам</h3>
         <p class="so-section-hint">Отметьте дни недели, когда ресторан получает поставку.</p>
         <div v-if="scheduleGridLoading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
         <template v-else-if="scheduleRestaurants.length">
           <div class="so-sched-filter">
             <input v-model="scheduleFilter" type="text" class="rom-input-sm" placeholder="Поиск ресторана..." style="min-width:200px" />
-            <button class="rom-btn rom-btn-export" @click="saveScheduleGrid" :disabled="savingScheduleGrid">
+            <button class="so-btn so-btn-accent" @click="saveScheduleGrid" :disabled="savingScheduleGrid">
               <BurgerSpinner v-if="savingScheduleGrid" size="xs" />
               <span>{{ savingScheduleGrid ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
@@ -589,13 +592,14 @@
             </table>
           </div>
         </div>
+        </div>
       </div>
     </template>
 
     <!-- ═══ TAB: Шаблон товаров ═══ -->
     <template v-if="pageTab === 'templates' && currentSupplierId">
-      <div class="rom-date-row">
-        <label>Юрлицо:</label>
+      <div class="so-panel">
+        <label class="so-panel-label">Юрлицо:</label>
         <select v-model="templateLe" @change="loadTemplates" class="rom-select">
           <option v-for="e in templateEntities" :key="e" :value="e">{{ ENTITY_SHORT_NAMES[e] || e }}</option>
         </select>
@@ -620,16 +624,16 @@
             </button>
           </div>
         </div>
-        <button class="rom-btn-sm" @click="addManualTemplateRow">+ Строка вручную</button>
-        <button class="rom-btn-sm" @click="importFromProducts">Импорт из справочника</button>
-        <button class="rom-btn-sm rom-btn-primary" @click="saveTemplates" :disabled="savingTemplates">
+        <button class="so-chip-btn" @click="addManualTemplateRow">+ Строка вручную</button>
+        <button class="so-chip-btn" @click="importFromProducts">Импорт из справочника</button>
+        <button class="so-btn so-btn-accent so-panel-save" @click="saveTemplates" :disabled="savingTemplates">
           <BurgerSpinner v-if="savingTemplates" size="xs" />
           <span>{{ savingTemplates ? 'Сохранение...' : 'Сохранить' }}</span>
         </button>
       </div>
       <div v-if="loadingTemplates" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else>
-        <div class="rom-table-wrap">
+        <div class="so-card so-card-flush">
           <table class="rom-table so-tpl-table">
             <thead>
               <tr>
@@ -792,15 +796,15 @@
     <template v-if="pageTab === 'settings' && currentSupplierId">
       <div class="so-settings-wrap">
         <!-- Кнопок «Сохранить» больше нет: правки уходят сами, здесь виден статус -->
-        <div class="so-autosave-bar" :class="{ busy: settingsSaving }">
+        <div class="so-autosave-bar so-autosave-chip" :class="{ busy: settingsSaving }">
           <template v-if="settingsSaving">Сохраняем…</template>
           <template v-else-if="settingsSavedTick">Изменения сохранены</template>
           <template v-else>Изменения сохраняются автоматически</template>
         </div>
         <!-- Приём заявок -->
-        <div class="so-settings-block">
-          <div class="so-section-title" style="margin:0">Приём заявок</div>
-          <p class="so-section-hint" style="margin:4px 0 10px 0">Пока приём приостановлен, рестораны видят сообщение и не могут подать заявку.</p>
+        <div class="so-card so-settings-block">
+          <div class="so-section-title so-section-title-flat">Приём заявок</div>
+          <p class="so-section-hint so-section-hint-flat">Пока приём приостановлен, рестораны видят сообщение и не могут подать заявку.</p>
           <div class="so-detail-bar">
             <!-- Возобновление — обычное действие: заливку акцентом на странице
                  держат только «Подключить поставщика» и «Отправить сводку». -->
@@ -818,9 +822,9 @@
         </div>
 
         <!-- Иконка поставщика -->
-        <div class="so-settings-block">
-          <div class="so-section-title" style="margin:0">Иконка поставщика</div>
-          <p class="so-section-hint" style="margin:4px 0 10px 0">Иконка показывается ресторану рядом с названием поставщика. «Авто» — подбор по названию.</p>
+        <div class="so-card so-settings-block">
+          <div class="so-section-title so-section-title-flat">Иконка поставщика</div>
+          <p class="so-section-hint so-section-hint-flat">Иконка показывается ресторану рядом с названием поставщика. «Авто» — подбор по названию.</p>
           <div class="so-icon-picker">
             <button type="button" class="so-icon-opt so-icon-auto" :class="{ active: !settings.icon_key }" @click="setSupplierIcon(null)" title="Авто (по названию)">Авто</button>
             <button v-for="ic in supplierIconKeys" :key="ic" type="button" class="so-icon-opt"
@@ -830,8 +834,8 @@
         </div>
 
         <!-- Автоматизация -->
-        <div class="so-settings-block">
-          <div class="so-section-title" style="margin:0">Автоматизация по дедлайну</div>
+        <div class="so-card so-settings-block">
+          <div class="so-section-title so-section-title-flat">Автоматизация по дедлайну</div>
           <label class="so-settings-check" title="Если ресторан не подал заявку до дедлайна — автоматически подать предыдущую заявку этого ресторана">
             <input type="checkbox" :checked="!!settings.auto_submit_previous" @change="toggleAutoSubmit" />
             <span>Авто-подача предыдущей заявки по дедлайну</span>
@@ -847,8 +851,8 @@
         </div>
 
         <!-- Почта поставщика (справочно) -->
-        <div class="so-settings-block">
-          <div class="so-section-title" style="margin:0">Почта поставщика</div>
+        <div class="so-card so-settings-block">
+          <div class="so-section-title so-section-title-flat">Почта поставщика</div>
           <p v-if="currentSupplier?.email" class="so-section-hint" style="margin:4px 0 0 0">
             {{ currentSupplier.email }} <span class="so-notify-muted">(редактируется в карточке поставщика)</span>
           </p>
@@ -2021,12 +2025,12 @@ function wdTitle(wd) {
 const selectedDayInfo = computed(() => weekDates.value.find(w => w.date === selectedDate.value) || null);
 const selectedDayDeadline = computed(() => selectedDayInfo.value?.deadline_str || '');
 /** «2026-07-28 14:00» → «28.07 в 14:00» — читать в спешке проще. */
-const selectedDayDeadlineFmt = computed(() => {
-  const raw = selectedDayDeadline.value;
+function fmtDeadlineHuman(raw) {
   if (!raw) return '';
   const m = String(raw).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
-  return m ? `${m[3]}.${m[2]} в ${m[4]}` : raw;
-});
+  return m ? `${m[3]}.${m[2]} в ${m[4]}` : String(raw);
+}
+const selectedDayDeadlineFmt = computed(() => fmtDeadlineHuman(selectedDayDeadline.value));
 
 async function handleToggleCloseDay(date) {
   if (!date) return;
@@ -4392,4 +4396,43 @@ watch(
 .rom-stat-value { font-size: 20px; font-weight: 800; color: #3A2418; font-variant-numeric: tabular-nums; }
 .rom-stat-label { font-size: 12.5px; font-weight: 600; color: #8A7F72; }
 .rom-stat-pending { color: #C25E12; }
+
+/* ── Общий каркас вкладок: карточки, секции, панели ── */
+.so-card {
+  padding: 16px 18px; margin-bottom: 14px;
+  border: 1.5px solid #EFE7DC; border-radius: 14px; background: #fff;
+}
+/* Для таблиц: карточка без внутренних полей, но с прокруткой */
+.so-card-flush { padding: 0; overflow-x: auto; }
+
+.so-section-title {
+  font-size: 15.5px; font-weight: 800; color: #4A2013; margin: 0 0 4px;
+}
+.so-section-title-flat { margin: 0; }
+.so-section-title-top { margin: 20px 0 4px; }
+.so-section-hint { font-size: 12.5px; color: #8A7F72; line-height: 1.45; margin: 0 0 12px; }
+.so-section-hint-flat { margin: 4px 0 10px; }
+
+/* Панель над таблицей: фильтры слева, сохранение справа */
+.so-panel {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 12px;
+  border: 1.5px solid #EFE7DC; border-radius: 14px; background: #fff;
+}
+.so-panel-label { font-size: 12.5px; font-weight: 700; color: #6B5544; }
+.so-panel-save { margin-left: auto; }
+
+.so-settings-block { margin-bottom: 14px; }
+.so-ov-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.so-chip-btn.is-close-day { color: #C0392B; border-color: #E9B4AF; }
+.so-chip-btn.is-close-day:hover:not(:disabled) { background: #FFF1F0; }
+.so-chip-btn.is-open-day { color: #2E7D32; border-color: #A5D6A7; }
+
+.so-autosave-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; margin-bottom: 12px;
+  border-radius: 20px; background: #F4EDE4; color: #6B5544;
+  font-size: 12.5px; font-weight: 600;
+}
+.so-autosave-chip.busy { background: rgba(232, 122, 30, .14); color: #C25E12; }
 </style>
