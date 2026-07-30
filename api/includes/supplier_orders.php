@@ -61,12 +61,14 @@ function soGetRestaurantSession($pdo) {
  * Возвращает map: template_id → ['regions' => [...], 'restaurants' => [...]].
  * Товары без строк в so_template_visibility в карту НЕ попадают (видны всем).
  */
-function soLoadTemplateVisibility($pdo, array $templateIds): array {
+function soLoadTemplateVisibility($pdo, array $templateIds, string $kind = 'access'): array {
     $ids = array_values(array_unique(array_map('intval', $templateIds)));
     if (!$ids) return [];
     $ph = implode(',', array_fill(0, count($ids), '?'));
-    $st = $pdo->prepare("SELECT template_id, scope_type, scope_value FROM so_template_visibility WHERE template_id IN ($ph)");
-    $st->execute($ids);
+    $st = $pdo->prepare("SELECT template_id, scope_type, scope_value
+                         FROM so_template_visibility
+                         WHERE template_id IN ($ph) AND kind = ?");
+    $st->execute(array_merge($ids, [$kind]));
     $map = [];
     foreach ($st->fetchAll() as $r) {
         $tid = (int)$r['template_id'];
@@ -1880,17 +1882,31 @@ if ($soAction === 'products' && $method === 'GET' && $soParam1) {
     // региона или поимённо выбранные. Без ограничения — видят все.
     if ($products) {
         $tplIds = array_column($products, 'id');
-        $visByTpl = soLoadTemplateVisibility($pdo, $tplIds);
+        $restRegion = (string)($rest['region'] ?? '');
+        $restNum = (string)($rest['restaurant_number'] ?? '');
+        // Подходит ли ресторан под набор адресатов. Пустой набор — «всем».
+        $matches = function (?array $vis) use ($restRegion, $restNum) {
+            if (!$vis) return true;
+            if (in_array($restRegion, $vis['regions'], true)) return true;
+            if (in_array($restNum, $vis['restaurants'], true)) return true;
+            return false;
+        };
+
+        $visByTpl = soLoadTemplateVisibility($pdo, $tplIds, 'access');
         if ($visByTpl) {
-            $restRegion = (string)($rest['region'] ?? '');
-            $restNum = (string)($rest['restaurant_number'] ?? '');
-            $products = array_values(array_filter($products, function ($p) use ($visByTpl, $restRegion, $restNum) {
-                $vis = $visByTpl[$p['id']] ?? null;
-                if (!$vis) return true; // нет ограничений — виден всем
-                if (in_array($restRegion, $vis['regions'], true)) return true;
-                if (in_array($restNum, $vis['restaurants'], true)) return true;
-                return false;
-            }));
+            $products = array_values(array_filter($products,
+                fn($p) => $matches($visByTpl[$p['id']] ?? null)));
+        }
+
+        // Примечание может быть адресным: товар заказывают все, а пояснение
+        // видят только выбранные регионы или рестораны.
+        $noteVis = soLoadTemplateVisibility($pdo, $tplIds, 'note');
+        if ($noteVis) {
+            foreach ($products as &$p) {
+                $vis = $noteVis[$p['id']] ?? null;
+                if ($vis && !$matches($vis)) $p['note'] = null;
+            }
+            unset($p);
         }
     }
 
@@ -4664,13 +4680,19 @@ if ($soAction === 'admin') {
         // флаг связи к int, чтобы фронт (v-else-if="t.linked") корректно различал
         // 0/1 (строка "0" в JS истинна и ломала бы индикатор «нет карточки»).
         $tplRows = $s->fetchAll();
-        $visByTpl = soLoadTemplateVisibility($pdo, array_column($tplRows, 'id'));
+        $tplIdList = array_column($tplRows, 'id');
+        $visByTpl = soLoadTemplateVisibility($pdo, $tplIdList, 'access');
+        $noteVisByTpl = soLoadTemplateVisibility($pdo, $tplIdList, 'note');
         foreach ($tplRows as &$tplRow) {
             $tplRow['linked'] = (int)$tplRow['linked'];
             $tplRow['order_disabled'] = (int)($tplRow['order_disabled'] ?? 0);
             $vis = $visByTpl[(int)$tplRow['id']] ?? ['regions' => [], 'restaurants' => []];
             $tplRow['vis_regions'] = $vis['regions'];
             $tplRow['vis_restaurants'] = $vis['restaurants'];
+            // Кому адресовано примечание. Пусто — всем, кому доступен товар.
+            $nvis = $noteVisByTpl[(int)$tplRow['id']] ?? ['regions' => [], 'restaurants' => []];
+            $tplRow['note_regions'] = $nvis['regions'];
+            $tplRow['note_restaurants'] = $nvis['restaurants'];
         }
         unset($tplRow);
         soRespond(['templates' => $tplRows]);
@@ -4731,7 +4753,8 @@ if ($soAction === 'admin') {
                   order_disabled = VALUES(order_disabled), is_active = 1, product_id = VALUES(product_id)
             ");
 
-            $skuVisibility = []; // sku → [['region'|'restaurant', value], ...]
+            $skuVisibility = [];     // sku → [['region'|'restaurant', value], ...] — доступность
+            $skuNoteVisibility = []; // то же, но кому видно примечание
             foreach ($items as $i => $item) {
                 $mult = isset($item['multiplicity']) && $item['multiplicity'] !== '' ? (float)$item['multiplicity'] : null;
                 $minQty = isset($item['min_qty']) && $item['min_qty'] !== '' ? (float)$item['min_qty'] : null;
@@ -4763,6 +4786,14 @@ if ($soAction === 'admin') {
                     foreach (array_unique($regions) as $rg) $pairs[] = ['region', mb_substr($rg, 0, 100)];
                     foreach (array_unique($rests) as $rn)   $pairs[] = ['restaurant', mb_substr($rn, 0, 100)];
                     $skuVisibility[$itemSku] = $pairs;
+
+                    // Кому показывать примечание. Пусто — всем, кому доступен товар.
+                    $noteRegions = array_values(array_filter(array_map('strval', (array)($item['note_regions'] ?? []))));
+                    $noteRests   = array_values(array_filter(array_map('strval', (array)($item['note_restaurants'] ?? []))));
+                    $notePairs = [];
+                    foreach (array_unique($noteRegions) as $rg) $notePairs[] = ['region', mb_substr($rg, 0, 100)];
+                    foreach (array_unique($noteRests) as $rn)   $notePairs[] = ['restaurant', mb_substr($rn, 0, 100)];
+                    $skuNoteVisibility[$itemSku] = $notePairs;
                 }
                 $count++;
             }
@@ -4774,19 +4805,23 @@ if ($soAction === 'admin') {
 
             // Доступность: перезаписываем по каждому SKU. Узнаём id строк шаблона
             // после upsert и заменяем их строки в so_template_visibility.
-            if ($skuVisibility) {
+            if ($skuVisibility || $skuNoteVisibility) {
                 $idSt = $pdo->prepare("SELECT id, sku FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1");
                 $idSt->execute([$supplierId, $le]);
-                $delVis = $pdo->prepare("DELETE FROM so_template_visibility WHERE template_id = ?");
-                $insVis = $pdo->prepare("INSERT IGNORE INTO so_template_visibility (template_id, scope_type, scope_value) VALUES (?, ?, ?)");
+                $delVis = $pdo->prepare("DELETE FROM so_template_visibility WHERE template_id = ? AND kind = ?");
+                $insVis = $pdo->prepare("INSERT IGNORE INTO so_template_visibility (template_id, kind, scope_type, scope_value) VALUES (?, ?, ?, ?)");
                 foreach ($idSt->fetchAll() as $row) {
                     $sku = (string)$row['sku'];
-                    if (!array_key_exists($sku, $skuVisibility)) continue;
                     $tid = (int)$row['id'];
-                    $delVis->execute([$tid]);
-                    foreach ($skuVisibility[$sku] as $pair) {
-                        if ($pair[1] === '') continue;
-                        $insVis->execute([$tid, $pair[0], $pair[1]]);
+                    // Доступность товара и адресаты примечания живут в одной
+                    // таблице, но разными наборами строк (kind).
+                    foreach (['access' => $skuVisibility, 'note' => $skuNoteVisibility] as $kind => $source) {
+                        if (!array_key_exists($sku, $source)) continue;
+                        $delVis->execute([$tid, $kind]);
+                        foreach ($source[$sku] as $pair) {
+                            if ($pair[1] === '') continue;
+                            $insVis->execute([$tid, $kind, $pair[0], $pair[1]]);
+                        }
                     }
                 }
             }

@@ -674,7 +674,21 @@
                     <input v-model="t.sku" class="rom-input-sm so-template-sku-input" placeholder="SKU" />
                     <input v-model="t.product_name" class="rom-input-sm so-template-name-input" placeholder="Название товара" />
                   </div>
-                  <input v-model="t.note" class="rom-input-sm so-tpl-note-input" placeholder="Примечание (видят рестораны)" />
+                  <div class="so-tpl-note-row">
+                    <input v-model="t.note" class="rom-input-sm so-tpl-note-input" placeholder="Примечание (видят рестораны)" />
+                    <!-- Примечание можно адресовать: всей сети, региону или
+                         отдельным ресторанам — как доступность товара. -->
+                    <button v-if="t.note && t.note.trim()" class="so-tpl-note-aud"
+                            :class="{ 'is-limited': (t.note_regions?.length || t.note_restaurants?.length) }"
+                            :title="(t.note_regions?.length || t.note_restaurants?.length)
+                              ? 'Примечание видят только выбранные'
+                              : 'Примечание видят все, кому доступен товар'"
+                            @click="openAccessModal(idx, 'note')">
+                      {{ (t.note_regions?.length || t.note_restaurants?.length)
+                        ? ('видят ' + ((t.note_regions?.length || 0) + (t.note_restaurants?.length || 0)))
+                        : 'видят все' }}
+                    </button>
+                  </div>
                   <label class="so-tpl-disable-toggle" :title="t.order_disabled ? 'Товар полностью скрыт из заявок ресторанов и бота. Включите, чтобы снова разрешить заказ.' : 'Полностью убрать товар из заявок (рестораны и бот его не увидят). В шаблоне останется.'">
                     <input type="checkbox" v-model="t.order_disabled" :true-value="1" :false-value="0" />
                     <span>Отключён для заказа</span>
@@ -732,12 +746,19 @@
       <div v-if="accessModal.open" class="rom-modal-overlay" @click.self="closeAccessModal">
         <div class="rom-modal so-access-modal">
           <div class="rom-modal-header">
-            <h3>Кому виден товар</h3>
+            <h3>{{ accessModal.target === 'note' ? 'Кому видно примечание' : 'Кому виден товар' }}</h3>
             <button class="rom-modal-close" @click="closeAccessModal">✕</button>
           </div>
           <div class="rom-modal-body">
             <p class="so-section-hint" style="margin:0 0 10px">
-              Ничего не выбрано — товар видят <b>все</b>. Отметьте регионы или рестораны, чтобы показывать его <b>только им</b>.
+              <template v-if="accessModal.target === 'note'">
+                Ничего не выбрано — примечание видят <b>все</b>, кому доступен товар.
+                Отметьте регионы или рестораны, чтобы показывать его <b>только им</b>.
+              </template>
+              <template v-else>
+                Ничего не выбрано — товар видят <b>все</b>. Отметьте регионы или рестораны,
+                чтобы показывать его <b>только им</b>.
+              </template>
             </p>
             <div class="so-access-block">
               <div class="so-access-title">Регионы</div>
@@ -2666,13 +2687,20 @@ const accessFilteredRestaurants = computed(() => {
 // Выбор регионов/ресторанов не теряем молча — правило по всем окнам проекта.
 const accessGuard = useDirtySnapshot();
 
-async function openAccessModal(idx) {
+/**
+ * Одно окно на два случая: кому доступен товар (target='access') и кому
+ * показывать примечание (target='note'). Наборы адресатов независимы —
+ * товар может заказывать вся сеть, а пояснение видеть только Минск.
+ */
+async function openAccessModal(idx, target = 'access') {
   const t = templates.value[idx];
   accessRestSearch.value = '';
+  const regions = target === 'note' ? t.note_regions : t.vis_regions;
+  const rests = target === 'note' ? t.note_restaurants : t.vis_restaurants;
   accessModal.value = {
-    open: true, idx,
-    regions: [...(t.vis_regions || [])],
-    restaurants: [...(t.vis_restaurants || [])].map(String),
+    open: true, idx, target,
+    regions: [...(regions || [])],
+    restaurants: [...(rests || [])].map(String),
   };
   accessGuard.mark(accessModal.value);
   if (!accessDirectory.value.restaurants.length) {
@@ -2683,8 +2711,13 @@ async function openAccessModal(idx) {
 function applyAccessModal() {
   const t = templates.value[accessModal.value.idx];
   if (t) {
-    t.vis_regions = [...accessModal.value.regions];
-    t.vis_restaurants = [...accessModal.value.restaurants];
+    if (accessModal.value.target === 'note') {
+      t.note_regions = [...accessModal.value.regions];
+      t.note_restaurants = [...accessModal.value.restaurants];
+    } else {
+      t.vis_regions = [...accessModal.value.regions];
+      t.vis_restaurants = [...accessModal.value.restaurants];
+    }
   }
   accessModal.value.open = false;
 }
@@ -2761,6 +2794,8 @@ function addManualTemplateRow() {
     min_qty: null,
     note: '',
     order_disabled: 0,
+    note_regions: [],
+    note_restaurants: [],
     vis_regions: [],
     vis_restaurants: [],
   });
@@ -2782,6 +2817,8 @@ function addTemplateProduct(p) {
     min_qty: p.min_qty || null,
     note: '',
     order_disabled: 0,
+    note_regions: [],
+    note_restaurants: [],
     vis_regions: [],
     vis_restaurants: [],
   });
@@ -2924,7 +2961,9 @@ async function importFromProducts() {
       multiplicity: p.multiplicity || null,
       min_qty: p.min_qty || null,
       note: '',
-      vis_regions: [],
+      note_regions: [],
+    note_restaurants: [],
+    vis_regions: [],
       vis_restaurants: [],
     }));
   } catch (e) {
@@ -4672,4 +4711,14 @@ watch(
 .so-modal-qty-input.is-bad { border-color: #D9661A; background: rgba(232, 122, 30, .09); }
 .so-modal-rule { margin-left: 6px; font-size: 11.5px; color: #8A7F72; }
 .so-modal-note { margin: 10px 0 0; font-size: 12px; color: #8A7F72; line-height: 1.45; }
+
+.so-tpl-note-row { display: flex; align-items: center; gap: 6px; }
+.so-tpl-note-row .so-tpl-note-input { flex: 1 1 auto; min-width: 0; }
+.so-tpl-note-aud {
+  flex: 0 0 auto; padding: 5px 9px; border: 1.5px solid #E4D9CB; border-radius: 8px;
+  background: #fff; font: inherit; font-size: 11.5px; font-weight: 700;
+  color: #8A7F72; cursor: pointer; white-space: nowrap;
+}
+.so-tpl-note-aud:hover { border-color: #E87A1E; color: #C25E12; }
+.so-tpl-note-aud.is-limited { background: rgba(232, 122, 30, .12); color: #C25E12; border-color: #F0C89A; }
 </style>
