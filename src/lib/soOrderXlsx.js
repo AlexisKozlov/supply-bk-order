@@ -200,6 +200,16 @@ export function buildSoOrderSheet(XLSX, {
   // Там, где номера не заполнены (Бургер БК), колонки нет вовсе.
   const dodoOf = (r) => String(r?.dodo_is_number ?? '').trim();
   const hasDodo = rests.some(r => dodoOf(r) !== '');
+  /**
+   * Подпись точки для поставщика: «Минск 26» — город и номер в ДОДО ИС,
+   * как на загрузочных листах. Без номера остаётся один город.
+   */
+  const dodoLabel = (r) => {
+    const num = dodoOf(r);
+    const city = String(r?.city ?? '').trim();
+    if (!num) return city || '—';
+    return city ? `${city} ${num}` : num;
+  };
   const header = hasDodo ? ['№', 'Додо ИС', 'Адрес'] : ['№', 'Адрес'];
   // Сколько колонок стоит перед товарами: на это опираются строки итогов.
   const leadPad = (label) => {
@@ -235,7 +245,7 @@ export function buildSoOrderSheet(XLSX, {
       const r = group[i];
       const isSubmitted = isSubmittedRest(r);
       const row = hasDodo
-        ? [fmtRestNum(r.number), dodoOf(r) || '—', r.address || '']
+        ? [fmtRestNum(r.number), dodoLabel(r), r.address || '']
         : [fmtRestNum(r.number), r.address || ''];
       const piecesArr = [];
       for (const p of prods) { if (!isSubmitted) { row.push(0); piecesArr.push(0); continue; } const v = getQty(r, p); const q = v ? v.qty : 0; row.push(q); piecesArr.push(q); }
@@ -359,7 +369,7 @@ export function buildSoOrderSheet(XLSX, {
   }
   ws['!cols'] = [
     { wch: 8 },
-    ...(hasDodo ? [{ wch: 9 }] : []),
+    ...(hasDodo ? [{ wch: 18 }] : []),
     { wch: 32 },
     ...prodWidths.map(w => ({ wch: w })),
     ...Array(M).fill({ wch: 11 }), { wch: 20 },
