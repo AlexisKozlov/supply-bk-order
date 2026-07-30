@@ -678,7 +678,9 @@
                     <input v-model="t.note" class="rom-input-sm so-tpl-note-input" placeholder="Примечание (видят рестораны)" />
                     <!-- Примечание можно адресовать: всей сети, региону или
                          отдельным ресторанам — как доступность товара. -->
-                    <button v-if="t.note && t.note.trim()" class="so-tpl-note-aud"
+                    <!-- Кнопка видна всегда: адресата удобно выбрать сразу,
+                         не дожидаясь, пока текст примечания будет написан. -->
+                    <button class="so-tpl-note-aud"
                             :class="{ 'is-limited': (t.note_regions?.length || t.note_restaurants?.length) }"
                             :title="(t.note_regions?.length || t.note_restaurants?.length)
                               ? 'Примечание видят только выбранные'
