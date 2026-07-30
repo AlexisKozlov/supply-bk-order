@@ -138,11 +138,15 @@ function soLsCollectDay(PDO $pdo, string $supplierId, string $deliveryDate): arr
                r.dodo_is_number, r.region, r.city, r.address,
                oi.sku, oi.product_name,
                COALESCE(oi.admin_qty, oi.quantity) AS qty,
-               p.multiplicity AS per_tray
+               COALESCE(p.multiplicity, t.multiplicity) AS per_tray
         FROM so_orders o
         JOIN so_order_items oi ON oi.order_id = o.id
         LEFT JOIN restaurants r ON r.number = o.restaurant_number
         LEFT JOIN products p ON p.id = oi.product_id
+        -- Запасной источник кратности: карточка товара может быть не привязана,
+        -- тогда штук в лотке берём из шаблона поставщика по SKU.
+        LEFT JOIN so_templates t ON t.supplier_id = o.supplier_id AND t.sku = oi.sku
+                                AND t.legal_entity = o.legal_entity AND t.is_active = 1
         WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
           AND COALESCE(oi.admin_qty, oi.quantity) > 0
         ORDER BY r.city, CAST(r.dodo_is_number AS UNSIGNED), o.restaurant_number, oi.sku");
@@ -164,13 +168,26 @@ function soLsCollectDay(PDO $pdo, string $supplierId, string $deliveryDate): arr
                 'items'             => [],
             ];
         }
-        $byRest[$num]['items'][] = [
-            'sku'          => $row['sku'],
-            'product_name' => $row['product_name'],
-            'qty'          => (float)$row['qty'],
-            'per_tray'     => (int)$row['per_tray'],
-        ];
+        // Один товар может лежать в заявке несколькими строками — разными
+        // партиями изготовления (тесто ПРЦ). Едет всё одной поставкой, поэтому
+        // для листов складываем в одну позицию: иначе стопки посчитаются по
+        // кускам и получится два неполных места вместо одного.
+        $sku = (string)$row['sku'];
+        if (isset($byRest[$num]['items'][$sku])) {
+            $byRest[$num]['items'][$sku]['qty'] += (float)$row['qty'];
+        } else {
+            $byRest[$num]['items'][$sku] = [
+                'sku'          => $sku,
+                'product_name' => $row['product_name'],
+                'qty'          => (float)$row['qty'],
+                'per_tray'     => (int)$row['per_tray'],
+            ];
+        }
     }
+    foreach ($byRest as &$restRow) {
+        $restRow['items'] = array_values($restRow['items']);
+    }
+    unset($restRow);
 
     $out = [];
     foreach ($byRest as $num => $rest) {

@@ -50,6 +50,10 @@
             <div class="rpt-hero-sub">Поставка {{ fmtFull(selectedDate) }}</div>
             <div class="rpt-hero-note">
               Заказ считается лотками: наберите лотки, штуки посчитаются сами.
+              <template v-if="batches.length > 1">
+                Поставка одна в неделю, поэтому тесто делят на две партии разного дня
+                изготовления — распределите, сколько нужно из каждой.
+              </template>
             </div>
           </div>
           <div v-if="locked" class="rpt-hero-lock">Приём закрыт</div>
@@ -69,26 +73,35 @@
 
           <div class="rpt-cols">
             <div class="rpt-list">
-              <div v-for="s in sizes" :key="s.sku" class="rpt-row" :class="{ 'is-filled': trays[s.sku] > 0 }">
+              <div v-for="s in sizes" :key="s.sku" class="rpt-row" :class="{ 'is-filled': sizeTrays(s) > 0 }">
                 <div class="rpt-row-info">
                   <span class="rpt-row-name">Тесто {{ s.short_name }}</span>
                   <span class="rpt-row-hint">в лотке {{ s.per_tray }} шт</span>
                 </div>
                 <div class="rpt-row-right">
-                  <span class="rpt-row-pieces" :class="{ 'is-on': trays[s.sku] > 0 }">
-                    {{ trays[s.sku] > 0 ? (trays[s.sku] * s.per_tray) + ' шт' : '—' }}
+                  <span class="rpt-row-pieces" :class="{ 'is-on': sizeTrays(s) > 0 }">
+                    {{ sizeTrays(s) > 0 ? (sizeTrays(s) * s.per_tray) + ' шт' : '—' }}
                   </span>
-                  <div class="rpt-qty">
-                    <button type="button" class="rpt-step" tabindex="-1"
-                      :disabled="locked || !(trays[s.sku] > 0)" @click="step(s, -1)" aria-label="Убавить">−</button>
-                    <label class="rpt-qty-box" :class="{ 'is-on': trays[s.sku] > 0 }">
-                      <input type="number" class="rpt-input" v-model.number="trays[s.sku]"
-                        :disabled="locked" min="0" step="1" inputmode="numeric"
-                        placeholder="—" @focus="$event.target.select()" />
-                      <span class="rpt-qty-u">лотк.</span>
-                    </label>
-                    <button type="button" class="rpt-step" tabindex="-1"
-                      :disabled="locked" @click="step(s, 1)" aria-label="Добавить">+</button>
+                  <div class="rpt-batches">
+                    <div v-for="b in batches" :key="b.batch_no" class="rpt-batch">
+                      <span v-if="batches.length > 1" class="rpt-batch-lbl">
+                        {{ b.batch_no }}-я партия
+                        <em>{{ b.label }}</em>
+                      </span>
+                      <div class="rpt-qty">
+                        <button type="button" class="rpt-step" tabindex="-1"
+                          :disabled="locked || !(trays[s.sku]?.[b.batch_no] > 0)"
+                          @click="step(s, b.batch_no, -1)" aria-label="Убавить">−</button>
+                        <label class="rpt-qty-box" :class="{ 'is-on': trays[s.sku]?.[b.batch_no] > 0 }">
+                          <input type="number" class="rpt-input" v-model.number="trays[s.sku][b.batch_no]"
+                            :disabled="locked" min="0" step="1" inputmode="numeric"
+                            placeholder="—" @focus="$event.target.select()" />
+                          <span class="rpt-qty-u">лотк.</span>
+                        </label>
+                        <button type="button" class="rpt-step" tabindex="-1"
+                          :disabled="locked" @click="step(s, b.batch_no, 1)" aria-label="Добавить">+</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -187,11 +200,21 @@ function api(path, opts = {}) {
 
 const currentDate = computed(() => dates.value.find(d => d.date === selectedDate.value) || null);
 const locked = computed(() => !!currentDate.value?.is_closed);
-const filledCount = computed(() => sizes.value.filter(s => trays[s.sku] > 0).length);
-const totalTrays = computed(() => sizes.value.reduce(
-  (sum, s) => sum + (trays[s.sku] > 0 ? Number(trays[s.sku]) : 0), 0));
+// Партии дня: одна у всех, две — у ресторанов с одной поставкой в неделю.
+const batches = computed(() => currentDate.value?.batches?.length
+  ? currentDate.value.batches
+  : [{ batch_no: 1, label: '' }]);
+
+/** Сколько всего лотков этого размера — по всем партиям. */
+function sizeTrays(size) {
+  const row = trays[size.sku] || {};
+  return batches.value.reduce((sum, b) => sum + (Number(row[b.batch_no]) || 0), 0);
+}
+
+const filledCount = computed(() => sizes.value.filter(s => sizeTrays(s) > 0).length);
+const totalTrays = computed(() => sizes.value.reduce((sum, s) => sum + sizeTrays(s), 0));
 const totalPieces = computed(() => sizes.value.reduce(
-  (sum, s) => sum + (trays[s.sku] > 0 ? Number(trays[s.sku]) * s.per_tray : 0), 0));
+  (sum, s) => sum + sizeTrays(s) * s.per_tray, 0));
 // Стопку считаем по той же норме, что в загрузочных листах. Ресторану полезно
 // видеть, сколько стопок приедет: столько мест выгружать.
 const stacks = computed(() => Math.ceil(totalTrays.value / traysPerStack.value) || 0);
@@ -206,10 +229,19 @@ function fmtDeadline(str) {
   return m ? `${m[3]}.${m[2]} в ${m[4]}` : String(str);
 }
 
-function step(size, dir) {
-  const cur = Number(trays[size.sku]) || 0;
+function step(size, batchNo, dir) {
+  if (!trays[size.sku]) trays[size.sku] = {};
+  const cur = Number(trays[size.sku][batchNo]) || 0;
   const next = Math.max(0, cur + dir);
-  trays[size.sku] = next === 0 ? null : next;
+  trays[size.sku][batchNo] = next === 0 ? null : next;
+}
+
+/** Пустая сетка «размер → партия»: v-model нужен готовый объект. */
+function resetTrays() {
+  for (const s of sizes.value) {
+    trays[s.sku] = {};
+    for (const b of batches.value) trays[s.sku][b.batch_no] = null;
+  }
 }
 
 async function load() {
@@ -245,15 +277,21 @@ async function selectDate(date) {
   selectedDate.value = date;
   submitError.value = '';
   orderLoading.value = true;
-  for (const s of sizes.value) trays[s.sku] = null;
+  resetTrays();
   try {
     const o = await api(`my-order?supplier_id=${encodeURIComponent(workshop.value.id)}&date=${date}`);
     savedStatus.value = o.status || null;
     const items = o.items || {};
+    const saved = o.batches || {};
     isSkipSaved.value = !!o.status && Object.keys(items).length === 0;
+    const first = batches.value[0].batch_no;
     for (const s of sizes.value) {
-      const pieces = Number(items[s.sku]) || 0;
-      trays[s.sku] = pieces > 0 ? Math.round(pieces / s.per_tray) : null;
+      const row = saved[s.sku] || {};
+      for (const b of batches.value) {
+        // Старые заявки лежат без партии — показываем их в первой.
+        const pieces = Number(row[b.batch_no] ?? (b.batch_no === first ? items[s.sku] : 0)) || 0;
+        trays[s.sku][b.batch_no] = pieces > 0 ? Math.round(pieces / s.per_tray) : null;
+      }
     }
     orderState[date] = { status: savedStatus.value, isSkip: isSkipSaved.value };
   } catch (e) {
@@ -279,8 +317,12 @@ async function submit(skip) {
     const items = {};
     if (!skip) {
       for (const s of sizes.value) {
-        const t = Number(trays[s.sku]) || 0;
-        if (t > 0) items[s.sku] = t * s.per_tray;
+        const byBatch = {};
+        for (const b of batches.value) {
+          const t = Number(trays[s.sku]?.[b.batch_no]) || 0;
+          if (t > 0) byBatch[b.batch_no] = t * s.per_tray;
+        }
+        if (Object.keys(byBatch).length) items[s.sku] = byBatch;
       }
     }
     const trayCount = totalTrays.value;
@@ -295,7 +337,7 @@ async function submit(skip) {
     savedStatus.value = 'submitted';
     isSkipSaved.value = skip;
     orderState[selectedDate.value] = { status: 'submitted', isSkip: skip };
-    if (skip) for (const s of sizes.value) trays[s.sku] = null;
+    if (skip) resetTrays();
     toast.success(
       skip ? 'Отмечено' : 'Заявка отправлена',
       skip ? `На ${fmtFull(selectedDate.value)} тесто не нужно`
@@ -470,5 +512,18 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
   .rpt-row { flex-wrap: wrap; }
   .rpt-row-right { width: 100%; justify-content: space-between; }
   .rpt-input { width: 60px; }
+}
+
+.rpt-batches { display: flex; align-items: flex-end; gap: 10px; }
+.rpt-batch { display: flex; flex-direction: column; gap: 4px; }
+.rpt-batch-lbl { font-size: 11px; font-weight: 700; color: var(--rpt-dim); white-space: nowrap; }
+.rpt-batch-lbl em { display: block; font-style: normal; font-weight: 600; font-size: 10px; color: #B0A090; }
+@media (max-width: 560px) {
+  /* Итог в штуках уводим под название, иначе он повисает сбоку от двух
+     полей ввода и мешает их читать. */
+  .rpt-row-right { flex-direction: column; align-items: stretch; gap: 8px; }
+  .rpt-row-pieces { text-align: left; }
+  .rpt-batches { flex-direction: column; align-items: stretch; width: 100%; gap: 8px; }
+  .rpt-batch-lbl em { display: inline; margin-left: 4px; }
 }
 </style>

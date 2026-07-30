@@ -74,7 +74,7 @@ function opGetWorkshops(PDO $pdo): array {
 /** Размеры теста из шаблона цеха: штук в лотке берём из кратности. */
 function opGetSizes(PDO $pdo, string $supplierId): array {
     $st = $pdo->prepare("
-        SELECT sku, product_name, multiplicity, sort_order
+        SELECT sku, product_name, product_id, multiplicity, sort_order
         FROM so_templates
         WHERE supplier_id = ? AND legal_entity = 'ООО \"Пицца Стар\"' AND is_active = 1
         ORDER BY sort_order, product_name");
@@ -85,6 +85,9 @@ function opGetSizes(PDO $pdo, string $supplierId): array {
         $out[] = [
             'sku'          => (string)$row['sku'],
             'product_name' => (string)$row['product_name'],
+            // Без карточки товара загрузочные листы не узнают, сколько штук
+            // в лотке: они берут кратность именно из products.
+            'product_id'   => (string)($row['product_id'] ?? ''),
             'short_name'   => opShortSize((string)$row['product_name'], (string)$row['sku']),
             'per_tray'     => $perTray > 0 ? $perTray : 1,
         ];
@@ -116,7 +119,8 @@ function opCollectDay(PDO $pdo, string $supplierId, string $date): array {
     $st = $pdo->prepare("
         SELECT o.id AS order_id, o.restaurant_number, o.status, o.submitted_at,
                r.dodo_is_number, r.city, r.region, r.address,
-               oi.sku, oi.product_name, COALESCE(oi.admin_qty, oi.quantity) AS qty
+               oi.sku, oi.product_name, oi.batch_no,
+               COALESCE(oi.admin_qty, oi.quantity) AS qty
         FROM so_orders o
         JOIN so_order_items oi ON oi.order_id = o.id
         JOIN restaurants r ON r.number = o.restaurant_number AND r.legal_entity_group = 'PS'
@@ -143,6 +147,7 @@ function opCollectDay(PDO $pdo, string $supplierId, string $date): array {
                 'order_id'          => (string)$row['order_id'],
                 'status'            => (string)$row['status'],
                 'qty'               => [],   // sku → штуки
+                'qty_by_batch'      => [],   // партия → sku → штуки
                 'trays'             => [],   // sku → лотки
                 'total_pieces'      => 0,
                 'total_trays'       => 0,
@@ -151,7 +156,9 @@ function opCollectDay(PDO $pdo, string $supplierId, string $date): array {
         }
         $sku = (string)$row['sku'];
         $qty = (float)$row['qty'];
+        $batch = (int)($row['batch_no'] ?: 1);
         $rests[$num]['qty'][$sku] = ($rests[$num]['qty'][$sku] ?? 0) + $qty;
+        $rests[$num]['qty_by_batch'][$batch][$sku] = ($rests[$num]['qty_by_batch'][$batch][$sku] ?? 0) + $qty;
     }
 
     // Лотки, стопки и паллеты считаем после сбора всех позиций ресторана.
@@ -203,6 +210,83 @@ function opDayTotals(array $day): array {
     ];
 }
 
+
+// ═══════════════════════ Партии теста ═══════════════════════
+// Сырое тесто должно созреть, поэтому изготавливают его заранее и не в один
+// день с поставкой. Для ресторанов с одной поставкой в неделю объём делят на
+// две партии разных дней изготовления, иначе к концу недели тесто перестоит.
+
+/** Дни недели по-русски: 1=пн … 7=вс. */
+const OP_DOW_NAMES = [1 => 'понедельник', 2 => 'вторник', 3 => 'среда', 4 => 'четверг',
+                      5 => 'пятница', 6 => 'суббота', 7 => 'воскресенье'];
+const OP_DOW_SHORT = [1 => 'пн', 2 => 'вт', 3 => 'ср', 4 => 'чт', 5 => 'пт', 6 => 'сб', 7 => 'вс'];
+
+/**
+ * График изготовления цеха: день поставки → партии.
+ * @return array dow => [ ['batch_no' => 1, 'production_dow' => 5], ... ]
+ */
+function opGetProductionSchedule(PDO $pdo, string $supplierId): array {
+    $st = $pdo->prepare("SELECT delivery_dow, batch_no, production_dow
+                         FROM op_production_schedule
+                         WHERE supplier_id = ?
+                         ORDER BY delivery_dow, batch_no");
+    $st->execute([$supplierId]);
+    $out = [];
+    foreach ($st->fetchAll() as $r) {
+        $out[(int)$r['delivery_dow']][] = [
+            'batch_no'       => (int)$r['batch_no'],
+            'production_dow' => (int)$r['production_dow'],
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Дата изготовления: ближайший нужный день недели ДО даты поставки.
+ * Совпадение дня недели означает «неделей раньше» — в день поставки тесто
+ * уже должно быть готово.
+ */
+function opProductionDate(string $deliveryDate, int $productionDow): string {
+    $d = new DateTime($deliveryDate);
+    $back = ((int)$d->format('N') - $productionDow + 7) % 7;
+    if ($back === 0) $back = 7;
+    return $d->modify("-{$back} days")->format('Y-m-d');
+}
+
+/**
+ * Партии для конкретной даты поставки.
+ * Если график не заполнен — одна партия в день поставки: модуль работает
+ * и без настройки, просто без разделения.
+ */
+function opBatchesForDate(array $schedule, string $deliveryDate): array {
+    $dow = (int)(new DateTime($deliveryDate))->format('N');
+    $rows = $schedule[$dow] ?? [];
+    if (!$rows) {
+        return [['batch_no' => 1, 'production_date' => $deliveryDate, 'production_dow' => $dow]];
+    }
+    $out = [];
+    foreach ($rows as $r) {
+        $out[] = [
+            'batch_no'        => $r['batch_no'],
+            'production_dow'  => $r['production_dow'],
+            'production_date' => opProductionDate($deliveryDate, $r['production_dow']),
+        ];
+    }
+    return $out;
+}
+
+/** Сколько дней поставки в неделю у ресторана от этого цеха. */
+function opRestaurantDeliveryDows(PDO $pdo, string $supplierId, string $restNum): array {
+    require_once __DIR__ . '/so_deadline.php';
+    $rows = soGetEffectiveScheduleRows($pdo, $supplierId, null, null, true);
+    $dows = [];
+    foreach ($rows as $row) {
+        if ((string)($row['restaurant_number'] ?? '') !== $restNum) continue;
+        $dows[(int)$row['delivery_day']] = true;
+    }
+    ksort($dows);
+    return array_keys($dows);
+}
 
 // ═══════════════════════ Кабинет ресторана ═══════════════════════
 // Ресторан заказывает тесто в разделе «Заказы» своего кабинета — отдельным
@@ -307,7 +391,12 @@ if ($opAction === 'plan' && $method === 'GET') {
     $dates = $st->fetchAll(PDO::FETCH_COLUMN);
 
     $sizes = opGetSizes($pdo, $supplierId);
+    $perTrayBySku = [];
+    foreach ($sizes as $sz) $perTrayBySku[$sz['sku']] = $sz['per_tray'];
+    $schedule = opGetProductionSchedule($pdo, $supplierId);
+
     $days = [];
+    $prod = [];   // дата изготовления → сводка
     foreach ($dates as $date) {
         $day = opCollectDay($pdo, $supplierId, $date);
         $t = opDayTotals($day);
@@ -320,8 +409,98 @@ if ($opAction === 'plan' && $method === 'GET') {
             'stacks'      => $t['stacks'],
             'pallets'     => $t['pallets'],
         ];
+
+        // Тот же объём, но разложенный по дням изготовления: партии заявки
+        // ложатся на свои даты по графику цеха.
+        $batches = [];
+        foreach (opBatchesForDate($schedule, $date) as $b) $batches[(int)$b['batch_no']] = $b;
+        foreach ($day['restaurants'] as $r) {
+            $byBatch = $r['qty_by_batch'] ?: [1 => $r['qty']];
+            foreach ($byBatch as $batchNo => $bySku) {
+                $b = $batches[(int)$batchNo] ?? reset($batches);
+                $pdate = $b['production_date'];
+                if (!isset($prod[$pdate])) {
+                    $prod[$pdate] = ['date' => $pdate, 'by_sku' => [], 'pieces' => 0, 'trays' => 0,
+                                     'deliveries' => [], 'restaurants' => []];
+                }
+                $prod[$pdate]['deliveries'][$date] = true;
+                $prod[$pdate]['restaurants'][$r['restaurant_number']] = true;
+                foreach ($bySku as $sku => $qty) {
+                    if (!isset($prod[$pdate]['by_sku'][$sku])) {
+                        $prod[$pdate]['by_sku'][$sku] = ['pieces' => 0, 'trays' => 0];
+                    }
+                    $trays = opTrays((float)$qty, (int)($perTrayBySku[$sku] ?? 0));
+                    $prod[$pdate]['by_sku'][$sku]['pieces'] += $qty;
+                    $prod[$pdate]['by_sku'][$sku]['trays'] += $trays;
+                    $prod[$pdate]['pieces'] += $qty;
+                    $prod[$pdate]['trays'] += $trays;
+                }
+            }
+        }
     }
-    opRespond(['sizes' => $sizes, 'days' => $days, 'stacks_per_pallet' => OP_STACKS_PER_PALLET]);
+
+    ksort($prod);
+    $production = [];
+    foreach ($prod as $row) {
+        $deliveries = array_keys($row['deliveries']);
+        sort($deliveries);
+        $production[] = [
+            'date'        => $row['date'],
+            'by_sku'      => $row['by_sku'],
+            'pieces'      => $row['pieces'],
+            'trays'       => $row['trays'],
+            'deliveries'  => $deliveries,
+            'restaurants' => count($row['restaurants']),
+        ];
+    }
+
+    opRespond(['sizes' => $sizes, 'days' => $days, 'production' => $production,
+               'stacks_per_pallet' => OP_STACKS_PER_PALLET]);
+}
+
+// ─── График изготовления: чтение ───
+if ($opAction === 'schedule' && $method === 'GET') {
+    $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
+    if ($supplierId === '') opRespond(['error' => 'Не указан цех'], 400);
+    opRespond([
+        'schedule'  => opGetProductionSchedule($pdo, $supplierId),
+        'dow_names' => OP_DOW_NAMES,
+    ]);
+}
+
+// ─── График изготовления: сохранение ───
+// Приходит полный список строк — так проще, чем возиться с удалением по одной.
+if ($opAction === 'schedule' && $method === 'POST') {
+    opRequireUser($pdo, 'edit');
+    $supplierId = trim((string)($body['supplier_id'] ?? ''));
+    $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
+    if ($supplierId === '') opRespond(['error' => 'Не указан цех'], 400);
+
+    $clean = [];
+    foreach ($rows as $r) {
+        $dd = (int)($r['delivery_dow'] ?? 0);
+        $bn = (int)($r['batch_no'] ?? 0);
+        $pd = (int)($r['production_dow'] ?? 0);
+        if ($dd < 1 || $dd > 7 || $pd < 1 || $pd > 7) continue;
+        if ($bn !== 1 && $bn !== 2) continue;
+        $clean[] = [$dd, $bn, $pd];
+    }
+
+    try {
+        $pdo->beginTransaction();
+        $pdo->prepare("DELETE FROM op_production_schedule WHERE supplier_id = ?")->execute([$supplierId]);
+        if ($clean) {
+            $ins = $pdo->prepare("INSERT INTO op_production_schedule (supplier_id, delivery_dow, batch_no, production_dow)
+                                  VALUES (?, ?, ?, ?)");
+            foreach ($clean as $c) $ins->execute([$supplierId, $c[0], $c[1], $c[2]]);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        error_log('[own-production schedule] ' . $e->getMessage());
+        opRespond(['error' => 'Не удалось сохранить график'], 500);
+    }
+    opRespond(['success' => true, 'rows' => count($clean)]);
 }
 
 // ─── Кабинет: что можно заказать и на какие даты ───
@@ -332,10 +511,29 @@ if ($opAction === 'my-form' && $method === 'GET') {
     $shop = $workshops[0];
     $dates = opRestaurantDates($pdo, (string)$shop['id'], (string)$rest['restaurant_number']);
     require_once __DIR__ . '/so_loading_sheets.php';
+
+    // Две партии нужны только там, где поставка одна в неделю: у остальных
+    // тесто и так приезжает часто, делить нечего.
+    $dows = opRestaurantDeliveryDows($pdo, (string)$shop['id'], (string)$rest['restaurant_number']);
+    $splitAllowed = count($dows) === 1;
+    $schedule = opGetProductionSchedule($pdo, (string)$shop['id']);
+    foreach ($dates as &$d) {
+        $batches = opBatchesForDate($schedule, $d['date']);
+        if (!$splitAllowed) $batches = [$batches[0]];
+        foreach ($batches as &$b) {
+            $b['label'] = 'изготовление ' . OP_DOW_SHORT[$b['production_dow']] . ' '
+                . (new DateTime($b['production_date']))->format('d.m');
+        }
+        unset($b);
+        $d['batches'] = $batches;
+    }
+    unset($d);
+
     opRespond([
         'workshop' => ['id' => $shop['id'], 'name' => $shop['short_name']],
         'dates'    => $dates,
         'sizes'    => opGetSizes($pdo, (string)$shop['id']),
+        'split_allowed'     => $splitAllowed,
         'trays_per_stack'   => SO_LS_TRAYS_PER_STACK,
         'stacks_per_pallet' => OP_STACKS_PER_PALLET,
     ]);
@@ -350,22 +548,29 @@ if ($opAction === 'my-order' && $method === 'GET') {
         opRespond(['error' => 'Нужны цех и дата'], 400);
     }
     $st = $pdo->prepare("
-        SELECT o.id, o.status, o.submitted_at, oi.sku, COALESCE(oi.admin_qty, oi.quantity) AS qty
+        SELECT o.id, o.status, o.submitted_at, oi.sku, oi.batch_no,
+               COALESCE(oi.admin_qty, oi.quantity) AS qty
         FROM so_orders o
         LEFT JOIN so_order_items oi ON oi.order_id = o.id
         WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ?
           AND o.legal_entity = 'ООО \"Пицца Стар\"'");
     $st->execute([$supplierId, $rest['restaurant_number'], $date]);
     $rows = $st->fetchAll();
-    $items = [];
+    $items = [];        // sku → всего штук (совместимость)
+    $batches = [];      // sku → партия → штук
     $status = null;
     $submittedAt = null;
     foreach ($rows as $row) {
         $status = $row['status'];
         $submittedAt = $row['submitted_at'];
-        if ($row['sku'] !== null) $items[(string)$row['sku']] = (float)$row['qty'];
+        if ($row['sku'] === null) continue;
+        $sku = (string)$row['sku'];
+        $batch = (int)($row['batch_no'] ?: 1);
+        $items[$sku] = ($items[$sku] ?? 0) + (float)$row['qty'];
+        $batches[$sku][$batch] = ($batches[$sku][$batch] ?? 0) + (float)$row['qty'];
     }
-    opRespond(['status' => $status, 'submitted_at' => $submittedAt, 'items' => $items]);
+    opRespond(['status' => $status, 'submitted_at' => $submittedAt,
+               'items' => $items, 'batches' => $batches]);
 }
 
 // ─── Кабинет: подать заявку ───
@@ -389,28 +594,51 @@ if ($opAction === 'submit' && $method === 'POST') {
             . ($allowed['deadline_str'] ? ' (до ' . $allowed['deadline_str'] . ')' : '')], 422);
     }
 
-    // Количества: только известные размеры, кратно лотку — цех печёт лотками.
+    // Количества: только известные размеры, кратно лотку — цех работает лотками.
+    // Формат позиций: либо {sku: штук}, либо {sku: {партия: штук}} — вторая
+    // форма приходит от ресторанов с одной поставкой в неделю.
     $sizes = opGetSizes($pdo, $supplierId);
     $bySku = [];
     foreach ($sizes as $s) $bySku[$s['sku']] = $s;
+
+    // Разрешённые партии этой даты: чужой номер в заявку не пропускаем.
+    $dows = opRestaurantDeliveryDows($pdo, $supplierId, (string)$rest['restaurant_number']);
+    $splitAllowed = count($dows) === 1;
+    $schedule = opGetProductionSchedule($pdo, $supplierId);
+    $dateBatches = opBatchesForDate($schedule, $date);
+    if (!$splitAllowed) $dateBatches = [$dateBatches[0]];
+    $allowedBatches = [];
+    foreach ($dateBatches as $b) $allowedBatches[(int)$b['batch_no']] = true;
+    $firstBatch = (int)$dateBatches[0]['batch_no'];
+
     $items = [];
     $errors = [];
-    foreach ($rawItems as $sku => $qty) {
+    foreach ($rawItems as $sku => $value) {
         $sku = (string)$sku;
         if (!isset($bySku[$sku])) continue;
-        $q = (float)$qty;
-        if ($q <= 0) continue;
         $perTray = (int)$bySku[$sku]['per_tray'];
-        if ($perTray > 1 && fmod($q, $perTray) > 0.001) {
-            $up = (int)ceil($q / $perTray) * $perTray;
-            $errors[] = "{$bySku[$sku]['short_name']}: {$q} шт не делится на лоток ({$perTray} шт), ближайшее — {$up}";
-            continue;
+        $parts = is_array($value) ? $value : [$firstBatch => $value];
+        foreach ($parts as $batchNo => $qty) {
+            $batchNo = (int)$batchNo ?: $firstBatch;
+            if (!isset($allowedBatches[$batchNo])) {
+                $errors[] = "{$bySku[$sku]['short_name']}: партии {$batchNo} на эту дату нет";
+                continue;
+            }
+            $q = (float)$qty;
+            if ($q <= 0) continue;
+            if ($perTray > 1 && fmod($q, $perTray) > 0.001) {
+                $up = (int)ceil($q / $perTray) * $perTray;
+                $errors[] = "{$bySku[$sku]['short_name']}: {$q} шт не делится на лоток ({$perTray} шт), ближайшее — {$up}";
+                continue;
+            }
+            $items[] = [
+                'sku'          => $sku,
+                'product_name' => $bySku[$sku]['product_name'],
+                'product_id'   => $bySku[$sku]['product_id'] ?? '',
+                'quantity'     => $q,
+                'batch_no'     => $batchNo,
+            ];
         }
-        $items[] = [
-            'sku'          => $sku,
-            'product_name' => $bySku[$sku]['product_name'],
-            'quantity'     => $q,
-        ];
     }
     if ($errors) opRespond(['error' => implode('; ', $errors)], 422);
 
@@ -431,8 +659,12 @@ if ($opAction === 'submit' && $method === 'POST') {
             $orderId = $pdo->lastInsertId();
         }
         if ($items) {
-            $ins = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, '', ?, ?, ?)");
-            foreach ($items as $it) $ins->execute([$orderId, $it['sku'], $it['product_name'], $it['quantity']]);
+            $ins = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, batch_no)
+                                  VALUES (?, ?, ?, ?, ?, ?)");
+            foreach ($items as $it) {
+                $ins->execute([$orderId, $it['product_id'], $it['sku'], $it['product_name'],
+                               $it['quantity'], $it['batch_no']]);
+            }
         }
         $pdo->commit();
     } catch (Throwable $e) {

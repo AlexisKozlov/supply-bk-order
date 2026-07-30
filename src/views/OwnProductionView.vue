@@ -4,7 +4,7 @@
       <div>
         <h1>Собственное производство</h1>
         <p class="op-sub">
-          Заказ теста для «Пицца Стар»: что печём, сколько лотков и стопок,
+          Заказ теста для «Пицца Стар»: что изготовить, сколько лотков и стопок,
           куда везём. Рестораны заказывают в своём кабинете.
         </p>
       </div>
@@ -120,6 +120,12 @@
             {{ loadingPlan ? 'Считаю…' : 'Показать' }}
           </button>
           <div class="op-panel-right">
+            <div class="op-switch">
+              <button class="op-switch-btn" :class="{ active: planMode === 'production' }"
+                      @click="planMode = 'production'">По дню изготовления</button>
+              <button class="op-switch-btn" :class="{ active: planMode === 'delivery' }"
+                      @click="planMode = 'delivery'">По дню поставки</button>
+            </div>
             <label class="op-reserve">
               Запас
               <input type="number" v-model.number="reserve" min="0" max="50" class="rom-input-sm op-reserve-input" />
@@ -133,6 +139,50 @@
           <div class="op-empty-title">Заявок за период нет</div>
           <p>Выберите другие даты.</p>
         </div>
+
+        <!-- Вид «по дню изготовления»: один день = одна смена цеха, внутри —
+             дни поставки, на которые это тесто уедет. -->
+        <div v-else-if="planMode === 'production'" class="op-card op-card-flush">
+          <table class="rom-table op-table">
+            <thead>
+              <tr>
+                <th>День изготовления</th>
+                <th>Уедет на поставку</th>
+                <th class="op-num">Точек</th>
+                <th v-for="s in plan.sizes" :key="s.sku" class="op-num">{{ s.short_name }}</th>
+                <th class="op-num">Лотков</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in plan.production" :key="d.date">
+                <td><b>{{ fmtDate(d.date) }}</b> <span class="op-dow">{{ dowOf(d.date) }}</span></td>
+                <td class="op-deliv">
+                  <span v-for="dd in d.deliveries" :key="dd" class="op-chip">{{ fmtDate(dd) }}</span>
+                </td>
+                <td class="op-num">{{ d.restaurants }}</td>
+                <td v-for="s in plan.sizes" :key="s.sku" class="op-num">
+                  <b>{{ withReserve(d.by_sku[s.sku]?.pieces || 0) }}</b>
+                  <span class="op-trays">{{ d.by_sku[s.sku]?.trays || 0 }} лотк.</span>
+                </td>
+                <td class="op-num"><b>{{ d.trays }}</b></td>
+              </tr>
+              <tr class="op-total-row">
+                <td>ИТОГО</td>
+                <td></td>
+                <td class="op-num"></td>
+                <td v-for="s in plan.sizes" :key="s.sku" class="op-num">
+                  <b>{{ withReserve(prodSizeTotal(s.sku)) }}</b>
+                </td>
+                <td class="op-num"><b>{{ prodTotalTrays }}</b></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="op-note">
+            Дни изготовления берутся из графика во вкладке «Настройки».
+            Для дней поставки без графика тесто считается изготовленным в тот же день.
+          </p>
+        </div>
+
         <div v-else class="op-card op-card-flush">
           <table class="rom-table op-table">
             <thead>
@@ -173,6 +223,56 @@
             В колонках размеров показано количество с запасом {{ reserve }}% — округлено вверх до лотка.
             Лотки, стопки и паллеты — по факту заявок.
           </p>
+        </div>
+      </template>
+
+      <!-- ═══ Настройки: график изготовления ═══ -->
+      <template v-else-if="tab === 'settings'">
+        <div class="op-card">
+          <h3 class="op-h3">Когда изготавливать тесто</h3>
+          <p class="op-hint">
+            Тесто должно созреть, поэтому изготавливают его заранее. Здесь задаём,
+            в какой день делать тесто под каждый день поставки. Вторая партия нужна
+            ресторанам с одной поставкой в неделю: часть теста делают раньше, часть позже,
+            чтобы к концу недели оно не перестояло.
+          </p>
+
+          <table class="rom-table op-table op-sched-table">
+            <thead>
+              <tr>
+                <th>День поставки</th>
+                <th>Партия 1 — изготовление</th>
+                <th>Партия 2 — изготовление</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="dow in DOWS" :key="dow.n">
+                <td><b>{{ dow.label }}</b></td>
+                <td>
+                  <select v-model.number="sched[dow.n].b1" class="rom-input-sm op-sched-select">
+                    <option :value="0">— в день поставки —</option>
+                    <option v-for="d in DOWS" :key="'b1' + d.n" :value="d.n">{{ d.label }}</option>
+                  </select>
+                  <span v-if="sched[dow.n].b1" class="op-sched-hint">{{ daysBeforeLabel(dow.n, sched[dow.n].b1) }}</span>
+                </td>
+                <td>
+                  <select v-model.number="sched[dow.n].b2" class="rom-input-sm op-sched-select"
+                          :disabled="!sched[dow.n].b1">
+                    <option :value="0">— без второй партии —</option>
+                    <option v-for="d in DOWS" :key="'b2' + d.n" :value="d.n">{{ d.label }}</option>
+                  </select>
+                  <span v-if="sched[dow.n].b2" class="op-sched-hint">{{ daysBeforeLabel(dow.n, sched[dow.n].b2) }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="op-sched-actions">
+            <button class="op-btn op-btn-accent" :disabled="savingSched" @click="saveSchedule">
+              {{ savingSched ? 'Сохраняю…' : 'Сохранить график' }}
+            </button>
+            <span v-if="schedSaved" class="op-saved">Сохранено</span>
+          </div>
         </div>
       </template>
 
@@ -217,6 +317,13 @@ const TABS = [
   { key: 'day', label: 'Заказ на день' },
   { key: 'plan', label: 'План производства' },
   { key: 'sheets', label: 'Загрузочные листы' },
+  { key: 'settings', label: 'Настройки' },
+];
+
+const DOWS = [
+  { n: 1, label: 'понедельник' }, { n: 2, label: 'вторник' }, { n: 3, label: 'среда' },
+  { n: 4, label: 'четверг' }, { n: 5, label: 'пятница' }, { n: 6, label: 'суббота' },
+  { n: 7, label: 'воскресенье' },
 ];
 
 const loading = ref(true);
@@ -228,10 +335,15 @@ const workshops = ref([]);
 const shopId = ref('');
 const date = ref(todayStr());
 const day = ref({ sizes: [], restaurants: [], totals: { by_sku: {}, pieces: 0, trays: 0, stacks: 0, pallets: 0 } });
-const plan = ref({ sizes: [], days: [] });
+const plan = ref({ sizes: [], days: [], production: [] });
+const planMode = ref('production');
+// График изготовления: день поставки → партия 1 и партия 2 (0 = нет)
+const sched = ref(Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map(n => [n, { b1: 0, b2: 0 }])));
+const savingSched = ref(false);
+const schedSaved = ref(false);
 const planFrom = ref(todayStr());
 const planTo = ref(todayStr(21));
-// Запас производства: цех печёт с небольшим перекрытием, чтобы брак или
+// Запас производства: цех делает тесто с небольшим перекрытием, чтобы брак или
 // довоз не оставил точку без теста. На заявки не влияет — только на план.
 const reserve = ref(0);
 
@@ -252,7 +364,7 @@ function fmtDate(d) {
 }
 function restLabel(num) { return formatRestaurantNumber(Number(num)); }
 
-/** Количество с запасом, округлённое вверх — цех печёт лотками. */
+/** Количество с запасом, округлённое вверх — цех работает лотками. */
 function withReserve(pieces) {
   const n = Number(pieces) || 0;
   if (!reserve.value) return fmt(n);
@@ -318,11 +430,72 @@ function switchTab(key) {
   tab.value = key;
   if (key === 'plan' && !plan.value.days.length) loadPlan();
   if ((key === 'day' || key === 'sheets') && !hasDay.value) loadDay();
+  if (key === 'settings') loadSchedule();
+}
+
+// ═══ График изготовления ═══
+
+function prodSizeTotal(sku) {
+  return (plan.value.production || []).reduce((sum, d) => sum + (d.by_sku[sku]?.pieces || 0), 0);
+}
+const prodTotalTrays = computed(() =>
+  (plan.value.production || []).reduce((sum, d) => sum + (Number(d.trays) || 0), 0));
+
+const DOW_SHORT = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+function dowOf(d) { return DOW_SHORT[new Date(d + 'T00:00:00').getDay()]; }
+
+/** «за сколько дней до поставки» — чтобы график читался без счёта в уме. */
+function daysBeforeLabel(deliveryDow, productionDow) {
+  let back = (deliveryDow - productionDow + 7) % 7;
+  if (back === 0) back = 7;
+  const word = back === 1 ? 'день' : (back < 5 ? 'дня' : 'дней');
+  return `за ${back} ${word}`;
+}
+
+async function loadSchedule() {
+  try {
+    const data = await api('schedule');
+    const fresh = Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map(n => [n, { b1: 0, b2: 0 }]));
+    for (const [dow, rows] of Object.entries(data.schedule || {})) {
+      for (const r of rows) {
+        if (Number(r.batch_no) === 2) fresh[dow].b2 = Number(r.production_dow);
+        else fresh[dow].b1 = Number(r.production_dow);
+      }
+    }
+    sched.value = fresh;
+  } catch (e) {
+    toast.error('Не получилось', e.message);
+  }
+}
+
+async function saveSchedule() {
+  savingSched.value = true;
+  schedSaved.value = false;
+  try {
+    const rows = [];
+    for (const [dow, v] of Object.entries(sched.value)) {
+      if (v.b1) rows.push({ delivery_dow: Number(dow), batch_no: 1, production_dow: v.b1 });
+      if (v.b1 && v.b2) rows.push({ delivery_dow: Number(dow), batch_no: 2, production_dow: v.b2 });
+    }
+    const { data, error } = await db.request('POST', 'own-production/schedule', {
+      supplier_id: shopId.value, rows,
+    });
+    if (error) throw new Error(error);
+    if (data?.error) throw new Error(data.error);
+    schedSaved.value = true;
+    setTimeout(() => { schedSaved.value = false; }, 2500);
+    // План пересчитываем: дни изготовления изменились.
+    plan.value = { sizes: [], days: [], production: [] };
+  } catch (e) {
+    toast.error('Не сохранилось', e.message);
+  } finally {
+    savingSched.value = false;
+  }
 }
 
 function reload() {
   day.value = { sizes: [], restaurants: [], totals: { by_sku: {}, pieces: 0, trays: 0, stacks: 0, pallets: 0 } };
-  plan.value = { sizes: [], days: [] };
+  plan.value = { sizes: [], days: [], production: [] };
   loadDay();
 }
 
@@ -541,4 +714,19 @@ onMounted(loadShops);
   .op-panel-right { margin-left: 0; width: 100%; }
   .op-tiles .op-tile { flex: 1 1 calc(50% - 8px); }
 }
+
+.op-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.op-switch-btn { padding: 7px 12px; border: 0; background: #fff; font-size: 12px; font-weight: 700;
+                 color: var(--text-secondary); cursor: pointer; }
+.op-switch-btn + .op-switch-btn { border-left: 1px solid var(--border); }
+.op-switch-btn.active { background: var(--bk-brown); color: #fff; }
+.op-dow { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+.op-deliv { display: flex; flex-wrap: wrap; gap: 4px; }
+.op-chip { padding: 2px 8px; border-radius: 999px; background: #F3EBE0; font-size: 12px; font-weight: 700;
+           color: var(--bk-brown); }
+.op-sched-table td { vertical-align: middle; }
+.op-sched-select { min-width: 150px; }
+.op-sched-hint { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
+.op-sched-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.op-saved { font-size: 12px; font-weight: 700; color: var(--green); }
 </style>
