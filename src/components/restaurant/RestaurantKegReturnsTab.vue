@@ -306,14 +306,14 @@ onMounted(async () => {
 .krt-deadline-passed { color: #E53935; font-weight: 700; }
 
 .krt-section {
-  background: #fff; border: 1px solid #ECE3D6; border-radius: 14px;
-  padding: 18px 18px 16px; box-shadow: 0 1px 0 rgba(80,35,20,.02);
+  background: #fff; border: 1.5px solid #EFE7DC; border-radius: 14px;
+  padding: 16px 18px 14px; margin-bottom: 12px;
 }
 .krt-section-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin-bottom: 14px;
 }
-.krt-section-head h3 { margin: 0; font-size: 15px; font-weight: 700; color: #2C1A12; }
+.krt-section-head h3 { margin: 0; font-size: 15.5px; font-weight: 800; color: #4A2013; }
 .krt-section-counter {
   font-size: 12.5px; color: #C16B4D; font-weight: 700;
   background: #FFF1E0; padding: 3px 10px; border-radius: 999px;
@@ -465,11 +465,12 @@ onMounted(async () => {
 .krt-keg-summary strong { font-weight: 700; }
 
 /* ═══ Полоса действий ═══ */
+/* Кнопки идут обычным блоком под формой. Липкая панель у нижнего края
+   перекрывалась нижним меню кабинета — как это было на экране заявки
+   поставщику, где от такой панели тоже отказались. */
 .krt-actions-bar {
-  position: sticky; bottom: 0;
-  margin: 12px -20px 0; padding: 10px 20px 12px;
-  background: linear-gradient(to top, #FAF6EF 70%, rgba(250,246,239,0));
-  z-index: 20;
+  margin: 16px 0 0; padding: 14px 0 0;
+  border-top: 1.5px solid #F1E8DC;
 }
 .krt-actions-bar-inner {
   display: flex; flex-wrap: wrap; gap: 8px;
@@ -713,15 +714,27 @@ onMounted(async () => {
   .krt-fld-row3 .krt-fld-bso-number { grid-area: number; }
   .krt-section { padding: 14px 14px 12px; border-radius: 12px; }
 
-  .krt-keg-row { grid-template-columns: 40px 1fr auto; gap: 10px; padding: 8px 6px; }
-  .krt-keg-thumb { width: 40px; height: 40px; }
+  /* На телефоне название кеги не влезало в узкую колонку рядом со
+     степпером и рвалось на четыре строки. Теперь строка идёт в два ряда:
+     сверху фото и название, снизу счётчик по правому краю. */
+  .krt-keg-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-areas: "thumb info" "stepper stepper";
+    gap: 8px 10px; padding: 10px 8px;
+    border: 1.5px solid #F1E8DC; border-radius: 12px; background: #fff;
+  }
+  .krt-keg-row.active { border-color: #F0C89A; background: #FFF9F1; }
+  .krt-keg-thumb { grid-area: thumb; width: 40px; height: 40px; }
+  .krt-keg-info { grid-area: info; }
+  .krt-keg-name { font-size: 13.5px; }
+  .krt-stepper { grid-area: stepper; justify-self: end; }
   .krt-step-btn { width: 38px; min-height: 38px; font-size: 19px; }
   .krt-step-input { width: 42px; min-height: 38px; font-size: 16px; }
 
   .krt-tip-bubble { right: 0; left: auto; }
   .krt-tip-bubble::before { left: auto; right: 8px; }
 
-  .krt-actions-bar { margin: 12px -14px 0; padding: 10px 14px 14px; }
+  .krt-actions-bar { margin: 14px 0 0; padding: 12px 0 0; }
   .krt-actions-bar-inner { flex-direction: column; }
   .krt-actions-bar-inner .krt-btn { width: 100%; padding: 12px; font-size: 15px; }
 
