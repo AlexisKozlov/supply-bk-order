@@ -57,7 +57,7 @@ function hoTable($section, PhpWord $word, array $headers, array $rows, array $wi
     hoTableStyle($word, $style);
     $table = $section->addTable($style);
 
-    $cm = fn($v) => Converter::cmToTwip($v);
+    $cm = fn($v) => (int)round(Converter::cmToTwip($v));
 
     $hr = $table->addRow();
     foreach ($headers as $i => $h) hoHeadCell($hr, $h, $cm($widths[$i]));
@@ -81,6 +81,50 @@ function hoH1($section, $num, $text) {
 function hoH2($section, $text) {
     $section->addText(htmlspecialchars($text), ['bold' => true, 'size' => 11.5, 'color' => HO_ORANGE],
         ['spaceBefore' => 200, 'spaceAfter' => 60, 'keepNext' => true]);
+}
+
+/**
+ * Плашка с названием поставщика на всю ширину. Раньше это была просто
+ * оранжевая строка текста, и подряд идущие поставщики читались как одно
+ * полотно: непонятно, где заканчивается один и начинается другой.
+ */
+function hoSupplierBand($section, PhpWord $word, string $name, string $owner) {
+    static $n = 0;
+    $style = 'hoBand' . (++$n);
+    $word->addTableStyle($style, ['borderSize' => 0, 'cellMargin' => 80, 'alignment' => Jc::CENTER]);
+    $table = $section->addTable($style);
+    $row = $table->addRow();
+
+    $left = $row->addCell((int)round(Converter::cmToTwip(12)), ['bgColor' => HO_BROWN, 'valign' => 'center']);
+    $left->addText(htmlspecialchars($name),
+        ['bold' => true, 'size' => 13, 'color' => 'FFFFFF'], ['spaceBefore' => 40, 'spaceAfter' => 40]);
+
+    $right = $row->addCell((int)round(Converter::cmToTwip(6)), ['bgColor' => HO_BROWN, 'valign' => 'center']);
+    $right->addText(($owner !== '' && $owner !== '—' ? 'ведёт: ' . htmlspecialchars($owner) : 'ответственный не назначен'),
+        ['size' => 9.5, 'color' => 'E8C8AE'],
+        ['alignment' => Jc::END, 'spaceBefore' => 40, 'spaceAfter' => 40]);
+    return $table;
+}
+
+/** Подпись блока внутри карточки поставщика: мелкие капсы с отбивкой. */
+function hoBlockLabel($section, string $text) {
+    $section->addText(mb_strtoupper(htmlspecialchars($text)),
+        ['bold' => true, 'size' => 8.5, 'color' => HO_ORANGE],
+        ['spaceBefore' => 160, 'spaceAfter' => 40, 'keepNext' => true]);
+}
+
+/** Тонкая линия-разделитель между поставщиками. */
+function hoDivider($section, PhpWord $word) {
+    static $n = 0;
+    $style = 'hoDiv' . (++$n);
+    $word->addTableStyle($style, [
+        'borderTopSize' => 6, 'borderTopColor' => HO_LINE,
+        'borderBottomSize' => 0, 'borderLeftSize' => 0, 'borderRightSize' => 0,
+        'cellMargin' => 0, 'alignment' => Jc::CENTER,
+    ]);
+    $t = $section->addTable($style);
+    $t->addRow(20)->addCell((int)round(Converter::cmToTwip(18)))->addText('', ['size' => 4]);
+    $section->addTextBreak(1, ['size' => 6]);
 }
 
 function hoHint($section, $text) {
@@ -118,18 +162,25 @@ function hoBuildDocx(PDO $pdo, array $full) {
     $word->setDefaultFontName('Calibri');
     $word->setDefaultFontSize(10);
 
+    // Поля уменьшены: таблицам с позициями было тесно, длинные названия
+    // товаров переносились по три строки и раздел превращался в «полотно».
+    // При этих полях полезная ширина листа A4 — 18 см (было 16,7).
+    // Размеры задаём целыми twips: PhpWord считает их дробными
+    // («11905.511811023622»), и часть программ на таком файле спотыкается.
     $section = $word->addSection([
-        'marginTop'    => Converter::cmToTwip(1.6),
-        'marginBottom' => Converter::cmToTwip(1.6),
-        'marginLeft'   => Converter::cmToTwip(1.9),
-        'marginRight'  => Converter::cmToTwip(1.5),
+        'pageSizeW'    => 11906,  // A4, 21 см
+        'pageSizeH'    => 16838,  // A4, 29,7 см
+        'marginTop'    => (int)round(Converter::cmToTwip(1.3)),
+        'marginBottom' => (int)round(Converter::cmToTwip(1.3)),
+        'marginLeft'   => (int)round(Converter::cmToTwip(1.4)),
+        'marginRight'  => (int)round(Converter::cmToTwip(1.2)),
     ]);
 
     // ── Шапка ──
     hoTableStyle($word, 'hoCover');
     $cover = $section->addTable('hoCover');
     $row = $cover->addRow();
-    $cell = $row->addCell(Converter::cmToTwip(17), ['bgColor' => HO_BROWN]);
+    $cell = $row->addCell((int)round(Converter::cmToTwip(18)), ['bgColor' => HO_BROWN]);
     $cell->addText(mb_strtoupper(htmlspecialchars($doc['title'])),
         ['bold' => true, 'size' => 19, 'color' => 'FFFFFF'], ['spaceBefore' => 220, 'spaceAfter' => 40]);
     $cell->addText('Отдел закупок  ·  портал supply-department.online',
@@ -143,7 +194,7 @@ function hoBuildDocx(PDO $pdo, array $full) {
     if (!empty($doc['return_date'])) $head[] = ['Первый рабочий день', hoDate($doc['return_date'])];
     if (trim((string)$doc['emergency_note']) !== '') $head[] = ['Экстренная связь', $doc['emergency_note']];
     $head[] = ['Документ составлен', hoDate($doc['created_at'])];
-    hoTable($section, $word, ['Параметр', 'Значение'], $head, [5.5, 11.5]);
+    hoTable($section, $word, ['Параметр', 'Значение'], $head, [5.5, 12.5]);
 
     $num = 0;
 
@@ -155,7 +206,7 @@ function hoBuildDocx(PDO $pdo, array $full) {
             $rows[] = [$p['name'], $p['zone'], $p['scope'], $p['contact']];
         }
         hoTable($section, $word, ['Ответственный', 'Что принимает', 'Поставщики и темы', 'Контакт'],
-            $rows, [4.0, 4.0, 5.5, 3.5]);
+            $rows, [4.2, 4.2, 6.0, 3.6]);
     }
 
     // ── 2. План приходов ──
@@ -179,7 +230,7 @@ function hoBuildDocx(PDO $pdo, array $full) {
             $rows[] = [hoDate($p['date']), $p['supplier'], $p['entity'], $p['person'], $p['note']];
         }
         hoTable($section, $word, ['Дата', 'Поставщик', 'Юрлицо', 'Кто принимает', 'Примечание'],
-            $rows, [2.4, 4.0, 3.4, 3.4, 3.8]);
+            $rows, [2.4, 4.4, 3.6, 3.6, 4.0]);
     }
 
     // ── 3. Регулярные дела ──
@@ -189,54 +240,59 @@ function hoBuildDocx(PDO $pdo, array $full) {
         $rows = [];
         foreach ($weekly as $w) $rows[] = [$w['c1'], $w['c2'], $w['c3'], $w['c4']];
         hoTable($section, $word, ['День', 'Что нужно сделать', 'До какого времени', 'Кто отвечает'],
-            $rows, [2.8, 7.5, 3.2, 3.5]);
+            $rows, [2.8, 8.2, 3.4, 3.6]);
     }
 
     // ── 4. Поставщики ──
     if ($suppliers) {
         $section->addPageBreak();
         hoH1($section, ++$num, 'Поставщики — что передаётся по каждому');
+        $supIndex = 0;
         foreach ($suppliers as $s) {
-            hoH2($section, 'Поставщик: ' . $s['supplier_name']);
             $owner = $s['person_id'] ? ($peopleById[(int)$s['person_id']] ?? '—') : '—';
-            hoTable($section, $word, ['Кто ведёт в отсутствие', 'Контакты поставщика'],
-                [[$owner, $s['contacts']]], [5.0, 12.0]);
+            if ($supIndex++ > 0) hoDivider($section, $word);
+            hoSupplierBand($section, $word, $s['supplier_name'], $owner);
 
-            $rows = [];
-            foreach (($s['orders'] ?? []) as $o) {
-                if (empty($o['items'])) {
-                    $rows[] = [$o['legal_entity'], hoDate($o['date']), '— позиции не заполнены —', ''];
-                    continue;
-                }
-                foreach ($o['items'] as $idx => $it) {
-                    $rows[] = [
-                        $idx === 0 ? $o['legal_entity'] : '',
-                        $idx === 0 ? hoDate($o['date']) : '',
-                        trim($it['sku'] . '  ' . $it['name']),
-                        $it['qty'],
-                    ];
-                }
+            if (trim((string)$s['contacts']) !== '') {
+                hoBlockLabel($section, 'Контакты поставщика');
+                $section->addText(htmlspecialchars($s['contacts']), ['size' => 10, 'color' => HO_INK],
+                    ['spaceAfter' => 60]);
             }
-            if ($rows) {
-                $section->addText('Отправленные заявки', ['bold' => true, 'size' => 10],
-                    ['spaceBefore' => 100, 'spaceAfter' => 40, 'keepNext' => true]);
-                hoTable($section, $word, ['Юрлицо', 'Дата прихода', 'Товар', 'Количество'],
-                    $rows, [3.0, 2.6, 8.4, 3.0]);
+
+            // Заявки — отдельной таблицей на каждую дату прихода: в одной
+            // сплошной таблице даты и юрлица терялись среди позиций.
+            $orders = $s['orders'] ?? [];
+            if ($orders) {
+                hoBlockLabel($section, 'Отправленные заявки');
+                foreach ($orders as $o) {
+                    $head = hoDate($o['date']) . '  ·  ' . $o['legal_entity'];
+                    $section->addText(htmlspecialchars($head),
+                        ['bold' => true, 'size' => 10.5, 'color' => HO_BROWN],
+                        ['spaceBefore' => 120, 'spaceAfter' => 40, 'keepNext' => true]);
+                    if (empty($o['items'])) {
+                        $section->addText('позиции не заполнены',
+                            ['italic' => true, 'size' => 9.5, 'color' => HO_GREY], ['spaceAfter' => 80]);
+                        continue;
+                    }
+                    $rows = [];
+                    foreach ($o['items'] as $it) {
+                        $rows[] = [$it['sku'], $it['name'], $it['qty']];
+                    }
+                    hoTable($section, $word, ['Артикул', 'Товар', 'Количество'], $rows, [2.6, 10.4, 5.0]);
+                }
             }
 
             $cond = [];
             if (trim((string)$s['correction_rule']) !== '') $cond[] = ['Корректировка заявки', $s['correction_rule']];
             if (trim((string)$s['docs_rule']) !== '')       $cond[] = ['Документы перед поставкой', $s['docs_rule']];
             if ($cond) {
-                $section->addText('Условия и сроки', ['bold' => true, 'size' => 10],
-                    ['spaceBefore' => 100, 'spaceAfter' => 40, 'keepNext' => true]);
-                hoTable($section, $word, ['Параметр', 'Значение'], $cond, [5.0, 12.0]);
+                hoBlockLabel($section, 'Условия и сроки');
+                hoTable($section, $word, ['Параметр', 'Значение'], $cond, [5.0, 13.0]);
             }
 
             if (trim((string)$s['attention']) !== '') {
-                $section->addText('На что обратить внимание', ['bold' => true, 'size' => 10],
-                    ['spaceBefore' => 100, 'spaceAfter' => 40, 'keepNext' => true]);
-                $section->addText(htmlspecialchars($s['attention']), ['size' => 9.5, 'color' => HO_INK],
+                hoBlockLabel($section, 'На что обратить внимание');
+                $section->addText(htmlspecialchars($s['attention']), ['size' => 10, 'color' => HO_INK],
                     ['spaceAfter' => 140]);
             }
         }
@@ -244,11 +300,11 @@ function hoBuildDocx(PDO $pdo, array $full) {
 
     // ── Прочие разделы ──
     $blocks = [
-        ['topic',    'Отдельные темы',                ['Тема', 'Порядок работы', 'Кто ведёт'],                       [4.5, 9.0, 3.5]],
-        ['payment',  'Оплаты, документы, растаможка', ['Поставка / документ', 'Что сделать', 'Срок', 'Кто отвечает'], [4.5, 6.0, 2.5, 4.0]],
-        ['control',  'На контроле — незакрытые вопросы', ['Вопрос', 'Состояние', 'Что должно произойти', 'Кто ведёт', 'Когда напомнить'], [3.6, 4.0, 4.0, 2.7, 2.7]],
-        ['escalate', 'К кому идти с вопросами',       ['Вопрос', 'К кому', 'Контакт'],                                [6.0, 5.5, 5.5]],
-        ['file',     'Вложения к документу',          ['Файл', 'Зачем нужен'],                                       [7.0, 10.0]],
+        ['topic',    'Отдельные темы',                ['Тема', 'Порядок работы', 'Кто ведёт'],                       [4.6, 9.8, 3.6]],
+        ['payment',  'Оплаты, документы, растаможка', ['Поставка / документ', 'Что сделать', 'Срок', 'Кто отвечает'], [4.6, 6.4, 2.6, 4.4]],
+        ['control',  'На контроле — незакрытые вопросы', ['Вопрос', 'Состояние', 'Что должно произойти', 'Кто ведёт', 'Когда напомнить'], [3.8, 4.2, 4.4, 2.8, 2.8]],
+        ['escalate', 'К кому идти с вопросами',       ['Вопрос', 'К кому', 'Контакт'],                                [6.4, 5.8, 5.8]],
+        ['file',     'Вложения к документу',          ['Файл', 'Зачем нужен'],                                       [7.0, 11.0]],
     ];
     foreach ($blocks as [$kind, $title, $headers, $widths]) {
         $rows = [];
@@ -267,7 +323,7 @@ function hoBuildDocx(PDO $pdo, array $full) {
     $section->addText('Документ прочитан, дела приняты:', ['size' => 10], ['spaceAfter' => 120]);
     $sign = [['Передал', $doc['author_name'], hoDate($doc['created_at']), '']];
     foreach ($people as $p) $sign[] = ['Принял', $p['name'], '', ''];
-    hoTable($section, $word, ['Кто', 'ФИО', 'Дата', 'Подпись'], $sign, [4.5, 5.0, 3.0, 4.5]);
+    hoTable($section, $word, ['Кто', 'ФИО', 'Дата', 'Подпись'], $sign, [4.6, 5.4, 3.0, 5.0]);
 
     $name = 'Передача дел ' . hoDate($doc['date_from']) . '.docx';
     $tmp = tempnam(sys_get_temp_dir(), 'ho_');
