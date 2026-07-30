@@ -427,6 +427,66 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
     return ['rest' => $rest, 'schedule' => $schedule, 'available_dates' => $finalDates, 'settings' => $settings];
 }
 
+/**
+ * Проверка минимального заказа поставщика для заявки из бота.
+ * Возвращает текст ошибки или null, если всё в порядке.
+ *
+ * Логика та же, что в so/submit-order: считаем итог в штуках или в
+ * килограммах (вес коробки из справочника по группе юрлиц ресторана)
+ * и сравниваем с порогом. Нулевой итог не блокируем: в кг-режиме это
+ * значит, что веса в карточках не заполнены, и честно посчитать нельзя.
+ */
+function soBotMinOrderError($pdo, array $settings, array $items, array $rest): ?string {
+    $minValue = isset($settings['min_order_value']) ? (float)$settings['min_order_value'] : 0.0;
+    if ($minValue <= 0 || !$items) return null;
+    $minUnit = $settings['min_order_unit'] ?? 'kg';
+    if ($minUnit !== 'pieces' && $minUnit !== 'kg') $minUnit = 'kg';
+
+    $total = 0.0;
+    if ($minUnit === 'pieces') {
+        foreach ($items as $it) {
+            $q = (float)($it['quantity'] ?? 0);
+            if ($q > 0) $total += $q;
+        }
+    } else {
+        $group = $rest['legal_entity_group'] ?: getEntityGroup($rest['legal_entity'] ?? '');
+        $entities = getEntitiesInGroup($group);
+        $qtyBySku = [];
+        foreach ($items as $it) {
+            $q = (float)($it['quantity'] ?? 0);
+            $sku = (string)($it['sku'] ?? '');
+            if ($q > 0 && $sku !== '') $qtyBySku[$sku] = ($qtyBySku[$sku] ?? 0) + $q;
+        }
+        if (!$qtyBySku) return null;
+        $skuPh = implode(',', array_fill(0, count($qtyBySku), '?'));
+        $entPh = implode(',', array_fill(0, count($entities), '?'));
+        $st = $pdo->prepare("SELECT sku, qty_per_box, weight_netto, multiplicity
+                             FROM products
+                             WHERE sku IN ({$skuPh}) AND legal_entity IN ({$entPh})");
+        $st->execute(array_merge(array_keys($qtyBySku), $entities));
+        $attrs = [];
+        foreach ($st->fetchAll() as $row) {
+            if (!isset($attrs[$row['sku']])) $attrs[$row['sku']] = $row;
+        }
+        foreach ($qtyBySku as $sku => $qty) {
+            $a = $attrs[$sku] ?? null;
+            if (!$a) continue;
+            $perBox = (float)$a['qty_per_box'];
+            if ($perBox <= 1) $perBox = max(1.0, (float)$a['multiplicity']);
+            $netto = (float)$a['weight_netto'];
+            if ($netto <= 0 || $perBox <= 0) continue;
+            $total += ($qty / $perBox) * $netto / 1000;
+        }
+    }
+
+    if ($total <= 0 || $total >= $minValue - 0.001) return null;
+
+    $fmt = fn($v) => rtrim(rtrim(number_format($v, 2, '.', ' '), '0'), '.');
+    $unit = $minUnit === 'pieces' ? 'шт' : 'кг';
+    return "Минимальный заказ у поставщика — {$fmt($minValue)} {$unit}. "
+         . "В заявке {$fmt($total)} {$unit}. Добавьте ещё {$fmt($minValue - $total)} {$unit}.";
+}
+
 function soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate) {
     $rest = soGetRestaurantContext($pdo, $restNum);
     if (!$rest || !$deliveryDate) {
@@ -1291,6 +1351,11 @@ function soOrderProcessInput($chatId, $text) {
 
     // Определяем юрлицо ресторана
     $le = $rest['legal_entity'];
+
+    // Минимальный заказ у поставщика. В кабинете это проверяется, а через бот
+    // заявка уходила мимо проверки — так у Камако прошли 12 шт при минимуме 24.
+    $minErr = soBotMinOrderError($pdo, $settings, $items, $rest);
+    if ($minErr !== null) { sendMessage($chatId, "❌ {$minErr}"); return; }
 
     // Сохраняем заказ
     try {
