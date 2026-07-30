@@ -1628,6 +1628,13 @@ if ($soAction === 'suppliers' && $method === 'GET') {
         $suppliersMap[$sid]['schedule'][] = ['order_day' => (int)$row['order_day'], 'delivery_day' => (int)$row['delivery_day']];
     }
 
+    // Цех собственного производства (ПРЦ) убираем: тесто рестораны заказывают
+    // в отдельном пункте «Тесто (ПРЦ)», а не среди обычных поставщиков.
+    require_once __DIR__ . '/so_loading_sheets.php';
+    foreach (array_keys($suppliersMap) as $sid) {
+        if (soLsSupplierEnabled($pdo, (string)$sid)) unset($suppliersMap[$sid]);
+    }
+
     if (empty($suppliersMap)) {
         soRespond(['suppliers' => []]);
     }

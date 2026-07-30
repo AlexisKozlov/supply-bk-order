@@ -31,6 +31,13 @@
         Основная поставка
         <span v-if="deliveryBadge" class="sb-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
       </button>
+      <!-- Собственное производство (тесто ПРЦ). Только «Пицца Стар». -->
+      <button v-if="isPizzaStarCabinet" class="sb-item"
+        :class="{ active: activeTab === 'orders' && orderSubTab === 'production' }"
+        @click="switchTab('orders', 'production')">
+        <span class="sb-icon" v-html="cabIconSvg.dough"></span>
+        Тесто (ПРЦ)
+      </button>
       <!-- Поставщики (Камако и др.) -->
       <button v-for="sup in suppliers" :key="'sb-'+sup.id" class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'sup_' + sup.id }"
@@ -385,6 +392,11 @@
         <button v-if="roStore.restaurantOrdersEnabled" class="ord-tab" :class="{ active: orderSubTab === 'delivery' }" @click="switchTab('orders', 'delivery')">
           Основная поставка
           <span v-if="deliveryBadge" class="ord-tab-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
+        </button>
+        <button v-if="isPizzaStarCabinet" class="ord-tab" :class="{ active: orderSubTab === 'production' }"
+          @click="switchTab('orders', 'production')">
+          <span class="ord-tab-icon" v-html="cabIconSvg.dough"></span>
+          Тесто (ПРЦ)
         </button>
         <button
           v-for="sup in suppliers"
@@ -788,6 +800,11 @@
       <!-- Сбор заказа (помощник). Для Пицца Стар не показывается. -->
       <div v-if="orderSubTab === 'assistant' && !isPizzaStarCabinet">
         <RestaurantSupplyAssistantTab />
+      </div>
+
+      <!-- Тесто собственного производства (ПРЦ). Только «Пицца Стар». -->
+      <div v-if="orderSubTab === 'production' && isPizzaStarCabinet">
+        <RestaurantProductionTab :confirm-fn="showConfirm" />
       </div>
 
       <!-- Корректировки основной поставки -->
@@ -1571,6 +1588,7 @@ const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/Scanne
 const RestaurantKegReturnsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantKegReturnsTab.vue'));
 const RestaurantRemindersTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantRemindersTab.vue'));
 const RestaurantCorrectionsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantCorrectionsTab.vue'));
+const RestaurantProductionTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantProductionTab.vue'));
 const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components/restaurant/RestaurantTodayReminders.vue'));
 const RestaurantOrderHistoryTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantOrderHistoryTab.vue'));
 const RestaurantSurveysTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantSurveysTab.vue'));
@@ -2961,6 +2979,9 @@ function applyRouteToState() {
   } else if (name === 'restaurant-orders-assistant') {
     activeTab.value = 'orders';
     orderSubTab.value = 'assistant';
+  } else if (name === 'restaurant-orders-production') {
+    activeTab.value = 'orders';
+    orderSubTab.value = 'production';
   }
   ensureSupDeadlineTimer();
 }
@@ -3000,6 +3021,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-orders-corrections' };
   } else if (activeTab.value === 'orders' && orderSubTab.value === 'assistant') {
     target = { name: 'restaurant-orders-assistant' };
+  } else if (activeTab.value === 'orders' && orderSubTab.value === 'production') {
+    target = { name: 'restaurant-orders-production' };
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
     if (sub === 'delivery' && roStore.restaurantOrdersEnabled) target = { name: 'restaurant-orders-delivery' };

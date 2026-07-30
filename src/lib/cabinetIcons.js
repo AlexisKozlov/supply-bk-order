@@ -35,6 +35,7 @@ export const cabIconSvg = {
   reminders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
   corrections: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4"/><path d="m11 11 4.5 4.5"/><path d="m8 18 1.5-3.5 3.5-3.5 2 2-3.5 3.5L8 18Z"/></svg>',
   contacts: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="12" cy="10" r="2.5"/><path d="M8 17c.7-2 2.2-3 4-3s3.3 1 4 3"/><path d="M4 8h2"/><path d="M4 12h2"/><path d="M4 16h2"/></svg>',
+  dough: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5h18"/><path d="M4 7.5 5 20h14l1-12.5"/><ellipse cx="12" cy="5.5" rx="6" ry="2.5"/><path d="M8 12h8"/><path d="M8.5 16h7"/></svg>',
 };
 
 // ── Иконки для крупных плиток на дашборде ──

@@ -4,6 +4,7 @@
  */
 
 export const icons = {
+  workshop: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 20V10l4 2.5V10l4 2.5V10l4 2.5V8l4 2v10z" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.6" stroke-linejoin="round"/><rect x="6" y="15" width="3" height="5" rx="0.6" fill="#F4A261"/><rect x="12" y="15" width="3" height="5" rx="0.6" fill="#F4A261"/><path d="M17 6.5V4" stroke="#E76F51" stroke-width="1.6" stroke-linecap="round"/></svg>`,
   handover: `<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="7" width="19" height="12" rx="2.5" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.6"/><path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7" stroke="#E76F51" stroke-width="1.6" stroke-linecap="round"/><path d="M7.5 13h6.5" stroke="#F4A261" stroke-width="1.8" stroke-linecap="round"/><path d="M12.2 10.8L14.8 13l-2.6 2.2" stroke="#E76F51" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   // ─── Navigation / Modules ───
   archive: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="5" rx="1.5" fill="#F4A261" stroke="#E76F51" stroke-width="1.5"/><path d="M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.5"/><rect x="9" y="12" width="6" height="2" rx="1" fill="#E76F51"/></svg>`,
@@ -169,6 +170,7 @@ export const icons = {
  * Каждая иконка в сайдбаре уникальна, чтобы они не путались между собой.
  */
 export const iconsLight = {
+  workshop: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 20V10l4 2.5V10l4 2.5V10l4 2.5V8l4 2v10z" fill="rgba(255,213,79,0.18)" stroke="#FFD54F" stroke-width="1.9" stroke-linejoin="round"/><rect x="6" y="15" width="3" height="5" rx="0.6" fill="#FFD54F" opacity="0.7"/><rect x="12" y="15" width="3" height="5" rx="0.6" fill="#FFD54F" opacity="0.7"/><path d="M17 6.5V4" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round"/></svg>`,
   handover: `<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="7" width="19" height="12" rx="2.5" fill="rgba(255,213,79,0.18)" stroke="#FFD54F" stroke-width="1.9"/><path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round"/><path d="M7.5 13h6.5" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round" opacity="0.55"/><path d="M12.2 10.8L14.8 13l-2.6 2.2" stroke="#FFD54F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   // ─── Заказы (жёлтый акцент #FFD54F) ───
 

@@ -149,6 +149,9 @@ require_once __DIR__ . '/includes/ocr.php';
 // Передача дел (отпуск, больничный)
 require_once __DIR__ . '/includes/handover.php';
 
+// Собственное производство (ПРЦ, тесто для «Пицца Стар»)
+require_once __DIR__ . '/includes/own_production.php';
+
 // Авторизация для REST
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 

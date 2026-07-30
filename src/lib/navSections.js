@@ -63,6 +63,7 @@ export const TOOLS_GROUPS = [
     { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
     { module: 'supplier-schedule', route: 'supplier-schedule', icon: 'truck', label: 'График поставок', keywords: 'расписание поставщиков дедлайн' },
     { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам', keywords: 'камако овощи so планета' },
+    { module: 'own-production', route: 'own-production', icon: 'workshop', label: 'Собственное производство', keywords: 'прц тесто цех пицца стар производство' },
     { module: 'supplier-orders', route: 'cabinet-links', icon: 'link', label: 'Ссылки кабинета', keywords: 'ссылки кабинет ресторана лидское салатория' },
     { module: 'plan-fact', route: 'payments', icon: 'payments', label: 'Оплаты поставщиков', keywords: 'оплата казначей платёж' },
   ]},
