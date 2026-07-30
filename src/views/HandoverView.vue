@@ -94,6 +94,14 @@
           <h1 v-else class="page-title">{{ current.doc.title }}</h1>
         </div>
         <div class="ho-actions">
+          <!-- Статус виден и переключается здесь: раньше он всегда показывал
+               «черновик», и было непонятно, где его менять. -->
+          <button v-if="canEdit" class="ho-status-btn"
+                  :class="current.doc.status === 'final' ? 'is-final' : 'is-draft'"
+                  :title="current.doc.status === 'final' ? 'Вернуть в черновик' : 'Пометить готовым — дела переданы'"
+                  @click="toggleStatus">
+            {{ current.doc.status === 'final' ? 'Готов' : 'Черновик' }}
+          </button>
           <button class="ho-btn ho-btn-ghost" :disabled="rebuilding" @click="rebuild">
             {{ rebuilding ? 'Собираю…' : 'Обновить приходы' }}
           </button>
@@ -154,15 +162,24 @@
 
         <div v-if="!current.people.length" class="ho-mini-empty">Пока никого не добавили</div>
         <div v-else class="ho-rows">
-          <div v-for="p in current.people" :key="p.id" class="ho-row ho-row-people">
-            <input v-model="p.name" class="ho-input" placeholder="Фамилия Имя" :disabled="!canEdit"
-                   @change="savePerson(p)" />
-            <input v-model="p.zone" class="ho-input" placeholder="что принимает" :disabled="!canEdit"
-                   @change="savePerson(p)" />
-            <input v-model="p.scope" class="ho-input" placeholder="поставщики и темы" :disabled="!canEdit"
-                   @change="savePerson(p)" />
-            <input v-model="p.contact" class="ho-input" placeholder="телефон / телеграм" :disabled="!canEdit"
-                   @change="savePerson(p)" />
+          <div v-for="(p, pi) in current.people" :key="p.id"
+               class="ho-row ho-row-people"
+               :class="{ 'is-drag': dragOver.list === 'people' && dragOver.index === pi }"
+               :draggable="canEdit"
+               @dragstart="onDragStart('people', pi, $event)"
+               @dragover.prevent="onDragOver('people', pi)"
+               @dragleave="onDragLeave('people', pi)"
+               @drop.prevent="onDrop('people', pi)"
+               @dragend="onDragEnd">
+            <span v-if="canEdit" class="ho-grip" title="Перетащите, чтобы поменять порядок">⠿</span>
+            <textarea v-model="p.name" v-autogrow class="ho-input ho-ta" rows="1" placeholder="Фамилия Имя" :disabled="!canEdit"
+                      @input="autoGrow($event.target)" @change="savePerson(p)"></textarea>
+            <textarea v-model="p.zone" v-autogrow class="ho-input ho-ta" rows="1" placeholder="что принимает" :disabled="!canEdit"
+                      @input="autoGrow($event.target)" @change="savePerson(p)"></textarea>
+            <textarea v-model="p.scope" v-autogrow class="ho-input ho-ta" rows="1" placeholder="поставщики и темы" :disabled="!canEdit"
+                      @input="autoGrow($event.target)" @change="savePerson(p)"></textarea>
+            <textarea v-model="p.contact" v-autogrow class="ho-input ho-ta" rows="1" placeholder="телефон / телеграм" :disabled="!canEdit"
+                      @input="autoGrow($event.target)" @change="savePerson(p)"></textarea>
             <button v-if="canEdit" class="ho-del" title="Удалить" @click="removePerson(p)">×</button>
           </div>
         </div>
@@ -268,15 +285,25 @@
 
         <div v-else class="ho-rows">
           <div class="ho-row ho-row-head" :style="gridStyle(b)">
+            <span v-if="canEdit && b.kind !== 'weekly'"></span>
             <span v-for="(h, i) in b.headers" :key="i">{{ h }}</span>
             <span v-if="canEdit"></span>
           </div>
-          <div v-for="it in itemsOf(b.kind)" :key="it.id" class="ho-row" :style="gridStyle(b)">
+          <div v-for="(it, ii) in itemsOf(b.kind)" :key="it.id" class="ho-row"
+               :style="gridStyle(b)"
+               :class="{ 'is-drag': dragOver.list === b.kind && dragOver.index === ii }"
+               :draggable="canEdit && b.kind !== 'weekly'"
+               @dragstart="onDragStart(b.kind, ii, $event)"
+               @dragover.prevent="onDragOver(b.kind, ii)"
+               @dragleave="onDragLeave(b.kind, ii)"
+               @drop.prevent="onDrop(b.kind, ii)"
+               @dragend="onDragEnd">
+            <span v-if="canEdit && b.kind !== 'weekly'" class="ho-grip" title="Перетащите, чтобы поменять порядок">⠿</span>
             <template v-for="(h, i) in b.headers" :key="i">
-              <input v-if="!(b.kind === 'weekly' && i === 0)"
-                     v-model="it['c' + (i + 1)]" class="ho-input"
-                     :placeholder="b.holders[i] || ''" :disabled="!canEdit"
-                     @change="saveItem(it)" />
+              <textarea v-if="!(b.kind === 'weekly' && i === 0)"
+                        v-model="it['c' + (i + 1)]" v-autogrow class="ho-input ho-ta" rows="1"
+                        :placeholder="b.holders[i] || ''" :disabled="!canEdit"
+                        @input="autoGrow($event.target)" @change="saveItem(it)"></textarea>
               <span v-else class="ho-day">{{ it.c1 }}</span>
             </template>
             <button v-if="canEdit && b.kind !== 'weekly'" class="ho-del" title="Удалить" @click="removeItem(it)">×</button>
@@ -302,7 +329,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
+import { ref, computed, onMounted, nextTick, defineAsyncComponent } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
@@ -404,7 +431,10 @@ function fmt(d) {
 }
 
 function gridStyle(b) {
-  return { gridTemplateColumns: b.cols + (canEdit.value ? ' 34px' : '') };
+  // Слева колонка под ручку перетаскивания, справа — под кнопку удаления.
+  // У дней недели порядок фиксирован, ручки нет.
+  const grip = canEdit.value && b.kind !== 'weekly' ? '18px ' : '';
+  return { gridTemplateColumns: grip + b.cols + (canEdit.value ? ' 34px' : '') };
 }
 
 function itemsOf(kind) {
@@ -429,6 +459,86 @@ function toggleSupplier(id) {
 function flash(text) {
   saveNote.value = text;
   setTimeout(() => { if (saveNote.value === text) saveNote.value = ''; }, 2000);
+}
+
+// ─── Поля растут под текст ───
+// Однострочные input прятали набранное: курсор уезжал вправо, и человек
+// не видел, что пишет. Теперь это textarea, которая растёт по содержимому,
+// а при желании её можно растянуть мышкой (resize: vertical).
+function autoGrow(el) {
+  if (!el || el.tagName !== 'TEXTAREA') return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 400) + 'px';
+}
+/**
+ * Директива вместо ручного обхода полей: подгоняет высоту сразу при
+ * появлении поля и при каждом обновлении значения. Обход по классу
+ * не срабатывал для уже заполненных полей — часть их в этот момент
+ * ещё не была в разметке (свёрнутые карточки, другая вкладка).
+ */
+const vAutogrow = {
+  mounted(el) { autoGrow(el); nextTick(() => autoGrow(el)); },
+  updated(el) { autoGrow(el); },
+};
+function growAll() {
+  nextTick(() => document.querySelectorAll('.ho-ta').forEach(autoGrow));
+}
+
+// ─── Перетаскивание строк ───
+// Порядок строк важен: регулярные дела читают сверху вниз, поставщиков
+// расставляют по важности. Тащим за строку, отпускаем на нужном месте.
+const dragFrom = ref({ list: null, index: null });
+const dragOver = ref({ list: null, index: null });
+
+function listByKind(kind) {
+  if (kind === 'people') return current.value?.people || [];
+  return current.value?.items?.[kind] || [];
+}
+
+function onDragStart(kind, index, e) {
+  dragFrom.value = { list: kind, index };
+  if (e?.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    // Без данных Firefox не начинает перенос.
+    try { e.dataTransfer.setData('text/plain', String(index)); } catch { /* старый браузер */ }
+  }
+}
+function onDragOver(kind, index) {
+  if (dragFrom.value.list !== kind) return;
+  dragOver.value = { list: kind, index };
+}
+function onDragLeave(kind, index) {
+  if (dragOver.value.list === kind && dragOver.value.index === index) {
+    dragOver.value = { list: null, index: null };
+  }
+}
+function onDragEnd() {
+  dragFrom.value = { list: null, index: null };
+  dragOver.value = { list: null, index: null };
+}
+
+async function onDrop(kind, index) {
+  const from = dragFrom.value;
+  onDragEnd();
+  if (from.list !== kind || from.index === null || from.index === index) return;
+
+  const list = listByKind(kind);
+  const moved = list.splice(from.index, 1)[0];
+  if (!moved) return;
+  list.splice(index, 0, moved);
+
+  // Порядок держим числами с шагом 10: между строками остаётся место,
+  // если потом понадобится вставить одну без перенумерации всех.
+  try {
+    await Promise.all(list.map((row, i) => {
+      row.sort_order = i * 10;
+      const path = kind === 'people' ? `handover/people/${row.id}` : `handover/items/${row.id}`;
+      return api('PATCH', path, { sort_order: row.sort_order });
+    }));
+    flash('Порядок сохранён');
+  } catch (e) {
+    flash(e?.message || 'Не удалось сохранить порядок');
+  }
 }
 
 async function loadDocs() {
@@ -479,6 +589,7 @@ function setCurrent(full) {
   current.value = full;
   periodAtLoad.value = `${full.doc.date_from}|${full.doc.date_to}`;
   openSuppliers.value = new Set();
+  growAll();
 }
 
 async function openDoc(id) {
@@ -495,6 +606,13 @@ async function saveDoc(patch) {
   if (!canEdit.value) return;
   await api('PATCH', `handover/docs/${current.value.doc.id}`, patch);
   flash('Сохранено');
+}
+
+async function toggleStatus() {
+  const next = current.value.doc.status === 'final' ? 'draft' : 'final';
+  current.value.doc.status = next;
+  await saveDoc({ status: next });
+  flash(next === 'final' ? 'Документ помечен готовым' : 'Документ снова черновик');
 }
 
 async function rebuild() {
@@ -527,6 +645,7 @@ async function downloadDocx() {
 async function addPerson() {
   const r = await api('POST', 'handover/people', { doc_id: current.value.doc.id, name: '' });
   current.value.people.push({ id: r.id, name: '', zone: '', scope: '', contact: '' });
+  growAll();
 }
 
 async function savePerson(p) {
@@ -553,6 +672,7 @@ async function addItem(kind) {
   const r = await api('POST', 'handover/items', { doc_id: current.value.doc.id, kind });
   if (!current.value.items[kind]) current.value.items[kind] = [];
   current.value.items[kind].push({ id: r.id, kind, c1: '', c2: '', c3: '', c4: '', c5: '' });
+  growAll();
 }
 
 async function saveItem(it) {
@@ -686,7 +806,7 @@ onMounted(loadDocs);
 
 .ho-rows { display: flex; flex-direction: column; gap: 8px; }
 .ho-row { display: grid; gap: 8px; align-items: center; }
-.ho-row-people { grid-template-columns: 1.4fr 1.4fr 2fr 1.4fr 34px; }
+.ho-row-people { grid-template-columns: 18px 1.4fr 1.4fr 2fr 1.4fr 34px; }
 .ho-row-head {
   font-size: 11px; font-weight: 800; letter-spacing: .03em;
   text-transform: uppercase; color: #8A7F72; padding: 0 2px;
@@ -781,4 +901,35 @@ onMounted(loadDocs);
   .ho-sup-right { width: 100%; justify-content: space-between; }
   .ho-items-sku { width: 70px; }
 }
+
+/* Поля растут под текст и тянутся мышкой */
+.ho-ta {
+  resize: vertical; overflow: hidden; line-height: 1.35;
+  min-height: 38px; padding-top: 9px; padding-bottom: 9px;
+  font-family: inherit;
+}
+.ho-ta:focus { overflow: auto; }
+
+/* Ручка перетаскивания */
+.ho-grip {
+  display: flex; align-items: center; justify-content: center;
+  width: 18px; align-self: stretch; cursor: grab;
+  color: #C4B8A8; font-size: 15px; line-height: 1; user-select: none;
+}
+.ho-grip:active { cursor: grabbing; }
+.ho-row[draggable="true"]:hover .ho-grip { color: #E87A1E; }
+/* Куда встанет строка при отпускании */
+.ho-row.is-drag {
+  outline: 2px dashed #E87A1E; outline-offset: 2px;
+  background: rgba(232, 122, 30, .06);
+}
+
+/* Статус документа — кнопка-переключатель в шапке */
+.ho-status-btn {
+  padding: 8px 14px; border-radius: 20px; border: 1.5px solid transparent;
+  font: inherit; font-size: 12.5px; font-weight: 800; cursor: pointer;
+}
+.ho-status-btn.is-draft { background: #F4EDE4; color: #6B5544; border-color: #E4D9CB; }
+.ho-status-btn.is-draft:hover { border-color: #E87A1E; color: #C25E12; }
+.ho-status-btn.is-final { background: rgba(46, 139, 87, .14); color: #2E7D32; border-color: #A5D6A7; }
 </style>

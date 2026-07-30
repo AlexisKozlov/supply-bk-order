@@ -53,6 +53,16 @@ function hoRequireUser($pdo) {
     return $u;
 }
 
+/**
+ * Ограничение длины текстового поля. Колонки теперь TEXT, но вставку
+ * гигантского текста (например, случайно скопированного файла) лучше
+ * обрезать, чем ронять запрос ошибкой базы.
+ */
+function hoText($value, int $limit = 20000): string {
+    $v = trim((string)$value);
+    return mb_strlen($v) > $limit ? mb_substr($v, 0, $limit) : $v;
+}
+
 function hoIsManager($u) {
     return in_array($u['role'] ?? '', ['admin', 'manager'], true);
 }
@@ -417,7 +427,7 @@ if ($hoAction === 'people' && $hoId !== null && in_array($method, ['PATCH', 'DEL
     $fields = [];
     $params = [];
     foreach (['name', 'zone', 'scope', 'contact'] as $f) {
-        if (array_key_exists($f, $body)) { $fields[] = "$f = ?"; $params[] = trim((string)$body[$f]); }
+        if (array_key_exists($f, $body)) { $fields[] = "$f = ?"; $params[] = hoText($body[$f], 2000); }
     }
     if (array_key_exists('sort_order', $body)) { $fields[] = "sort_order = ?"; $params[] = (int)$body['sort_order']; }
     if (array_key_exists('user_id', $body)) { $fields[] = "user_id = ?"; $params[] = $body['user_id'] ?: null; }
@@ -442,7 +452,7 @@ if ($hoAction === 'suppliers' && $hoId !== null && in_array($method, ['PATCH', '
     $fields = [];
     $params = [];
     foreach (['contacts', 'correction_rule', 'docs_rule', 'attention'] as $f) {
-        if (array_key_exists($f, $body)) { $fields[] = "$f = ?"; $params[] = trim((string)$body[$f]); }
+        if (array_key_exists($f, $body)) { $fields[] = "$f = ?"; $params[] = hoText($body[$f]); }
     }
     if (array_key_exists('person_id', $body)) { $fields[] = "person_id = ?"; $params[] = $body['person_id'] ? (int)$body['person_id'] : null; }
     if (array_key_exists('included', $body)) { $fields[] = "included = ?"; $params[] = $body['included'] ? 1 : 0; }
@@ -465,9 +475,9 @@ if ($hoAction === 'items' && $method === 'POST') {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     $s->execute([
         $docId, $kind,
-        trim((string)($body['c1'] ?? '')), trim((string)($body['c2'] ?? '')),
-        trim((string)($body['c3'] ?? '')), trim((string)($body['c4'] ?? '')),
-        trim((string)($body['c5'] ?? '')), (int)($body['sort_order'] ?? 0),
+        hoText($body['c1'] ?? ''), hoText($body['c2'] ?? ''),
+        hoText($body['c3'] ?? ''), hoText($body['c4'] ?? ''),
+        hoText($body['c5'] ?? ''), (int)($body['sort_order'] ?? 0),
     ]);
     hoRespond(['id' => (int)$pdo->lastInsertId()], 201);
 }
@@ -486,7 +496,7 @@ if ($hoAction === 'items' && $hoId !== null && in_array($method, ['PATCH', 'DELE
     $fields = [];
     $params = [];
     foreach (['c1', 'c2', 'c3', 'c4', 'c5'] as $f) {
-        if (array_key_exists($f, $body)) { $fields[] = "$f = ?"; $params[] = trim((string)$body[$f]); }
+        if (array_key_exists($f, $body)) { $fields[] = "$f = ?"; $params[] = hoText($body[$f]); }
     }
     if (array_key_exists('done', $body)) { $fields[] = "done = ?"; $params[] = $body['done'] ? 1 : 0; }
     if (array_key_exists('sort_order', $body)) { $fields[] = "sort_order = ?"; $params[] = (int)$body['sort_order']; }

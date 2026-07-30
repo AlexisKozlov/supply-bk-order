@@ -124,20 +124,6 @@ function hoBlockLabel($section, PhpWord $word, string $text) {
         ['spaceBefore' => 0, 'spaceAfter' => 0, 'keepNext' => true]);
 }
 
-/** Тонкая линия-разделитель между поставщиками. */
-function hoDivider($section, PhpWord $word) {
-    static $n = 0;
-    $style = 'hoDiv' . (++$n);
-    $word->addTableStyle($style, [
-        'borderTopSize' => 6, 'borderTopColor' => HO_LINE,
-        'borderBottomSize' => 0, 'borderLeftSize' => 0, 'borderRightSize' => 0,
-        'cellMargin' => 0, 'alignment' => Jc::CENTER,
-    ]);
-    $t = $section->addTable($style);
-    $t->addRow(20)->addCell((int)round(Converter::cmToTwip(19.1)))->addText('', ['size' => 4]);
-    $section->addTextBreak(1, ['size' => 6]);
-}
-
 function hoHint($section, $text) {
     $section->addText(htmlspecialchars($text), ['italic' => true, 'size' => 9, 'color' => HO_GREY],
         ['spaceAfter' => 120]);
@@ -261,7 +247,9 @@ function hoBuildDocx(PDO $pdo, array $full) {
         $supIndex = 0;
         foreach ($suppliers as $s) {
             $owner = $s['person_id'] ? ($peopleById[(int)$s['person_id']] ?? '—') : '—';
-            if ($supIndex > 0) hoDivider($section, $word);
+            // Между блоками — воздух. Раньше здесь стоял разделитель-таблица,
+            // и в готовом файле это выглядело как пустая строка с рамкой.
+            if ($supIndex > 0) $section->addTextBreak(1, ['size' => 10]);
             hoSupplierBand($section, $word, ++$supIndex, $s['supplier_name'], $owner);
 
             if (trim((string)$s['contacts']) !== '') {
