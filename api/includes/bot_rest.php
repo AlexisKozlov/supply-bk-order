@@ -870,6 +870,10 @@ function restMenuSupplier($chatId, $msgId) {
     }
     $rIdList = implode(',', array_keys($restMap));
     $sups = $pdo->query("SELECT DISTINCT s.id, s.short_name FROM supplier_schedules ss JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 AND s.so_enabled = 1 WHERE ss.restaurant_id IN ({$rIdList}) AND ss.is_active = 1 ORDER BY s.short_name")->fetchAll();
+    // Тесто собственного производства заказывают в кабинете: там две партии
+    // изготовления, в боте такой формы нет. Цех из списка убираем.
+    require_once __DIR__ . '/so_loading_sheets.php';
+    $sups = array_values(array_filter($sups, fn($sp) => !soLsSupplierEnabled($pdo, (string)$sp['id'])));
 
     $text = "📦 <b>Заявки поставщикам</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";

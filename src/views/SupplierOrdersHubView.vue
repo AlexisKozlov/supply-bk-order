@@ -113,6 +113,10 @@ async function loadList() {
   try {
     const soSuppliers = await soStore.adminGetSuppliers(orderStore.settings.legalEntity);
     for (const s of soSuppliers) {
+      // Цех собственного производства (ПРЦ) живёт в своём модуле —
+      // «Собственное производство». Здесь его не показываем, чтобы графики
+      // и настройки не правили в двух местах.
+      if (s.is_workshop) continue;
       list.push({ id: s.id, name: s.short_name, type: 'so' });
     }
   } catch (e) {

@@ -2493,7 +2493,16 @@ if ($soAction === 'admin') {
             ORDER BY s.short_name
         ");
         $s->execute($params);
-        soRespond(['suppliers' => $s->fetchAll()]);
+        // Цех собственного производства (ПРЦ) помечаем: им управляют в модуле
+        // «Собственное производство», в списке поставщиков он не нужен —
+        // иначе одно и то же настраивается в двух местах.
+        require_once __DIR__ . '/so_loading_sheets.php';
+        $rows = $s->fetchAll();
+        foreach ($rows as &$row) {
+            $row['is_workshop'] = soLsSupplierEnabled($pdo, (string)$row['id']) ? 1 : 0;
+        }
+        unset($row);
+        soRespond(['suppliers' => $rows]);
     }
 
     // --- Обзор по всем поставщикам группы на выбранную дату ---
@@ -2520,6 +2529,14 @@ if ($soAction === 'admin') {
         ");
         $s->execute($params);
         $suppliers = $s->fetchAll();
+
+        // Цех собственного производства в обзор поставщиков не попадает —
+        // его день смотрят в модуле «Собственное производство».
+        require_once __DIR__ . '/so_loading_sheets.php';
+        $suppliers = array_values(array_filter(
+            $suppliers,
+            fn($sup) => !soLsSupplierEnabled($pdo, (string)$sup['id'])
+        ));
 
         $rows = [];
         foreach ($suppliers as $sup) {

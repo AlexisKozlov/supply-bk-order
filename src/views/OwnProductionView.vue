@@ -226,6 +226,13 @@
         </div>
       </template>
 
+      <!-- ═══ Заявки ресторанов ═══ -->
+      <!-- Приём на день (правка количеств, закрыть день, продлить дедлайн,
+           письмо цеху) и список заявок — экран из «Заявок поставщикам». -->
+      <template v-else-if="tab === 'orders'">
+        <SupplierOrdersManagerView :supplier-id="shopId" :tabs="['status', 'list']" />
+      </template>
+
       <!-- ═══ Настройки: график изготовления ═══ -->
       <template v-else-if="tab === 'settings'">
         <div class="op-card">
@@ -274,6 +281,13 @@
             <span v-if="schedSaved" class="op-saved">Сохранено</span>
           </div>
         </div>
+
+        <!-- График поставок по ресторанам, шаблон размеров и настройки цеха
+             (дедлайн подачи, авто-письмо, пауза) — тот же экран, что у
+             остальных поставщиков. -->
+        <div class="op-embed">
+          <SupplierOrdersManagerView :supplier-id="shopId" :tabs="['schedules', 'templates', 'settings']" />
+        </div>
       </template>
 
       <!-- ═══ Загрузочные листы ═══ -->
@@ -306,7 +320,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
@@ -317,8 +331,14 @@ const TABS = [
   { key: 'day', label: 'Заказ на день' },
   { key: 'plan', label: 'План производства' },
   { key: 'sheets', label: 'Загрузочные листы' },
+  { key: 'orders', label: 'Заявки ресторанов' },
   { key: 'settings', label: 'Настройки' },
 ];
+
+// Приём заявок, графики поставок, шаблон товаров и настройки поставщика
+// (дедлайны, письмо цеху) берём из «Заявок поставщикам»: там эта механика
+// уже написана и вылизана, дублировать её ради ПРЦ незачем.
+const SupplierOrdersManagerView = defineAsyncComponent(() => import('@/views/SupplierOrdersManagerView.vue'));
 
 const DOWS = [
   { n: 1, label: 'понедельник' }, { n: 2, label: 'вторник' }, { n: 3, label: 'среда' },
@@ -729,4 +749,6 @@ onMounted(loadShops);
 .op-sched-hint { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
 .op-sched-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .op-saved { font-size: 12px; font-weight: 700; color: var(--green); }
+
+.op-embed { margin-top: 18px; }
 </style>

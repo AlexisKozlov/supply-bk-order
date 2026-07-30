@@ -19,7 +19,7 @@
       <label>Поставщик:</label>
       <select v-model="currentSupplierId" @change="onSupplierChange" class="rom-select">
         <option value="">— выберите —</option>
-        <option v-for="s in allSuppliers" :key="s.id" :value="s.id">
+        <option v-for="s in pickerSuppliers" :key="s.id" :value="s.id">
           {{ s.short_name }} ({{ s.restaurant_count }} рест.)
         </option>
       </select>
@@ -1202,6 +1202,10 @@ const { confirmModal, confirm: showConfirm, onConfirm, onCancel } = useConfirm()
 
 const props = defineProps({
   supplierId: { type: String, default: '' },
+  // Какие разделы показывать. Нужно другим модулям, которые встраивают этот
+  // экран ради части функций: «Собственное производство» берёт приём заявок,
+  // графики, шаблон и настройки, а обзор по всем поставщикам ему не нужен.
+  tabs: { type: Array, default: null },
 });
 
 const store = useSupplierOrderStore();
@@ -1212,12 +1216,8 @@ const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'С
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
 const daysShort = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
 
-// Стартовая вкладка: «Обзор» по умолчанию, но при входе по прямой ссылке
-// на конкретного поставщика (props.supplierId) — сразу «Приём».
-const pageTab = ref(props.supplierId ? 'status' : 'overview');
-
 // Разделы модуля: один список — и для кнопок, и для загрузки данных вкладки.
-const PAGE_TABS = [
+const ALL_PAGE_TABS = [
   { key: 'overview', label: 'Обзор' },
   { key: 'status', label: 'Приём' },
   { key: 'list', label: 'Список заявок' },
@@ -1225,6 +1225,15 @@ const PAGE_TABS = [
   { key: 'templates', label: 'Шаблон товаров' },
   { key: 'settings', label: 'Настройки' },
 ];
+const PAGE_TABS = computed(() => (props.tabs?.length
+  ? ALL_PAGE_TABS.filter(t => props.tabs.includes(t.key))
+  : ALL_PAGE_TABS));
+
+// Стартовая вкладка: «Обзор» по умолчанию, но при входе по прямой ссылке
+// на конкретного поставщика (props.supplierId) — сразу «Приём».
+const pageTab = ref(
+  props.tabs?.length ? PAGE_TABS.value[0]?.key || 'status'
+                     : (props.supplierId ? 'status' : 'overview'));
 const TAB_LOADERS = {
   overview: () => loadOverview(),
   status: () => loadStatus(),
@@ -1383,6 +1392,10 @@ const templateEntities = computed(() => {
   return LEGAL_ENTITIES.filter(e => !e.includes('Пицца Стар'));
 });
 const currentSupplier = computed(() => allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value)) || null);
+// В выборе поставщика цех собственного производства не показываем: его
+// настраивают в модуле «Собственное производство». Сам список поставщиков
+// оставляем полным — по нему находится название и почта встроенного экрана.
+const pickerSuppliers = computed(() => allSuppliers.value.filter(s => !s.is_workshop));
 
 // ── Загрузочные листы (ПРЦ, тесто) ──
 // ПРЦ собирает заказ стопками по 22 лотка и клеит на них печатные листы.
