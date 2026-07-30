@@ -145,7 +145,7 @@ function soLsCollectDay(PDO $pdo, string $supplierId, string $deliveryDate): arr
         LEFT JOIN products p ON p.id = oi.product_id
         WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
           AND COALESCE(oi.admin_qty, oi.quantity) > 0
-        ORDER BY r.region, CAST(r.dodo_is_number AS UNSIGNED), o.restaurant_number, oi.sku");
+        ORDER BY r.city, CAST(r.dodo_is_number AS UNSIGNED), o.restaurant_number, oi.sku");
     $stmt->execute([$supplierId, $deliveryDate]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -159,6 +159,7 @@ function soLsCollectDay(PDO $pdo, string $supplierId, string $deliveryDate): arr
                 'restaurant_number' => $num,
                 'dodo_is_number'    => trim((string)($row['dodo_is_number'] ?? '')),
                 'region'            => trim((string)($row['region'] ?? '')),
+                'city'              => $city,
                 'address'           => $city !== '' && $addr !== '' ? "$city, $addr" : ($city ?: $addr),
                 'items'             => [],
             ];
@@ -178,10 +179,13 @@ function soLsCollectDay(PDO $pdo, string $supplierId, string $deliveryDate): arr
         $rest['items']       = $built['items'];
         $rest['stacks']      = $built['stacks'];
         $rest['total_trays'] = $built['total_trays'];
-        // Подпись ресторана: «Минск 26» — регион и номер в ДОДО ИС. Если номер
-        // не заполнен, оставляем один регион: портальный номер (PS12) для ПРЦ
-        // ничего не значит, они работают номерами ДОДО ИС.
-        $rest['title'] = trim($rest['region'] . ' ' . $rest['dodo_is_number']);
+        // Подпись ресторана: «Могилев 1» — ГОРОД и номер в ДОДО ИС. Регион для
+        // этого не годится: у «Пицца Стар» половина точек лежит в регионе
+        // «Регионы», и листы получались с бессмысленной подписью.
+        // Если номер в ДОДО ИС не заполнен — оставляем один город: портальный
+        // номер (PS12) для ПРЦ ничего не значит, они работают номерами ДОДО ИС.
+        $titleBase = $rest['city'] !== '' ? $rest['city'] : $rest['region'];
+        $rest['title'] = trim($titleBase . ' ' . $rest['dodo_is_number']);
         if ($rest['title'] === '') $rest['title'] = formatRestaurantNumber((int)$num);
         $out[] = $rest;
     }

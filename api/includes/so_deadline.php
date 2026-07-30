@@ -213,7 +213,7 @@ function soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate = null, $re
         $fields = "ssi.restaurant_id, ssi.order_day, ssi.delivery_day, ssi.is_active";
         $joins = '';
         if ($withRestaurantMeta) {
-            $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
+            $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.dodo_is_number, r.legal_entity_group";
             $joins = " JOIN restaurants r ON r.id = ssi.restaurant_id AND r.active = 1";
         }
         $sql = "SELECT {$fields} FROM so_supplier_temp_schedule_items ssi{$joins} WHERE ssi.period_id = ? AND ssi.is_active = 1";
@@ -231,7 +231,7 @@ function soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate = null, $re
     $fields = "ss.restaurant_id, ss.order_day, ss.delivery_day, ss.is_active";
     $joins = '';
     if ($withRestaurantMeta) {
-        $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
+        $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.dodo_is_number, r.legal_entity_group";
         $joins = " JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1";
     }
     $sql = "SELECT {$fields} FROM supplier_schedules ss{$joins} WHERE ss.supplier_id = ? AND ss.is_active = 1";

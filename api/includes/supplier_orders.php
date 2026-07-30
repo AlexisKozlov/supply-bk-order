@@ -364,6 +364,10 @@ function soBuildSummaryXlsx(PDO $pdo, string $supplierId, string $deliveryDate, 
         $restaurantsOut[] = [
             'number' => (int)$rn, 'city' => $rest['city'] ?: '', 'region' => $rest['region'] ?: '',
             'address' => $rest['address'] ?: '', 'submitted' => isset($submittedNums[$rn]),
+            // Номер точки в ДОДО ИС: у «Пицца Стар» поставщики работают им,
+            // а не портальным номером. Колонка появляется только там, где
+            // номера заполнены.
+            'dodo_is_number' => trim((string)($rest['dodo_is_number'] ?? '')),
         ];
     }
     $itemsOut = new stdClass();
@@ -3040,6 +3044,8 @@ if ($soAction === 'admin') {
                 'region' => $row['region'],
                 'city' => $row['city'],
                 'address' => $row['address'],
+                // Номер точки в ДОДО ИС — колонка в Excel-сводке у «Пицца Стар».
+                'dodo_is_number' => $row['dodo_is_number'] ?? null,
                 'legal_entity_group' => $row['legal_entity_group'],
                 'order_day' => (int)$row['order_day'],
                 'order_id' => $orderRow['order_id'] ?? null,
@@ -3057,7 +3063,7 @@ if ($soAction === 'admin') {
         $adhocNums = array_values(array_diff(array_map('strval', array_keys($ordersByRestaurant)), $schedNums));
         if ($adhocNums) {
             $aph = implode(',', array_fill(0, count($adhocNums), '?'));
-            $rInfo = $pdo->prepare("SELECT number, region, city, address, legal_entity_group FROM restaurants WHERE legal_entity_group = ? AND number IN ($aph)");
+            $rInfo = $pdo->prepare("SELECT number, region, city, address, dodo_is_number, legal_entity_group FROM restaurants WHERE legal_entity_group = ? AND number IN ($aph)");
             $rInfo->execute(array_merge([$supplierGroup], array_map('intval', $adhocNums)));
             $rInfoMap = [];
             foreach ($rInfo->fetchAll() as $ri) $rInfoMap[(string)$ri['number']] = $ri;
@@ -3068,6 +3074,7 @@ if ($soAction === 'admin') {
                     'number' => $rn,
                     'region' => $ri['region'] ?? '',
                     'city' => $ri['city'] ?? '',
+                    'dodo_is_number' => $ri['dodo_is_number'] ?? null,
                     'address' => $ri['address'] ?? '',
                     'legal_entity_group' => $ri['legal_entity_group'] ?? $supplierGroup,
                     'order_day' => null,

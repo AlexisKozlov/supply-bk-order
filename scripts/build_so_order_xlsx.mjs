@@ -16,7 +16,7 @@
  *   "sheet_name": "Камако",
  *   "products": [
  *     {"sku": "...", "name": "...",
- *      "qty_per_box": 10, "boxes_per_pallet": 40,
+ *      "qty_per_box": 10, "boxes_per_pallet": 40, "multiplicity": 6,
  *      "weight_netto": 5000, "weight_brutto": 5200}   // вес ОДНОЙ коробки, граммы
  *   ],
  *   "restaurants": [
@@ -99,6 +99,11 @@ function sheetForDay(day) {
         boxes_per_pallet: p.boxes_per_pallet,
         weight_netto: p.weight_netto,
         weight_brutto: p.weight_brutto,
+        // Кратность = физический размер коробки/лотка, когда учётная единица
+        // штучная (qty_per_box = 1). Без неё сервер считал «одна штука = один
+        // лоток», и в письме поставщику лотков было столько же, сколько штук,
+        // хотя на портале в браузере файл собирался верно.
+        multiplicity: p.multiplicity,
     }));
 
     // ── Рестораны: флаг submitted → order_status (модуль смотрит order_status). ──
@@ -107,6 +112,9 @@ function sheetForDay(day) {
         city: r.city,
         region: r.region,
         address: r.address,
+        // Номер точки в ДОДО ИС: по нему поставщики «Пицца Стар» и
+        // ориентируются. Без проброса колонки в файле не было.
+        dodo_is_number: r.dodo_is_number,
         order_status: r.order_status ?? (r.submitted ? 'submitted' : 'draft'),
     }));
 

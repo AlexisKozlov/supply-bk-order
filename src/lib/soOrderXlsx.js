@@ -195,7 +195,19 @@ export function buildSoOrderSheet(XLSX, {
     const u = String(p.unit_of_measure || '').trim();
     return u ? `\nед.: ${u}` : '';
   };
-  const header = ['№', 'Адрес'];
+  // Номер точки в ДОДО ИС. У «Пицца Стар» поставщики ориентируются по нему,
+  // а не по портальному номеру, поэтому колонка идёт сразу за номером.
+  // Там, где номера не заполнены (Бургер БК), колонки нет вовсе.
+  const dodoOf = (r) => String(r?.dodo_is_number ?? '').trim();
+  const hasDodo = rests.some(r => dodoOf(r) !== '');
+  const header = hasDodo ? ['№', 'Додо ИС', 'Адрес'] : ['№', 'Адрес'];
+  // Сколько колонок стоит перед товарами: на это опираются строки итогов.
+  const leadPad = (label) => {
+    const row = [label];
+    const lead = hasDodo ? 3 : 2;
+    while (row.length < lead) row.push('');
+    return row;
+  };
   for (const p of prods) {
     const title = p.is_grouped
       ? `${p.product_name}\nSKU ×${p.source_skus.length}`
@@ -222,7 +234,9 @@ export function buildSoOrderSheet(XLSX, {
     for (let i = 0; i < group.length; i++) {
       const r = group[i];
       const isSubmitted = isSubmittedRest(r);
-      const row = [fmtRestNum(r.number), r.address || ''];
+      const row = hasDodo
+        ? [fmtRestNum(r.number), dodoOf(r) || '—', r.address || '']
+        : [fmtRestNum(r.number), r.address || ''];
       const piecesArr = [];
       for (const p of prods) { if (!isSubmitted) { row.push(0); piecesArr.push(0); continue; } const v = getQty(r, p); const q = v ? v.qty : 0; row.push(q); piecesArr.push(q); }
       if (M) {
@@ -237,7 +251,7 @@ export function buildSoOrderSheet(XLSX, {
       aoa.push(row);
       rowMeta.push({ type: 'data', row: r, isEven: i % 2 === 1, isSubmitted });
     }
-    const subRow = [`Итого ${city}`, ''];
+    const subRow = leadPad(`Итого ${city}`);
     const cityPieces = [];
     for (const p of prods) {
       let sum = 0, hasAny = false;
@@ -251,7 +265,7 @@ export function buildSoOrderSheet(XLSX, {
 
   // ═══ ИТОГО (по показанным ресторанам) ═══
   const totalPieces = prods.map(() => 0);
-  const grandRow = ['ИТОГО', ''];
+  const grandRow = leadPad('ИТОГО');
   for (let pi = 0; pi < prods.length; pi++) {
     const p = prods[pi];
     let sum = 0, hasAny = false;
@@ -279,7 +293,7 @@ export function buildSoOrderSheet(XLSX, {
       perProd.brutto.push((wboxes !== null && !isNaN(a.wb) && a.wb > 0) ? round(wboxes * a.wb / 1000, 1) : '');
     }
     const pushInfoRow = (label, values) => {
-      const row = [label, ''];
+      const row = leadPad(label);
       for (const v of values) row.push(v);
       for (let k = 0; k < M; k++) row.push(''); // правые столбцы показателей — пусто
       row.push(''); // Пометка
@@ -344,7 +358,9 @@ export function buildSoOrderSheet(XLSX, {
     prodWidths.push(Math.min(PROD_MAX_W, Math.max(PROD_MIN_W, longestWord + 2)));
   }
   ws['!cols'] = [
-    { wch: 8 }, { wch: 32 },
+    { wch: 8 },
+    ...(hasDodo ? [{ wch: 9 }] : []),
+    { wch: 32 },
     ...prodWidths.map(w => ({ wch: w })),
     ...Array(M).fill({ wch: 11 }), { wch: 20 },
   ];
