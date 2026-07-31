@@ -305,7 +305,14 @@ watch(() => route.query.id, (id) => { if (id) openFromQuery(); });
 @media (max-width: 720px) {
   .tit-wrap { padding: 16px 12px 80px; }
   .tit-header { flex-direction: column; }
+  /* Три кнопки в одну строку не помещались — «Создать» уезжала за край.
+     Раскладываем по две в ряд, последнюю (нечётную) — на всю ширину. */
+  .tit-header-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .tit-header-actions > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .tit-filters { padding: 8px; }
+  /* min-width 220px не давал полям сжаться, и поиск обрезался справа. */
+  .tit-filters select { flex: 1 1 100%; min-width: 0; }
+  .tit-search { flex: 1 1 100%; min-width: 0; width: 100%; }
   .tit-table thead { display: none; }
   .tit-row { display: block; padding: 12px; border-bottom: 1px solid #F0E8DC; }
   .tit-row td { display: block; padding: 4px 0; border: none; }

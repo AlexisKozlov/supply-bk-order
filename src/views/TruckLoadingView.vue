@@ -1658,6 +1658,14 @@ onMounted(async () => {
 }
 
 /* Responsive */
+@media (max-width: 560px) {
+  /* Дата и две кнопки-«ярлыка» в одну строку не помещались — «Послезавтра»
+     обрезалась о край экрана. Переносим по строкам. */
+  .tl-toolbar-actions { flex-wrap: wrap; }
+  .tl-toolbar-actions > input[type="date"] { flex: 1 1 100%; min-width: 0; }
+  .tl-toolbar-actions > .tl-btn { flex: 1 1 calc(50% - 4px); }
+}
+
 @media (max-width: 900px) {
   .tl-columns {
     flex-direction: column;

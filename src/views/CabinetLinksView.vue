@@ -254,4 +254,13 @@ onMounted(load);
 .cl-access-block { display: flex; flex-direction: column; gap: 6px; }
 .cl-access-title { font-size: 12px; font-weight: 700; color: #6b4f3a; text-transform: uppercase; }
 .cl-rest-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; border: 1px solid #e0d5c8; border-radius: 8px; padding: 8px; }
+
+@media (max-width: 560px) {
+  /* «Юрлицо» и «Добавить ссылку» в одну строку не помещались — кнопка
+     обрезалась справа. Кнопку на всю ширину, ссылки переносим по словам. */
+  .cl-page { padding: 12px; width: 100%; max-width: 100%; }
+  .cl-toolbar { gap: 10px; }
+  .cl-toolbar > button { width: 100%; }
+  .cl-page a { overflow-wrap: anywhere; }
+}
 </style>

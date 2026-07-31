@@ -510,4 +510,29 @@ onBeforeUnmount(() => {
   .rcm-grid { grid-template-columns: 1fr; }
   .rcm-header { flex-direction: column; }
 }
+
+@media (max-width: 560px) {
+  /* Та же ловушка, что на «Сборе заказа»: без ширины страница растягивается
+     по длинному тексту сообщения и уезжает вбок целиком. */
+  .rcm-page { width: 100%; max-width: 100%; box-sizing: border-box; }
+  .rcm-post, .rcm-post p, .rcm-posts { overflow-wrap: anywhere; min-width: 0; }
+  /* Четыре вкладки в строку налезали друг на друга — прокручиваем вбок. */
+  .rcm-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .rcm-tabs::-webkit-scrollbar { display: none; }
+  .rcm-tab { flex: 0 0 auto; white-space: nowrap; padding: 12px 10px; }
+  /* Поля формы шире карточки: задаём ширину явно, иначе input берёт size. */
+  .rcm-field input, .rcm-field textarea, .rcm-field select,
+  .rcm-list-head select, .rcm-tg-input { width: 100%; max-width: 100%; box-sizing: border-box; }
+  .rcm-panel { min-width: 0; }
+  /* Пример ссылки в подсказке — длинный неразрывный адрес: он распирал форму
+     до 900+ px, и вся страница ехала вбок вместе с заголовком. */
+  .rcm-hint code { overflow-wrap: anywhere; word-break: break-word; }
+  .rcm-page input[type="text"],
+  .rcm-page input[type="url"],
+  .rcm-page textarea,
+  .rcm-page select { max-width: 100%; }
+  /* Сетки внутри карточек на телефоне — в одну колонку. */
+  .rcm-page .rcm-row,
+  .rcm-page .rcm-two { grid-template-columns: 1fr; }
+}
 </style>

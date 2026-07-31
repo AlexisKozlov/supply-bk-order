@@ -1064,7 +1064,17 @@ onMounted(() => {
 .sam-stock-sel { font-size: 13px; color: var(--p-muted); }
 
 @media (max-width: 600px) {
-  .sam-page { padding: 14px; }
+  /* Страница лежит в main с overflow-x:auto, поэтому без явной ширины она
+     растягивается по самой широкой таблице — и вбок едет весь экран вместе
+     с заголовком. Ограничиваем страницу шириной окна, таблица скроллится сама. */
+  .sam-page { padding: 14px; width: 100%; max-width: 100%; box-sizing: border-box; }
   .rom-tpl-toolbar { flex-direction: column; align-items: stretch; }
+  /* overflow:hidden не давал широкой таблице скроллиться внутри карточки —
+     вбок ехала вся страница вместе с заголовком. */
+  .rom-table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Фильтры: поля во всю ширину, кнопки — по две в ряд. */
+  .sam-filters { display: grid; grid-template-columns: 1fr 1fr; }
+  .sam-filters > input,
+  .sam-filters > select { grid-column: 1 / -1; width: 100%; min-width: 0; }
 }
 </style>
