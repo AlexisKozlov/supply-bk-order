@@ -79,8 +79,10 @@
                   <span class="rpt-row-hint">в лотке {{ s.per_tray }} шт</span>
                 </div>
                 <div class="rpt-row-right">
+                  <!-- Пока не набрано — пусто: одинокий прочерк над полем ввода
+                       читался как мусор, а место под итог всё равно занято. -->
                   <span class="rpt-row-pieces" :class="{ 'is-on': sizeTrays(s) > 0 }">
-                    {{ sizeTrays(s) > 0 ? (sizeTrays(s) * s.per_tray) + ' шт' : '—' }}
+                    {{ sizeTrays(s) > 0 ? (sizeTrays(s) * s.per_tray) + ' шт' : '' }}
                   </span>
                   <div class="rpt-batches">
                     <div v-for="b in batches" :key="b.batch_no" class="rpt-batch">
@@ -176,6 +178,9 @@ const submitError = ref('');
 const savedStatus = ref(null);
 const isSkipSaved = ref(false);
 const trays = reactive({});
+// Снимок набранного после загрузки: по нему видно, что человек что-то ввёл и
+// ещё не отправил — тогда переключение дня спрашивает подтверждение.
+const traysSnapshot = ref('');
 const traysPerStack = ref(22);
 const orderState = reactive({});   // дата → { status, isSkip }
 const timeLeft = ref('');
@@ -273,7 +278,20 @@ async function load() {
   }
 }
 
+/** Есть ли несохранённое: сравниваем текущие лотки со снимком после загрузки. */
+function isDirty() {
+  return traysSnapshot.value !== '' && JSON.stringify(trays) !== traysSnapshot.value;
+}
+
 async function selectDate(date) {
+  if (date !== selectedDate.value && isDirty()) {
+    const ok = await showConfirm(
+      'Заявка не отправлена',
+      `Набранное на ${fmtFull(selectedDate.value)} не сохранится. Перейти на другой день?`,
+      { okText: 'Перейти', cancelText: 'Остаться', danger: true },
+    );
+    if (!ok) return;
+  }
   selectedDate.value = date;
   submitError.value = '';
   orderLoading.value = true;
@@ -284,12 +302,13 @@ async function selectDate(date) {
     const items = o.items || {};
     const saved = o.batches || {};
     isSkipSaved.value = !!o.status && Object.keys(items).length === 0;
-    const first = batches.value[0].batch_no;
     for (const s of sizes.value) {
+      // Сервер всегда раскладывает заявку по партиям (у старых номер 1),
+      // поэтому берём только их. Подстановка общей суммы в первую партию
+      // задваивала позицию, заказанную одной второй партией.
       const row = saved[s.sku] || {};
       for (const b of batches.value) {
-        // Старые заявки лежат без партии — показываем их в первой.
-        const pieces = Number(row[b.batch_no] ?? (b.batch_no === first ? items[s.sku] : 0)) || 0;
+        const pieces = Number(row[b.batch_no]) || 0;
         trays[s.sku][b.batch_no] = pieces > 0 ? Math.round(pieces / s.per_tray) : null;
       }
     }
@@ -298,6 +317,7 @@ async function selectDate(date) {
     submitError.value = e.message;
   } finally {
     orderLoading.value = false;
+    traysSnapshot.value = JSON.stringify(trays);
   }
   startTimer();
 }
@@ -338,6 +358,7 @@ async function submit(skip) {
     isSkipSaved.value = skip;
     orderState[selectedDate.value] = { status: 'submitted', isSkip: skip };
     if (skip) resetTrays();
+    traysSnapshot.value = JSON.stringify(trays);
     toast.success(
       skip ? 'Отмечено' : 'Заявка отправлена',
       skip ? `На ${fmtFull(selectedDate.value)} тесто не нужно`
@@ -521,8 +542,10 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 @media (max-width: 560px) {
   /* Итог в штуках уводим под название, иначе он повисает сбоку от двух
      полей ввода и мешает их читать. */
-  .rpt-row-right { flex-direction: column; align-items: stretch; gap: 8px; }
-  .rpt-row-pieces { text-align: left; }
+  .rpt-row { padding: 10px 12px; gap: 6px; }
+  .rpt-row-right { flex-direction: column; align-items: stretch; gap: 6px; }
+  .rpt-row-pieces { text-align: left; min-width: 0; }
+  .rpt-row-pieces:empty { display: none; }
   .rpt-batches { flex-direction: column; align-items: stretch; width: 100%; gap: 8px; }
   .rpt-batch-lbl em { display: inline; margin-left: 4px; }
 }

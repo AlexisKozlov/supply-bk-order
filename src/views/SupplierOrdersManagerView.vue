@@ -5,8 +5,9 @@
       <h1>Заявки поставщикам</h1>
     </div>
 
-    <!-- Разделы модуля -->
-    <div class="so-seg so-seg-tabs">
+    <!-- Разделы модуля. Скрываются, когда экран встроен в чужой модуль
+         со своей навигацией: две полосы вкладок подряд читаются как ошибка. -->
+    <div v-if="!hideTabs" class="so-seg so-seg-tabs">
       <button v-for="t in PAGE_TABS" :key="t.key"
               class="so-seg-btn" :class="{ active: pageTab === t.key }"
               @click="switchPageTab(t.key)">
@@ -1206,6 +1207,15 @@ const props = defineProps({
   // экран ради части функций: «Собственное производство» берёт приём заявок,
   // графики, шаблон и настройки, а обзор по всем поставщикам ему не нужен.
   tabs: { type: Array, default: null },
+  // Прятать собственную полосу вкладок: у встраивающего модуля она своя.
+  hideTabs: { type: Boolean, default: false },
+  // Префикс ключей в адресе страницы. Без него встроенный экран и модуль
+  // пишут в одни и те же ?tab= и ?date= и затирают друг друга.
+  queryPrefix: { type: String, default: '' },
+  // Юрлицо поставщика. Обычно берётся из сайдбара, но встроенный экран должен
+  // работать по юрлицу своего поставщика: у «Собственного производства» это
+  // всегда «Пицца Стар», каким бы юрлицом ни пользовался открывший ссылку.
+  legalEntity: { type: String, default: '' },
 });
 
 const store = useSupplierOrderStore();
@@ -1368,7 +1378,7 @@ for (let d = 1; d <= 7; d++) {
 const loadingTemplates = ref(false);
 const savingTemplates = ref(false);
 const templates = ref([]);
-const templateLe = ref(orderStore.settings.legalEntity || 'ООО "Бургер БК"');
+const templateLe = ref(props.legalEntity || orderStore.settings.legalEntity || 'ООО "Бургер БК"');
 const templateProductSearch = ref('');
 const templateProductResults = ref([]);
 // Индекс строки шаблона в режиме привязки к карточке каталога (null — режим добавления новой строки)
@@ -1378,6 +1388,7 @@ let templateSearchTimer = null;
 // Группа юрлиц текущего поставщика (BK_VM | PS). Определяется из списка
 // поставщиков: он уже отфильтрован backend'ом по группе юрлица сайдбара.
 const currentSupplierGroup = computed(() => {
+  if (props.legalEntity) return getEntityGroup(props.legalEntity);
   const sup = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value));
   if (sup?.legal_entity_group) return sup.legal_entity_group;
   // Fallback: берём группу из сайдбара, т.к. список поставщиков уже сужен
@@ -1680,7 +1691,9 @@ onMounted(async () => {
   // Живой отсчёт до дедлайнов в «Обзоре» — тикаем раз в минуту
   overviewTimer = setInterval(() => { now.value = Date.now(); }, 60000);
   try {
-    allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
+    // Встроенный экран грузит поставщиков своего юрлица, а не выбранного в
+    // сайдбаре: иначе название, почта и признак цеха не находятся.
+    allSuppliers.value = await store.adminGetSuppliers(props.legalEntity || orderStore.settings.legalEntity);
     if (!props.supplierId && allSuppliers.value.length === 1) {
       currentSupplierId.value = allSuppliers.value[0].id;
       await refreshActiveTab();
@@ -3626,17 +3639,23 @@ function formatDateTime(dt) {
 }
 
 // ═══ Сохранение фильтров в URL ═══
+// qk('date') → 'date' обычно и 'so_date' у встроенного экрана.
+const qk = (key) => (props.queryPrefix ? `${props.queryPrefix}_${key}` : key);
+
 // Восстанавливаем из query при монтировании
 {
   const q = route.query || {};
-  if (q.tab) pageTab.value = String(q.tab);
-  if (q.date) selectedDate.value = String(q.date);
-  if (q.status) listStatus.value = String(q.status);
-  if (q.query) listQuery.value = String(q.query);
-  if (q.skipOnly === '1') listSkipOnly.value = true;
-  if (q.from) listDeliveryFrom.value = String(q.from);
-  if (q.to) listDeliveryTo.value = String(q.to);
-  if (q.scheduleFilter) scheduleFilter.value = String(q.scheduleFilter);
+  const tabFromUrl = q[qk('tab')] ? String(q[qk('tab')]) : '';
+  // Чужой ключ вкладки (остался от соседнего экрана) игнорируем: иначе
+  // раздел откроется пустым — такой вкладки у него нет.
+  if (tabFromUrl && PAGE_TABS.value.some(t => t.key === tabFromUrl)) pageTab.value = tabFromUrl;
+  if (q[qk('date')]) selectedDate.value = String(q[qk('date')]);
+  if (q[qk('status')]) listStatus.value = String(q[qk('status')]);
+  if (q[qk('query')]) listQuery.value = String(q[qk('query')]);
+  if (q[qk('skipOnly')] === '1') listSkipOnly.value = true;
+  if (q[qk('from')]) listDeliveryFrom.value = String(q[qk('from')]);
+  if (q[qk('to')]) listDeliveryTo.value = String(q[qk('to')]);
+  if (q[qk('scheduleFilter')]) scheduleFilter.value = String(q[qk('scheduleFilter')]);
 }
 
 let urlSyncInit = false;
@@ -3645,7 +3664,7 @@ watch(
   () => {
     if (!urlSyncInit) { urlSyncInit = true; return; }
     const q = { ...route.query };
-    const set = (key, val) => { if (val) q[key] = val; else delete q[key]; };
+    const set = (key, val) => { if (val) q[qk(key)] = val; else delete q[qk(key)]; };
     set('tab', pageTab.value !== 'status' ? pageTab.value : '');
     set('date', selectedDate.value);
     set('status', listStatus.value);

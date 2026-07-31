@@ -54,9 +54,20 @@ function opRequireUser($pdo, string $need = 'view') {
     return $u;
 }
 
-/** Цеха: поставщики «Пицца Стар» с признаком собственного производства. */
-function opGetWorkshops(PDO $pdo): array {
+/**
+ * Цеха: поставщики «Пицца Стар» с признаком собственного производства.
+ * Если у сотрудника есть привязка к своим поставщикам (внешние работники
+ * цеха), список сужается до неё.
+ */
+function opGetWorkshops(PDO $pdo, $sessionUser = null): array {
     require_once __DIR__ . '/so_loading_sheets.php';
+    require_once __DIR__ . '/supplier_orders.php';
+    $scope = $sessionUser ? soUserSupplierScope($sessionUser) : [];
+    // Проверка цеха дёргает этот список на каждом запросе — держим ответ
+    // в памяти запроса, чтобы не ходить в базу дважды.
+    static $cache = [];
+    $key = implode(',', $scope);
+    if (isset($cache[$key])) return $cache[$key];
     $st = $pdo->prepare("
         SELECT id, short_name, full_name, email, legal_entity
         FROM suppliers
@@ -65,14 +76,35 @@ function opGetWorkshops(PDO $pdo): array {
     $st->execute();
     $out = [];
     foreach ($st->fetchAll() as $row) {
+        if ($scope && !in_array((string)$row['id'], $scope, true)) continue;
         if (!soLsSupplierEnabled($pdo, (string)$row['id'])) continue;
         $out[] = $row;
     }
-    return $out;
+    return $cache[$key] = $out;
 }
 
-/** Размеры теста из шаблона цеха: штук в лотке берём из кратности. */
+/**
+ * Цех из запроса. Без проверки по прямой ссылке можно было бы подставить
+ * любого поставщика и прочитать чужие заявки — идентификатор приходит от
+ * браузера, а не из сессии.
+ */
+function opRequireWorkshop(PDO $pdo, string $supplierId, $sessionUser = null): array {
+    if ($supplierId !== '') {
+        foreach (opGetWorkshops($pdo, $sessionUser) as $w) {
+            if ((string)$w['id'] === $supplierId) return $w;
+        }
+    }
+    opRespond(['error' => 'Цех не найден или недоступен'], 403);
+}
+
+/**
+ * Размеры теста из шаблона цеха: штук в лотке берём из кратности.
+ * План перебирает все даты периода, поэтому список запоминаем на время
+ * запроса — иначе один и тот же справочник читался бы десятки раз.
+ */
 function opGetSizes(PDO $pdo, string $supplierId): array {
+    static $cache = [];
+    if (isset($cache[$supplierId])) return $cache[$supplierId];
     $st = $pdo->prepare("
         SELECT sku, product_name, product_id, multiplicity, sort_order
         FROM so_templates
@@ -92,7 +124,7 @@ function opGetSizes(PDO $pdo, string $supplierId): array {
             'per_tray'     => $perTray > 0 ? $perTray : 1,
         ];
     }
-    return $out;
+    return $cache[$supplierId] = $out;
 }
 
 /** «Тесто для пиццы дрожжевое охлажденное 30 см, 7 шт/лоток» → «30 см». */
@@ -349,7 +381,7 @@ $opUser = in_array($opAction, OP_CABINET_ACTIONS, true) ? null : opRequireUser($
 
 // ─── Цеха ───
 if ($opAction === 'suppliers' && $method === 'GET') {
-    opRespond(['suppliers' => opGetWorkshops($pdo)]);
+    opRespond(['suppliers' => opGetWorkshops($pdo, $opUser)]);
 }
 
 // ─── Заказ на день ───
@@ -359,6 +391,7 @@ if ($opAction === 'day' && $method === 'GET') {
     if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         opRespond(['error' => 'Нужны цех и дата (ГГГГ-ММ-ДД)'], 400);
     }
+    opRequireWorkshop($pdo, $supplierId, $opUser);
     $day = opCollectDay($pdo, $supplierId, $date);
     opRespond([
         'date'        => $date,
@@ -379,6 +412,7 @@ if ($opAction === 'plan' && $method === 'GET') {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) opRespond(['error' => 'Нужны даты периода'], 400);
     }
     if ($to < $from) opRespond(['error' => 'Конец периода раньше начала'], 400);
+    opRequireWorkshop($pdo, $supplierId, $opUser);
 
     // Даты, на которые есть заявки цеху.
     $st = $pdo->prepare("
@@ -462,6 +496,7 @@ if ($opAction === 'plan' && $method === 'GET') {
 if ($opAction === 'schedule' && $method === 'GET') {
     $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
     if ($supplierId === '') opRespond(['error' => 'Не указан цех'], 400);
+    opRequireWorkshop($pdo, $supplierId, $opUser);
     opRespond([
         'schedule'  => opGetProductionSchedule($pdo, $supplierId),
         'dow_names' => OP_DOW_NAMES,
@@ -471,10 +506,11 @@ if ($opAction === 'schedule' && $method === 'GET') {
 // ─── График изготовления: сохранение ───
 // Приходит полный список строк — так проще, чем возиться с удалением по одной.
 if ($opAction === 'schedule' && $method === 'POST') {
-    opRequireUser($pdo, 'edit');
+    $opEditor = opRequireUser($pdo, 'edit');
     $supplierId = trim((string)($body['supplier_id'] ?? ''));
     $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
     if ($supplierId === '') opRespond(['error' => 'Не указан цех'], 400);
+    opRequireWorkshop($pdo, $supplierId, $opEditor);
 
     $clean = [];
     foreach ($rows as $r) {
@@ -547,6 +583,7 @@ if ($opAction === 'my-order' && $method === 'GET') {
     if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         opRespond(['error' => 'Нужны цех и дата'], 400);
     }
+    opRequireWorkshop($pdo, $supplierId);
     $st = $pdo->prepare("
         SELECT o.id, o.status, o.submitted_at, oi.sku, oi.batch_no,
                COALESCE(oi.admin_qty, oi.quantity) AS qty
@@ -583,6 +620,9 @@ if ($opAction === 'submit' && $method === 'POST') {
     if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         opRespond(['error' => 'Нужны цех и дата поставки'], 400);
     }
+    // Через этот маршрут заказывают только тесто: чужого поставщика в заявку
+    // не пропускаем, у него своя механика подачи.
+    opRequireWorkshop($pdo, $supplierId);
 
     // Дата должна быть в графике ресторана и приём по ней открыт.
     $dates = opRestaurantDates($pdo, $supplierId, (string)$rest['restaurant_number']);

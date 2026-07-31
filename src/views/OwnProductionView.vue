@@ -4,60 +4,94 @@
       <div>
         <h1>Собственное производство</h1>
         <p class="op-sub">
-          Заказ теста для «Пицца Стар»: что изготовить, сколько лотков и стопок,
-          куда везём. Рестораны заказывают в своём кабинете.
+          Цех «Пицца Стар»: что изготовить, сколько лотков и стопок, куда везём.
+          Рестораны заказывают тесто в своём кабинете.
         </p>
       </div>
     </div>
 
-    <div v-if="!workshops.length && !loading" class="op-card op-empty">
-      Цех не найден. Проверьте, что поставщик с признаком собственного производства
-      подключён к модулю заявок.
+    <div v-if="loading" class="op-card op-empty">Загрузка…</div>
+
+    <div v-else-if="!workshops.length" class="op-card op-empty">
+      <div class="op-empty-title">Цех не найден</div>
+      <p>Проверьте, что поставщик цеха активен и подключён к заявкам «Пицца Стар».</p>
     </div>
 
     <template v-else>
       <!-- Цех: обычно один, но список оставлен на будущее -->
       <div v-if="workshops.length > 1" class="op-shops">
         <button v-for="w in workshops" :key="w.id" class="op-shop"
-                :class="{ active: shopId === w.id }" @click="shopId = w.id; reload()">
+                :class="{ active: shopId === w.id }" @click="pickShop(w.id)">
           {{ w.short_name }}
         </button>
       </div>
 
-      <div class="op-seg">
-        <button v-for="t in TABS" :key="t.key" class="op-seg-btn"
-                :class="{ active: tab === t.key }" @click="switchTab(t.key)">
-          {{ t.label }}
-        </button>
-      </div>
+      <!-- Навигация: сверху ежедневная работа, ниже — то, что настраивают редко -->
+      <nav class="op-nav">
+        <div class="op-seg">
+          <button v-for="t in WORK_TABS" :key="t.key" class="op-seg-btn"
+                  :class="{ active: tab === t.key }" @click="switchTab(t.key)">
+            {{ t.label }}
+          </button>
+        </div>
+        <div class="op-seg op-seg-setup">
+          <span class="op-seg-cap">Настройка</span>
+          <button v-for="t in SETUP_TABS" :key="t.key" class="op-seg-btn"
+                  :class="{ active: tab === t.key }" @click="switchTab(t.key)">
+            {{ t.label }}
+          </button>
+        </div>
+      </nav>
 
       <!-- ═══ Заказ на день ═══ -->
       <template v-if="tab === 'day'">
         <div class="op-panel">
-          <label class="op-panel-label">Дата отгрузки</label>
-          <input type="date" v-model="date" class="rom-input-sm" @change="loadDay" />
+          <label class="op-panel-label">Дата поставки</label>
+          <!-- Стрелки держим вплотную к полю: на узком экране они иначе
+               разъезжаются по разным строкам и теряют смысл. -->
+          <span class="op-datebox">
+            <button class="op-nav-day" title="Предыдущий день" @click="shiftDate(-1)">‹</button>
+            <input type="date" v-model="date" class="rom-input-sm" @change="loadDay" />
+            <button class="op-nav-day" title="Следующий день" @click="shiftDate(1)">›</button>
+            <span class="op-date-dow">{{ dowFull(date) }}</span>
+          </span>
           <button class="op-btn" :disabled="loadingDay" @click="loadDay">
-            {{ loadingDay ? 'Загрузка…' : 'Показать' }}
+            {{ loadingDay ? 'Загрузка…' : 'Обновить' }}
           </button>
           <div class="op-panel-right">
             <button class="op-btn op-btn-accent" :disabled="!hasDay || sheetsBusy" @click="downloadSheets">
-              {{ sheetsBusy ? 'Готовлю…' : 'Загрузочные листы' }}
+              {{ sheetsBusy ? 'Готовлю…' : 'Загрузочные листы (Excel)' }}
             </button>
           </div>
         </div>
 
         <div v-if="loadingDay" class="op-card op-empty">Загрузка…</div>
         <div v-else-if="!hasDay" class="op-card op-empty">
-          <div class="op-empty-title">На эту дату заявок нет</div>
-          <p>Выберите другую дату — показываются только поданные заявки ресторанов.</p>
+          <div class="op-empty-title">На {{ fmtDateFull(date) }} заявок нет</div>
+          <p>Показываются только поданные заявки ресторанов. Выберите другую дату поставки.</p>
         </div>
         <template v-else>
           <div class="op-tiles">
-            <div class="op-tile"><span class="op-tile-num">{{ day.restaurants.length }}</span><span>точек</span></div>
-            <div class="op-tile"><span class="op-tile-num">{{ fmt(day.totals.pieces) }}</span><span>штук теста</span></div>
-            <div class="op-tile"><span class="op-tile-num">{{ day.totals.trays }}</span><span>лотков</span></div>
-            <div class="op-tile"><span class="op-tile-num">{{ day.totals.stacks }}</span><span>стопок</span></div>
-            <div class="op-tile op-tile-accent"><span class="op-tile-num">{{ day.totals.pallets }}</span><span>паллет</span></div>
+            <div class="op-tile">
+              <span class="op-tile-num">{{ day.restaurants.length }}</span>
+              <span>{{ plural(day.restaurants.length, ['точка', 'точки', 'точек']) }}</span>
+            </div>
+            <div class="op-tile">
+              <span class="op-tile-num">{{ fmt(day.totals.pieces) }}</span>
+              <span>{{ plural(day.totals.pieces, ['штука', 'штуки', 'штук']) }} теста</span>
+            </div>
+            <div class="op-tile">
+              <span class="op-tile-num">{{ day.totals.trays }}</span>
+              <span>{{ plural(day.totals.trays, ['лоток', 'лотка', 'лотков']) }}</span>
+            </div>
+            <div class="op-tile">
+              <span class="op-tile-num">{{ day.totals.stacks }}</span>
+              <span>{{ plural(day.totals.stacks, ['стопка', 'стопки', 'стопок']) }}</span>
+            </div>
+            <div class="op-tile op-tile-accent">
+              <span class="op-tile-num">{{ fmt(day.totals.pallets) }}</span>
+              <span>{{ plural(day.totals.pallets, ['паллета', 'паллеты', 'паллет']) }}</span>
+            </div>
           </div>
 
           <div class="op-card op-card-flush">
@@ -72,6 +106,7 @@
                   <th class="op-num">Лотков</th>
                   <th class="op-num">Стопок</th>
                   <th class="op-num">Паллет</th>
+                  <th class="op-print-col">Лист</th>
                 </tr>
               </thead>
               <tbody>
@@ -90,21 +125,35 @@
                   </td>
                   <td class="op-num"><b>{{ r.total_trays }}</b></td>
                   <td class="op-num">{{ r.stacks }}</td>
-                  <td class="op-num">{{ r.pallets }}</td>
+                  <td class="op-num">{{ fmt(r.pallets) }}</td>
+                  <td class="op-print-col">
+                    <button class="op-btn op-btn-sm" :disabled="printing === r.restaurant_number"
+                            @click="printSheets(r.restaurant_number)">
+                      {{ printing === r.restaurant_number ? '…' : 'Печать' }}
+                    </button>
+                  </td>
                 </tr>
                 <tr class="op-total-row">
                   <td>ИТОГО</td>
                   <td></td>
                   <td v-for="s in day.sizes" :key="s.sku" class="op-num">
-                    <b>{{ fmt(day.totals.by_sku[s.sku]?.pieces || 0) }}</b>
-                    <span class="op-trays">{{ day.totals.by_sku[s.sku]?.trays || 0 }} лотк.</span>
+                    <template v-if="day.totals.by_sku[s.sku]?.pieces">
+                      <b>{{ fmt(day.totals.by_sku[s.sku].pieces) }}</b>
+                      <span class="op-trays">{{ day.totals.by_sku[s.sku].trays }} лотк.</span>
+                    </template>
+                    <span v-else class="op-dim">—</span>
                   </td>
                   <td class="op-num"><b>{{ day.totals.trays }}</b></td>
                   <td class="op-num"><b>{{ day.totals.stacks }}</b></td>
-                  <td class="op-num"><b>{{ day.totals.pallets }}</b></td>
+                  <td class="op-num"><b>{{ fmt(day.totals.pallets) }}</b></td>
+                  <td class="op-print-col"></td>
                 </tr>
               </tbody>
             </table>
+            <p class="op-note">
+              «Печать» — загрузочные листы одной точки, по листу на стопку.
+              Кнопка сверху собирает книгу Excel сразу по всем точкам дня.
+            </p>
           </div>
         </template>
       </template>
@@ -113,11 +162,11 @@
       <template v-else-if="tab === 'plan'">
         <div class="op-panel">
           <label class="op-panel-label">Период</label>
-          <input type="date" v-model="planFrom" class="rom-input-sm" />
+          <input type="date" v-model="planFrom" class="rom-input-sm" @change="loadPlan" />
           <span class="op-dash">—</span>
-          <input type="date" v-model="planTo" class="rom-input-sm" />
+          <input type="date" v-model="planTo" class="rom-input-sm" @change="loadPlan" />
           <button class="op-btn" :disabled="loadingPlan" @click="loadPlan">
-            {{ loadingPlan ? 'Считаю…' : 'Показать' }}
+            {{ loadingPlan ? 'Считаю…' : 'Обновить' }}
           </button>
           <div class="op-panel-right">
             <div class="op-switch">
@@ -132,6 +181,12 @@
               %
             </label>
           </div>
+        </div>
+
+        <div v-if="schedIsEmpty" class="op-warn">
+          График изготовления не заполнен — тесто считается изготовленным в день поставки,
+          и оба вида плана совпадают.
+          <button class="op-link" @click="switchTab('production')">Заполнить график</button>
         </div>
 
         <div v-if="loadingPlan" class="op-card op-empty">Считаю…</div>
@@ -157,12 +212,17 @@
               <tr v-for="d in plan.production" :key="d.date">
                 <td><b>{{ fmtDate(d.date) }}</b> <span class="op-dow">{{ dowOf(d.date) }}</span></td>
                 <td class="op-deliv">
-                  <span v-for="dd in d.deliveries" :key="dd" class="op-chip">{{ fmtDate(dd) }}</span>
+                  <span v-for="dd in d.deliveries" :key="dd" class="op-chip">
+                    {{ fmtDate(dd) }} <i>{{ dowOf(dd) }}</i>
+                  </span>
                 </td>
                 <td class="op-num">{{ d.restaurants }}</td>
                 <td v-for="s in plan.sizes" :key="s.sku" class="op-num">
-                  <b>{{ withReserve(d.by_sku[s.sku]?.pieces || 0) }}</b>
-                  <span class="op-trays">{{ d.by_sku[s.sku]?.trays || 0 }} лотк.</span>
+                  <template v-if="d.by_sku[s.sku]?.pieces">
+                    <b>{{ withReserve(d.by_sku[s.sku].pieces) }}</b>
+                    <span class="op-trays">{{ d.by_sku[s.sku].trays }} лотк.</span>
+                  </template>
+                  <span v-else class="op-dim">—</span>
                 </td>
                 <td class="op-num"><b>{{ d.trays }}</b></td>
               </tr>
@@ -178,8 +238,11 @@
             </tbody>
           </table>
           <p class="op-note">
-            Дни изготовления берутся из графика во вкладке «Настройки».
+            Дни изготовления берутся из графика в разделе «График изготовления».
             Для дней поставки без графика тесто считается изготовленным в тот же день.
+            <template v-if="reserve > 0">
+              В колонках размеров — количество с запасом {{ reserve }}%, округлённое вверх.
+            </template>
           </p>
         </div>
 
@@ -187,7 +250,7 @@
           <table class="rom-table op-table">
             <thead>
               <tr>
-                <th>Дата</th>
+                <th>Дата поставки</th>
                 <th class="op-num">Точек</th>
                 <th v-for="s in plan.sizes" :key="s.sku" class="op-num">{{ s.short_name }}</th>
                 <th class="op-num">Лотков</th>
@@ -197,15 +260,18 @@
             </thead>
             <tbody>
               <tr v-for="d in plan.days" :key="d.date">
-                <td><b>{{ fmtDate(d.date) }}</b></td>
+                <td><b>{{ fmtDate(d.date) }}</b> <span class="op-dow">{{ dowOf(d.date) }}</span></td>
                 <td class="op-num">{{ d.restaurants }}</td>
                 <td v-for="s in plan.sizes" :key="s.sku" class="op-num">
-                  <b>{{ withReserve(d.by_sku[s.sku]?.pieces || 0) }}</b>
-                  <span class="op-trays">{{ d.by_sku[s.sku]?.trays || 0 }} лотк.</span>
+                  <template v-if="d.by_sku[s.sku]?.pieces">
+                    <b>{{ withReserve(d.by_sku[s.sku].pieces) }}</b>
+                    <span class="op-trays">{{ d.by_sku[s.sku].trays }} лотк.</span>
+                  </template>
+                  <span v-else class="op-dim">—</span>
                 </td>
                 <td class="op-num"><b>{{ d.trays }}</b></td>
                 <td class="op-num">{{ d.stacks }}</td>
-                <td class="op-num">{{ d.pallets }}</td>
+                <td class="op-num">{{ fmt(d.pallets) }}</td>
               </tr>
               <tr class="op-total-row">
                 <td>ИТОГО</td>
@@ -215,7 +281,7 @@
                 </td>
                 <td class="op-num"><b>{{ planTotal('trays') }}</b></td>
                 <td class="op-num"><b>{{ planTotal('stacks') }}</b></td>
-                <td class="op-num"><b>{{ Math.round(planTotal('pallets') * 100) / 100 }}</b></td>
+                <td class="op-num"><b>{{ fmt(planTotal('pallets')) }}</b></td>
               </tr>
             </tbody>
           </table>
@@ -226,15 +292,8 @@
         </div>
       </template>
 
-      <!-- ═══ Заявки ресторанов ═══ -->
-      <!-- Приём на день (правка количеств, закрыть день, продлить дедлайн,
-           письмо цеху) и список заявок — экран из «Заявок поставщикам». -->
-      <template v-else-if="tab === 'orders'">
-        <SupplierOrdersManagerView :supplier-id="shopId" :tabs="['status', 'list']" />
-      </template>
-
-      <!-- ═══ Настройки: график изготовления ═══ -->
-      <template v-else-if="tab === 'settings'">
+      <!-- ═══ График изготовления ═══ -->
+      <template v-else-if="tab === 'production'">
         <div class="op-card">
           <h3 class="op-h3">Когда изготавливать тесто</h3>
           <p class="op-hint">
@@ -275,69 +334,77 @@
           </table>
 
           <div class="op-sched-actions">
-            <button class="op-btn op-btn-accent" :disabled="savingSched" @click="saveSchedule">
+            <button class="op-btn op-btn-accent" :disabled="savingSched || !schedDirty" @click="saveSchedule">
               {{ savingSched ? 'Сохраняю…' : 'Сохранить график' }}
             </button>
             <span v-if="schedSaved" class="op-saved">Сохранено</span>
+            <span v-else-if="schedDirty" class="op-dirty">Есть несохранённые изменения</span>
           </div>
-        </div>
-
-        <!-- График поставок по ресторанам, шаблон размеров и настройки цеха
-             (дедлайн подачи, авто-письмо, пауза) — тот же экран, что у
-             остальных поставщиков. -->
-        <div class="op-embed">
-          <SupplierOrdersManagerView :supplier-id="shopId" :tabs="['schedules', 'templates', 'settings']" />
         </div>
       </template>
 
-      <!-- ═══ Загрузочные листы ═══ -->
-      <template v-else-if="tab === 'sheets'">
-        <div class="op-panel">
-          <label class="op-panel-label">Дата отгрузки</label>
-          <input type="date" v-model="date" class="rom-input-sm" @change="loadDay" />
-          <button class="op-btn op-btn-accent" :disabled="!hasDay || sheetsBusy" @click="downloadSheets">
-            {{ sheetsBusy ? 'Готовлю…' : 'Скачать книгу Excel' }}
-          </button>
-        </div>
-
-        <div v-if="!hasDay" class="op-card op-empty">На эту дату заявок нет.</div>
-        <div v-else class="op-card">
-          <h3 class="op-h3">Печать по точкам</h3>
-          <p class="op-hint">
-            Один лист — одна стопка. Печатайте по точке, если нужна не вся книга.
-          </p>
-          <div class="op-print-list">
-            <div v-for="r in day.restaurants" :key="r.restaurant_number" class="op-print-row">
-              <span class="op-print-title">{{ r.title }}</span>
-              <span class="op-print-meta">{{ r.total_trays }} лотков · {{ r.stacks }} стопок</span>
-              <button class="op-btn" @click="printSheets(r.restaurant_number)">Печать</button>
-            </div>
-          </div>
-        </div>
+      <!-- ═══ Экраны заявок поставщику: приём, архив, графики, товары, параметры ═══ -->
+      <!-- Механика уже написана в «Заявках поставщикам» — модуль показывает
+           нужный экран без своей копии и без второй полосы вкладок. -->
+      <template v-else-if="managerTab">
+        <p v-if="tabHint" class="op-tabhint">{{ tabHint }}</p>
+        <SupplierOrdersManagerView :key="managerTab"
+          :supplier-id="shopId" :tabs="[managerTab]" :legal-entity="shopEntity"
+          hide-tabs query-prefix="so" />
       </template>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
+import { ref, computed, watch, onMounted, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const toast = useToastStore();
+const route = useRoute();
+const router = useRouter();
+const userStore = useUserStore();
+const orderStore = useOrderStore();
 
-const TABS = [
+// Модуль работает только по «Пицца Стар». Ссылку на раздел могут открыть с
+// другим юрлицом в сайдбаре — тогда встроенные экраны (товары цеха, почта
+// поставщика) искали бы данные не в той группе. Переключаем сами, до того
+// как отрисуются дочерние экраны.
+const PS_ENTITY = 'ООО "Пицца Стар"';
+{
+  const allowed = userStore.getAllowedEntities?.() || [];
+  if (allowed.includes(PS_ENTITY) && orderStore.settings.legalEntity !== PS_ENTITY) {
+    orderStore.settings.legalEntity = PS_ENTITY;
+  }
+}
+
+// Разделы модуля. Ежедневная работа — сверху, редкие настройки — отдельной
+// строкой: раньше «Настройки» лежали внутри «Настроек» и путали.
+// managerTab — какой экран «Заявок поставщикам» показать вместо своей вёрстки.
+const WORK_TABS = [
+  { key: 'intake', label: 'Приём заявок', managerTab: 'status',
+    hint: 'Кто из ресторанов подал заявку на выбранный день. Здесь же правят количества, продлевают дедлайн и отправляют сводку цеху.' },
   { key: 'day', label: 'Заказ на день' },
   { key: 'plan', label: 'План производства' },
-  { key: 'sheets', label: 'Загрузочные листы' },
-  { key: 'orders', label: 'Заявки ресторанов' },
-  { key: 'settings', label: 'Настройки' },
+  { key: 'archive', label: 'Все заявки', managerTab: 'list',
+    hint: 'Поданные заявки на тесто за любой период: поиск по ресторану, статус, открытие и правка.' },
 ];
+const SETUP_TABS = [
+  { key: 'delivery', label: 'График поставок', managerTab: 'schedules',
+    hint: 'В какие дни какой ресторан получает тесто и до какого часа успевает подать заявку.' },
+  { key: 'production', label: 'График изготовления' },
+  { key: 'products', label: 'Товары цеха', managerTab: 'templates',
+    hint: 'Размеры теста, которые видит ресторан. «Кратность» — сколько штук в лотке: по ней кабинет пересчитывает лотки в штуки.' },
+  { key: 'params', label: 'Параметры цеха', managerTab: 'settings',
+    hint: 'Пауза приёма заявок, авто-письмо со сводкой цеху, минимальный заказ и содержимое Excel.' },
+];
+const ALL_TABS = [...WORK_TABS, ...SETUP_TABS];
 
-// Приём заявок, графики поставок, шаблон товаров и настройки поставщика
-// (дедлайны, письмо цеху) берём из «Заявок поставщикам»: там эта механика
-// уже написана и вылизана, дублировать её ради ПРЦ незачем.
 const SupplierOrdersManagerView = defineAsyncComponent(() => import('@/views/SupplierOrdersManagerView.vue'));
 
 const DOWS = [
@@ -350,15 +417,17 @@ const loading = ref(true);
 const loadingDay = ref(false);
 const loadingPlan = ref(false);
 const sheetsBusy = ref(false);
-const tab = ref('day');
+const printing = ref('');
+const tab = ref('intake');
 const workshops = ref([]);
 const shopId = ref('');
 const date = ref(todayStr());
-const day = ref({ sizes: [], restaurants: [], totals: { by_sku: {}, pieces: 0, trays: 0, stacks: 0, pallets: 0 } });
+const day = ref(emptyDay());
 const plan = ref({ sizes: [], days: [], production: [] });
 const planMode = ref('production');
 // График изготовления: день поставки → партия 1 и партия 2 (0 = нет)
-const sched = ref(Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map(n => [n, { b1: 0, b2: 0 }])));
+const sched = ref(emptySched());
+const schedLoaded = ref('');           // снимок сохранённого графика — для «есть изменения»
 const savingSched = ref(false);
 const schedSaved = ref(false);
 const planFrom = ref(todayStr());
@@ -368,21 +437,71 @@ const planTo = ref(todayStr(21));
 const reserve = ref(0);
 
 const hasDay = computed(() => day.value.restaurants.length > 0);
+const managerTab = computed(() => ALL_TABS.find(t => t.key === tab.value)?.managerTab || '');
+const tabHint = computed(() => ALL_TABS.find(t => t.key === tab.value)?.hint || '');
+// Пустой график изготовления означает «делаем в день поставки» — про это лучше
+// сказать прямо, иначе план выглядит правильным и никто не заметит настройку.
+const schedIsEmpty = computed(() => Object.values(sched.value).every(v => !v.b1));
+const shopEntity = computed(() =>
+  workshops.value.find(w => w.id === shopId.value)?.legal_entity || PS_ENTITY);
+const schedDirty = computed(() => JSON.stringify(sched.value) !== schedLoaded.value);
 
+function emptyDay() {
+  return { sizes: [], restaurants: [], totals: { by_sku: {}, pieces: 0, trays: 0, stacks: 0, pallets: 0 } };
+}
+function emptySched() {
+  return Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map(n => [n, { b1: 0, b2: 0 }]));
+}
+/**
+ * Дата в виде ГГГГ-ММ-ДД по местному времени.
+ * toISOString() переводит в UTC: в Минске после 21:00 он отдавал вчерашний
+ * день, и «сегодня» вместе со стрелками промахивались на сутки.
+ */
+function ymd(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 function todayStr(offset = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  return ymd(d);
 }
 function fmt(v) {
   const n = Number(v) || 0;
-  return Number.isInteger(n) ? n.toLocaleString('ru-RU') : n.toFixed(2);
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+}
+/** Русское склонение: forms = [1 точка, 2 точки, 5 точек]. Доли — как «2». */
+function plural(v, forms) {
+  const n = Number(v) || 0;
+  if (!Number.isInteger(n)) return forms[1];
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return forms[2];
+  if (b === 1) return forms[0];
+  if (b >= 2 && b <= 4) return forms[1];
+  return forms[2];
 }
 function fmtDate(d) {
   const p = String(d).slice(0, 10).split('-');
   return `${p[2]}.${p[1]}`;
 }
+/** «2026-08-04» → «04.08.2026» — как в шапке загрузочного листа. */
+function fmtDateFull(d) {
+  const p = String(d).slice(0, 10).split('-');
+  return `${p[2]}.${p[1]}.${p[0]}`;
+}
 function restLabel(num) { return formatRestaurantNumber(Number(num)); }
+
+const DOW_SHORT = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+const DOW_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+function dowOf(d) { return DOW_SHORT[new Date(d + 'T00:00:00').getDay()] || ''; }
+function dowFull(d) { return d ? DOW_FULL[new Date(d + 'T00:00:00').getDay()] || '' : ''; }
+
+function shiftDate(delta) {
+  const d = new Date(date.value + 'T00:00:00');
+  d.setDate(d.getDate() + delta);
+  date.value = ymd(d);
+  loadDay();
+}
 
 /** Количество с запасом, округлённое вверх — цех работает лотками. */
 function withReserve(pieces) {
@@ -396,6 +515,11 @@ function planSizeTotal(sku) {
 function planTotal(field) {
   return plan.value.days.reduce((sum, d) => sum + (Number(d[field]) || 0), 0);
 }
+function prodSizeTotal(sku) {
+  return (plan.value.production || []).reduce((sum, d) => sum + (d.by_sku[sku]?.pieces || 0), 0);
+}
+const prodTotalTrays = computed(() =>
+  (plan.value.production || []).reduce((sum, d) => sum + (Number(d.trays) || 0), 0));
 
 async function api(path, params = {}) {
   const qs = new URLSearchParams({ supplier_id: shopId.value, ...params }).toString();
@@ -413,7 +537,10 @@ async function loadShops() {
     workshops.value = data?.suppliers || [];
     if (workshops.value.length) {
       shopId.value = workshops.value[0].id;
-      await loadDay();
+      // График изготовления нужен не только своей вкладке: по нему план
+      // понимает, предупреждать ли о ненастроенных днях.
+      await loadSchedule();
+      await loadTab();
     }
   } catch (e) {
     toast.error('Не получилось', e.message);
@@ -436,6 +563,10 @@ async function loadDay() {
 
 async function loadPlan() {
   if (!shopId.value) return;
+  if (planTo.value < planFrom.value) {
+    toast.error('Период задан наоборот', 'Конец периода раньше начала');
+    return;
+  }
   loadingPlan.value = true;
   try {
     plan.value = await api('plan', { from: planFrom.value, to: planTo.value });
@@ -446,23 +577,28 @@ async function loadPlan() {
   }
 }
 
+/** Данные текущей вкладки. Экраны заявок грузят себя сами. */
+function loadTab() {
+  if (tab.value === 'day') return loadDay();
+  if (tab.value === 'plan') return loadPlan();
+  if (tab.value === 'production') return loadSchedule();
+  return Promise.resolve();
+}
+
 function switchTab(key) {
+  if (tab.value === key) return;
   tab.value = key;
-  if (key === 'plan' && !plan.value.days.length) loadPlan();
-  if ((key === 'day' || key === 'sheets') && !hasDay.value) loadDay();
-  if (key === 'settings') loadSchedule();
+  loadTab();
+}
+
+function pickShop(id) {
+  shopId.value = id;
+  day.value = emptyDay();
+  plan.value = { sizes: [], days: [], production: [] };
+  loadTab();
 }
 
 // ═══ График изготовления ═══
-
-function prodSizeTotal(sku) {
-  return (plan.value.production || []).reduce((sum, d) => sum + (d.by_sku[sku]?.pieces || 0), 0);
-}
-const prodTotalTrays = computed(() =>
-  (plan.value.production || []).reduce((sum, d) => sum + (Number(d.trays) || 0), 0));
-
-const DOW_SHORT = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
-function dowOf(d) { return DOW_SHORT[new Date(d + 'T00:00:00').getDay()]; }
 
 /** «за сколько дней до поставки» — чтобы график читался без счёта в уме. */
 function daysBeforeLabel(deliveryDow, productionDow) {
@@ -475,7 +611,7 @@ function daysBeforeLabel(deliveryDow, productionDow) {
 async function loadSchedule() {
   try {
     const data = await api('schedule');
-    const fresh = Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map(n => [n, { b1: 0, b2: 0 }]));
+    const fresh = emptySched();
     for (const [dow, rows] of Object.entries(data.schedule || {})) {
       for (const r of rows) {
         if (Number(r.batch_no) === 2) fresh[dow].b2 = Number(r.production_dow);
@@ -483,6 +619,7 @@ async function loadSchedule() {
       }
     }
     sched.value = fresh;
+    schedLoaded.value = JSON.stringify(fresh);
   } catch (e) {
     toast.error('Не получилось', e.message);
   }
@@ -502,6 +639,7 @@ async function saveSchedule() {
     });
     if (error) throw new Error(error);
     if (data?.error) throw new Error(data.error);
+    schedLoaded.value = JSON.stringify(sched.value);
     schedSaved.value = true;
     setTimeout(() => { schedSaved.value = false; }, 2500);
     // План пересчитываем: дни изготовления изменились.
@@ -511,12 +649,6 @@ async function saveSchedule() {
   } finally {
     savingSched.value = false;
   }
-}
-
-function reload() {
-  day.value = { sizes: [], restaurants: [], totals: { by_sku: {}, pieces: 0, trays: 0, stacks: 0, pallets: 0 } };
-  plan.value = { sizes: [], days: [], production: [] };
-  loadDay();
 }
 
 /** Скачивание файла с сессионным заголовком — окно открыть нельзя. */
@@ -534,7 +666,6 @@ async function downloadFile(url, filename) {
   URL.revokeObjectURL(link.href);
 }
 
-
 async function downloadSheets() {
   sheetsBusy.value = true;
   try {
@@ -551,6 +682,7 @@ async function downloadSheets() {
  * на стопку, содержимое по центру листа (верх лотка загибается).
  */
 async function printSheets(restaurantNumber) {
+  printing.value = String(restaurantNumber);
   try {
     const path = `so/admin/loading-sheets-data?supplier_id=${encodeURIComponent(shopId.value)}&date=${encodeURIComponent(date.value)}`;
     const { data, error } = await db.request('GET', path);
@@ -626,14 +758,39 @@ async function printSheets(restaurantNumber) {
     setTimeout(() => w.print(), 300);
   } catch (e) {
     toast.error('Не получилось', e.message);
+  } finally {
+    printing.value = '';
   }
 }
 
-/** «2026-08-04» → «04.08.2026» — как в шапке листа. */
-function fmtDateFull(d) {
-  const p = String(d).slice(0, 10).split('-');
-  return `${p[2]}.${p[1]}.${p[0]}`;
+// ═══ Адрес страницы ═══
+// У каждой вкладки и выбранной даты свой адрес: ссылку можно отправить коллеге,
+// а «назад» в браузере возвращает туда, где человек был.
+{
+  const q = route.query || {};
+  const t = String(q.tab || '');
+  if (ALL_TABS.some(x => x.key === t)) tab.value = t;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.date || ''))) date.value = String(q.date);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.from || ''))) planFrom.value = String(q.from);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.to || ''))) planTo.value = String(q.to);
+  if (q.mode === 'delivery' || q.mode === 'production') planMode.value = String(q.mode);
+  const r = Number(q.reserve);
+  if (Number.isFinite(r) && r > 0 && r <= 50) reserve.value = r;
 }
+
+// Слежка не immediate: срабатывает только на настоящее изменение, поэтому
+// адрес пишем сразу — иначе первое переключение вкладки теряется.
+watch([tab, date, planFrom, planTo, planMode, reserve], () => {
+  const q = { ...route.query };
+  const set = (key, val) => { if (val) q[key] = String(val); else delete q[key]; };
+  set('tab', tab.value !== 'intake' ? tab.value : '');
+  set('date', date.value);
+  set('from', planFrom.value);
+  set('to', planTo.value);
+  set('mode', planMode.value !== 'production' ? planMode.value : '');
+  set('reserve', reserve.value > 0 ? reserve.value : '');
+  router.replace({ query: q }).catch(() => {});
+});
 
 onMounted(loadShops);
 </script>
@@ -652,8 +809,9 @@ onMounted(loadShops);
   border-color: transparent; color: #fff;
 }
 
+.op-nav { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
 .op-seg {
-  display: inline-flex; padding: 3px; gap: 2px; margin-bottom: 14px;
+  display: inline-flex; align-items: center; padding: 3px; gap: 2px;
   background: #F4EDE4; border-radius: 12px; max-width: 100%; overflow-x: auto;
 }
 .op-seg-btn {
@@ -661,6 +819,16 @@ onMounted(loadShops);
   font: inherit; font-size: 13px; font-weight: 700; color: #6B5544; cursor: pointer; white-space: nowrap;
 }
 .op-seg-btn.active { background: #fff; color: #3A2418; box-shadow: 0 1px 4px rgba(74, 32, 19, .12); }
+.op-seg-setup { background: transparent; padding: 0; gap: 6px; }
+.op-seg-setup .op-seg-btn {
+  border: 1.5px solid #EFE7DC; background: #fff; font-size: 12.5px; font-weight: 600;
+  color: #8A7F72; border-radius: 999px; padding: 6px 13px;
+}
+.op-seg-setup .op-seg-btn.active { border-color: #E4B98A; background: #FFF5EA; color: #B4560D; box-shadow: none; }
+.op-seg-cap {
+  flex: 0 0 auto; padding-right: 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: #B3A697;
+}
 
 .op-panel {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -670,6 +838,13 @@ onMounted(loadShops);
 .op-panel-label { font-size: 12.5px; font-weight: 700; color: #6B5544; }
 .op-panel-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .op-dash { color: #C4B8A8; }
+.op-datebox { display: inline-flex; align-items: center; gap: 6px; }
+.op-date-dow { font-size: 12.5px; font-weight: 700; color: #8A7F72; }
+.op-nav-day {
+  width: 30px; height: 32px; border: 1.5px solid #E4D9CB; border-radius: 9px; background: #fff;
+  font-size: 17px; line-height: 1; font-weight: 700; color: #6B5544; cursor: pointer;
+}
+.op-nav-day:hover { border-color: #C4B8A8; }
 .op-reserve { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #6B5544; }
 .op-reserve-input { width: 64px; }
 
@@ -679,6 +854,7 @@ onMounted(loadShops);
 }
 .op-btn:hover:not(:disabled) { border-color: #C4B8A8; }
 .op-btn:disabled { opacity: .5; cursor: default; }
+.op-btn-sm { padding: 5px 11px; font-size: 12px; }
 .op-btn-accent {
   background: linear-gradient(135deg, #E87A1E 0%, #D9661A 100%);
   border-color: transparent; color: #fff; box-shadow: 0 4px 12px rgba(232, 122, 30, .22);
@@ -693,7 +869,7 @@ onMounted(loadShops);
 .op-empty { text-align: center; color: #8A7F72; font-size: 13.5px; padding: 30px 20px; }
 .op-empty-title { font-size: 16px; font-weight: 800; color: #3A2418; margin-bottom: 6px; }
 .op-h3 { margin: 0 0 4px; font-size: 15.5px; font-weight: 800; color: #4A2013; }
-.op-hint { margin: 0 0 12px; font-size: 12.5px; color: #8A7F72; }
+.op-hint { margin: 0 0 12px; font-size: 12.5px; color: #8A7F72; line-height: 1.5; }
 .op-note { margin: 10px 14px 12px; font-size: 12px; color: #8A7F72; line-height: 1.45; }
 
 .op-tiles { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -719,20 +895,14 @@ onMounted(loadShops);
 }
 .op-addr { color: #5F4B38; }
 .op-dim { color: #C4B8A8; }
+.op-print-col { text-align: center !important; white-space: nowrap; }
 .op-total-row { background: #FBF6F0; }
 .op-total-row td { font-weight: 700; }
-
-.op-print-list { display: flex; flex-direction: column; gap: 6px; }
-.op-print-row {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 9px 12px; border: 1.5px solid #EFE7DC; border-radius: 11px; background: #FDFAF6;
-}
-.op-print-title { font-weight: 700; }
-.op-print-meta { font-size: 12.5px; color: #8A7F72; margin-right: auto; }
 
 @media (max-width: 760px) {
   .op-panel-right { margin-left: 0; width: 100%; }
   .op-tiles .op-tile { flex: 1 1 calc(50% - 8px); }
+  .op-seg-setup { flex-wrap: nowrap; }
 }
 
 .op-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -744,11 +914,23 @@ onMounted(loadShops);
 .op-deliv { display: flex; flex-wrap: wrap; gap: 4px; }
 .op-chip { padding: 2px 8px; border-radius: 999px; background: #F3EBE0; font-size: 12px; font-weight: 700;
            color: var(--bk-brown); }
+.op-chip i { font-style: normal; font-weight: 600; color: #9A8F80; }
 .op-sched-table td { vertical-align: middle; }
 .op-sched-select { min-width: 150px; }
 .op-sched-hint { margin-left: 8px; font-size: 11px; color: var(--text-muted); }
-.op-sched-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.op-sched-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
 .op-saved { font-size: 12px; font-weight: 700; color: var(--green); }
+.op-dirty { font-size: 12px; font-weight: 700; color: #C25E12; }
 
-.op-embed { margin-top: 18px; }
+.op-tabhint { margin: -4px 0 12px; font-size: 12.5px; color: #8A7F72; line-height: 1.5; max-width: 900px; }
+.op-warn {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 11px 14px; margin-bottom: 12px; border-radius: 12px;
+  border: 1.5px solid #F0DCC0; background: #FFF7EC;
+  font-size: 12.5px; color: #7A5A34; line-height: 1.45;
+}
+.op-link {
+  border: 0; background: none; padding: 0; font: inherit; font-weight: 700;
+  color: #C25E12; text-decoration: underline; cursor: pointer;
+}
 </style>
