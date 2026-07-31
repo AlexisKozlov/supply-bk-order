@@ -140,7 +140,7 @@ function aiHistoryClear($chatId): void {
     tgStateClear($chatId, 'ai_history');
 }
 
-function selectRelevantLookups($q) {
+function selectRelevantLookups($q, $user = null) {
     // Всегда запускаем поиск товара и карточек — они релевантны почти для любого вопроса
     $lookups = ['lookupProduct', 'lookupCards'];
 
@@ -188,7 +188,17 @@ function selectRelevantLookups($q) {
                      'lookupDeliveries', 'lookupPlans', 'lookupPrices', 'lookupSales'];
     }
 
-    return array_unique($lookups);
+    $lookups = array_unique($lookups);
+
+    // Оставляем только те источники, к модулям которых у человека есть доступ.
+    // Спрятать кнопку и отдать те же данные текстом — это не защита.
+    if ($user && function_exists('botCan')) {
+        $lookups = array_values(array_filter($lookups, function ($name) use ($user) {
+            $rule = BOT_LOOKUP_ACCESS[$name] ?? null;
+            return !$rule || botCan($user, $rule[0], $rule[1]);
+        }));
+    }
+    return $lookups;
 }
 
 function handleFreeText($chatId, $text, $user) {
@@ -258,7 +268,7 @@ function handleFreeText($chatId, $text, $user) {
         $context = gatherContext($user);
         $lookupContext = '';
         $q = mb_strtolower($effectiveText);
-        $lookups = selectRelevantLookups($q);
+        $lookups = selectRelevantLookups($q, $user);
         foreach ($lookups as $fn) {
             try {
                 $result = $fn($effectiveText, $entity);

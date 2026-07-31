@@ -39,12 +39,64 @@ const BOT_CMD_ACCESS = [
     'upload_order_file' => ['order', 'edit', 'admin'],
 ];
 
+/**
+ * Источники данных для ответов на свободный текст → модуль портала.
+ * Без этой карты кнопки были спрятаны по правам, а те же цифры спокойно
+ * доставались вопросом словами: «сколько стоит сыр», «реализация по ресторанам».
+ */
+const BOT_LOOKUP_ACCESS = [
+    'lookupProduct'   => ['cards', 'view'],
+    'lookupCards'     => ['cards', 'view'],
+    'lookupOrders'    => ['order', 'view'],
+    'lookupDeliveries'=> ['order', 'view'],
+    'lookupStockDays' => ['analysis', 'view'],
+    'lookupShelfLife' => ['shelf-life', 'view'],
+    'lookupSupplier'  => ['database', 'view'],
+    'lookupSchedule'  => ['delivery-schedule', 'view'],
+    'lookupPlans'     => ['planning', 'view'],
+    'lookupPrices'    => ['pricing', 'view'],
+    'lookupSales'     => ['restaurant-sales', 'view'],
+];
+
 /** Кнопки внутри «Экспорта» — у каждой выгрузки свой модуль. */
 const BOT_EXPORT_ACCESS = [
     'export_analysis' => ['analysis', 'view'],
     'export_orders'   => ['order', 'view'],
     'export_prices'   => ['pricing', 'view'],
 ];
+
+/**
+ * Инструменты ИИ-помощника → модуль портала.
+ * Модель получает только доступные человеку инструменты, и они же ещё раз
+ * проверяются при выполнении: список у модели — подсказка, а не защита.
+ * run_sql ограничен ролью внутри самого инструмента (admin/manager).
+ */
+const BOT_TOOL_ACCESS = [
+    'search_product'    => ['analysis', 'view'],
+    'get_stock_critical'=> ['analysis', 'view'],
+    'get_summary'       => ['analysis', 'view'],
+    'get_orders'        => ['order', 'view'],
+    'get_deliveries'    => ['order', 'view'],
+    'get_prices'        => ['pricing', 'view'],
+    'get_psc'           => ['pricing', 'view'],
+    'get_shelf_life'    => ['shelf-life', 'view'],
+    'get_supplier_info' => ['database', 'view'],
+    'get_schedule'      => ['delivery-schedule', 'view'],
+    'get_plans'         => ['planning', 'view'],
+    'get_sales'         => ['restaurant-sales', 'view'],
+    'get_tenders'       => ['tenders', 'view'],
+    'search_card'       => ['cards', 'view'],
+];
+
+/** Доступен ли инструмент ИИ этому человеку. */
+function botToolAllowed($user, string $tool): bool {
+    // Произвольный SELECT — только админу и менеджеру (сам инструмент это тоже
+    // проверяет; здесь убираем его из списка, чтобы модель не тратила вызов).
+    if ($tool === 'run_sql') return in_array($user['role'] ?? '', ['admin', 'manager'], true);
+    $rule = BOT_TOOL_ACCESS[$tool] ?? null;
+    if (!$rule) return true;
+    return botCan($user, $rule[0], $rule[1]);
+}
 
 /** Права пользователя с учётом шаблона роли. Кэш на время запроса. */
 function botUserPerms($user) {

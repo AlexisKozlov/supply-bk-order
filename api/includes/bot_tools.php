@@ -35,8 +35,8 @@ DLT — срок доставки. DOC — срок документооборо
 PROMPT;
 }
 
-function getToolDefinitions() {
-    return [
+function getToolDefinitions($user = null) {
+    $defs = [
         [
             'name' => 'search_product',
             'description' => 'Поиск товара по артикулу (SKU) или названию. Возвращает остатки, расход, запас в днях, цену, поставщика, кейсовку, ожидаемые поставки, последние заказы, реализацию ресторанов.',
@@ -197,12 +197,24 @@ function getToolDefinitions() {
             ]
         ]
     ];
+
+    // Оставляем инструменты, к модулям которых есть доступ: иначе спрятанные
+    // кнопки обходились вопросом словами — модель просто звала нужный инструмент.
+    if ($user && function_exists('botToolAllowed')) {
+        $defs = array_values(array_filter($defs, fn($d) => botToolAllowed($user, $d['name'])));
+    }
+    return $defs;
 }
 
 // Выполнение tool call — возвращает текст с результатами
 // $user — массив с полями role, name и т.д. (или null если недоступен)
 function executeTool($toolName, $input, $entity, $user = null) {
     global $pdo, $SITE_URL;
+
+    // Модель может назвать инструмент, которого ей не давали, — проверяем ещё раз.
+    if ($user && function_exists('botToolAllowed') && !botToolAllowed($user, $toolName)) {
+        return "Нет доступа к этим данным.";
+    }
 
     switch ($toolName) {
         case 'search_product':
@@ -722,7 +734,7 @@ function askGeminiWithTools($question, $entity, $userName, $user = null) {
     $systemPrompt .= "\nСегодня: " . date('d.m.Y, l');
 
     // Конвертируем инструменты в формат Gemini
-    $toolDefs = getToolDefinitions();
+    $toolDefs = getToolDefinitions($user);
     $geminiFunctions = [];
     foreach ($toolDefs as $tool) {
         $fn = [
@@ -842,7 +854,7 @@ function callGeminiToolsApi($url, $payload) {
 
 function selectRelevantTools($question) {
     $q = mb_strtolower($question);
-    $allTools = getToolDefinitions();
+    $allTools = getToolDefinitions($user);
     $toolsByName = [];
     foreach ($allTools as $t) $toolsByName[$t['name']] = $t;
 
@@ -1081,7 +1093,7 @@ function askDeepSeekWithTools($question, $entity, $userName, $user = null, array
 
     // Все инструменты (DeepSeek платный — без жёсткого лимита токенов Groq)
     $tools = [];
-    foreach (getToolDefinitions() as $tool) {
+    foreach (getToolDefinitions($user) as $tool) {
         $params = $tool['input_schema'];
         if (isset($params['required']) && empty($params['required'])) unset($params['required']);
         $tools[] = ['type' => 'function', 'function' => [

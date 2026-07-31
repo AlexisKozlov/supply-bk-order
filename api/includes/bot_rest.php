@@ -5,6 +5,10 @@ require_once __DIR__ . '/tg_client.php';
 // явно: в supplier_orders.php файл подтягивается точечно внутри функций,
 // и в потоке бота его могло не оказаться.
 require_once __DIR__ . '/so_loading_sheets.php';
+// botIsSubscribedToRestaurant — проверка «этот чат правда привязан к этой точке».
+// Файл подключаем явно: bot_rest.php грузят не только из вебхука бота
+// (ещё корректировки и задачи), и там helpers мог отсутствовать.
+require_once __DIR__ . '/bot_helpers.php';
 
 // ═══ Инициализация Telegram-токена и низкоуровневых хелперов ═══
 // При загрузке из telegram_bot.php токен и функции уже определены — function_exists
@@ -1182,6 +1186,14 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
 function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
     tgStateClear($chatId, 'restord');
+    // Как и на соседних шагах: ресторан из callback_data проверяем по подпискам.
+    // Через restord_day_ сюда заходили без проверки — было видно товары и
+    // текущую заявку чужой точки (отправить за неё уже не давал soOrderProcessInput).
+    if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) {
+        editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №" . formatRestaurantNumber((int)$restNum) . ".",
+            ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+        return;
+    }
     if (soBotBlockWorkshop($pdo, $chatId, $msgId, $supplierId, $restNum)) return;
     $supName = soGetSupplierName($pdo, $supplierId);
     $rest = soGetRestaurantContext($pdo, $restNum);
@@ -1573,6 +1585,14 @@ function soShowMyOrders($chatId, $msgId, $supplierId) {
 
 function soShowRestOrders($chatId, $msgId, $supplierId, $restNum) {
     global $pdo;
+    // Номер ресторана приходит из callback_data — старые кнопки истории
+    // (rest_orders_for_, rest_history_, rest_hist_) вели сюда без проверки, и
+    // подменой номера можно было прочитать заявки чужой точки.
+    if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) {
+        editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №" . formatRestaurantNumber((int)$restNum) . ".",
+            ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+        return;
+    }
     $supName = soGetSupplierName($pdo, $supplierId);
     $s = $pdo->prepare("
         SELECT id, delivery_date, submitted_at
