@@ -74,6 +74,16 @@ export function usePushNotifications() {
         return false;
       }
       isSubscribed.value = true;
+      // Сразу шлём проверочное уведомление: человек видит, что всё работает,
+      // а не гадает, включилось или нет. Ошибку здесь не показываем —
+      // подписка уже сохранена.
+      try {
+        await fetch('/api/push/test', {
+          method: 'POST',
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+      } catch (e) { /* не критично */ }
       return true;
     } catch (e) {
       error.value = e.message || 'Ошибка подписки';

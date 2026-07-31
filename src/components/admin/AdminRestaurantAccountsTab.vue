@@ -27,6 +27,14 @@
         <span class="arat-num">{{ verifiedEmailCount }}</span>
         <span class="arat-label">email подтверждён</span>
       </div>
+      <div class="arat-summary-item app">
+        <span class="arat-num">{{ withPwaCount }}</span>
+        <span class="arat-label">поставили приложение</span>
+      </div>
+      <div class="arat-summary-item app">
+        <span class="arat-num">{{ withPushCount }}</span>
+        <span class="arat-label">включили уведомления</span>
+      </div>
     </div>
 
     <!-- Массовая выдача пароля -->
@@ -62,6 +70,9 @@
           <option value="email-none">Без email</option>
           <option value="email-pending">Email не подтверждён</option>
           <option value="email-ok">Email подтверждён</option>
+          <option value="pwa">Поставили приложение</option>
+          <option value="no-pwa">Без приложения</option>
+          <option value="push">С уведомлениями</option>
         </select>
       </div>
 
@@ -75,6 +86,7 @@
               <th class="arat-col-rest">Ресторан</th>
               <th class="arat-col-status">Статус</th>
               <th class="arat-col-email">Email</th>
+              <th class="arat-col-app">Приложение</th>
               <th class="arat-col-meta">Последний вход</th>
               <th class="arat-col-actions">Действия</th>
             </tr>
@@ -99,6 +111,11 @@
                   >{{ u.email_verified_at ? '✓' : '!' }}</span>
                 </template>
                 <span v-else class="arat-email-empty">не указан</span>
+              </td>
+              <td class="arat-col-app">
+                <span v-if="u.has_pwa" class="arat-badge app" :title="'Открывали с иконки: ' + formatTime(u.pwa_last_seen_at)">на телефоне</span>
+                <span v-else class="arat-muted">—</span>
+                <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' устройств(а) с уведомлениями'">🔔{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
               </td>
               <td class="arat-col-meta" :title="u.password_changed_at ? 'Пароль: ' + formatTime(u.password_changed_at) : ''">
                 <span v-if="u.last_login_at">{{ formatTime(u.last_login_at) }}</span>
@@ -159,6 +176,9 @@ const withoutPasswordCount = computed(() => usersList.value.filter(u => !u.has_p
 const disabledCount = computed(() => usersList.value.filter(u => u.has_password && !u.is_active).length);
 const withEmailCount = computed(() => usersList.value.filter(u => !!u.email).length);
 const verifiedEmailCount = computed(() => usersList.value.filter(u => !!u.email_verified_at).length);
+// Кабинет открывали с иконки на телефоне (установленное приложение).
+const withPwaCount = computed(() => usersList.value.filter(u => u.has_pwa).length);
+const withPushCount = computed(() => usersList.value.filter(u => u.push_devices > 0).length);
 
 const filteredUsers = computed(() => {
   const q = (filter.value || '').toLowerCase().trim();
@@ -170,6 +190,9 @@ const filteredUsers = computed(() => {
     if (st === 'email-none' && u.email) return false;
     if (st === 'email-pending' && (!u.email || u.email_verified_at)) return false;
     if (st === 'email-ok' && !u.email_verified_at) return false;
+    if (st === 'pwa' && !u.has_pwa) return false;
+    if (st === 'no-pwa' && u.has_pwa) return false;
+    if (st === 'push' && !(u.push_devices > 0)) return false;
     if (!q) return true;
     const num = String(u.restaurant_number || '');
     const formattedNum = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group) || '';
@@ -533,4 +556,9 @@ async function handleToggleUser(u) {
   border-color: #fecaca;
 }
 .arat-btn-danger:hover:not(:disabled) { background: #fef2f2; }
+
+.arat-summary-item.app .arat-num { color: #C1502E; }
+.arat-col-app { white-space: nowrap; }
+.arat-badge.app { background: #FDEBD9; color: #C1502E; }
+.arat-push-dot { margin-left: 6px; font-size: 12px; }
 </style>

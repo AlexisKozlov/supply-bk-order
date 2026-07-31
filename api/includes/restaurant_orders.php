@@ -3329,6 +3329,9 @@ if ($roAction === 'my-info' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
 
+    // Кабинет сообщает, что открыт с иконки приложения — помечаем устройство.
+    if (!empty($_GET['pwa'])) roMarkSessionPwa($pdo, roGetSessionToken());
+
     // Данные учётной записи ресторана для UI (модалка с email и т.п.).
     $accountInfo = [
         'email'          => $rest['email'] ?? null,
@@ -5789,7 +5792,15 @@ if (strpos($roAction, 'admin') === 0) {
                 ru.telegram_chat_id,
                 ru.email,
                 ru.email_verified_at,
-                CASE WHEN ru.password_hash IS NULL OR ru.password_hash = '' THEN 0 ELSE 1 END AS has_password
+                CASE WHEN ru.password_hash IS NULL OR ru.password_hash = '' THEN 0 ELSE 1 END AS has_password,
+                -- Кабинет установлен как приложение: последняя активность
+                -- устройства, которое открывало кабинет с иконки.
+                (SELECT MAX(sp.last_seen_at) FROM ro_user_sessions sp
+                  WHERE sp.ro_user_id = ru.id AND sp.is_pwa = 1) AS pwa_last_seen_at,
+                -- Сколько устройств подписано на уведомления.
+                (SELECT COUNT(*) FROM push_subscriptions ps
+                  WHERE ps.restaurant_number = r.number
+                    AND ps.legal_entity_group COLLATE utf8mb4_general_ci = r.legal_entity_group) AS push_devices
             FROM restaurants r
             LEFT JOIN ro_users ru
                    ON ru.restaurant_number = r.number
@@ -5811,6 +5822,8 @@ if (strpos($roAction, 'admin') === 0) {
             if ($restActive === 0) $row['is_active'] = 0;
             $row['restaurant_active'] = $restActive;
             $row['has_password'] = (int)$row['has_password'];
+            $row['push_devices'] = (int)($row['push_devices'] ?? 0);
+            $row['has_pwa'] = !empty($row['pwa_last_seen_at']);
         }
         unset($row);
         roRespond(['users' => $rows]);

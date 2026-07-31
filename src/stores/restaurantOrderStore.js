@@ -219,7 +219,15 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   async function loadMyInfo() {
     loading.value = true;
     try {
-      const data = await api('my-info');
+      // Признак «открыто из установленного приложения» — по нему закупка
+      // видит, кто уже поставил кабинет на телефон.
+      const standalone = (() => {
+        try {
+          return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+            || window.navigator?.standalone === true;
+        } catch (e) { return false; }
+      })();
+      const data = await api(standalone ? 'my-info?pwa=1' : 'my-info');
       restaurantOrdersEnabled.value = data.restaurant_orders_enabled !== false;
       sessionInfo.value = data.session;
       deliveryDays.value = data.delivery_days || [];

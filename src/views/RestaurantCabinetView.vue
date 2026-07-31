@@ -212,7 +212,7 @@
               <strong>Включить уведомления?</strong>
               <span>Будем напоминать о дедлайнах прямо на этом устройстве, даже когда сайт закрыт.</span>
             </div>
-            <button class="dash-push-onboard-btn" :disabled="push.busy.value" @click="enablePushOnboarding">Включить</button>
+            <button class="dash-push-onboard-btn" :disabled="push.busy.value" @click="enablePushOnboarding">{{ push.busy.value ? 'Включаем…' : 'Включить' }}</button>
             <button class="dash-push-onboard-skip" @click="dismissPushOnboarding" aria-label="Не сейчас">×</button>
           </div>
 

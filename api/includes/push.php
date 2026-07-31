@@ -6,6 +6,7 @@
  *   GET    push/key         — публичный VAPID-ключ для подписки в браузере
  *   POST   push/subscribe   — сохранить subscription из браузера
  *                              { endpoint, keys: { p256dh, auth }, user_agent? }
+ *   POST   push/test        — проверочное уведомление на свою подписку
  *   POST   push/unsubscribe — удалить подписку по endpoint
  *                              { endpoint }
  *
@@ -78,6 +79,37 @@ if ($subpoint === 'subscribe' && $method === 'POST') {
     $stmt->execute([$restaurantNumber, $legalEntityGroup, $userId, $endpointUrl, $p256dh, $auth, $userAgent]);
 
     pushRespond(['success' => true]);
+}
+
+// Проверочное уведомление сразу после включения: пользователь видит, что
+// уведомления реально работают. Шлём ТОЛЬКО на подписку текущей сессии.
+if ($subpoint === 'test' && $method === 'POST') {
+    $endpointUrl = trim((string)($body['endpoint'] ?? ''));
+    if (!$endpointUrl) pushRespond(['error' => 'endpoint обязателен'], 400);
+
+    $roUser = function_exists('roGetRestaurantSession') ? roGetRestaurantSession($pdo) : null;
+    $sysUser = $roUser ? null : (function_exists('getSessionUser') ? getSessionUser($pdo) : null);
+    if (!$roUser && !$sysUser) pushRespond(['error' => 'Требуется авторизация'], 401);
+
+    // Чужую подписку дёрнуть нельзя: сверяем владельца.
+    if ($roUser) {
+        $chk = $pdo->prepare("SELECT id FROM push_subscriptions WHERE endpoint = ? AND restaurant_number = ? AND legal_entity_group = ?");
+        $chk->execute([$endpointUrl, (int)$roUser['restaurant_number'], $roUser['legal_entity_group'] ?? 'BK_VM']);
+    } else {
+        $chk = $pdo->prepare("SELECT id FROM push_subscriptions WHERE endpoint = ? AND user_id = ?");
+        $chk->execute([$endpointUrl, (int)$sysUser['id']]);
+    }
+    if (!$chk->fetchColumn()) pushRespond(['error' => 'Подписка не найдена'], 404);
+
+    if (!is_file(__DIR__ . '/push_send.php')) pushRespond(['error' => 'Отправка недоступна'], 500);
+    require_once __DIR__ . '/push_send.php';
+    $ok = pushSendToEndpoint($pdo, $endpointUrl, [
+        'title' => 'Уведомления включены',
+        'body'  => 'Так будут приходить напоминания о заявках и дедлайнах.',
+        'url'   => $roUser ? '/restaurant' : '/',
+        'tag'   => 'push-enabled',
+    ]);
+    pushRespond(['success' => $ok]);
 }
 
 if ($subpoint === 'unsubscribe' && $method === 'POST') {

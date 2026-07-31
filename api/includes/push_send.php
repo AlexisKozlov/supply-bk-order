@@ -86,3 +86,55 @@ function pushSendToRestaurant(PDO $pdo, int $restaurantNumber, string $legalEnti
     }
     return $ok;
 }
+
+/**
+ * Отправка на ОДНУ подписку — используется для проверочного уведомления
+ * сразу после включения: человек должен увидеть, что всё работает, а не
+ * гадать по серой кнопке.
+ *
+ * @return bool доставлено или нет. Протухшая подписка удаляется.
+ */
+function pushSendToEndpoint(PDO $pdo, string $endpoint, array $payload): bool {
+    $vapidPublic = $_ENV['VAPID_PUBLIC'] ?? '';
+    $vapidPrivate = $_ENV['VAPID_PRIVATE'] ?? '';
+    $vapidSubject = $_ENV['VAPID_SUBJECT'] ?? 'mailto:support@example.com';
+    if (!$vapidPublic || !$vapidPrivate || !$endpoint) return false;
+
+    $stmt = $pdo->prepare("SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE endpoint = ?");
+    $stmt->execute([$endpoint]);
+    $row = $stmt->fetch();
+    if (!$row) return false;
+
+    try {
+        $webPush = new WebPush([
+            'VAPID' => [
+                'subject'    => $vapidSubject,
+                'publicKey'  => $vapidPublic,
+                'privateKey' => $vapidPrivate,
+            ],
+        ], [], 10);
+    } catch (\Throwable $e) {
+        error_log('[push_send] init error: ' . $e->getMessage());
+        return false;
+    }
+
+    $sub = Subscription::create([
+        'endpoint'        => $row['endpoint'],
+        'publicKey'       => $row['p256dh'],
+        'authToken'       => $row['auth'],
+        'contentEncoding' => 'aesgcm',
+    ]);
+    $report = $webPush->sendOneNotification($sub, json_encode($payload, JSON_UNESCAPED_UNICODE));
+    if ($report->isSuccess()) {
+        try {
+            $pdo->prepare("UPDATE push_subscriptions SET last_used_at = NOW() WHERE id = ?")->execute([$row['id']]);
+        } catch (\Throwable $e) { /* ignore */ }
+        return true;
+    }
+    if ($report->isSubscriptionExpired()) {
+        try { $pdo->prepare("DELETE FROM push_subscriptions WHERE id = ?")->execute([$row['id']]); } catch (\Throwable $e) { /* ignore */ }
+    } else {
+        error_log('[push_send] test send failed: ' . $report->getReason());
+    }
+    return false;
+}

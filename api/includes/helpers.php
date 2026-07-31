@@ -210,6 +210,23 @@ function roReadActiveSessionRow(PDO $pdo) {
 }
 
 /**
+ * Отмечает, что это устройство открыло кабинет из установленного приложения
+ * (иконка на телефоне, display-mode: standalone). Нужно, чтобы закупка видела,
+ * кто уже поставил приложение — по одному этому флагу строится отчёт.
+ */
+function roMarkSessionPwa(PDO $pdo, $token) {
+    if (!$token) return;
+    try {
+        $pdo->prepare("
+            UPDATE ro_user_sessions
+               SET is_pwa = 1,
+                   pwa_first_seen_at = COALESCE(pwa_first_seen_at, NOW())
+             WHERE token = ? AND is_pwa = 0
+        ")->execute([$token]);
+    } catch (\Throwable $e) { /* колонки может не быть до миграции */ }
+}
+
+/**
  * Удаляет сессию по токену. Используется при logout текущего устройства.
  */
 function roRevokeSessionByToken(PDO $pdo, $token) {

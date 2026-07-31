@@ -44,11 +44,15 @@ export function useCabinetDashboard({ toast }) {
   async function enablePushOnboarding() {
     const ok = await push.subscribe();
     if (ok) {
-      toast?.success?.('Уведомления включены');
+      // Проверочное уведомление шлёт сам subscribe() — человек увидит его
+      // на экране телефона и поймёт, что всё работает.
+      toast?.success?.('Уведомления включены — отправили проверочное');
       dismissPushOnboarding();
-    } else if (push.error.value) {
-      toast?.error?.(push.error.value);
+      return;
     }
+    // Раньше при неудаче без текста ошибки не показывалось ничего: кнопка
+    // просто становилась серой, и было непонятно, включилось или нет.
+    toast?.error?.(push.error.value || 'Не удалось включить уведомления. Откройте кабинет с иконки приложения и попробуйте ещё раз.');
   }
 
   return {
