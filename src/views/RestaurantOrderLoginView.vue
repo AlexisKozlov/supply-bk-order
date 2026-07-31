@@ -144,6 +144,10 @@
         {{ loginBrand.footer }}
         <span class="ro-help-sep">·</span>
         <a class="ro-help-link" :href="`https://t.me/${supportTg}`" target="_blank" rel="noopener">Нужна помощь?</a>
+        <span class="ro-help-sep">·</span>
+        <!-- Обратная дорога на портал: с главной ресторан теперь уводится
+             в кабинет, и без этой ссылки сотрудник не смог бы войти. -->
+        <a class="ro-help-link" href="/?showLogin=true">Вход для сотрудников</a>
       </div>
     </div>
   </div>

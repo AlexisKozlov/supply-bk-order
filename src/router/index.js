@@ -296,6 +296,17 @@ router.beforeEach(async (to) => {
     if (!roStore.isAuthenticated && !(await roStore.restoreFromCookie())) {
       return { path: '/restaurant/login' };
     }
+  } else if (to.name === 'home' && !userStore.isAuthenticated && !to.query.showLogin && !to.query.redirect) {
+    // Ресторан открыл главную портала, хотя вошёл как ресторан — уводим сразу
+    // в кабинет. Так ведёт себя установленное приложение: оно всегда стартует
+    // со своего адреса, и у тех, кто поставил на телефон портал (а не кабинет),
+    // каждый запуск упирался в экран входа закупок.
+    // Сотрудника не трогаем: у него userStore.isAuthenticated = true, а зайти
+    // на портал специально можно по ссылке с ?showLogin=true.
+    const roStore = useRestaurantOrderStore();
+    if (roStore.isAuthenticated || await roStore.restoreFromCookie()) {
+      return { path: '/restaurant' };
+    }
   }
   if (to.meta.requiresAuth && !userStore.isAuthenticated) {
     return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
