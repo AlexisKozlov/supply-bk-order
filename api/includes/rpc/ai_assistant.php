@@ -14,13 +14,27 @@
  */
 
 if ($fn === 'ai_assistant') {
+    // Помощник живёт в разделе «Анализ запасов» — и доступ к нему такой же.
+    // Раньше сюда пускали любого авторизованного: спрятанные разделы можно
+    // было расспросить словами, как это было в боте.
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+    requireModuleAccess($authUser, 'analysis', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
     $question = trim((string)($body['question'] ?? ''));
     if ($question === '') respond(['error' => 'Пустой вопрос'], 400);
     if (mb_strlen($question) > 2000) $question = mb_substr($question, 0, 2000);
 
-    // Юрлицо: фронт присылает текущее; иначе — основное БК.
+    // Юрлицо приходит от браузера — проверяем, что оно вообще доступно человеку.
+    // Иначе подменой поля можно было спросить данные чужой компании.
     $entity = trim((string)($body['entity'] ?? ''));
-    if ($entity === '') $entity = 'ООО "Бургер БК"';
+    if ($entity === '') {
+        $userEntities = $authUser['legal_entities'] ?? [];
+        if (is_string($userEntities)) $userEntities = json_decode($userEntities, true) ?: [];
+        $entity = $userEntities[0] ?? 'ООО "Бургер БК"';
+    }
+    if (!checkLegalEntityAccess($authUser, $entity)) {
+        respond(['error' => 'Нет доступа к этому юрлицу'], 403);
+    }
 
     // История чата (последние пары) для многоходового диалога.
     $history = [];

@@ -756,6 +756,8 @@ $TABLE_TO_MODULE = [
     'plans'=>'planning',
     'products'=>'database','suppliers'=>'database','restaurants'=>'database','cards'=>'cards',
     'analog_cards'=>'analogs',
+    // Скрытые группы аналогов правят на экране «Анализ запасов» — там же и права.
+    'hidden_analogs'=>'analysis',
     'delivery_schedule'=>'delivery-schedule',
     'supplier_schedule_deadlines'=>'supplier-schedule',
     'analysis_data'=>'analysis','stock_1c'=>'analysis','restaurant_sales'=>'restaurant-sales',

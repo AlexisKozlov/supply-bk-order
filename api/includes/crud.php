@@ -44,10 +44,26 @@ if (!$sessionUser) {
     }
     // API-ключ даёт только чтение, RBAC не применяется (нет пользователя для проверки ролей)
 }
+// Таблицы, у которых нет «своего» модуля портала: журналы и справочник
+// сотрудников. Раньше они проваливались мимо проверки ($module = null), и
+// любой авторизованный мог прочитать список людей с их правами и почтой или
+// весь журнал действий. На фронте их открывает только админка.
+$ADMIN_ONLY_TABLES = ['users', 'error_logs', 'search_logs', 'reminder_cron_log'];
+// Журнал аудита: читать — как заказы (история заказа и лента на дашборде),
+// писать может любой авторизованный: запись аудита не должна теряться из-за
+// прав на модуль, в котором человек что-то сделал.
+$AUDIT_READ_MODULE = 'order';
+
 if ($sessionUser) {
     $userRole = $sessionUser['role'] ?? 'user';
     if ($userRole !== 'admin') {
+        if (in_array($table, $ADMIN_ONLY_TABLES, true)) {
+            respond(['error' => 'Доступно только администратору'], 403);
+        }
         $module = $TABLE_TO_MODULE[$table] ?? null;
+        if (!$module && $table === 'audit_log' && $method === 'GET') {
+            $module = $AUDIT_READ_MODULE;
+        }
         if ($module) {
             $perms = resolvePermissions($userRole, $sessionUser['permissions'] ?? null, $ROLE_TEMPLATES);
             $level = $ACCESS_LEVELS[$perms[$module] ?? 'none'] ?? 0;

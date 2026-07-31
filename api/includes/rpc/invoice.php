@@ -17,6 +17,10 @@
 
 if ($fn === 'invoice_recognize') {
     if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
+    // Распознавание живёт в «План-факте» и стоит денег за вызов ИИ — доступ
+    // такой же, как к самому разделу, а не «любой авторизованный».
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+    requireModuleAccess($authUser, 'plan-fact', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
     // AI Vision на сложных сканах — до 60 сек. Дефолтный max_execution_time
     // в php-fpm обычно 30, поднимаем чтобы не прерывало запрос внутри.
     set_time_limit(180);
