@@ -1179,14 +1179,13 @@ try {
                     $tokStmt->execute([$token, $chatId, $restNum, $restGroup]);
                     $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
 
-                    $rows = [];
-                    // Тесто в боте не подают: там нет ни лотков, ни деления на
-                    // партии — весь объём ушёл бы в первую и цех изготовил бы
-                    // его не в тот день. Для цеха оставляем только кабинет.
-                    if ($reminderType !== 'expired' && !$isWorkshop) {
-                        $rows[] = [['text' => '📝 Подать в боте', 'callback_data' => "soord_day_{$supId}_{$restNum}_{$deliveryDate}"]];
-                    }
-                    $rows[] = [['text' => $isWorkshop ? '🥖 Заказать тесто' : '🌐 Открыть на сайте', 'url' => $url]];
+                    // Заявку подают в кабинете — ссылка открывает нужную
+                    // страницу с автоматическим входом. Пошаговый ввод в чате
+                    // убран: там не видно ни примечаний, ни минимального заказа.
+                    $rows = [[[
+                        'text' => $isWorkshop ? '🥖 Заказать тесто' : '📝 Подать заявку',
+                        'url'  => $url,
+                    ]]];
                     $keyboard = ['inline_keyboard' => $rows];
 
                     tgSend($chatId, $msgText, true, $keyboard);

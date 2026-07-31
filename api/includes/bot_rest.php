@@ -308,7 +308,8 @@ function soBotWorkshopsForChat($pdo, $chatId) {
  */
 function soBotDoughButtons($pdo, $chatId) {
     $list = soBotWorkshopsForChat($pdo, $chatId);
-    $many = count($list) > 1;
+    // Номер точки — по тому же правилу, что у остальных поставщиков.
+    $many = count(botGetSubscribedRestaurants($pdo, $chatId)) > 1;
     $rows = [];
     foreach ($list as $w) {
         $url = soBotGetWebLink($pdo, $chatId, (string)$w['supplier_id'], (string)$w['restaurant_number']);
@@ -316,6 +317,52 @@ function soBotDoughButtons($pdo, $chatId) {
         $label = '🥖 Заказать тесто'
             . ($many ? ' — ' . formatRestaurantNumber((int)$w['restaurant_number']) : '');
         $rows[] = [['text' => $label, 'web_app' => ['url' => $url]]];
+    }
+    return $rows;
+}
+
+/**
+ * Кнопки заявок поставщикам — мини-приложения на страницу поставщика в кабинете.
+ *
+ * Раньше заявка в боте занимала пять шагов (поставщик → ресторан → день →
+ * список товаров → количества одним сообщением текстом). Кабинет показывает то
+ * же самое сразу: дни поставки, отсчёт до дедлайна, прошлую заявку, примечания
+ * и минимальный заказ — и открывается прямо в Telegram.
+ *
+ * Если у ресторана нет учётной записи кабинета, ссылку собрать не из чего —
+ * такой паре оставляем прежний путь через бота, чтобы никто не остался без
+ * возможности подать заявку.
+ */
+function soBotOrderRows($pdo, $chatId, array $suppliers) {
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $restNums = array_column($subs, 'restaurant_number');
+    if (!$restNums || !$suppliers) return [];
+    $ph = implode(',', array_map('intval', $restNums));
+    $st = $pdo->prepare("
+        SELECT DISTINCT r.number
+        FROM supplier_schedules ss
+        JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+        WHERE ss.supplier_id = ? AND ss.is_active = 1 AND r.number IN ({$ph})
+        ORDER BY r.number");
+    // Номер точки в подписи нужен, когда у чата несколько ресторанов: у БК и ПС
+    // встречаются поставщики с одинаковым названием, и без номера кнопки
+    // «Камако» и «Камако» неразличимы.
+    $many = count($restNums) > 1;
+    $rows = [];
+    foreach ($suppliers as $sup) {
+        $st->execute([$sup['id']]);
+        $rests = $st->fetchAll(PDO::FETCH_COLUMN);
+        if (!$rests) continue;
+        foreach ($rests as $rn) {
+            $label = $sup['short_name'] . ($many ? ' — ' . formatRestaurantNumber((int)$rn) : '');
+            $url = soBotGetWebLink($pdo, $chatId, (string)$sup['id'], (string)$rn);
+            if (!$url) {
+                // Кабинет недоступен — старый пошаговый путь как запасной.
+                $rows[] = [['text' => $sup['short_name'], 'callback_data' => 'soord_sup_' . substr($sup['id'], 0, 36)]];
+                break;
+            }
+            $rows[] = [['text' => $label, 'web_app' => ['url' => $url]]];
+        }
     }
     return $rows;
 }
@@ -944,22 +991,13 @@ function restMenuSupplier($chatId, $msgId) {
         editMessage($chatId, $msgId, $text, ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
         return;
     }
-    // Если поставщик один и теста нет — сразу к нему. С тестом не проваливаемся:
-    // иначе кнопка «Заказать тесто» никогда бы не показалась.
-    if (count($sups) === 1 && !$doughRows) {
-        soOrderSelectRest($chatId, $msgId, $sups[0]['id']);
-        return;
-    }
+    // Автопровал к единственному поставщику убран: кнопка и так открывает
+    // заявку в один тап, а лишний экран мешал видеть остальные кнопки.
     $btns = $doughRows;
-    if ($doughRows) {
-        $text .= "🥖 <b>Тесто (ПРЦ)</b> — заказ лотками, откроется в Telegram.\n\n";
-    }
-    if ($sups) {
-        $text .= "Выберите поставщика:\n";
-        foreach ($sups as $sup) {
-            $btns[] = [['text' => $sup['short_name'], 'callback_data' => 'soord_sup_' . substr($sup['id'], 0, 36)]];
-        }
-    }
+    foreach (soBotOrderRows($pdo, $chatId, $sups) as $row) $btns[] = $row;
+    $text .= $btns
+        ? "Нажмите поставщика — заявка откроется прямо здесь, в Telegram."
+        : "Нет доступных поставщиков.";
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
