@@ -3918,10 +3918,14 @@ if ($soAction === 'admin') {
             roNotifyRestaurant($pdo, $restNum, implode("\n", $lines), $group);
         } catch (Exception $e) { /* не критично */ }
         try {
+            require_once __DIR__ . '/so_loading_sheets.php';
             pushSendToRestaurant($pdo, $restNum, $group, [
                 'title' => '📦 Внеплановая поставка (довоз)',
                 'body'  => "{$supplierName}: доставка {$deliveryFmt}" . ($editable ? ', можно скорректировать' : ''),
-                'url'   => '/restaurant/orders/supplier/' . $suppId,
+                // У цеха свой раздел кабинета — страница поставщика для него пустая.
+                'url'   => soLsSupplierEnabled($pdo, (string)$suppId)
+                    ? '/restaurant/orders/production'
+                    : '/restaurant/orders/supplier/' . $suppId,
                 'tag'   => "adhoc_{$suppId}_{$deliveryDate}",
             ]);
         } catch (\Throwable $e) { /* не критично */ }
@@ -4557,10 +4561,14 @@ if ($soAction === 'admin') {
             $tgHtml   .= " Дедлайн {$deadlineHm}.";
             $pushBody .= ", дедлайн {$deadlineHm}";
         }
+        require_once __DIR__ . '/so_loading_sheets.php';
         $push = [
             'title' => $supName,
             'body'  => $pushBody,
-            'url'   => '/restaurant/cabinet',
+            // Цех — в свой раздел кабинета, остальных как раньше на главную.
+            'url'   => soLsSupplierEnabled($pdo, (string)$supplierId)
+                ? '/restaurant/orders/production'
+                : '/restaurant/cabinet',
             'tag'   => "so-remind-{$supplierId}-{$deliveryDate}",
         ];
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';

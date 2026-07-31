@@ -54,6 +54,7 @@ $endpoint = 'so';
 $method = null;
 $uri = '';
 require_once __DIR__ . '/includes/supplier_orders.php';
+require_once __DIR__ . '/includes/so_loading_sheets.php'; // soLsSupplierEnabled: признак цеха
 
 // Включён ли день доставки в маске напоминаний подписки. NULL/пусто → все дни,
 // 0 → явно снято всё. Та же логика, что rrDayEnabled в restaurant_reminders.php.
@@ -879,6 +880,10 @@ try {
     foreach ($suppliers as $sup) {
         $supId = $sup['id'];
         $supName = $sup['short_name'];
+        // Цех собственного производства (ПРЦ): тесто заказывают отдельным
+        // разделом кабинета, а не в общем списке поставщиков. Напоминание
+        // должно вести именно туда, иначе ресторан попадает на пустой экран.
+        $isWorkshop = soLsSupplierEnabled($pdo, (string)$supId);
         $defaultDeadlineTime = $sup['default_deadline_time'];
         // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null), время — строка|null
         $weeklyDow = (isset($sup['weekly_deadline_dow']) && $sup['weekly_deadline_dow'] !== null && $sup['weekly_deadline_dow'] !== '' && (int)$sup['weekly_deadline_dow'] >= 1 && (int)$sup['weekly_deadline_dow'] <= 7) ? (int)$sup['weekly_deadline_dow'] : null;
@@ -1155,7 +1160,9 @@ try {
             }
 
             $restGroup = $byRest[$restNum]['group'] ?? 'BK_VM';
-            $redirect = "/restaurant/orders/supplier/{$supId}";
+            $redirect = $isWorkshop
+                ? '/restaurant/orders/production'
+                : "/restaurant/orders/supplier/{$supId}";
 
             // Дедуп-ключ на весь тик один (see $dedupKey выше) — не плодим по каналам.
             // Флаг: записан ли дедуп-лог. При включённом TG его пишет цикл рассылки
@@ -1173,10 +1180,13 @@ try {
                     $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
 
                     $rows = [];
-                    if ($reminderType !== 'expired') {
+                    // Тесто в боте не подают: там нет ни лотков, ни деления на
+                    // партии — весь объём ушёл бы в первую и цех изготовил бы
+                    // его не в тот день. Для цеха оставляем только кабинет.
+                    if ($reminderType !== 'expired' && !$isWorkshop) {
                         $rows[] = [['text' => '📝 Подать в боте', 'callback_data' => "soord_day_{$supId}_{$restNum}_{$deliveryDate}"]];
                     }
-                    $rows[] = [['text' => '🌐 Открыть на сайте', 'url' => $url]];
+                    $rows[] = [['text' => $isWorkshop ? '🥖 Заказать тесто' : '🌐 Открыть на сайте', 'url' => $url]];
                     $keyboard = ['inline_keyboard' => $rows];
 
                     tgSend($chatId, $msgText, true, $keyboard);

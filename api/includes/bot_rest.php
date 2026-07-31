@@ -1,6 +1,10 @@
 <?php
 require_once __DIR__ . '/so_deadline.php';
 require_once __DIR__ . '/tg_client.php';
+// soLsSupplierEnabled — признак цеха собственного производства. Подключаем
+// явно: в supplier_orders.php файл подтягивается точечно внутри функций,
+// и в потоке бота его могло не оказаться.
+require_once __DIR__ . '/so_loading_sheets.php';
 
 // ═══ Инициализация Telegram-токена и низкоуровневых хелперов ═══
 // При загрузке из telegram_bot.php токен и функции уже определены — function_exists
@@ -269,8 +273,38 @@ function soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) {
     ")->execute([$tgToken, $chatId, $restNum, $restGroup]);
 
     $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
-    $redirect = '/restaurant/orders/supplier/' . urlencode($supplierId);
+    // У цеха собственного производства свой раздел кабинета: страница обычного
+    // поставщика для него пустая — цеха нет в списке поставщиков ресторана.
+    $redirect = soLsSupplierEnabled($pdo, (string)$supplierId)
+        ? '/restaurant/orders/production'
+        : '/restaurant/orders/supplier/' . urlencode($supplierId);
     return "{$siteUrl}/restaurant/login?tg_token={$tgToken}&redirect=" . urlencode($redirect);
+}
+
+/**
+ * Тесто в боте не подают: там нет ни лотков, ни деления на партии — объём ушёл
+ * бы одной партией, и цех изготовил бы его не в тот день. Старые кнопки из
+ * прошлых сообщений сюда ещё приходят, поэтому отвечаем понятно и уводим в кабинет.
+ * @return bool true — это цех, дальше идти не надо
+ */
+function soBotBlockWorkshop($pdo, $chatId, $msgId, $supplierId, $restNum = null) {
+    if (!soLsSupplierEnabled($pdo, (string)$supplierId)) return false;
+    $btns = [];
+    if ($restNum === null) {
+        $subs = botGetSubscribedRestaurants($pdo, $chatId);
+        $restNum = $subs[0]['restaurant_number'] ?? null;
+    }
+    $url = $restNum !== null ? soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) : null;
+    if ($url) $btns[] = [['text' => '🥖 Заказать тесто', 'url' => $url]];
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
+    editMessage(
+        $chatId,
+        $msgId,
+        "🥖 <b>Тесто ПРЦ</b>\n\nТесто заказывают в кабинете ресторана — в разделе «Заказы» → «Тесто (ПРЦ)».\n\n"
+        . "<i>Там заказ считается лотками, а для точек с одной поставкой в неделю объём делится на две партии.</i>",
+        ['inline_keyboard' => $btns]
+    );
+    return true;
 }
 
 // Ссылка на «Поиск карточек» из бота с авторизацией ресторана.
@@ -920,6 +954,7 @@ function soBotCountAccessibleSoSuppliers($pdo, $chatId) {
 function soOrderSelectRest($chatId, $msgId, $supplierId) {
     global $pdo;
     tgStateClear($chatId, 'restord');
+    if (soBotBlockWorkshop($pdo, $chatId, $msgId, $supplierId)) return;
     $subs = botGetSubscribedRestaurants($pdo, $chatId);
     $restNums = array_column($subs, 'restaurant_number');
     $supName = soGetSupplierName($pdo, $supplierId);
@@ -970,6 +1005,7 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
 function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     global $pdo;
     tgStateClear($chatId, 'restord');
+    if (soBotBlockWorkshop($pdo, $chatId, $msgId, $supplierId, $restNum)) return;
     // Ресторан приходит из callback_data — проверяем подписку вызывающего,
     // иначе виден график/наличие заказов чужого ресторана (подача заявки
     // защищена отдельно на этапе submit, но и промежуточный шаг закрываем).
@@ -1074,6 +1110,7 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
 function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
     tgStateClear($chatId, 'restord');
+    if (soBotBlockWorkshop($pdo, $chatId, $msgId, $supplierId, $restNum)) return;
     $supName = soGetSupplierName($pdo, $supplierId);
     $rest = soGetRestaurantContext($pdo, $restNum);
     if (!$rest) {
@@ -1191,6 +1228,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
 // Камако: «Поставка не нужна» — создаём пустую заявку-отказ
 function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
+    if (soBotBlockWorkshop($pdo, $chatId, $msgId, $supplierId, $restNum)) return;
     // Проверка подписки: нельзя отправить отказ за ресторан, на который не подписан
     if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) {
         editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$restNum}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
@@ -1288,6 +1326,13 @@ function soOrderProcessInput($chatId, $text) {
     $restNum      = (string)($state['restaurant_number'] ?? '');
     $deliveryDate = (string)($state['delivery_date'] ?? '');
     if (!$supplierId || !$restNum || !$deliveryDate) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
+
+    // Незакрытый диалог по цеху мог остаться с прошлого раза — тесто в боте
+    // не принимаем, у него свои лотки и партии.
+    if (soLsSupplierEnabled($pdo, $supplierId)) {
+        sendMessage($chatId, "🥖 Тесто заказывают в кабинете ресторана: «Заказы» → «Тесто (ПРЦ)».");
+        return;
+    }
 
     // Проверка подписки: нельзя отправить заявку за ресторан, на который не подписан
     if (!botIsSubscribedToRestaurant($pdo, $chatId, $restNum)) {
