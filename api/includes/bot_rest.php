@@ -685,58 +685,49 @@ function restShowMySubs($chatId, $msgId = null) {
             $pendingCorr += intval($pc->fetchColumn());
         }
 
-        $text = "🏪 <b>Меню ресторана</b>\n";
-        $text .= "━━━━━━━━━━━━━━━━━━━━\n";
+        // Шапка: кто это и что требует внимания. Раньше здесь дублировался
+        // список всех кнопок — читать его никто не будет, кнопки и так рядом.
+        $text = "🏪 <b>Меню ресторана</b>\n\n";
         foreach ($subs as $sub) {
             $label = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
             $addr = trim((string)($sub['address'] ?: $sub['city'] ?: ''));
             $addr = $addr !== '' ? mb_substr($addr, 0, 42) : 'адрес не указан';
-            $text .= "• <b>" . soEsc($label) . "</b> — " . soEsc($addr) . "\n";
+            $text .= "<b>" . soEsc($label) . "</b> · " . soEsc($addr) . "\n";
         }
-        $text .= "\n";
 
-        $text .= "<b>Доступно сейчас</b>\n";
-        $text .= "🏠 Кабинет: профиль и быстрый вход\n";
-        $text .= "📦 Поставки: график, остатки, корректировки";
-        if ($pendingCorr > 0) {
-            $text .= " <b>({$pendingCorr} ответа)</b>";
-        }
-        $text .= "\n";
-        $text .= "🛒 Заявки поставщикам: Планета и другие\n";
-        if (soBotWorkshopsForChat($pdo, $chatId)) {
-            $text .= "🥖 Тесто (ПРЦ): заказ лотками\n";
-        }
-        if ($mainOrdersEnabled) {
-            $text .= "✅ Основная поставка: заявки открыты\n";
-        }
-        if ($activeSc) $text .= "📋 Сбор остатков: {$activeSc['name']}\n";
+        $alerts = [];
+        if ($activeSc)       $alerts[] = "📋 Идёт сбор остатков: <b>" . soEsc($activeSc['name']) . "</b>";
+        if ($pendingCorr > 0) $alerts[] = "✏️ Ответы по корректировкам: <b>{$pendingCorr}</b>";
+        if ($alerts) $text .= "\n" . implode("\n", $alerts) . "\n";
 
-        $btns[] = [
-            ['text' => '🏠 Кабинет', 'callback_data' => 'rest_cabinet'],
-            ['text' => '💬 Чат', 'callback_data' => 'chat_start'],
-        ];
-        $btns[] = [
-            ['text' => '📦 Поставки', 'callback_data' => 'rest_menu_main'],
-            ['text' => '🛒 Поставщики', 'callback_data' => 'rest_menu_supplier'],
-        ];
+        // Кнопки по смыслу: сначала «заказать», потом «посмотреть»,
+        // потом связь и настройки. Раньше порядок был случайным.
+        $order = [];
+        $order[] = ['text' => '🛒 Заявки поставщикам', 'callback_data' => 'rest_menu_supplier'];
         if ($mainOrdersEnabled) {
-            $btns[] = [['text' => '🛒 Основная поставка', 'callback_data' => 'rest_ro_orders']];
+            $order[] = ['text' => '🛒 Основная поставка', 'callback_data' => 'rest_ro_orders'];
         }
-        // Тесто ПРЦ — сразу из меню: раздел кабинета открывается в Telegram.
+        $btns[] = $order;
         foreach (soBotDoughButtons($pdo, $chatId) as $row) $btns[] = $row;
         if ($activeSc) {
-            $btns[] = [['text' => "📋 Сбор остатков", 'callback_data' => 'rest_sc_start']];
+            $btns[] = [['text' => '📋 Сбор остатков', 'callback_data' => 'rest_sc_start']];
         }
-        $btns[] = [['text' => '🆕 Новинки', 'callback_data' => 'rest_novelties']];
 
-        // ── Инструменты ──
         $btns[] = [
-            ['text' => '⏰ Напоминания', 'callback_data' => 'rest_reminders'],
-            ['text' => '⚙️ Уведомления', 'callback_data' => 'rest_notif_settings'],
+            ['text' => '📦 Поставки', 'callback_data' => 'rest_menu_main'],
+            ['text' => '🆕 Новинки', 'callback_data' => 'rest_novelties'],
         ];
         $cardLink = restCardSearchWebLink($pdo, $chatId);
         $btns[] = [
             ['text' => '🔍 Карточки', 'web_app' => ['url' => $cardLink ?: 'https://supply-department.online/search-cards']],
+            ['text' => '🏠 Кабинет', 'callback_data' => 'rest_cabinet'],
+        ];
+        $btns[] = [
+            ['text' => '💬 Написать в закупки', 'callback_data' => 'chat_start'],
+        ];
+        $btns[] = [
+            ['text' => '⏰ Напоминания', 'callback_data' => 'rest_reminders'],
+            ['text' => '⚙️ Уведомления', 'callback_data' => 'rest_notif_settings'],
         ];
 
         if ($orderFile) {
@@ -744,8 +735,7 @@ function restShowMySubs($chatId, $msgId = null) {
             $btns[] = [['text' => "📄 Файл заказа ({$updDate})", 'callback_data' => 'rest_order_file']];
         }
     } else {
-        $text = "🏪 <b>Меню ресторана</b>\n";
-        $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+        $text = "🏪 <b>Меню ресторана</b>\n\n";
         $text .= "Telegram ещё не привязан к ресторану.\n\n";
         $text .= "Получите 6-значный код в кабинете ресторана:\n";
         $text .= "<b>Профиль → Telegram → Получить код</b>\n";
@@ -900,18 +890,10 @@ function restMenuMain($chatId, $msgId) {
     $subs = botGetSubscribedRestaurants($pdo, $chatId);
     $mainOrdersEnabled = botAnyRestaurantOrdersEnabled($pdo, $subs);
 
-    $text = "📦 <b>Поставки</b>\n";
-    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-    $text .= "Выберите, что нужно открыть:\n\n";
-    $text .= "📅 <b>График</b>\n";
-    $text .= "Дни и время доставок по ресторану.\n\n";
-    $text .= "✏️ <b>Корректировка</b>\n";
-    $text .= "Добавить или убрать товар по основной поставке.\n\n";
-    $text .= "📦 <b>Остатки склада</b>\n";
-    $text .= "Быстрый поиск товара на складе.";
-    if ($mainOrdersEnabled) {
-        $text .= "\n\n🛒 <b>Мои заказы</b>\nИстория и статусы основной поставки.";
-    }
+    // Текст короткий: подписи кнопок и так всё называют, а расшифровка каждой
+    // превращала экран в простыню, которую пролистывают не читая.
+    $text = "📦 <b>Поставки</b>\n\n";
+    $text .= "График доставок, корректировки основной поставки и остатки склада.";
 
     $btns = [
         [
@@ -956,8 +938,7 @@ function restMenuSupplier($chatId, $msgId) {
     // Тесто — отдельной кнопкой: она открывает раздел кабинета в Telegram.
     $doughRows = soBotDoughButtons($pdo, $chatId);
 
-    $text = "📦 <b>Заявки поставщикам</b>\n";
-    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    $text = "📦 <b>Заявки поставщикам</b>\n\n";
     if (!$sups && !$doughRows) {
         $text .= "Нет доступных поставщиков.";
         editMessage($chatId, $msgId, $text, ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
@@ -2146,8 +2127,7 @@ function restNotifSettings($chatId, $msgId) {
         ['field' => 'stock_sessions',  'label' => 'Новые сборы остатков',   'val' => $row['notify_stock_sessions']],
     ];
 
-    $text = "⚙️ <b>Настройки уведомлений</b>\n";
-    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    $text = "⚙️ <b>Настройки уведомлений</b>\n\n";
     $text .= "Нажмите, чтобы включить или выключить:\n\n";
 
     $btns = [];
@@ -3184,8 +3164,7 @@ function restRoOrders($chatId, $msgId) {
     // Текущая сессия
     $session = $pdo->query("SELECT * FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1")->fetch();
 
-    $text = "🛒 <b>Заказы ресторанов</b>\n";
-    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    $text = "🛒 <b>Заказы ресторанов</b>\n\n";
 
     if (!$session) {
         $text .= "❌ Сейчас нет активной сессии приёма заявок.\n";
@@ -3252,8 +3231,7 @@ function cmdRoStatus($chatId, $user, $msgId) {
 
     $session = $pdo->query("SELECT * FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1")->fetch();
 
-    $text = "🛒 <b>Заказы ресторанов</b>\n";
-    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    $text = "🛒 <b>Заказы ресторанов</b>\n\n";
 
     if (!$session) {
         $text .= "❌ Нет активной сессии.\n";
@@ -3344,8 +3322,7 @@ function restRoSendLogins($chatId, $msgId) {
 
         $addr = $u['city'] . ($u['address'] ? ', ' . $u['address'] : '');
         $prettyRn = formatRestaurantNumber($rn);
-        $msgText = "🛒 <b>Заказы ресторанов — новая система</b>\n";
-        $msgText .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+        $msgText = "🛒 <b>Заказы ресторанов — новая система</b>\n\n";
         $msgText .= "Для подачи заявок используйте веб-форму:\n\n";
         $msgText .= "🏪 Ресторан: <b>" . soEsc($prettyRn) . "</b> (" . soEsc($addr) . ")\n";
         $msgText .= "🔗 Ссылка: {$siteUrl}/restaurant\n";

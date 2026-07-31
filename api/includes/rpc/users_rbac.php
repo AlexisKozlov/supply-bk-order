@@ -163,6 +163,22 @@ if ($fn === 'update_user') {
         $s = $pdo->prepare("SELECT name FROM users WHERE id=?"); $s->execute([$userId]); $target = $s->fetch();
         if ($target) $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$target['name']]);
     }
+    // Права поменялись — пересобираем персональное меню команд в Telegram,
+    // иначе человек продолжит видеть команды снятого модуля до перепривязки.
+    if (isset($body['role']) || array_key_exists('permissions', $body)) {
+        try {
+            require_once __DIR__ . '/../bot_access.php';
+            $tgu = $pdo->prepare("SELECT name, role, permissions, hidden_modules, telegram_chat_id FROM users WHERE id = ?");
+            $tgu->execute([$userId]);
+            $tgRow = $tgu->fetch();
+            if ($tgRow && !empty($tgRow['telegram_chat_id'])) {
+                botSyncChatCommands($tgRow['telegram_chat_id'], $tgRow);
+            }
+        } catch (Throwable $e) {
+            error_log('update_user commands sync: ' . $e->getMessage());
+        }
+    }
+
     $changedFields = [];
     if (isset($body['role'])) $changedFields['role'] = $body['role'];
     if (array_key_exists('permissions', $body)) $changedFields['permissions'] = $body['permissions'];

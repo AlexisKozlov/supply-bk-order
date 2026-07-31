@@ -374,10 +374,21 @@ if ($fn === 'confirm_telegram_link') {
         error_log('confirm_telegram_link error: ' . $e->getMessage());
         respond(['error' => 'Ошибка привязки'], 500);
     }
+    // Персональное меню команд: общий список короткий (он виден и ресторанам),
+    // а сотруднику ставим команды по его правам.
+    try {
+        require_once __DIR__ . '/../bot_access.php';
+        $tgUser = $pdo->prepare("SELECT name, role, permissions, hidden_modules FROM users WHERE name = ? LIMIT 1");
+        $tgUser->execute([$sessionUser['name']]);
+        botSyncChatCommands($chatId, $tgUser->fetch() ?: null);
+    } catch (Throwable $e) {
+        error_log('confirm_telegram_link commands: ' . $e->getMessage());
+    }
+
     // Отправляем приветствие в Telegram
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if ($botToken) {
-        $tgMsg = "✅ Аккаунт <b>" . htmlspecialchars($sessionUser['name'], ENT_QUOTES, 'UTF-8') . "</b> привязан!\n\nТеперь вам доступны все команды бота.\nНажмите /start для меню.";
+        $tgMsg = "✅ Аккаунт <b>" . htmlspecialchars($sessionUser['name'], ENT_QUOTES, 'UTF-8') . "</b> привязан!\n\nНажмите /start — меню собрано под ваши права.";
         sendTelegramMessage($botToken, $chatId, $tgMsg);
     }
     respond(['success' => true, 'user_name' => $sessionUser['name']]);

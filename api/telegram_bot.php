@@ -347,6 +347,7 @@ function sendDocument($chatId, $filename, $content, $caption = '') {
 
 require_once __DIR__ . '/includes/legal_entities.php';
 require_once __DIR__ . '/includes/helpers.php';
+require_once __DIR__ . '/includes/bot_access.php';
 require_once __DIR__ . '/includes/bot_state.php';
 require_once __DIR__ . '/includes/bot_ai.php';
 require_once __DIR__ . '/includes/bot_lookup.php';
@@ -362,7 +363,9 @@ require_once __DIR__ . '/includes/bot_faq.php';
 
 function getUser($chatId) {
     global $pdo;
-    $s = $pdo->prepare("SELECT name, role, legal_entities FROM users WHERE telegram_chat_id = ?");
+    // permissions и hidden_modules нужны меню: без них бот показывал всем
+    // одинаковый набор кнопок независимо от прав на портале.
+    $s = $pdo->prepare("SELECT name, role, legal_entities, permissions, hidden_modules FROM users WHERE telegram_chat_id = ?");
     $s->execute([$chatId]);
     $u = $s->fetch();
     if (!$u) return null;
@@ -512,25 +515,14 @@ function botRestaurantLinkInstructions() {
          . "<i>Код действует 10 минут. Каждый сотрудник получает свой код.</i>";
 }
 
-function botCommandsHelpText() {
-    return "📋 <b>Команды бота</b>\n\n"
-         . "/start — начать и выбрать роль\n"
-         . "/menu — главное меню\n"
-         . "/restaurant — меню ресторана\n"
-         . "/cards — поиск карточек товаров\n"
-         . "/today — сводка на сегодня\n"
-         . "/orders — заказы за 7 дней\n"
-         . "/deliveries — ближайшие поставки\n"
-         . "/plans — планирование\n"
-         . "/stock — критичные остатки\n"
-         . "/analysis — анализ запасов\n"
-         . "/consumption — топ расхода\n"
-         . "/prices — изменения цен\n"
-         . "/psc — протоколы согласования цен\n"
-         . "/schedule — график доставок\n"
-         . "/sales — реализация ресторанов\n"
-         . "/export — выгрузки CSV\n"
-         . "/settings — настройки уведомлений";
+function botCommandsHelpText($user = null) {
+    // Список строим из того же набора, что уходит в меню команд Telegram:
+    // человек не должен читать про разделы, которых у него нет.
+    $out = "📋 <b>Команды бота</b>\n\n";
+    foreach (botCommandsForUser($user) as $c) {
+        $out .= "/{$c['command']} — " . mb_strtolower(mb_substr($c['description'], 0, 1)) . mb_substr($c['description'], 1) . "\n";
+    }
+    return rtrim($out);
 }
 
 // ═══ Команды с данными ═══
@@ -1759,50 +1751,46 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0, $editMsgId = null)
 
 // ═══ Settings UI ═══
 
-function getMenuButtons($user) {
+function getMenuButtons($user, $chatId = null) {
     $entity = $user ? getUserEntity($user) : null;
-    $buttons = [
-        // Главное
-        [['text' => '📅 Сегодня', 'callback_data' => 'cmd_today']],
-        // Заказы и поставки
-        [
-            ['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'],
-            ['text' => '🚚 Поставки', 'callback_data' => 'cmd_deliveries'],
-            ['text' => '📅 Планы', 'callback_data' => 'cmd_plans'],
-        ],
-        // Аналитика
-        [
-            ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock'],
-            ['text' => '📊 Расход', 'callback_data' => 'cmd_consumption'],
-            ['text' => '📊 Анализ', 'callback_data' => 'cmd_analysis'],
-        ],
-        // Цены и реализация
-        [
-            ['text' => '💰 Цены', 'callback_data' => 'cmd_prices'],
-            ['text' => '📋 ПСЦ', 'callback_data' => 'cmd_psc'],
-            ['text' => '🏪 Продажи', 'callback_data' => 'cmd_sales'],
-        ],
-        // Инструменты
-        [
-            ['text' => '🔍 Карточки', 'web_app' => ['url' => 'https://supply-department.online/search-cards']],
-            ['text' => '🗓 График', 'callback_data' => 'cmd_schedule'],
-            ['text' => '📤 Экспорт', 'callback_data' => 'cmd_export'],
-        ],
-        // Рестораны
-        [
-            ['text' => '✏️ Корректировки', 'callback_data' => 'cmd_corrections'],
-            ['text' => '🏪 Рестораны', 'callback_data' => 'cmd_rest_subs_stats'],
-        ],
-        [
-            ['text' => '🛒 Заказы рестов', 'callback_data' => 'cmd_ro_status'],
-            ['text' => '📨 Рассылка логинов', 'callback_data' => 'cmd_ro_send_logins'],
-        ],
-        // Файл заказа + ресторанное меню
-        [
-            ['text' => '📄 Файл заказа', 'callback_data' => 'cmd_upload_order_file'],
-            ['text' => '🏪 Меню ресторана', 'callback_data' => 'start_role_restaurant'],
-        ],
+    // chatId нужен, чтобы понять, есть ли у чата ресторанные подписки.
+    // Явный параметр не везде удобен, поэтому подстраховываемся глобальным.
+    $chatId = $chatId ?: ($GLOBALS['chatId'] ?? 0);
+
+    // Кнопка появляется, только если модуль доступен человеку на портале и не
+    // спрятан им самим. Раньше список был одинаковым для всех: сотрудник цеха
+    // или ресторанный менеджер видел цены, ПСЦ и рассылку логинов.
+    $can = fn($cmd) => botCmdVisible($user, $cmd);
+    $btn = fn($cmd, $label) => ['text' => $label, 'callback_data' => 'cmd_' . $cmd];
+
+    // Ряды собираем по смыслу и выкидываем пустые: дырок в сетке не остаётся.
+    $groups = [
+        ['today' => '📅 Сегодня'],
+        ['orders' => '📦 Заказы', 'deliveries' => '🚚 Поставки', 'plans' => '📅 Планы'],
+        ['stock' => '📉 Остатки', 'consumption' => '📊 Расход', 'analysis' => '📊 Анализ'],
+        ['prices' => '💰 Цены', 'psc' => '📋 ПСЦ', 'sales' => '🏪 Продажи'],
+        ['schedule' => '🗓 График', 'export' => '📤 Экспорт'],
+        ['corrections' => '✏️ Корректировки', 'rest_subs_stats' => '🏪 Рестораны'],
+        ['ro_status' => '🛒 Заказы рестов', 'ro_send_logins' => '📨 Рассылка логинов'],
+        ['upload_order_file' => '📄 Файл заказа'],
     ];
+    $buttons = [];
+    foreach ($groups as $row) {
+        $cells = [];
+        foreach ($row as $cmd => $label) {
+            if ($can($cmd)) $cells[] = $btn($cmd, $label);
+        }
+        if ($cells) $buttons[] = $cells;
+    }
+
+    // Карточки и меню ресторана доступны всем: первое — справочник товаров,
+    // второе — переход в ресторанную часть бота.
+    $tools = [['text' => '🔍 Карточки', 'web_app' => ['url' => 'https://supply-department.online/search-cards']]];
+    if ($chatId && botCountActiveSubs($chatId) > 0) {
+        $tools[] = ['text' => '🏪 Меню ресторана', 'callback_data' => 'start_role_restaurant'];
+    }
+    $buttons[] = $tools;
+
     if ($user && count($user['legal_entities']) > 1) {
         $short = $entity ? getEntityShort($entity) : '?';
         $buttons[] = [['text' => "🏢 {$short}", 'callback_data' => 'cmd_entity'], ['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']];
@@ -1820,7 +1808,6 @@ function getMenuText($user) {
     $dayName = $dayNames[(int)date('N')] ?? '';
 
     $lines = ["🍔 <b>Supply Department</b>"];
-    $lines[] = "━━━━━━━━━━━━━━━━━━━━";
     if ($entity) $lines[] = "🏢 {$short} · {$today}, {$dayName}";
     else $lines[] = "📅 {$today}, {$dayName}";
     $lines[] = "";
@@ -1968,6 +1955,12 @@ if (isset($input['callback_query'])) {
             answerCallback($cb['id'], 'Нажмите /start для привязки аккаунта');
             exit;
         }
+        // Проверка прав на само действие: спрятать кнопку недостаточно —
+        // callback_data можно отправить руками, минуя меню.
+        if (!botCmdAllowed($user, $cmd)) {
+            answerCallback($cb['id'], '⛔ Нет доступа к этому разделу', true);
+            exit;
+        }
         answerCallback($cb['id']);
         switch ($cmd) {
             case 'menu':
@@ -2038,6 +2031,7 @@ if (isset($input['callback_query'])) {
     if (str_starts_with($data, 'sched_')) {
         $user = getUser($chatId);
         if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        if (!botCmdAllowed($user, 'schedule')) { answerCallback($cb['id'], '⛔ Нет доступа к графику', true); exit; }
         answerCallback($cb['id']);
         $dayNum = intval(substr($data, 6));
         if ($dayNum >= 1 && $dayNum <= 6) {
@@ -2050,6 +2044,7 @@ if (isset($input['callback_query'])) {
     if (str_starts_with($data, 'analysis_')) {
         $user = getUser($chatId);
         if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        if (!botCmdAllowed($user, 'analysis')) { answerCallback($cb['id'], '⛔ Нет доступа к анализу', true); exit; }
         answerCallback($cb['id']);
         $parts = explode('_', $data);
         // analysis_summary, analysis_red_0, analysis_orange_1 ...
@@ -2332,6 +2327,12 @@ if (isset($input['callback_query'])) {
     if (str_starts_with($data, 'export_')) {
         $user = getUser($chatId);
         if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        // У каждой выгрузки свой модуль: анализ, заказы, прайс.
+        $expRule = BOT_EXPORT_ACCESS[$data] ?? null;
+        if (!$expRule || !botCan($user, $expRule[0], $expRule[1])) {
+            answerCallback($cb['id'], '⛔ Нет доступа к этой выгрузке', true);
+            exit;
+        }
         answerCallback($cb['id'], 'Генерирую файл...');
         $type = substr($data, 7);
         $entity = getUserEntity($user);
@@ -3251,9 +3252,17 @@ if (preg_match('/^\d{6}$/', $text)) {
 if ($text === '/start') {
     tgStateClear($chatId, 'cards');
     $user = getUser($chatId);
+    // Меню команд Telegram — под этого человека: у ресторана короткий список,
+    // у сотрудника только его разделы. Общий список одинаковый для всех.
+    botSyncChatCommands($chatId, $user);
+    $hasRestSubs = botCountActiveSubs($chatId) > 0;
     if ($user) {
         $greeting = "Привет, <b>" . tgEsc($user['name']) . "</b>! 👋\n\n";
-        sendMessage($chatId, $greeting . getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
+        sendMessage($chatId, $greeting . getMenuText($user), ['inline_keyboard' => getMenuButtons($user, $chatId)]);
+    } elseif ($hasRestSubs) {
+        // Чат привязан только к ресторану — спрашивать «кто вы» незачем,
+        // выбор из одного варианта был лишним шагом на каждом входе.
+        restShowMySubs($chatId);
     } else {
         // Показываем выбор роли: отдел закупок или ресторан
         $keyboard = ['inline_keyboard' => [
@@ -3268,12 +3277,12 @@ if ($text === '/start') {
 // /help или /menu
 if ($text === '/help' || $text === '/menu') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
     setUserMode($user['name'], null); // сброс режима
     tgStateClear($chatId, 'cards');
     tgStateClear($chatId, 'restord'); // сброс режима ввода заявки
     tgStateClear($chatId, 'soord'); // сброс режима ввода заявки поставщику
-    $tips = "\n\n" . botCommandsHelpText()
+    $tips = "\n\n" . botCommandsHelpText($user)
           . "\n\n💡 <i>Можно также спросить текстом:</i>\n"
           . "• Какой остаток молока?\n"
           . "• Товары с запасом на 3 дня\n"
@@ -3292,7 +3301,8 @@ if ($text === '/reminders') {
 // /today — дашборд на сегодня
 if ($text === '/today') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'today')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdToday($chatId, $user);
     exit;
 }
@@ -3300,7 +3310,8 @@ if ($text === '/today') {
 // /export — экспорт CSV
 if ($text === '/export') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'export')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdExport($chatId, $user);
     exit;
 }
@@ -3318,7 +3329,8 @@ if ($text === '/restaurant') {
 // /analysis — полный анализ запасов
 if ($text === '/analysis') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'analysis')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdAnalysis($chatId, $user);
     exit;
 }
@@ -3326,7 +3338,8 @@ if ($text === '/analysis') {
 // /deliveries — ближайшие поставки
 if ($text === '/deliveries') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'deliveries')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdDeliveries($chatId, $user);
     exit;
 }
@@ -3334,7 +3347,8 @@ if ($text === '/deliveries') {
 // /plans — планирование
 if ($text === '/plans') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'plans')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdPlans($chatId, $user);
     exit;
 }
@@ -3342,7 +3356,8 @@ if ($text === '/plans') {
 // /schedule — график доставок
 if ($text === '/schedule') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'schedule')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdSchedule($chatId, $user);
     exit;
 }
@@ -3350,7 +3365,7 @@ if ($text === '/schedule') {
 // /entity — переключение юрлица
 if ($text === '/entity') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
     $entities = $user['legal_entities'];
     if (count($entities) <= 1) {
         $current = getUserEntity($user);
@@ -3389,7 +3404,8 @@ if ($text === '/cards') {
 // /orders
 if ($text === '/orders') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'orders')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdOrders($chatId, $user);
     exit;
 }
@@ -3397,7 +3413,8 @@ if ($text === '/orders') {
 // /stock
 if ($text === '/stock') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'stock')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdStock($chatId, $user);
     exit;
 }
@@ -3405,7 +3422,8 @@ if ($text === '/stock') {
 // /sales
 if ($text === '/sales') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'sales')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdSales($chatId, $user);
     exit;
 }
@@ -3413,7 +3431,8 @@ if ($text === '/sales') {
 // /consumption
 if ($text === '/consumption') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'consumption')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdConsumption($chatId, $user);
     exit;
 }
@@ -3421,7 +3440,8 @@ if ($text === '/consumption') {
 // /prices
 if ($text === '/prices') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'prices')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdPrices($chatId, $user);
     exit;
 }
@@ -3429,7 +3449,8 @@ if ($text === '/prices') {
 // /psc
 if ($text === '/psc') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    if (!$user) { botDenyPurchasing($chatId); exit; }
+    if (!botCmdAllowed($user, 'psc')) { sendMessage($chatId, "⛔ У вас нет доступа к этому разделу."); exit; }
     cmdPsc($chatId, $user);
     exit;
 }
@@ -3515,6 +3536,22 @@ if ($cardsState !== null) {
 // Свободный текст — ответ на вопрос
 $user = getUser($chatId);
 if (!$user) {
+    // Ресторан привязан, просто не как сотрудник закупок. Раньше он получал
+    // «привяжите аккаунт» и упирался в тупик — теперь ведём в нужное место.
+    if (botCountActiveSubs($chatId) > 0) {
+        sendMessage(
+            $chatId,
+            "Я отвечаю на вопросы отдела закупок, а ваш чат привязан к ресторану.\n\n"
+            . "Что можно сделать:\n"
+            . "• написать в отдел закупок — кнопка «Чат» в меню ресторана;\n"
+            . "• открыть меню ресторана и выбрать нужное.",
+            ['inline_keyboard' => [
+                [['text' => '💬 Написать в закупки', 'callback_data' => 'chat_start']],
+                [['text' => '🏪 Меню ресторана', 'callback_data' => 'start_role_restaurant']],
+            ]]
+        );
+        exit;
+    }
     sendMessage($chatId, "🔒 Для доступа к боту нужно привязать Telegram к аккаунту.\n\nНажмите /start чтобы получить ссылку для входа.");
     exit;
 }

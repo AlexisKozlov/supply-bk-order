@@ -28,27 +28,18 @@ if (!$botToken) {
     exit(1);
 }
 
+// Общий список видят ВСЕ, включая рестораны, которые к закупкам отношения не
+// имеют. Поэтому здесь только то, что осмысленно для любого: вход, меню,
+// помощь, ресторанная часть, напоминания и поиск карточек. Команды закупок
+// ставятся персонально каждому привязанному сотруднику по его правам —
+// botSyncChatCommands() в api/includes/bot_access.php.
 $commands = [
-    ['command' => 'start',       'description' => 'Начать работу и выбрать роль'],
+    ['command' => 'start',       'description' => 'Начать работу'],
     ['command' => 'menu',        'description' => 'Главное меню'],
     ['command' => 'help',        'description' => 'Помощь по командам'],
     ['command' => 'restaurant',  'description' => 'Меню ресторана'],
     ['command' => 'reminders',   'description' => 'Подписки на напоминания о заявках'],
     ['command' => 'cards',       'description' => 'Поиск карточек товаров'],
-    ['command' => 'today',       'description' => 'Сводка на сегодня'],
-    ['command' => 'orders',      'description' => 'Заказы за 7 дней'],
-    ['command' => 'deliveries',  'description' => 'Ближайшие поставки'],
-    ['command' => 'plans',       'description' => 'Планирование'],
-    ['command' => 'stock',       'description' => 'Критичные остатки'],
-    ['command' => 'analysis',    'description' => 'Анализ запасов'],
-    ['command' => 'consumption', 'description' => 'Топ расхода'],
-    ['command' => 'prices',      'description' => 'Изменения цен'],
-    ['command' => 'psc',         'description' => 'Протоколы согласования цен'],
-    ['command' => 'schedule',    'description' => 'График доставок'],
-    ['command' => 'sales',       'description' => 'Реализация ресторанов'],
-    ['command' => 'export',      'description' => 'Выгрузки CSV'],
-    ['command' => 'entity',      'description' => 'Переключить юрлицо'],
-    ['command' => 'settings',    'description' => 'Настройки уведомлений'],
 ];
 
 $payload = json_encode([
