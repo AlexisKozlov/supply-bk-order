@@ -1,6 +1,6 @@
 <template>
   <Transition name="upd-fade">
-    <div v-if="needRefresh && !autoHealing" class="upd-banner" role="alert">
+    <div v-if="needRefresh && !autoHealing" class="upd-banner" :class="{ 'upd-above-nav': isRestaurantArea }" role="alert">
       <div class="upd-content">
         <div class="upd-icon">🔄</div>
         <div class="upd-text">
@@ -19,8 +19,14 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue';
+import { computed, ref, onUnmounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
+
+// В кабинете ресторана на телефоне снизу закреплено меню — баннер вставал
+// поверх него и перекрывал кнопки.
+const route = useRoute();
+const isRestaurantArea = computed(() => String(route.path || '').startsWith('/restaurant'));
 
 // Таймер и слушатель сохраняем, чтобы корректно убрать при размонтировании
 // (HMR в dev, тесты, или если когда-нибудь UpdatePrompt окажется не в App.vue).
@@ -200,6 +206,10 @@ onUnmounted(() => {
 
 .upd-fade-enter-active, .upd-fade-leave-active { transition: all 0.25s ease; }
 .upd-fade-enter-from, .upd-fade-leave-to { opacity: 0; transform: translate(-50%, 20px); }
+
+@media (max-width: 768px) {
+  .upd-banner.upd-above-nav { bottom: calc(74px + env(safe-area-inset-bottom, 0px) + 10px); }
+}
 
 @media (max-width: 520px) {
   .upd-content { flex-direction: column; align-items: stretch; padding: 12px; }

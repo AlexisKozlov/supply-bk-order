@@ -1,5 +1,7 @@
 <template>
   <div class="cab" :class="cabBrand.themeClass">
+    <!-- Полоса «нет связи»: над нижним меню, шапку не перекрывает. -->
+    <OfflineIndicator placement="cabinet" :show-queue="false" />
     <!-- ══════ Sidebar ══════ -->
     <aside class="cab-sidebar">
       <div class="sb-brand">
@@ -1377,6 +1379,24 @@
         </button>
       </div>
 
+      <!-- Установка кабинета на телефон. Карточка скрыта, если приложение
+           уже установлено или браузер установку не поддерживает. -->
+      <div v-if="pwaInstall.canInstall.value" class="pf-card">
+        <div class="pf-card-head">
+          <span class="pf-card-icon pf-icon-app">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="2" width="12" height="20" rx="2.5"/>
+              <path d="M11 18.5h2"/>
+            </svg>
+          </span>
+          <div class="pf-card-title">
+            <h3>Кабинет как приложение</h3>
+            <p>Отдельная иконка на экране телефона и уведомления о заказах</p>
+          </div>
+        </div>
+        <InstallAppButton />
+      </div>
+
       <div class="pf-logout-row">
         <button class="pf-btn danger lg pf-logout" @click="handleLogout">Выйти из аккаунта</button>
       </div>
@@ -1583,6 +1603,9 @@ function renderPostMessage(text) {
 }
 import { useCabinetDashboard } from '@/composables/useCabinetDashboard.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
+import OfflineIndicator from '@/components/ui/OfflineIndicator.vue';
+import InstallAppButton from '@/components/InstallAppButton.vue';
+import { useInstallPrompt } from '@/composables/useInstallPrompt.js';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
 const RestaurantKegReturnsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantKegReturnsTab.vue'));
@@ -1605,6 +1628,8 @@ const route = useRoute();
 const roStore = useRestaurantOrderStore();
 const soStore = useSupplierOrderStore();
 const toast = useToastStore();
+// Установка кабинета как приложения (карточка в профиле).
+const pwaInstall = useInstallPrompt();
 
 const globalLoading = ref(true);
 const globalError = ref('');
@@ -5795,6 +5820,7 @@ tr.del-err { background: #fef2f2; }
 .pf-icon-devices { background: #E8F5E9; color: #2E7D32; }
 .pf-icon-contact { background: #FFF1E0; color: #C16B4D; }
 .pf-icon-bug { background: #FFF3E0; color: #b35900; }
+.pf-icon-app { background: #FDEBD9; color: #C1502E; }
 .pf-bug-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 6px; vertical-align: middle; }
 .pf-card-title { min-width: 0; flex: 1; }
 .pf-card-title h3 { margin: 0; font-size: 15px; font-weight: 700; color: #2C1A12; }

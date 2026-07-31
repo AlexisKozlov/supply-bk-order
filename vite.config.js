@@ -40,17 +40,39 @@ export default defineConfig({
       // sw.js / index.html / manifest.webmanifest (см. memory/pwa-config).
       registerType: 'prompt',
       manifest: {
+        // id фиксирует «личность» приложения: если позже поменять start_url,
+        // установленное приложение останется тем же, а не появится вторым.
+        id: '/',
         name: 'Supply Department — Отдел закупок',
         short_name: 'Закупки',
-        description: 'Портал закупок',
+        description: 'Портал отдела закупок: заказы, поставки, аналитика',
         theme_color: '#502314',
         background_color: '#FAF6EF',
         display: 'standalone',
+        start_url: '/',
+        scope: '/',
         lang: 'ru',
+        dir: 'ltr',
+        categories: ['business', 'productivity'],
         icons: [
-          { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          // Отдельные maskable-иконки: логотип уменьшен и лежит на фоне,
+          // иначе Android вырезает круг и срезает края логотипа.
+          { src: '/pwa-maskable-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: '/pwa-maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+        // Быстрые действия по долгому нажатию на иконку приложения.
+        shortcuts: [
+          { name: 'Новый заказ', short_name: 'Заказ', url: '/order' },
+          { name: 'Заявки поставщикам', short_name: 'Заявки', url: '/supplier-orders' },
+          { name: 'Заказы ресторанов', short_name: 'Рестораны', url: '/restaurant-orders' },
+          { name: 'Задачи', short_name: 'Задачи', url: '/tasks' },
+        ],
+        // Показываются в окне установки Chrome/Android.
+        screenshots: [
+          { src: '/screenshots/portal-wide.png', sizes: '1280x800', type: 'image/png', form_factor: 'wide', label: 'Портал закупок на компьютере' },
+          { src: '/screenshots/portal-narrow.png', sizes: '390x844', type: 'image/png', form_factor: 'narrow', label: 'Портал закупок на телефоне' },
         ],
       },
       workbox: {
@@ -92,6 +114,16 @@ export default defineConfig({
           'maintenance.html',
           'mockups/**',
           'edi-autofill.user.js',
+          // Ниже — то, что не должно скачиваться всем при каждом обновлении.
+          // Файлы остаются доступны по прямой ссылке, просто не лежат в
+          // офлайн-кэше. До этой чистки приложение весило 8,4 МБ.
+          'keg-photos/**',        // 3,3 МБ картинок, на которые нет ссылок из кода
+          'icons/**',             // отдельные svg-файлы, интерфейс их не использует
+          'screenshots/**',       // снимки экрана для окна установки
+          '**/jspdf*.js',         // PDF/PPTX/canvas — только экран «Аналитика ячеек»
+          '**/pptxgen*.js',
+          '**/html2canvas*.js',
+          '**/index.es-*.js',
         ],
         navigateFallback: 'index.html',
         // /mockups/ — статические страницы-макеты для согласования дизайна.

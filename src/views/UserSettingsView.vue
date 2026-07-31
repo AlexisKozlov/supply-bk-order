@@ -65,6 +65,19 @@
           <a href="https://t.me/supplyportal_bot" target="_blank" class="uset-btn-primary">Подключить Telegram-бот</a>
         </div>
       </div>
+
+      <!-- Установка портала как приложения. Карточки нет, если уже
+           установлено или браузер этого не умеет. -->
+      <div v-if="pwaInstall.canInstall.value" class="uset-card">
+        <div class="uset-card-header">
+          <div class="uset-card-icon">💻</div>
+          <div>
+            <div class="uset-card-title">Портал как приложение</div>
+            <div class="uset-card-desc">Своё окно без адресной строки и запуск с рабочего стола.</div>
+          </div>
+        </div>
+        <InstallAppButton />
+      </div>
     </div>
   </div>
 </template>
@@ -75,9 +88,12 @@ import { db } from '@/lib/apiClient.js'
 import { useUserStore } from '@/stores/userStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
+import InstallAppButton from '@/components/InstallAppButton.vue'
+import { useInstallPrompt } from '@/composables/useInstallPrompt.js'
 
 const userStore = useUserStore()
 const toast = useToastStore()
+const pwaInstall = useInstallPrompt()
 
 const initials = computed(() => {
   const name = userStore.currentUser?.name || ''

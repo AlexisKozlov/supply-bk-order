@@ -3,8 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover обязателен: без него env(safe-area-inset-*) всегда 0,
+         и на iPhone нижнее меню кабинета уезжает под системную полоску. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#502314" />
+    <!-- Установленное приложение: без рамок браузера, статус-бар в цвет шапки. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- default (не black-translucent): контент НЕ заезжает под часы iPhone,
+         фон статус-бара Safari берёт из theme-color. Менять на translucent
+         можно только вместе с padding-top: env(safe-area-inset-top) во всех шапках. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Закупки" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" sizes="180x180" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <!-- Шрифт интерфейса: Plus Jakarta Sans (тело/UI). Бренд-заголовки — Flame (self-host). -->

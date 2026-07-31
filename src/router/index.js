@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useUserStore, loadRbacConfig } from '@/stores/userStore.js';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { syncPwaIdentity } from '@/lib/pwaManifest.js';
 
 const APP_TITLE = 'Портал закупок';
 
@@ -255,6 +256,9 @@ router.onError((error) => {
 router.afterEach((to) => {
   const pageTitle = to.meta.title;
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
+  // Кабинет ресторана и портал закупок ставятся как разные приложения —
+  // подставляем нужный манифест и иконку под текущий раздел.
+  syncPwaIdentity(to.path);
 });
 
 const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'supplier-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks', 'supply-assistant', 'handover', 'own-production'];
