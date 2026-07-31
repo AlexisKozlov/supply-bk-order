@@ -282,6 +282,45 @@ function soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) {
 }
 
 /**
+ * Цеха собственного производства, доступные ресторанам этого чата.
+ * @return array [['restaurant_number' => .., 'supplier_id' => .., 'short_name' => ..], ...]
+ */
+function soBotWorkshopsForChat($pdo, $chatId) {
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $restNums = array_column($subs, 'restaurant_number');
+    if (!$restNums) return [];
+    $ph = implode(',', array_map('intval', $restNums));
+    $rows = $pdo->query("
+        SELECT DISTINCT r.number AS restaurant_number, s.id AS supplier_id, s.short_name
+        FROM supplier_schedules ss
+        JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+        JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 AND s.so_enabled = 1
+        WHERE r.number IN ({$ph}) AND ss.is_active = 1
+        ORDER BY r.number, s.short_name")->fetchAll();
+    return array_values(array_filter($rows, fn($x) => soLsSupplierEnabled($pdo, (string)$x['supplier_id'])));
+}
+
+/**
+ * Кнопки «Заказать тесто»: открывают раздел кабинета прямо в Telegram.
+ * Форму теста в боте не повторяем — там лотки и две партии изготовления,
+ * а мини-приложение показывает ровно тот же экран, что и на сайте.
+ * Ссылка одноразовая: в webview нет cookie ресторана, вход идёт по tg_token.
+ */
+function soBotDoughButtons($pdo, $chatId) {
+    $list = soBotWorkshopsForChat($pdo, $chatId);
+    $many = count($list) > 1;
+    $rows = [];
+    foreach ($list as $w) {
+        $url = soBotGetWebLink($pdo, $chatId, (string)$w['supplier_id'], (string)$w['restaurant_number']);
+        if (!$url) continue;
+        $label = '🥖 Заказать тесто'
+            . ($many ? ' — ' . formatRestaurantNumber((int)$w['restaurant_number']) : '');
+        $rows[] = [['text' => $label, 'web_app' => ['url' => $url]]];
+    }
+    return $rows;
+}
+
+/**
  * Тесто в боте не подают: там нет ни лотков, ни деления на партии — объём ушёл
  * бы одной партией, и цех изготовил бы его не в тот день. Старые кнопки из
  * прошлых сообщений сюда ещё приходят, поэтому отвечаем понятно и уводим в кабинет.
@@ -295,7 +334,7 @@ function soBotBlockWorkshop($pdo, $chatId, $msgId, $supplierId, $restNum = null)
         $restNum = $subs[0]['restaurant_number'] ?? null;
     }
     $url = $restNum !== null ? soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) : null;
-    if ($url) $btns[] = [['text' => '🥖 Заказать тесто', 'url' => $url]];
+    if ($url) $btns[] = [['text' => '🥖 Заказать тесто', 'web_app' => ['url' => $url]]];
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     editMessage(
         $chatId,
@@ -664,6 +703,9 @@ function restShowMySubs($chatId, $msgId = null) {
         }
         $text .= "\n";
         $text .= "🛒 Заявки поставщикам: Планета и другие\n";
+        if (soBotWorkshopsForChat($pdo, $chatId)) {
+            $text .= "🥖 Тесто (ПРЦ): заказ лотками\n";
+        }
         if ($mainOrdersEnabled) {
             $text .= "✅ Основная поставка: заявки открыты\n";
         }
@@ -680,6 +722,8 @@ function restShowMySubs($chatId, $msgId = null) {
         if ($mainOrdersEnabled) {
             $btns[] = [['text' => '🛒 Основная поставка', 'callback_data' => 'rest_ro_orders']];
         }
+        // Тесто ПРЦ — сразу из меню: раздел кабинета открывается в Telegram.
+        foreach (soBotDoughButtons($pdo, $chatId) as $row) $btns[] = $row;
         if ($activeSc) {
             $btns[] = [['text' => "📋 Сбор остатков", 'callback_data' => 'rest_sc_start']];
         }
@@ -909,22 +953,31 @@ function restMenuSupplier($chatId, $msgId) {
     require_once __DIR__ . '/so_loading_sheets.php';
     $sups = array_values(array_filter($sups, fn($sp) => !soLsSupplierEnabled($pdo, (string)$sp['id'])));
 
+    // Тесто — отдельной кнопкой: она открывает раздел кабинета в Telegram.
+    $doughRows = soBotDoughButtons($pdo, $chatId);
+
     $text = "📦 <b>Заявки поставщикам</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-    if (!$sups) {
+    if (!$sups && !$doughRows) {
         $text .= "Нет доступных поставщиков.";
         editMessage($chatId, $msgId, $text, ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
         return;
     }
-    // Если поставщик один — сразу к нему
-    if (count($sups) === 1) {
+    // Если поставщик один и теста нет — сразу к нему. С тестом не проваливаемся:
+    // иначе кнопка «Заказать тесто» никогда бы не показалась.
+    if (count($sups) === 1 && !$doughRows) {
         soOrderSelectRest($chatId, $msgId, $sups[0]['id']);
         return;
     }
-    $text .= "Выберите поставщика:\n";
-    $btns = [];
-    foreach ($sups as $sup) {
-        $btns[] = [['text' => $sup['short_name'], 'callback_data' => 'soord_sup_' . substr($sup['id'], 0, 36)]];
+    $btns = $doughRows;
+    if ($doughRows) {
+        $text .= "🥖 <b>Тесто (ПРЦ)</b> — заказ лотками, откроется в Telegram.\n\n";
+    }
+    if ($sups) {
+        $text .= "Выберите поставщика:\n";
+        foreach ($sups as $sup) {
+            $btns[] = [['text' => $sup['short_name'], 'callback_data' => 'soord_sup_' . substr($sup['id'], 0, 36)]];
+        }
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
