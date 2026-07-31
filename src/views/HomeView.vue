@@ -135,14 +135,11 @@
             <button class="login-close" @click="showLoginModal = false"><BkIcon name="close" size="xs"/></button>
             <div class="login-form">
               <div class="login-form-title">Вход в систему</div>
-              <!-- Переключатель: Отдел закупок / Ресторан -->
-              <div class="login-mode-tabs">
-                <button class="login-mode-tab" :class="{ active: loginMode === 'staff' }" @click="switchLoginMode('staff')">Отдел закупок</button>
-                <button class="login-mode-tab" :class="{ active: loginMode === 'restaurant' }" @click="switchLoginMode('restaurant')">Ресторан</button>
-              </div>
-              <!-- Форма для отдела закупок -->
-              <template v-if="loginMode === 'staff'">
-                <div class="login-form-sub">Введите email и пароль</div>
+              <!-- Вход сотрудника отдела закупок. Ресторанам — отдельный
+                   адрес /restaurant/login: там своя форма (номер ресторана,
+                   «запомнить устройство») и своё описание приложения для
+                   установки на телефон. -->
+              <div class="login-form-sub">Введите email и пароль</div>
                 <div class="login-field">
                   <label>Email</label>
                   <input v-model="selectedUser" type="email" placeholder="Введите email" autocomplete="email" :disabled="loginLoading" @keydown.enter="passwordInput?.focus()" />
@@ -163,28 +160,9 @@
                   <BurgerSpinner v-if="loginLoading" size="xs" />
                   <span>{{ loginLoading ? 'Вход...' : 'Войти' }}</span>
                 </button>
-              </template>
-              <!-- Форма для ресторана -->
-              <template v-else>
-                <div class="login-form-sub">Введите номер ресторана и пароль</div>
-                <div class="login-field">
-                  <label>Номер ресторана или email</label>
-                  <input v-model="roNumber" type="text" inputmode="text" placeholder="24, PS01 или name@example.com" :disabled="loginLoading" @keydown.enter="roPasswordInput?.focus()" />
-                </div>
-                <div class="login-field">
-                  <label>Пароль</label>
-                  <input ref="roPasswordInput" v-model="roPassword" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doRoLogin" :disabled="loginLoading" />
-                </div>
-                <label class="login-consent">
-                  <input v-model="acceptedDataRules" type="checkbox" :disabled="loginLoading" />
-                  <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
-                </label>
-                <div v-if="loginError" class="login-error">{{ loginError }}</div>
-                <button class="login-submit" @click="doRoLogin" :disabled="loginLoading || !roNumber || !roPassword || !acceptedDataRules">
-                  <BurgerSpinner v-if="loginLoading" size="xs" />
-                  <span>{{ loginLoading ? 'Вход...' : 'Войти' }}</span>
-                </button>
-              </template>
+              <div class="login-ro-hint">
+                Вы из ресторана? <a href="/restaurant/login">Вход в кабинет ресторана</a>
+              </div>
             </div>
           </div>
         </div>
@@ -232,7 +210,6 @@ import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { activityLabel } from '@/lib/auditActions.js';
 import { useCanvasParticles } from '@/composables/useCanvasParticles.js';
@@ -247,7 +224,6 @@ const route = useRoute();
 const userStore = useUserStore();
 const orderStore = useOrderStore();
 const toast = useToastStore();
-const roStore = useRestaurantOrderStore();
 
 const showLogoutConfirm = ref(false);
 const showLoginModal = ref(false);
@@ -275,10 +251,6 @@ const password = ref('');
 const passwordInput = ref(null);
 const loginError = ref('');
 const loginLoading = ref(false);
-const loginMode = ref('staff');
-const roNumber = ref('');
-const roPassword = ref('');
-const roPasswordInput = ref(null);
 const acceptedDataRules = ref(false);
 const isMaintenance = ref(false);
 const maintenanceBannerText = ref('');
@@ -522,52 +494,7 @@ function loginErrMsg(code) {
   return map[code] || code || 'Неверный пароль';
 }
 
-function switchLoginMode(mode) {
-  loginMode.value = mode;
-  loginError.value = '';
-}
 
-const roForceLogin = ref(false);
-
-async function doRoLogin() {
-  if (!roNumber.value || !roPassword.value) return;
-  if (!acceptedDataRules.value) {
-    loginError.value = 'Подтвердите согласие с правилами использования портала';
-    return;
-  }
-  loginError.value = '';
-  loginLoading.value = true;
-  try {
-    // Поле принимает либо номер ресторана, либо email. По @ определяем.
-    const raw = roNumber.value.trim();
-    let identifier, group = null;
-    if (raw.includes('@')) {
-      identifier = raw; // email — бэк сам подберёт группу и номер
-    } else {
-      const parsed = parseRestaurantInput(raw);
-      if (!parsed?.number) {
-        loginError.value = 'Неверный номер ресторана или email. Пример: 24, PS01 или name@example.com';
-        roForceLogin.value = false;
-        return;
-      }
-      identifier = parsed.number;
-      group = parsed.group;
-    }
-    const result = await roStore.login(identifier, roPassword.value, group, roForceLogin.value, acceptedDataRules.value);
-    if (result.success) {
-      roForceLogin.value = false;
-      showLoginModal.value = false;
-      router.push({ name: 'restaurant-cabinet' });
-    } else if (result.active_session) {
-      loginError.value = `В аккаунте работает другой пользователь${result.last_login_ago ? ' (вошёл ' + result.last_login_ago + ')' : ''}. Нажмите «Войти» ещё раз, чтобы завершить его сессию.`;
-      roForceLogin.value = true;
-    } else {
-      loginError.value = result.error || 'Неверные данные для входа';
-      roForceLogin.value = false;
-    }
-  } catch (e) { loginError.value = e.message || 'Ошибка соединения'; roForceLogin.value = false; }
-  finally { loginLoading.value = false; }
-}
 
 function confirmLogout() {
   showLogoutConfirm.value = false;
@@ -690,6 +617,16 @@ function confirmLogout() {
 .login-field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .login-error { color: #E76F51; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
 .login-forgot-row { display: flex; justify-content: flex-end; margin: -6px 0 10px; }
+.login-ro-hint {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(80,35,20,0.10);
+  font-size: 13px;
+  color: #6B5A50;
+  text-align: center;
+}
+.login-ro-hint a { color: #C1502E; font-weight: 700; text-decoration: none; }
+.login-ro-hint a:hover { text-decoration: underline; }
 .login-forgot-link { color: #8b7355; font-size: 12px; font-weight: 600; text-decoration: none; }
 .login-forgot-link:hover { color: #E76F51; text-decoration: underline; }
 .login-consent { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 12px; color: #6f5948; font-size: 12px; line-height: 1.35; cursor: pointer; }

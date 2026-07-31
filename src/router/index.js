@@ -285,12 +285,15 @@ router.beforeEach(async (to) => {
   // редиректим на форму входа. Серверная валидация делается в кабинете.
   if (to.path.startsWith('/restaurant/') && to.path !== '/restaurant/login' && to.path !== '/restaurant/reset-password' && to.path !== '/restaurant/verify-email' && to.path !== '/restaurant/reset-password-by-email') {
     const roStore = useRestaurantOrderStore();
-    if (!roStore.isAuthenticated) {
+    // Кэш ресторана мог пропасть (iOS чистит хранилище установленного
+    // приложения), хотя сессия на сервере жива — спрашиваем сервер по cookie
+    // и пускаем без повторного ввода пароля.
+    if (!roStore.isAuthenticated && !(await roStore.restoreFromCookie())) {
       return { path: '/restaurant/login', query: { redirect: to.fullPath } };
     }
   } else if (to.path === '/restaurant') {
     const roStore = useRestaurantOrderStore();
-    if (!roStore.isAuthenticated) {
+    if (!roStore.isAuthenticated && !(await roStore.restoreFromCookie())) {
       return { path: '/restaurant/login' };
     }
   }

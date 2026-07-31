@@ -139,6 +139,21 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
+  // Тихое восстановление входа по cookie.
+  // Признак «залогинен» на фронте — это запись в localStorage. Она может
+  // пропасть (iOS чистит хранилище установленного приложения, ручная очистка
+  // данных сайта), хотя сама сессия на сервере ещё жива — и человек видел
+  // форму входа без причины. Спрашиваем сервер по HttpOnly-cookie и, если
+  // сессия действует, просто восстанавливаем данные ресторана.
+  let _restorePromise = null;
+  async function restoreFromCookie() {
+    if (restaurant.value) return true;
+    if (!_restorePromise) {
+      _restorePromise = validate().finally(() => { _restorePromise = null; });
+    }
+    return _restorePromise;
+  }
+
   async function loadSessions() {
     return api('sessions', { method: 'GET' });
   }
@@ -810,7 +825,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     serverTimeOffset, nowFromServer,
     accountInfo, setAccountEmail,
-    login, loginByTelegram, validate, logout, logoutLocal, loadSessions, revokeSession, revokeOtherSessions,
+    login, loginByTelegram, validate, restoreFromCookie, logout, logoutLocal, loadSessions, revokeSession, revokeOtherSessions,
     loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
     loadBroadcasts, heartbeat, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
