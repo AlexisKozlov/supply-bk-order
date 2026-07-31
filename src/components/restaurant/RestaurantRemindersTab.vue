@@ -46,11 +46,33 @@
             <span>{{ pushChipLabel }}</span>
           </button>
 
+          <!-- iPhone в браузере: Apple разрешает уведомления только установленному
+               приложению, поэтому кнопки включения нет. Без подсказки это выглядит
+               так, будто уведомлений вообще не существует. -->
+          <button v-else-if="pwaInstall.needsIosHint.value"
+                  type="button"
+                  class="rrt-chip rrt-chip-action is-warn"
+                  title="Как включить уведомления на iPhone"
+                  @click="showIosPushHint = !showIosPushHint">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+            <span>Уведомления на iPhone</span>
+          </button>
+
           <span class="rrt-chip" :class="{ 'is-warn': !availableTg.length, 'is-on': availableTg.length }" :title="tgChipTitle">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
             <span>{{ tgChipLabel }}</span>
           </span>
         </div>
+      </div>
+
+      <div v-if="showIosPushHint" class="rrt-ios-hint">
+        <b>Уведомления на iPhone приходят только в установленное приложение.</b>
+        <ol>
+          <li>Откройте кабинет в Safari</li>
+          <li>Нажмите <b>Поделиться</b> внизу экрана</li>
+          <li>Выберите <b>«На экран „Домой“»</b> → <b>«Добавить»</b></li>
+          <li>Запустите кабинет с иконки и включите уведомления здесь же</li>
+        </ol>
       </div>
 
       <!-- Сетка карточек -->
@@ -300,9 +322,12 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { usePushNotifications } from '@/composables/usePushNotifications.js';
+import { useInstallPrompt } from '@/composables/useInstallPrompt.js';
 import { roFetch } from '@/lib/roUtils.js';
 
 const push = usePushNotifications();
+const pwaInstall = useInstallPrompt();
+const showIosPushHint = ref(false);
 
 const RestaurantTodayReminders = defineAsyncComponent(() => import('@/components/restaurant/RestaurantTodayReminders.vue'));
 
@@ -1010,4 +1035,16 @@ onBeforeUnmount(() => {
   .rrt-tut-title { font-size: 15px; }
   .rrt-tut-ok { min-width: 140px; padding: 10px 22px; font-size: 13px; }
 }
+
+.rrt-ios-hint {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  background: #FFF7EE;
+  border: 1px solid #F0DFC9;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #4A3A32;
+  line-height: 1.6;
+}
+.rrt-ios-hint ol { margin: 8px 0 0; padding-left: 20px; }
 </style>
