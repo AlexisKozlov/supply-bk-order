@@ -4530,7 +4530,9 @@ onUnmounted(() => {
    дата под ним, статус отметкой в углу. Лента прокручивается, последняя
    карточка не «обрезается» — справа есть воздух. */
 .day-tabs {
-  display: flex; gap: 8px; padding: 6px 14px 12px 0; overflow-x: auto;
+  /* Сверху 9px, а не 6: метка «заявка подана» выходит за угол кнопки на 7px
+     (top -5 плюс белая обводка), и прокрутка срезала ей верх. */
+  display: flex; gap: 8px; padding: 9px 14px 12px 0; margin-top: -3px; overflow-x: auto;
   -webkit-overflow-scrolling: touch; scrollbar-width: none; scroll-snap-type: x proximity;
 }
 .day-tabs::-webkit-scrollbar { display: none; }

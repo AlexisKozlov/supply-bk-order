@@ -3187,10 +3187,12 @@ if ($soAction === 'admin') {
         // Все позиции заявок для этой даты
         $itemsStmt = $pdo->prepare("
             SELECT o.restaurant_number, o.delivery_date, o.legal_entity,
-                   oi.sku, oi.product_name, oi.quantity, oi.admin_qty, oi.id as item_id, o.id as order_id
+                   oi.sku, oi.product_name, oi.quantity, oi.admin_qty, oi.batch_no,
+                   oi.id as item_id, o.id as order_id
             FROM so_orders o
             JOIN so_order_items oi ON oi.order_id = o.id
             WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
+            ORDER BY oi.batch_no, oi.id
         ");
         $itemsStmt->execute(array_merge([$supplierId, $date], $supplierEntities));
         $orderItems = $itemsStmt->fetchAll();

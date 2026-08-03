@@ -311,12 +311,27 @@
                       : (p.is_grouped ? `Объединено из SKU: ${p.source_skus.join(', ')}` : '')"
                     @dblclick="canEditProduct(p) && startEdit(r.number, p.sku)">
                     <template v-if="editCell === `${r.number}_${p.sku}`">
+                      <!-- Заказ по партиям: своё поле на каждую, иначе правка
+                           ушла бы целиком в первую партию. -->
+                      <div v-if="editParts.length > 1" class="so-cell-parts-edit" @focusout="onPartsBlur">
+                        <label v-for="pt in editParts" :key="pt.item.item_id" class="so-cell-part">
+                          <span class="so-cell-part-n">{{ pt.batch }}</span>
+                          <input
+                            v-model="pt.value"
+                            type="text" inputmode="decimal"
+                            class="so-cell-input so-cell-input-part"
+                            @keydown.enter="saveEdit"
+                            @keydown.escape="cancelEdit"
+                          />
+                        </label>
+                      </div>
                       <input
+                        v-else
                         v-model="editValue"
                         type="text" inputmode="decimal"
                         class="so-cell-input"
                         @keydown.enter="saveEdit"
-                        @keydown.escape="editCell = ''"
+                        @keydown.escape="cancelEdit"
                         @blur="saveEdit"
                         ref="editInputRef"
                       />
@@ -332,6 +347,12 @@
                         {{ getCellQty(r.number, p) }}
                       </span>
                       <span v-else class="so-qty-empty">—</span>
+                      <!-- Заказ по партиям (цех): под общей цифрой видно, сколько
+                           в каждой — цех делает их в разные дни. -->
+                      <span v-if="cellParts(r.number, p)" class="so-qty-parts">
+                        <i v-for="pt in cellParts(r.number, p)" :key="pt.batch"
+                           :title="pt.batch + '-я партия'">{{ formatQtyValue(pt.qty) }}</i>
+                      </span>
                     </template>
                   </td>
                   <td v-if="loadingSheetsAvailable" class="so-td-print">
@@ -1614,6 +1635,9 @@ const showMissing = ref(true);
 const editCell = ref('');
 const editValue = ref('');
 const editInputRef = ref(null);
+// Заказ, разложенный по партиям (цех ПРЦ): в ячейке правим каждую партию
+// отдельным полем — общая цифра там сумма, и править её нечем.
+const editParts = ref([]);
 
 function normalizeProductName(name) {
   return String(name || '').trim().toLowerCase();
@@ -3188,15 +3212,21 @@ async function exportExcel() {
 
 // ═══ Pivot table helpers ═══
 
-// Lookup: { "restNum_sku" => { quantity, admin_qty, item_id, order_id } }
+// Lookup: { "restNum_sku" => [ { quantity, admin_qty, item_id, order_id, batch_no } ] }
+//
+// Список, а не одна позиция: у цеха ПРЦ ресторан с одной поставкой в неделю
+// заказывает двумя партиями, и это две строки по одному SKU. Раньше вторая
+// затирала первую — в матрице показывалось количество только одной партии.
 const itemLookup = computed(() => {
   const map = {};
   for (const item of orderItems.value) {
     const key = `${item.restaurant_number}_${item.sku}`;
-    map[key] = item;
+    (map[key] ||= []).push(item);
   }
   return map;
 });
+/** Первая позиция ячейки — для правки и юрлица. */
+function firstItem(restNum, sku) { return itemLookup.value[`${restNum}_${sku}`]?.[0] || null; }
 
 const displayProducts = computed(() => buildDisplayProducts(products.value));
 
@@ -3207,25 +3237,34 @@ function getDisplayItem(restNum, product) {
   let effectiveQty = 0;
   let hasAdmin = false;
 
+  const parts = [];   // количества по партиям — для подписи под цифрой
   for (const sku of skus) {
-    const item = itemLookup.value[`${restNum}_${sku}`];
-    if (!item) continue;
-    found = true;
-    const rawQty = parseFloat(item.quantity);
-    const rawAdmin = item.admin_qty !== null && item.admin_qty !== undefined ? parseFloat(item.admin_qty) : NaN;
-    if (!isNaN(rawQty)) originalQty += rawQty;
-    if (!isNaN(rawAdmin)) {
-      effectiveQty += rawAdmin;
-      hasAdmin = true;
-    } else if (!isNaN(rawQty)) {
-      effectiveQty += rawQty;
+    for (const item of (itemLookup.value[`${restNum}_${sku}`] || [])) {
+      found = true;
+      const rawQty = parseFloat(item.quantity);
+      const rawAdmin = item.admin_qty !== null && item.admin_qty !== undefined ? parseFloat(item.admin_qty) : NaN;
+      if (!isNaN(rawQty)) originalQty += rawQty;
+      if (!isNaN(rawAdmin)) {
+        effectiveQty += rawAdmin;
+        hasAdmin = true;
+      } else if (!isNaN(rawQty)) {
+        effectiveQty += rawQty;
+      }
+      parts.push({
+        batch: Number(item.batch_no) || 0,
+        qty: isNaN(rawAdmin) ? (isNaN(rawQty) ? 0 : rawQty) : rawAdmin,
+      });
     }
   }
 
   if (!found) return null;
+  // Разбивка нужна, только когда позиции реально разложены по партиям.
+  const batched = parts.filter(p => p.batch > 0);
+  const showParts = batched.length > 1 && batched.some(p => p.batch > 1);
   return {
     quantity: originalQty,
     admin_qty: hasAdmin ? effectiveQty : null,
+    parts: showParts ? batched.sort((a, b) => a.batch - b.batch) : null,
   };
 }
 
@@ -3263,6 +3302,11 @@ const filteredRestaurants = computed(() => {
   }
   return list;
 });
+
+/** Разбивка ячейки по партиям — null, когда заказ не делится. */
+function cellParts(restNum, product) {
+  return getDisplayItem(restNum, product)?.parts || null;
+}
 
 function getCellQty(restNum, product) {
   const item = getDisplayItem(restNum, product);
@@ -3396,7 +3440,7 @@ function cellViolates(restNum, product) {
 function cellLegalEntity(restNum, product) {
   const skus = product?.source_skus?.length ? product.source_skus : [product?.sku];
   for (const sku of skus) {
-    const item = itemLookup.value[`${restNum}_${sku}`];
+    const item = firstItem(restNum, sku);
     if (item?.legal_entity) return item.legal_entity;
   }
   return null;
@@ -3484,7 +3528,18 @@ async function commitOrderItemQty(item, val) {
 
 function startEdit(restNum, sku) {
   const key = `${restNum}_${sku}`;
-  const item = itemLookup.value[key];
+  const list = itemLookup.value[key] || [];
+  // Позиция разложена по партиям — по полю на партию, чтобы правка не ушла
+  // целиком в первую из них.
+  editParts.value = list.length > 1
+    ? list.map(it => ({
+        item: it,
+        batch: Number(it.batch_no) || 1,
+        // Без хвоста «.00»: в базе decimal, а правят целые лотки и штуки.
+        value: formatQtyValue(it.admin_qty !== null && it.admin_qty !== undefined ? it.admin_qty : it.quantity),
+      }))
+    : [];
+  const item = list[0] || null;
   editCell.value = key;
   editValue.value = item?.admin_qty !== null && item?.admin_qty !== undefined
     ? item.admin_qty
@@ -3495,12 +3550,25 @@ function startEdit(restNum, sku) {
   });
 }
 
+/** Закрыть редактор без записи. */
+function cancelEdit() {
+  editCell.value = '';
+  editParts.value = [];
+}
+
+/** Уход фокуса из блока партий — это конец правки, а не переход между полями. */
+function onPartsBlur(e) {
+  if (e.currentTarget.contains(e.relatedTarget)) return;
+  saveEdit();
+}
+
 async function saveEdit() {
   if (!editCell.value) return;
   const match = editCell.value.match(/^(\d+)_(.+)$/);
-  if (!match) { editCell.value = ''; return; }
+  if (!match) { cancelEdit(); return; }
   const [, restNum, sku] = match;
-  const item = itemLookup.value[`${restNum}_${sku}`];
+  if (editParts.value.length > 1) return savePartsEdit(restNum, sku);
+  const item = firstItem(restNum, sku);
   const val = parseFloat(String(editValue.value).replace(',', '.'));
   editCell.value = '';
 
@@ -3513,6 +3581,43 @@ async function saveEdit() {
     return;
   }
   await commitQty(restNum, sku, val, item);
+}
+
+/**
+ * Запись количеств по партиям. Пишем только изменённые строки: у каждой партии
+ * своя позиция заявки, и трогать соседнюю нельзя.
+ * Правила товара (кратность, минимум) проверяем по сумме — предупреждаем,
+ * но не мешаем: последнее слово за закупщиком.
+ */
+async function savePartsEdit(restNum, sku) {
+  const parts = editParts.value;
+  cancelEdit();
+  let sum = 0;
+  const changes = [];
+  for (const pt of parts) {
+    const raw = String(pt.value).replace(',', '.').trim();
+    const val = raw === '' ? NaN : parseFloat(raw);
+    if (!isNaN(val)) sum += val;
+    const now = pt.item.admin_qty !== null && pt.item.admin_qty !== undefined
+      ? parseFloat(pt.item.admin_qty)
+      : parseFloat(pt.item.quantity);
+    if ((isNaN(val) && !isNaN(now)) || (!isNaN(val) && val !== now)) changes.push({ pt, val });
+  }
+  if (!changes.length) return;
+  try {
+    for (const { pt, val } of changes) {
+      await store.adminUpdateQty({
+        item_id: pt.item.item_id,
+        admin_qty: isNaN(val) ? null : val,
+      });
+      pt.item.admin_qty = isNaN(val) ? null : val;
+    }
+    const product = products.value.find(p => p.sku === sku);
+    const issue = qtyIssue(product, sum, parts[0].item?.legal_entity || null);
+    if (issue) toast.info('Сохранено, но не по правилам', issue);
+  } catch (e) {
+    toast.error('Ошибка сохранения', e.message);
+  }
 }
 
 /** Собственно запись количества (после проверок или выбора в окне). */
@@ -4218,6 +4323,20 @@ watch(
 .so-qty { font-weight: var(--tk-fw-semibold); color: var(--tk-text); }
 .so-qty-admin { font-weight: var(--tk-fw-bold); color: var(--tk-accent-text); }
 .so-qty-empty { color: var(--tk-n-300); font-size: var(--tk-fz-lg); }
+/* Партии под общей цифрой: «160 · 130» мелко и серым. */
+.so-qty-parts {
+  display: block; margin-top: 1px; font-size: 10.5px; font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-muted); white-space: nowrap;
+}
+.so-qty-parts i { font-style: normal; }
+.so-qty-parts i + i::before { content: ' · '; color: var(--tk-n-300); }
+/* Правка по партиям: столбик коротких полей с номером партии слева. */
+.so-cell-parts-edit { display: flex; flex-direction: column; gap: 3px; align-items: center; }
+.so-cell-part { display: inline-flex; align-items: center; gap: 4px; }
+.so-cell-part-n {
+  min-width: 12px; font-size: 10px; font-weight: var(--tk-fw-bold); color: var(--tk-text-muted);
+}
+.so-cell-input-part { width: 48px; padding: 1px var(--tk-s-1); }
 
 .so-cell-input {
   width: 56px; padding: 3px var(--tk-s-1); border: 1px solid var(--tk-accent);

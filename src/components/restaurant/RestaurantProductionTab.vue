@@ -447,7 +447,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .rpt-empty-hint { font-size: 12px; color: #B0A090; }
 
 /* ── Дни поставки ── */
-.rpt-days { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px;
+/* Метка «подано» вылезает за угол кнопки, а горизонтальная прокрутка режет
+   всё, что выходит за края. Верхний и правый отступы дают ей место. */
+.rpt-days { display: flex; gap: 8px; overflow-x: auto; margin-top: -6px; padding: 8px 6px 8px;
             -webkit-overflow-scrolling: touch; scrollbar-width: none; }
 .rpt-days::-webkit-scrollbar { display: none; }
 .rpt-day { position: relative; flex: 0 0 auto; min-width: 78px; padding: 9px 12px 8px;
@@ -587,11 +589,18 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
      полей ввода и мешает их читать. */
   .rpt-row { padding: 10px 12px; gap: 6px; }
   .rpt-row-right { flex-direction: column; align-items: stretch; gap: 6px; }
-  .rpt-row-pieces { text-align: left; min-width: 0; }
+  .rpt-row-pieces { justify-content: flex-start; text-align: left; min-width: 0; height: auto; }
   .rpt-row-pieces:empty { display: none; }
   .rpt-batches { flex-direction: column; align-items: stretch; width: 100%; gap: 8px; }
-  .rpt-batch-lbl { text-align: left; min-height: 0; }
+  /* Подпись во всю строку: слева партия, справа штуки — иначе цифры
+     жались влево, а справа висело пустое место. */
+  .rpt-batch-lbl { display: flex; justify-content: space-between; gap: 8px; text-align: left; min-height: 0; }
   .rpt-batch-lbl:empty { display: none; }
+  .rpt-batch-pieces { margin-left: 0; }
   .rpt-batch-lbl em { display: inline; margin-left: 4px; }
+  /* Поле растягивается на всю ширину между «−» и «+». */
+  .rpt-qty-box { flex: 1 1 auto; justify-content: center; }
+  .rpt-qty-static { flex: 1 1 auto; min-width: 0; }
+  .rpt-input { width: 100%; }
 }
 </style>
