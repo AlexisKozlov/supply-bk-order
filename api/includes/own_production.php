@@ -478,9 +478,9 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
     $THIN = \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN;
     $SOLID = \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID;
 
-    // Колонки: A — ресторан, дальше по паре на размер (штуки и лотки),
-    // последняя — всего лотков. Паллеты цех не просил: он считает лотками.
-    $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(2 + count($sizes) * 2);
+    // Колонки: A — ресторан, дальше по паре на размер (штуки и лотки).
+    // Ни паллет, ни «всего лотков» цех не просил — он считает по размерам.
+    $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(1 + count($sizes) * 2);
 
     $sheets = [
         ['Пн-Вт-Ср', [1, 2, 3]],
@@ -512,7 +512,6 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
         // Итог по листу — копим по ходу.
         $sheetQty = [];
         $sheetTrays = [];
-        $sheetTraysTotal = 0;
 
         foreach ($sheetDays as $date => $day) {
             $dt = new DateTime($date);
@@ -533,8 +532,7 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
                 $ws->setCellValue("{$c2}{$row}", 'лотков');
                 $col += 2;
             }
-            $cTrays = $lastCol;
-            $ws->setCellValue("{$cTrays}{$row}", 'Всего лотков');
+
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true)->getColor()->setRGB('502314');
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('F4EDE4');
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER)->setWrapText(true);
@@ -544,7 +542,6 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
 
             $dayQty = [];
             $dayTrays = [];
-            $dayTraysTotal = 0;
             $zebra = false;
 
             foreach (opWeekRows($day) as $r) {
@@ -561,8 +558,6 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
                     $dayTrays[$s['sku']] = ($dayTrays[$s['sku']] ?? 0) + $t;
                     $col += 2;
                 }
-                $ws->setCellValue("{$cTrays}{$row}", $r['total_trays'] ?: null);
-                $dayTraysTotal += $r['total_trays'];
                 if ($zebra) {
                     $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('FBF8F4');
                 }
@@ -582,8 +577,6 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
                 $sheetTrays[$s['sku']] = ($sheetTrays[$s['sku']] ?? 0) + ($dayTrays[$s['sku']] ?? 0);
                 $col += 2;
             }
-            $ws->setCellValue("{$cTrays}{$row}", $dayTraysTotal ?: null);
-            $sheetTraysTotal += $dayTraysTotal;
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true);
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('F4EDE4');
 
@@ -593,7 +586,7 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
             $ws->getStyle("B{$headRow}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER);
             // Штуки и лотки — целые: иначе «160.0» в каждой ячейке.
             $firstDataRow = $headRow + 1;
-            $ws->getStyle("B{$firstDataRow}:{$cTrays}{$row}")->getNumberFormat()->setFormatCode('#,##0');
+            $ws->getStyle("B{$firstDataRow}:{$lastCol}{$row}")->getNumberFormat()->setFormatCode('#,##0');
             $row += 2;
         }
 
@@ -607,11 +600,11 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
             $ws->setCellValue("{$c2}{$row}", $sheetTrays[$s['sku']] ?: null);
             $col += 2;
         }
-        $ws->setCellValue("{$cTrays}{$row}", $sheetTraysTotal ?: null);
+
         $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true)->setSize(12)->getColor()->setRGB('FFFFFF');
         $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB(SO_LS_BROWN);
         $ws->getStyle("B{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER);
-        $ws->getStyle("B{$row}:{$cTrays}{$row}")->getNumberFormat()->setFormatCode('#,##0');
+        $ws->getStyle("B{$row}:{$lastCol}{$row}")->getNumberFormat()->setFormatCode('#,##0');
         $ws->getRowDimension($row)->setRowHeight(20);
     }
 

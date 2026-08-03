@@ -812,6 +812,23 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
               . "<p>Отдел закупок</p>"
               . "</body></html>";
 
+    // Цех: даже когда письмо уходит «за день», книга внутри недельная — у цеха
+    // один формат на все каналы (письмо, выгрузка, сводка в Telegram).
+    require_once __DIR__ . '/so_loading_sheets.php';
+    if (soLsSupplierEnabled($pdo, $supplierId)) {
+        require_once __DIR__ . '/own_production.php';
+        $wsBook = opBuildWeekXlsx($pdo, $supplierId, $deliveryDate);
+        if ($wsBook['status'] === 'ok') {
+            $sum['xlsx'] = $wsBook['xlsx'];
+            $sum['filename'] = $wsBook['filename'];
+            $bodyHtml = str_replace(
+                'Подробности — в приложенном файле Excel.',
+                'Подробности — в приложенном файле Excel: два листа, пн-вт-ср и чт-пт-сб.',
+                $bodyHtml
+            );
+        }
+    }
+
     $attachB64 = base64_encode($sum['xlsx']);
     // Лимит вложения 4 МБ (в base64 ~ *1.34).
     if (strlen($attachB64) > 4 * 1024 * 1024 * 4 / 3) {
@@ -982,6 +999,24 @@ function soSendWeekSummaryEmail(PDO $pdo, string $supplierId, array $dates, stri
               . "<p>Подробности — в приложенном файле Excel: на каждый день своя вкладка.</p>"
               . "<p>Отдел закупок</p>"
               . "</body></html>";
+
+    // Цех получает книгу в своём формате: два листа по три дня, строка на
+    // ресторан (и по строке на партию). Так письмо, выгрузка и сводка в
+    // Telegram показывают одно и то же — расхождений между ними быть не должно.
+    require_once __DIR__ . '/so_loading_sheets.php';
+    if (soLsSupplierEnabled($pdo, $supplierId)) {
+        require_once __DIR__ . '/own_production.php';
+        $wsBook = opBuildWeekXlsx($pdo, $supplierId, $dates[0]);
+        if ($wsBook['status'] === 'ok') {
+            $sum['xlsx'] = $wsBook['xlsx'];
+            $sum['filename'] = $wsBook['filename'];
+            $bodyHtml = str_replace(
+                'на каждый день своя вкладка',
+                'два листа — пн-вт-ср и чт-пт-сб, внутри дня строка на ресторан',
+                $bodyHtml
+            );
+        }
+    }
 
     $attachB64 = base64_encode($sum['xlsx']);
     $limit = (int)(4 * 1024 * 1024 * 4 / 3);
