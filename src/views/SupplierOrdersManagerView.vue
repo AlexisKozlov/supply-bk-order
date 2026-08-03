@@ -1188,7 +1188,7 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { appPrompt } from '@/lib/appDialogs.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
-import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroup, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
 import { buildSoOrderSheet } from '@/lib/soOrderXlsx.js';
 import { supplierIconKeys, trustedSupplierIcon, supplierIconStyle } from '@/lib/cabinetIcons.js';
@@ -1388,7 +1388,11 @@ let templateSearchTimer = null;
 // Группа юрлиц текущего поставщика (BK_VM | PS). Определяется из списка
 // поставщиков: он уже отфильтрован backend'ом по группе юрлица сайдбара.
 const currentSupplierGroup = computed(() => {
-  if (props.legalEntity) return getEntityGroup(props.legalEntity);
+  // Здесь нужен КОД группы ('PS' | 'BK_VM'), а не список юрлиц: по нему
+  // фильтруются рестораны. getEntityGroup вернул бы массив названий, и
+  // встроенный экран (цех ПРЦ) искал рестораны по несуществующей группе —
+  // список приходил пустым, график поставок выглядел ненастроенным.
+  if (props.legalEntity) return getEntityGroupCode(props.legalEntity);
   const sup = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value));
   if (sup?.legal_entity_group) return sup.legal_entity_group;
   // Fallback: берём группу из сайдбара, т.к. список поставщиков уже сужен

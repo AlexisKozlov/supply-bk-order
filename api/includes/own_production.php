@@ -13,7 +13,6 @@
  * Маршруты:
  *   GET own-production/suppliers        — цеха (поставщики с признаком ПРЦ)
  *   GET own-production/day?date=        — заказ на день: рестораны × размеры
- *   GET own-production/plan?from=&to=   — план производства по датам
  */
 
 // Проверка $endpoint — ниже, перед маршрутами: функции нужны и другим файлам.
@@ -249,12 +248,14 @@ function opDayTotals(array $day): array {
 // две партии разных дней изготовления, иначе к концу недели тесто перестоит.
 
 /** Дни недели по-русски: 1=пн … 7=вс. */
-const OP_DOW_NAMES = [1 => 'понедельник', 2 => 'вторник', 3 => 'среда', 4 => 'четверг',
-                      5 => 'пятница', 6 => 'суббота', 7 => 'воскресенье'];
 const OP_DOW_SHORT = [1 => 'пн', 2 => 'вт', 3 => 'ср', 4 => 'чт', 5 => 'пт', 6 => 'сб', 7 => 'вс'];
 
 /**
  * График изготовления цеха: день поставки → партии.
+ * Экрана настройки у графика больше нет — таблица пустая, и партия всегда
+ * получается одна, в день поставки. Чтение оставлено: кабинет ресторана
+ * спрашивает партии на каждую дату, и если график когда-нибудь заполнят
+ * (вручную или новым экраном), деление заработает без правок кода.
  * @return array dow => [ ['batch_no' => 1, 'production_dow' => 5], ... ]
  */
 function opGetProductionSchedule(PDO $pdo, string $supplierId): array {
@@ -400,143 +401,6 @@ if ($opAction === 'day' && $method === 'GET') {
         'totals'      => opDayTotals($day),
         'stacks_per_pallet' => OP_STACKS_PER_PALLET,
     ]);
-}
-
-// ─── План производства по датам ───
-if ($opAction === 'plan' && $method === 'GET') {
-    $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
-    $from = trim((string)($_GET['from'] ?? ''));
-    $to   = trim((string)($_GET['to'] ?? ''));
-    if ($supplierId === '') opRespond(['error' => 'Не указан цех'], 400);
-    foreach ([$from, $to] as $d) {
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) opRespond(['error' => 'Нужны даты периода'], 400);
-    }
-    if ($to < $from) opRespond(['error' => 'Конец периода раньше начала'], 400);
-    opRequireWorkshop($pdo, $supplierId, $opUser);
-
-    // Даты, на которые есть заявки цеху.
-    $st = $pdo->prepare("
-        SELECT DISTINCT delivery_date
-        FROM so_orders
-        WHERE supplier_id = ? AND delivery_date BETWEEN ? AND ?
-          AND status IN ('submitted', 'locked')
-        ORDER BY delivery_date");
-    $st->execute([$supplierId, $from, $to]);
-    $dates = $st->fetchAll(PDO::FETCH_COLUMN);
-
-    $sizes = opGetSizes($pdo, $supplierId);
-    $perTrayBySku = [];
-    foreach ($sizes as $sz) $perTrayBySku[$sz['sku']] = $sz['per_tray'];
-    $schedule = opGetProductionSchedule($pdo, $supplierId);
-
-    $days = [];
-    $prod = [];   // дата изготовления → сводка
-    foreach ($dates as $date) {
-        $day = opCollectDay($pdo, $supplierId, $date);
-        $t = opDayTotals($day);
-        $days[] = [
-            'date'        => $date,
-            'restaurants' => count($day['restaurants']),
-            'by_sku'      => $t['by_sku'],
-            'pieces'      => $t['pieces'],
-            'trays'       => $t['trays'],
-            'stacks'      => $t['stacks'],
-            'pallets'     => $t['pallets'],
-        ];
-
-        // Тот же объём, но разложенный по дням изготовления: партии заявки
-        // ложатся на свои даты по графику цеха.
-        $batches = [];
-        foreach (opBatchesForDate($schedule, $date) as $b) $batches[(int)$b['batch_no']] = $b;
-        foreach ($day['restaurants'] as $r) {
-            $byBatch = $r['qty_by_batch'] ?: [1 => $r['qty']];
-            foreach ($byBatch as $batchNo => $bySku) {
-                $b = $batches[(int)$batchNo] ?? reset($batches);
-                $pdate = $b['production_date'];
-                if (!isset($prod[$pdate])) {
-                    $prod[$pdate] = ['date' => $pdate, 'by_sku' => [], 'pieces' => 0, 'trays' => 0,
-                                     'deliveries' => [], 'restaurants' => []];
-                }
-                $prod[$pdate]['deliveries'][$date] = true;
-                $prod[$pdate]['restaurants'][$r['restaurant_number']] = true;
-                foreach ($bySku as $sku => $qty) {
-                    if (!isset($prod[$pdate]['by_sku'][$sku])) {
-                        $prod[$pdate]['by_sku'][$sku] = ['pieces' => 0, 'trays' => 0];
-                    }
-                    $trays = opTrays((float)$qty, (int)($perTrayBySku[$sku] ?? 0));
-                    $prod[$pdate]['by_sku'][$sku]['pieces'] += $qty;
-                    $prod[$pdate]['by_sku'][$sku]['trays'] += $trays;
-                    $prod[$pdate]['pieces'] += $qty;
-                    $prod[$pdate]['trays'] += $trays;
-                }
-            }
-        }
-    }
-
-    ksort($prod);
-    $production = [];
-    foreach ($prod as $row) {
-        $deliveries = array_keys($row['deliveries']);
-        sort($deliveries);
-        $production[] = [
-            'date'        => $row['date'],
-            'by_sku'      => $row['by_sku'],
-            'pieces'      => $row['pieces'],
-            'trays'       => $row['trays'],
-            'deliveries'  => $deliveries,
-            'restaurants' => count($row['restaurants']),
-        ];
-    }
-
-    opRespond(['sizes' => $sizes, 'days' => $days, 'production' => $production,
-               'stacks_per_pallet' => OP_STACKS_PER_PALLET]);
-}
-
-// ─── График изготовления: чтение ───
-if ($opAction === 'schedule' && $method === 'GET') {
-    $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
-    if ($supplierId === '') opRespond(['error' => 'Не указан цех'], 400);
-    opRequireWorkshop($pdo, $supplierId, $opUser);
-    opRespond([
-        'schedule'  => opGetProductionSchedule($pdo, $supplierId),
-        'dow_names' => OP_DOW_NAMES,
-    ]);
-}
-
-// ─── График изготовления: сохранение ───
-// Приходит полный список строк — так проще, чем возиться с удалением по одной.
-if ($opAction === 'schedule' && $method === 'POST') {
-    $opEditor = opRequireUser($pdo, 'edit');
-    $supplierId = trim((string)($body['supplier_id'] ?? ''));
-    $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
-    if ($supplierId === '') opRespond(['error' => 'Не указан цех'], 400);
-    opRequireWorkshop($pdo, $supplierId, $opEditor);
-
-    $clean = [];
-    foreach ($rows as $r) {
-        $dd = (int)($r['delivery_dow'] ?? 0);
-        $bn = (int)($r['batch_no'] ?? 0);
-        $pd = (int)($r['production_dow'] ?? 0);
-        if ($dd < 1 || $dd > 7 || $pd < 1 || $pd > 7) continue;
-        if ($bn !== 1 && $bn !== 2) continue;
-        $clean[] = [$dd, $bn, $pd];
-    }
-
-    try {
-        $pdo->beginTransaction();
-        $pdo->prepare("DELETE FROM op_production_schedule WHERE supplier_id = ?")->execute([$supplierId]);
-        if ($clean) {
-            $ins = $pdo->prepare("INSERT INTO op_production_schedule (supplier_id, delivery_dow, batch_no, production_dow)
-                                  VALUES (?, ?, ?, ?)");
-            foreach ($clean as $c) $ins->execute([$supplierId, $c[0], $c[1], $c[2]]);
-        }
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        error_log('[own-production schedule] ' . $e->getMessage());
-        opRespond(['error' => 'Не удалось сохранить график'], 500);
-    }
-    opRespond(['success' => true, 'rows' => count($clean)]);
 }
 
 // ─── Кабинет: что можно заказать и на какие даты ───
