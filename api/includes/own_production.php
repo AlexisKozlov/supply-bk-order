@@ -571,29 +571,22 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
                 $row++;
             }
 
-            // Итог дня
-            $ws->setCellValue("A{$row}", 'Итого за день');
-            $col = 2;
+            // Итог дня в лист не выводим (просил цех) — только копим для итога
+            // по всем трём дням внизу листа.
             foreach ($sizes as $s) {
-                $c1 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
-                $c2 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col + 1);
-                $ws->setCellValue("{$c1}{$row}", $dayQty[$s['sku']] ?: null);
-                $ws->setCellValue("{$c2}{$row}", $dayTrays[$s['sku']] ?: null);
                 $sheetQty[$s['sku']] = ($sheetQty[$s['sku']] ?? 0) + ($dayQty[$s['sku']] ?? 0);
                 $sheetTrays[$s['sku']] = ($sheetTrays[$s['sku']] ?? 0) + ($dayTrays[$s['sku']] ?? 0);
-                $col += 2;
             }
-            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true);
-            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('F4EDE4');
+            $lastDataRow = $row - 1;
 
             // Рамки на блок дня
-            $ws->getStyle("A{$headRow}:{$lastCol}{$row}")->getBorders()->getAllBorders()
+            $ws->getStyle("A{$headRow}:{$lastCol}{$lastDataRow}")->getBorders()->getAllBorders()
                 ->setBorderStyle($THIN)->getColor()->setRGB('D8CCBD');
-            $ws->getStyle("B{$headRow}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER);
+            $ws->getStyle("B{$headRow}:{$lastCol}{$lastDataRow}")->getAlignment()->setHorizontal($CENTER);
             // Штуки и лотки — целые: иначе «160.0» в каждой ячейке.
             $firstDataRow = $headRow + 1;
-            $ws->getStyle("B{$firstDataRow}:{$lastCol}{$row}")->getNumberFormat()->setFormatCode('#,##0');
-            $row += 2;
+            $ws->getStyle("B{$firstDataRow}:{$lastCol}{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
+            $row++;
         }
 
         // Итог по листу

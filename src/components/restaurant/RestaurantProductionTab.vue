@@ -546,7 +546,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
    отдельной меткой справа. Ширина совпадает с полем ввода. */
 .rpt-qty-static {
   position: relative; display: flex; align-items: center; justify-content: center;
-  flex: 0 0 116px; width: 116px; box-sizing: border-box; height: 38px; padding: 0 34px 0 8px;
+  /* flex-basis тут задавать нельзя: блок лежит в колоночном контейнере, и
+     116px уходили в ВЫСОТУ — ячейка вытягивалась квадратом. */
+  flex: 0 0 auto; width: 116px; box-sizing: border-box; height: 38px; padding: 0 34px 0 8px;
   border: 1.5px solid var(--rpt-line); border-radius: 10px; background: #FCFAF7;
 }
 .rpt-qty-static .rpt-qty-u { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
