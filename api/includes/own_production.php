@@ -308,6 +308,36 @@ function opBatchesForDate(array $schedule, string $deliveryDate): array {
     return $out;
 }
 
+/**
+ * Партии, которые видит и заказывает ресторан.
+ *
+ * Правило простое: одна поставка в неделю — две партии, чаще — одна.
+ * Раньше вторая партия бралась только из графика изготовления, а его никогда
+ * не заполняли, поэтому деления не было ни у кого. График как экран убран,
+ * поэтому число партий считаем по частоте поставки, а даты изготовления
+ * подставляем, только если график всё-таки заполнен (напрямую в базе).
+ *
+ * @param bool $splitAllowed поставка ровно раз в неделю
+ */
+function opBatchesForRestaurant(array $schedule, string $deliveryDate, bool $splitAllowed): array {
+    $batches = opBatchesForDate($schedule, $deliveryDate);
+    $scheduled = !empty($schedule[(int)(new DateTime($deliveryDate))->format('N')]);
+    if (!$splitAllowed) {
+        $batches = [$batches[0]];
+    } elseif (count($batches) < 2) {
+        // Вторая партия без графика: цех сам решает, когда её делать —
+        // ресторану важно лишь разделить объём на начало и конец недели.
+        $batches[] = [
+            'batch_no'        => 2,
+            'production_dow'  => $batches[0]['production_dow'],
+            'production_date' => $batches[0]['production_date'],
+        ];
+    }
+    foreach ($batches as &$b) $b['scheduled'] = $scheduled;
+    unset($b);
+    return $batches;
+}
+
 /** Сколько дней поставки в неделю у ресторана от этого цеха. */
 function opRestaurantDeliveryDows(PDO $pdo, string $supplierId, string $restNum): array {
     require_once __DIR__ . '/so_deadline.php';
@@ -418,11 +448,13 @@ if ($opAction === 'my-form' && $method === 'GET') {
     $splitAllowed = count($dows) === 1;
     $schedule = opGetProductionSchedule($pdo, (string)$shop['id']);
     foreach ($dates as &$d) {
-        $batches = opBatchesForDate($schedule, $d['date']);
-        if (!$splitAllowed) $batches = [$batches[0]];
+        $batches = opBatchesForRestaurant($schedule, $d['date'], $splitAllowed);
         foreach ($batches as &$b) {
-            $b['label'] = 'изготовление ' . OP_DOW_SHORT[$b['production_dow']] . ' '
-                . (new DateTime($b['production_date']))->format('d.m');
+            // Дату изготовления показываем, только если она реально задана
+            // графиком: иначе подпись врала бы про день, который никто не выбирал.
+            $b['label'] = empty($b['scheduled']) ? ''
+                : 'изготовление ' . OP_DOW_SHORT[$b['production_dow']] . ' '
+                  . (new DateTime($b['production_date']))->format('d.m');
         }
         unset($b);
         $d['batches'] = $batches;
@@ -509,8 +541,7 @@ if ($opAction === 'submit' && $method === 'POST') {
     $dows = opRestaurantDeliveryDows($pdo, $supplierId, (string)$rest['restaurant_number']);
     $splitAllowed = count($dows) === 1;
     $schedule = opGetProductionSchedule($pdo, $supplierId);
-    $dateBatches = opBatchesForDate($schedule, $date);
-    if (!$splitAllowed) $dateBatches = [$dateBatches[0]];
+    $dateBatches = opBatchesForRestaurant($schedule, $date, $splitAllowed);
     $allowedBatches = [];
     foreach ($dateBatches as $b) $allowedBatches[(int)$b['batch_no']] = true;
     $firstBatch = (int)$dateBatches[0]['batch_no'];
