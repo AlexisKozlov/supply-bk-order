@@ -110,29 +110,40 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in day.restaurants" :key="r.restaurant_number">
-                  <td class="op-rest">
-                    <span class="op-rest-title">{{ r.title }}</span>
-                    <span class="op-rest-num">{{ restLabel(r.restaurant_number) }}</span>
-                  </td>
-                  <td class="op-addr">{{ r.address }}</td>
-                  <td v-for="s in day.sizes" :key="s.sku" class="op-num">
-                    <template v-if="r.qty[s.sku]">
-                      <b>{{ fmt(r.qty[s.sku]) }}</b>
-                      <span class="op-trays">{{ r.trays[s.sku] }} лотк.</span>
+                <!-- Ресторан с двумя партиями занимает две строки: цех печёт их
+                     в разные дни, поэтому сумма по точке ему бесполезна.
+                     Лотки, стопки и паллеты общие — везут одной поставкой. -->
+                <template v-for="r in day.restaurants" :key="r.restaurant_number">
+                  <tr v-for="(b, i) in restBatches(r)" :key="r.restaurant_number + '-' + b.no"
+                      :class="{ 'op-batch-next': i > 0 }">
+                    <td class="op-rest">
+                      <template v-if="i === 0">
+                        <span class="op-rest-title">{{ r.title }}</span>
+                        <span class="op-rest-num">{{ restLabel(r.restaurant_number) }}</span>
+                      </template>
+                      <span v-if="b.no" class="op-batch-tag">{{ b.no }}-я партия</span>
+                    </td>
+                    <td class="op-addr">{{ i === 0 ? r.address : '' }}</td>
+                    <td v-for="s in day.sizes" :key="s.sku" class="op-num">
+                      <template v-if="b.qty[s.sku]">
+                        <b>{{ fmt(b.qty[s.sku]) }}</b>
+                        <span class="op-trays">{{ b.trays[s.sku] }} лотк.</span>
+                      </template>
+                      <span v-else class="op-dim">—</span>
+                    </td>
+                    <template v-if="i === 0">
+                      <td class="op-num" :rowspan="restBatches(r).length"><b>{{ r.total_trays }}</b></td>
+                      <td class="op-num" :rowspan="restBatches(r).length">{{ r.stacks }}</td>
+                      <td class="op-num" :rowspan="restBatches(r).length">{{ fmt(r.pallets) }}</td>
+                      <td class="op-print-col" :rowspan="restBatches(r).length">
+                        <button class="op-btn op-btn-sm" :disabled="printing === r.restaurant_number"
+                                @click="printSheets(r.restaurant_number)">
+                          {{ printing === r.restaurant_number ? '…' : 'Печать' }}
+                        </button>
+                      </td>
                     </template>
-                    <span v-else class="op-dim">—</span>
-                  </td>
-                  <td class="op-num"><b>{{ r.total_trays }}</b></td>
-                  <td class="op-num">{{ r.stacks }}</td>
-                  <td class="op-num">{{ fmt(r.pallets) }}</td>
-                  <td class="op-print-col">
-                    <button class="op-btn op-btn-sm" :disabled="printing === r.restaurant_number"
-                            @click="printSheets(r.restaurant_number)">
-                      {{ printing === r.restaurant_number ? '…' : 'Печать' }}
-                    </button>
-                  </td>
-                </tr>
+                  </tr>
+                </template>
                 <tr class="op-total-row">
                   <td>ИТОГО</td>
                   <td></td>
@@ -277,6 +288,28 @@ function fmtDateFull(d) {
   return `${p[2]}.${p[1]}.${p[0]}`;
 }
 function restLabel(num) { return formatRestaurantNumber(Number(num)); }
+
+/**
+ * Строки таблицы по одному ресторану.
+ * Одна партия — одна строка с общими количествами (`no: 0`, без пометки).
+ * Две партии — две строки: цех делает их в разные дни, и общая сумма по точке
+ * ничего не говорит о том, сколько замешивать сегодня.
+ */
+function restBatches(r) {
+  const byBatch = r.qty_by_batch || {};
+  const nums = Object.keys(byBatch).map(Number).filter(n => n > 0).sort((a, b) => a - b);
+  if (nums.length < 2) return [{ no: 0, qty: r.qty || {}, trays: r.trays || {} }];
+  return nums.map((no) => {
+    const qty = byBatch[no] || {};
+    const trays = {};
+    for (const s of day.value.sizes) {
+      const pieces = Number(qty[s.sku]) || 0;
+      const perTray = Number(s.per_tray) || 0;
+      trays[s.sku] = pieces > 0 && perTray > 0 ? Math.ceil(pieces / perTray) : 0;
+    }
+    return { no, qty, trays };
+  });
+}
 
 const DOW_SHORT = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 const DOW_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -579,6 +612,12 @@ onMounted(loadShops);
 .op-addr { color: #5F4B38; }
 .op-dim { color: #C4B8A8; }
 .op-print-col { text-align: center !important; white-space: nowrap; }
+/* Вторая строка партии липнет к первой: это одна точка, а не новая. */
+.op-batch-next > td { border-top: 0; }
+.op-batch-tag {
+  display: inline-block; margin-top: 2px; padding: 1px 7px; border-radius: 7px;
+  background: #F4EDE4; color: #8A7F72; font-size: 11px; font-weight: 700; white-space: nowrap;
+}
 .op-total-row { background: #FBF6F0; }
 .op-total-row td { font-weight: 700; }
 

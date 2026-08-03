@@ -80,29 +80,43 @@
                   <span class="rpt-row-hint">в лотке {{ s.per_tray }} шт</span>
                 </div>
                 <div class="rpt-row-right">
-                  <!-- Пока не набрано — пусто: одинокий прочерк над полем ввода
-                       читался как мусор, а место под итог всё равно занято. -->
-                  <span class="rpt-row-pieces" :class="{ 'is-on': sizeTrays(s) > 0 }">
+                  <!-- Общая сумма по размеру нужна только когда партий две:
+                       при одной партии её место занимают штуки над полем. -->
+                  <span v-if="batches.length > 1" class="rpt-row-pieces" :class="{ 'is-on': sizeTrays(s) > 0 }">
                     {{ sizeTrays(s) > 0 ? (sizeTrays(s) * s.per_tray) + ' шт' : '' }}
                   </span>
                   <div class="rpt-batches">
                     <div v-for="b in batches" :key="b.batch_no" class="rpt-batch">
-                      <span v-if="batches.length > 1" class="rpt-batch-lbl">
-                        {{ b.batch_no }}-я партия
-                        <em>{{ b.label }}</em>
+                      <!-- Подпись над полем есть всегда, даже пустая: иначе строка
+                           подпрыгивает, как только набрали первый лоток. -->
+                      <span class="rpt-batch-lbl">
+                        <template v-if="batches.length > 1">{{ b.batch_no }}-я партия</template>
+                        <b v-if="batchPieces(s, b.batch_no) > 0" class="rpt-batch-pieces">
+                          {{ batchPieces(s, b.batch_no) }} шт
+                        </b>
+                        <em v-if="b.label">{{ b.label }}</em>
                       </span>
-                      <div class="rpt-qty">
+                      <!-- Приём закрыт — заявка только для чтения. Показываем
+                           числа, а не серые мёртвые поля с кнопками. -->
+                      <div v-if="locked" class="rpt-qty-static"
+                           :class="{ 'is-on': trays[s.sku]?.[b.batch_no] > 0 }">
+                        <template v-if="trays[s.sku]?.[b.batch_no] > 0">
+                          <b>{{ trays[s.sku][b.batch_no] }}</b><span class="rpt-qty-u">лотк.</span>
+                        </template>
+                        <span v-else class="rpt-qty-none">—</span>
+                      </div>
+                      <div v-else class="rpt-qty">
                         <button type="button" class="rpt-step" tabindex="-1"
-                          :disabled="locked || !(trays[s.sku]?.[b.batch_no] > 0)"
+                          :disabled="!(trays[s.sku]?.[b.batch_no] > 0)"
                           @click="step(s, b.batch_no, -1)" aria-label="Убавить">−</button>
                         <label class="rpt-qty-box" :class="{ 'is-on': trays[s.sku]?.[b.batch_no] > 0 }">
                           <input type="number" class="rpt-input" v-model.number="trays[s.sku][b.batch_no]"
-                            :disabled="locked" min="0" step="1" inputmode="numeric"
+                            min="0" step="1" inputmode="numeric"
                             placeholder="—" @focus="$event.target.select()" />
                           <span class="rpt-qty-u">лотк.</span>
                         </label>
                         <button type="button" class="rpt-step" tabindex="-1"
-                          :disabled="locked" @click="step(s, b.batch_no, 1)" aria-label="Добавить">+</button>
+                          @click="step(s, b.batch_no, 1)" aria-label="Добавить">+</button>
                       </div>
                     </div>
                   </div>
@@ -215,6 +229,11 @@ const batches = computed(() => currentDate.value?.batches?.length
 function sizeTrays(size) {
   const row = trays[size.sku] || {};
   return batches.value.reduce((sum, b) => sum + (Number(row[b.batch_no]) || 0), 0);
+}
+
+/** Штуки одной партии — подпись над её полем ввода. */
+function batchPieces(size, batchNo) {
+  return (Number(trays[size.sku]?.[batchNo]) || 0) * size.per_tray;
 }
 
 const filledCount = computed(() => sizes.value.filter(s => sizeTrays(s) > 0).length);
@@ -482,8 +501,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .rpt-row-info { min-width: 0; }
 .rpt-row-name { display: block; font-size: 15px; font-weight: 700; color: var(--rpt-brown); }
 .rpt-row-hint { display: block; margin-top: 2px; font-size: 12px; color: var(--rpt-dim); }
-.rpt-row-right { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
-.rpt-row-pieces { min-width: 56px; text-align: right; font-size: 13px; font-weight: 700; color: #C4B5A3; }
+/* Низ по низу: над полями есть подпись партии, и при выравнивании по центру
+   общая сумма штук вставала выше полей ввода. */
+.rpt-row-right { display: flex; align-items: flex-end; gap: 12px; flex: 0 0 auto; }
+.rpt-row-pieces {
+  display: flex; align-items: center; justify-content: flex-end;
+  min-width: 56px; height: 38px; text-align: right;
+  font-size: 13px; font-weight: 700; color: #C4B5A3;
+}
 .rpt-row-pieces.is-on { color: var(--rpt-green); }
 
 .rpt-qty { display: flex; align-items: center; gap: 6px; }
@@ -491,7 +516,11 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
             background: var(--rpt-cream); font-size: 19px; font-weight: 700; color: var(--rpt-brown);
             cursor: pointer; line-height: 1; }
 .rpt-step:hover:not(:disabled) { border-color: var(--rpt-accent); color: var(--rpt-accent); }
-.rpt-step:disabled { opacity: .4; cursor: not-allowed; }
+/* Недоступная кнопка не должна выглядеть залитым квадратом: снимаем фон,
+   оставляем бледный контур — строка читается как поле, а не как плитка. */
+.rpt-step:disabled {
+  background: transparent; border-color: #EFE6DA; color: #D8CCBD; cursor: not-allowed;
+}
 .rpt-qty-box { display: flex; align-items: baseline; gap: 3px; padding: 0 8px; height: 38px;
                border: 1.5px solid var(--rpt-line); border-radius: 10px; background: #fff; }
 .rpt-qty-box.is-on { border-color: var(--rpt-green); background: #F4FAF2; }
@@ -500,6 +529,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
              -moz-appearance: textfield; }
 .rpt-input::-webkit-outer-spin-button, .rpt-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .rpt-qty-u { font-size: 11px; font-weight: 700; color: var(--rpt-dim); }
+/* Закрытая заявка: та же ширина, что у поля ввода, но без рамки и заливки. */
+.rpt-qty-static {
+  display: flex; align-items: baseline; justify-content: flex-end; gap: 3px;
+  min-width: 116px; height: 38px; padding: 0 8px;
+}
+.rpt-qty-static b { font-size: 17px; font-weight: 800; color: var(--rpt-brown); }
+.rpt-qty-static.is-on b { color: var(--rpt-green); }
+.rpt-qty-none { font-size: 15px; color: #D8CCBD; align-self: center; }
 
 .rpt-aside { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .rpt-sum { background: #fff; border: 1.5px solid var(--rpt-line); border-radius: 14px; padding: 12px 14px; }
@@ -538,8 +575,13 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 
 .rpt-batches { display: flex; align-items: flex-end; gap: 10px; }
 .rpt-batch { display: flex; flex-direction: column; gap: 4px; }
-.rpt-batch-lbl { font-size: 11px; font-weight: 700; color: var(--rpt-dim); white-space: nowrap; }
+.rpt-batch-lbl {
+  display: block; min-height: 14px; font-size: 11px; font-weight: 700;
+  color: var(--rpt-dim); white-space: nowrap; text-align: right;
+}
 .rpt-batch-lbl em { display: block; font-style: normal; font-weight: 600; font-size: 10px; color: #B0A090; }
+/* Штуки набранной партии: тот же мелкий кегль, но цветом «набрано». */
+.rpt-batch-pieces { margin-left: 5px; font-weight: 800; color: var(--rpt-green); }
 @media (max-width: 560px) {
   /* Итог в штуках уводим под название, иначе он повисает сбоку от двух
      полей ввода и мешает их читать. */
@@ -548,6 +590,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
   .rpt-row-pieces { text-align: left; min-width: 0; }
   .rpt-row-pieces:empty { display: none; }
   .rpt-batches { flex-direction: column; align-items: stretch; width: 100%; gap: 8px; }
+  .rpt-batch-lbl { text-align: left; min-height: 0; }
+  .rpt-batch-lbl:empty { display: none; }
   .rpt-batch-lbl em { display: inline; margin-left: 4px; }
 }
 </style>
