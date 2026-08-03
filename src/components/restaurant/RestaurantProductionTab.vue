@@ -531,11 +531,15 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
              -moz-appearance: textfield; }
 .rpt-input::-webkit-outer-spin-button, .rpt-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .rpt-qty-u { font-size: 11px; font-weight: 700; color: var(--rpt-dim); }
-/* Закрытая заявка: та же ширина, что у поля ввода, но без рамки и заливки. */
+/* Закрытая заявка: рамка как у поля ввода, чтобы числа читались таблицей,
+   а не висели в воздухе. Отличие от открытой формы — приглушённый фон и
+   отсутствие кнопок «−» и «+». */
 .rpt-qty-static {
-  display: flex; align-items: baseline; justify-content: flex-end; gap: 3px;
+  display: flex; align-items: baseline; justify-content: center; gap: 3px;
   min-width: 116px; height: 38px; padding: 0 8px;
+  border: 1.5px solid var(--rpt-line); border-radius: 10px; background: #FCFAF7;
 }
+.rpt-qty-static.is-on { border-color: #C6E3C0; background: #F7FBF5; }
 .rpt-qty-static b { font-size: 17px; font-weight: 800; color: var(--rpt-brown); }
 .rpt-qty-static.is-on b { color: var(--rpt-green); }
 .rpt-qty-none { font-size: 15px; color: #D8CCBD; align-self: center; }

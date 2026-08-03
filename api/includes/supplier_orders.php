@@ -3074,6 +3074,21 @@ if ($soAction === 'admin') {
             $ordersByRestaurant[(string)$orderRow['restaurant_number']] = $orderRow;
         }
 
+        // Сколько партий заказывает ресторан. Делятся только заказы цеха (тесто)
+        // у точек с одной поставкой в неделю: закупщику надо видеть два поля даже
+        // там, где заявки ещё нет.
+        $batchesByRest = [];
+        require_once __DIR__ . '/so_loading_sheets.php';
+        if (soLsSupplierEnabled($pdo, $supplierId)) {
+            $dowsByRest = [];
+            foreach (soGetEffectiveScheduleRows($pdo, $supplierId, null, null, true) as $row) {
+                $dowsByRest[(string)$row['restaurant_number']][(int)$row['delivery_day']] = true;
+            }
+            foreach ($dowsByRest as $rn => $dows) {
+                $batchesByRest[$rn] = count($dows) === 1 ? 2 : 1;
+            }
+        }
+
         $restaurants = [];
         foreach ($effectiveRows as $row) {
             if ((int)$row['delivery_day'] !== $deliveryDow) continue;
@@ -3096,6 +3111,7 @@ if ($soAction === 'admin') {
                 'auto_source_delivery_date' => $orderRow['auto_source_delivery_date'] ?? null,
                 'item_count' => isset($orderRow['item_count']) ? (int)$orderRow['item_count'] : 0,
                 'total_qty' => $orderRow['total_qty'] ?? null,
+                'batches' => $batchesByRest[(string)$row['restaurant_number']] ?? 1,
             ];
         }
         // Внеплановые (довоз): рестораны с заявкой на эту дату, которых нет в графике.
@@ -3717,9 +3733,12 @@ if ($soAction === 'admin') {
                     $orderId = $order['id'];
                 }
 
-                // Ищем позицию по SKU
-                $existingItem = $pdo->prepare("SELECT id, quantity, admin_qty, product_name FROM so_order_items WHERE order_id = ? AND sku = ?");
-                $existingItem->execute([$orderId, $sku]);
+                // Ищем позицию по SKU и партии. Партия нужна цеху ПРЦ: у теста
+                // на один SKU приходится две строки, и без номера правка первой
+                // партии переписывала бы вторую.
+                $batchNo = (int)($body['batch_no'] ?? 0) ?: 1;
+                $existingItem = $pdo->prepare("SELECT id, quantity, admin_qty, product_name FROM so_order_items WHERE order_id = ? AND sku = ? AND batch_no = ?");
+                $existingItem->execute([$orderId, $sku, $batchNo]);
                 $item = $existingItem->fetch();
 
                 if ($item) {
@@ -3728,8 +3747,8 @@ if ($soAction === 'admin') {
                 } else {
                     $oldVal = 0;
                     // Создаём новую позицию (админ добавил количество для товара, которого не было в заказе)
-                    $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty) VALUES (?, ?, ?, ?, 0, ?)")
-                        ->execute([$orderId, $body['product_id'] ?? '', $sku, $productName ?? '', $val]);
+                    $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty, batch_no) VALUES (?, ?, ?, ?, 0, ?, ?)")
+                        ->execute([$orderId, $body['product_id'] ?? '', $sku, $productName ?? '', $val, $batchNo]);
                 }
                 $pdo->commit();
             } catch (Exception $e) {
@@ -4883,6 +4902,40 @@ if ($soAction === 'admin') {
         $deliveryDate = $body['delivery_date'] ?? '';
         if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+
+        // Цех получает заказ теста на всю неделю двумя листами (пн-вт-ср,
+        // чт-пт-сб): он планирует замесы неделей, а не одним днём.
+        require_once __DIR__ . '/so_loading_sheets.php';
+        if (soLsSupplierEnabled($pdo, $supplierId)) {
+            require_once __DIR__ . '/own_production.php';
+            $book = opBuildWeekXlsx($pdo, $supplierId, $deliveryDate);
+            if ($book['status'] !== 'ok') soRespond(['error' => 'На эту неделю заявок нет'], 400);
+
+            $wSubs = $pdo->prepare("
+                SELECT u.name, u.telegram_chat_id FROM so_supplier_summary_subscribers sss
+                JOIN users u ON u.name = sss.user_name
+                WHERE sss.supplier_id = ? AND u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id != ''");
+            $wSubs->execute([$supplierId]);
+            $wList = $wSubs->fetchAll();
+            $wToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+            if (!$wList)  soRespond(['error' => 'Нет подписчиков для этого поставщика'], 400);
+            if (!$wToken) soRespond(['error' => 'Telegram Bot Token не настроен'], 500);
+
+            $wMonday = opWeekMonday($deliveryDate);
+            $wSat = (new DateTime($wMonday))->modify('+5 days')->format('Y-m-d');
+            $wCaption = "🥟 <b>Заказ теста на неделю</b>\n"
+                . '📅 ' . (new DateTime($wMonday))->format('d.m') . '–' . (new DateTime($wSat))->format('d.m.Y') . "\n"
+                . "Два листа: пн-вт-ср и чт-пт-сб.";
+            $wKey = "so_summary_week_{$supplierId}_{$wMonday}";
+            $wLog = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
+            $wSent = 0;
+            foreach ($wList as $sub) {
+                $ok = sendTelegramDocument($wToken, $sub['telegram_chat_id'], $book['filename'], $book['xlsx'], $wCaption);
+                $wLog->execute([$ok ? 'so_summary_sent' : 'so_summary_fail', $sub['telegram_chat_id'], $wKey]);
+                if ($ok) $wSent++;
+            }
+            soRespond(['success' => true, 'sent' => $wSent, 'total_subs' => count($wList), 'mode' => 'week']);
+        }
 
         // Опции Excel-отчёта берутся из настроек поставщика внутри soBuildSummaryXlsx
         $sum = soBuildSummaryXlsx($pdo, $supplierId, $deliveryDate);

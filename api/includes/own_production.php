@@ -443,11 +443,6 @@ function opWeekRows(array $day): array {
                 'qty'    => $p['qty'],
                 'trays'  => $trays,
                 'total_trays' => $traysTotal,
-                // Паллета цеха — 4 стопки по 22 лотка. Дробь оставляем: цех по
-                // ней прикидывает загрузку камеры, а не считает целые места.
-                'pallets' => $traysTotal > 0
-                    ? round($traysTotal / (SO_LS_TRAYS_PER_STACK * OP_STACKS_PER_PALLET), 2)
-                    : 0,
             ];
         }
     }
@@ -483,8 +478,9 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
     $THIN = \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN;
     $SOLID = \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID;
 
-    // Колонки: A — ресторан, дальше по паре на размер, затем лотки и паллеты.
-    $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(2 + count($sizes) * 2 + 1);
+    // Колонки: A — ресторан, дальше по паре на размер (штуки и лотки),
+    // последняя — всего лотков. Паллеты цех не просил: он считает лотками.
+    $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(2 + count($sizes) * 2);
 
     $sheets = [
         ['Пн-Вт-Ср', [1, 2, 3]],
@@ -505,7 +501,6 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
         for ($c = 2; $c <= 2 + count($sizes) * 2; $c++) {
             $ws->getColumnDimension(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($c))->setWidth(11);
         }
-        $ws->getColumnDimension($lastCol)->setWidth(11);
 
         if (!$sheetDays) {
             $ws->setCellValue('A1', 'На эти дни заявок нет');
@@ -538,9 +533,8 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
                 $ws->setCellValue("{$c2}{$row}", 'лотков');
                 $col += 2;
             }
-            $cTrays = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
-            $ws->setCellValue("{$cTrays}{$row}", 'Лотков');
-            $ws->setCellValue("{$lastCol}{$row}", 'Паллет');
+            $cTrays = $lastCol;
+            $ws->setCellValue("{$cTrays}{$row}", 'Всего лотков');
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true)->getColor()->setRGB('502314');
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('F4EDE4');
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER)->setWrapText(true);
@@ -568,7 +562,6 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
                     $col += 2;
                 }
                 $ws->setCellValue("{$cTrays}{$row}", $r['total_trays'] ?: null);
-                $ws->setCellValue("{$lastCol}{$row}", $r['pallets'] ?: null);
                 $dayTraysTotal += $r['total_trays'];
                 if ($zebra) {
                     $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('FBF8F4');
@@ -590,8 +583,6 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
                 $col += 2;
             }
             $ws->setCellValue("{$cTrays}{$row}", $dayTraysTotal ?: null);
-            $ws->setCellValue("{$lastCol}{$row}", $dayTraysTotal > 0
-                ? round($dayTraysTotal / (SO_LS_TRAYS_PER_STACK * OP_STACKS_PER_PALLET), 2) : null);
             $sheetTraysTotal += $dayTraysTotal;
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true);
             $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('F4EDE4');
@@ -600,10 +591,9 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
             $ws->getStyle("A{$headRow}:{$lastCol}{$row}")->getBorders()->getAllBorders()
                 ->setBorderStyle($THIN)->getColor()->setRGB('D8CCBD');
             $ws->getStyle("B{$headRow}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER);
-            // Штуки и лотки — целые, паллеты с сотыми: иначе «160.0» в каждой ячейке.
+            // Штуки и лотки — целые: иначе «160.0» в каждой ячейке.
             $firstDataRow = $headRow + 1;
             $ws->getStyle("B{$firstDataRow}:{$cTrays}{$row}")->getNumberFormat()->setFormatCode('#,##0');
-            $ws->getStyle("{$lastCol}{$firstDataRow}:{$lastCol}{$row}")->getNumberFormat()->setFormatCode('0.00');
             $row += 2;
         }
 
@@ -618,13 +608,10 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
             $col += 2;
         }
         $ws->setCellValue("{$cTrays}{$row}", $sheetTraysTotal ?: null);
-        $ws->setCellValue("{$lastCol}{$row}", $sheetTraysTotal > 0
-            ? round($sheetTraysTotal / (SO_LS_TRAYS_PER_STACK * OP_STACKS_PER_PALLET), 2) : null);
         $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true)->setSize(12)->getColor()->setRGB('FFFFFF');
         $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB(SO_LS_BROWN);
         $ws->getStyle("B{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER);
         $ws->getStyle("B{$row}:{$cTrays}{$row}")->getNumberFormat()->setFormatCode('#,##0');
-        $ws->getStyle("{$lastCol}{$row}")->getNumberFormat()->setFormatCode('0.00');
         $ws->getRowDimension($row)->setRowHeight(20);
     }
 
@@ -846,6 +833,7 @@ if ($opAction === 'submit' && $method === 'POST') {
         $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
         $old->execute([$supplierId, $rest['restaurant_number'], $date, $le]);
         $orderId = $old->fetchColumn();
+        $existingOrderId = $orderId;   // была заявка или подаём впервые — для текста уведомления
         if ($orderId) {
             $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
             $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
@@ -871,7 +859,60 @@ if ($opAction === 'submit' && $method === 'POST') {
         opRespond(['error' => 'Не удалось сохранить заявку'], 500);
     }
 
-    opRespond(['success' => true, 'order_id' => (string)$orderId, 'items' => count($items)]);
+    // ── Ответ клиенту, потом уведомления ───────────────────────────────────
+    // Как у обычных заявок: ресторан должен видеть подтверждение, иначе
+    // непонятно, дошла заявка или нет. Ошибки уведомлений подачу не ломают.
+    $isNew = empty($existingOrderId);
+    http_response_code(200);
+    echo json_encode(['success' => true, 'order_id' => (string)$orderId, 'items' => count($items)],
+        JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+    if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+
+    $shopName = '';
+    try {
+        $ns = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+        $ns->execute([$supplierId]);
+        $shopName = (string)($ns->fetchColumn() ?: 'Цех');
+    } catch (Throwable $e) { $shopName = 'Цех'; }
+    $dateFmt = (new DateTime($date))->format('d.m.Y');
+
+    // Telegram: подробный состав, лотками — ресторан заказывает именно лотки.
+    try {
+        $esc = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+        $lines = [$isNew ? '✅ <b>Заявка на тесто отправлена</b>' : '✏️ <b>Заявка на тесто обновлена</b>', ''];
+        $lines[] = '🏪 <b>Цех:</b> ' . $esc($shopName);
+        $lines[] = '📅 <b>Доставка:</b> ' . $dateFmt;
+        if ($items) {
+            $lines[] = '';
+            $lines[] = '<b>Состав:</b>';
+            $multi = count($allowedBatches) > 1;
+            foreach ($items as $it) {
+                $per = (int)$bySku[$it['sku']]['per_tray'];
+                $trays = $per > 0 ? (int)round($it['quantity'] / $per) : 0;
+                $batch = $multi ? ' (' . $it['batch_no'] . '-я партия)' : '';
+                $lines[] = '• ' . $esc($bySku[$it['sku']]['short_name']) . $batch
+                    . ' — <b>' . $trays . ' лотк.</b> (' . (int)$it['quantity'] . ' шт)';
+            }
+        } else {
+            $lines[] = '';
+            $lines[] = '<i>Тесто на эту дату не нужно.</i>';
+        }
+        roNotifyRestaurant($pdo, $rest['restaurant_number'], implode("\n", $lines), 'PS');
+    } catch (Throwable $e) { /* уведомление не критично */ }
+
+    // Push — коротко, для тех, у кого стоит приложение.
+    try {
+        require_once __DIR__ . '/push_send.php';
+        pushSendToRestaurant($pdo, (int)$rest['restaurant_number'], 'PS', [
+            'title' => $shopName !== '' ? $shopName : 'Тесто',
+            'body'  => $items
+                ? ($isNew ? "Заявка на тесто на {$dateFmt} принята." : "Заявка на тесто на {$dateFmt} обновлена.")
+                : "{$dateFmt}: отмечено, что тесто не нужно.",
+            'url'   => '/restaurant/orders/production',
+            'tag'   => "op-confirm-{$supplierId}-{$date}",
+        ]);
+    } catch (Throwable $e) { /* push не критичен */ }
+    exit;
 }
 
 opRespond(['error' => 'Неизвестный маршрут модуля «Собственное производство»'], 404);

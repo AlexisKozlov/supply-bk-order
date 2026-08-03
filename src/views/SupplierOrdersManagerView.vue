@@ -210,9 +210,14 @@
               {{ dayEmailLabel.text }}
             </span>
 
-            <!-- Excel и выбор дней — одна кнопка со стрелкой: действие одно,
-                 просто с настройкой, сколько дней выгружать. -->
-            <div class="so-split">
+            <!-- У цеха своя выгрузка: неделя двумя листами (пн-вт-ср, чт-пт-сб),
+                 выбирать дни там нечего. У остальных — Excel по выбранным дням. -->
+            <button v-if="loadingSheetsAvailable" class="so-btn" @click="exportWorkshopWeek"
+                    :disabled="exporting || !selectedDate"
+                    title="Заказ теста на всю неделю: два листа по три дня">
+              {{ exporting ? 'Собираю…' : 'Заказ на неделю (Excel)' }}
+            </button>
+            <div v-else class="so-split">
               <button class="so-btn so-split-main" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
                 {{ exporting ? 'Выгрузка…' : 'Excel' }}
                 <span v-if="!exporting" class="so-split-count">{{ exportLabel }}</span>
@@ -314,7 +319,7 @@
                       <!-- Заказ по партиям: своё поле на каждую, иначе правка
                            ушла бы целиком в первую партию. -->
                       <div v-if="editParts.length > 1" class="so-cell-parts-edit" @focusout="onPartsBlur">
-                        <label v-for="pt in editParts" :key="pt.item.item_id" class="so-cell-part">
+                        <label v-for="pt in editParts" :key="pt.batch" class="so-cell-part">
                           <span class="so-cell-part-n">{{ pt.batch }}</span>
                           <input
                             v-model="pt.value"
@@ -1548,6 +1553,34 @@ async function printLoadingSheets(restaurantNumber) {
     setTimeout(() => w.print(), 300);
   } catch (e) {
     toast.error('Не получилось', e.message || String(e));
+  }
+}
+
+/**
+ * Заказ теста на неделю выбранной даты: два листа по три дня.
+ * Цеху нужна вся неделя целиком, поэтому день здесь только определяет неделю.
+ */
+async function exportWorkshopWeek() {
+  if (!currentSupplierId.value || !selectedDate.value || exporting.value) return;
+  exporting.value = true;
+  try {
+    const url = `/api/own-production/week-export?supplier_id=${encodeURIComponent(currentSupplierId.value)}&date=${encodeURIComponent(selectedDate.value)}`;
+    const resp = await fetch(url, { headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' } });
+    if (!resp.ok) {
+      const msg = await resp.json().catch(() => ({}));
+      toast.error('Не получилось', msg.error || `Ошибка ${resp.status}`);
+      return;
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Тесто — неделя ${formatDate(selectedDate.value)}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) {
+    toast.error('Не получилось', e.message || String(e));
+  } finally {
+    exporting.value = false;
   }
 }
 
@@ -3529,15 +3562,27 @@ async function commitOrderItemQty(item, val) {
 function startEdit(restNum, sku) {
   const key = `${restNum}_${sku}`;
   const list = itemLookup.value[key] || [];
+  // Сколько партий у ресторана — по графику, а не по заявке: у точки без
+  // заявки позиций ещё нет, но полей всё равно должно быть два.
+  const wantBatches = Math.max(
+    Number(restaurants.value.find(r => String(r.number) === String(restNum))?.batches) || 1,
+    list.length,
+  );
   // Позиция разложена по партиям — по полю на партию, чтобы правка не ушла
   // целиком в первую из них.
-  editParts.value = list.length > 1
-    ? list.map(it => ({
-        item: it,
-        batch: Number(it.batch_no) || 1,
-        // Без хвоста «.00»: в базе decimal, а правят целые лотки и штуки.
-        value: formatQtyValue(it.admin_qty !== null && it.admin_qty !== undefined ? it.admin_qty : it.quantity),
-      }))
+  editParts.value = wantBatches > 1
+    ? Array.from({ length: wantBatches }, (_, i) => {
+        const batch = i + 1;
+        const it = list.find(x => (Number(x.batch_no) || 1) === batch) || null;
+        return {
+          item: it,
+          batch,
+          // Без хвоста «.00»: в базе decimal, а правят целые лотки и штуки.
+          value: it
+            ? formatQtyValue(it.admin_qty !== null && it.admin_qty !== undefined ? it.admin_qty : it.quantity)
+            : '',
+        };
+      })
     : [];
   const item = list[0] || null;
   editCell.value = key;
@@ -3598,23 +3643,42 @@ async function savePartsEdit(restNum, sku) {
     const raw = String(pt.value).replace(',', '.').trim();
     const val = raw === '' ? NaN : parseFloat(raw);
     if (!isNaN(val)) sum += val;
+    if (!pt.item) {
+      // Партии ещё нет в базе — создаём, только если ввели число.
+      if (!isNaN(val)) changes.push({ pt, val });
+      continue;
+    }
     const now = pt.item.admin_qty !== null && pt.item.admin_qty !== undefined
       ? parseFloat(pt.item.admin_qty)
       : parseFloat(pt.item.quantity);
     if ((isNaN(val) && !isNaN(now)) || (!isNaN(val) && val !== now)) changes.push({ pt, val });
   }
   if (!changes.length) return;
+  let needReload = false;
   try {
+    const prod = products.value.find(p => p.sku === sku);
     for (const { pt, val } of changes) {
-      await store.adminUpdateQty({
-        item_id: pt.item.item_id,
-        admin_qty: isNaN(val) ? null : val,
-      });
-      pt.item.admin_qty = isNaN(val) ? null : val;
+      if (pt.item?.item_id) {
+        await store.adminUpdateQty({ item_id: pt.item.item_id, admin_qty: isNaN(val) ? null : val });
+        pt.item.admin_qty = isNaN(val) ? null : val;
+      } else {
+        // Новая позиция за ресторан: заявки может не быть вовсе — сервер её создаст.
+        const result = await store.adminUpdateQty({
+          restaurant_number: restNum,
+          delivery_date: selectedDate.value,
+          sku,
+          product_name: prod?.product_name || '',
+          product_id: prod?.product_id || '',
+          supplier_id: currentSupplierId.value,
+          batch_no: pt.batch,
+          admin_qty: isNaN(val) ? null : val,
+        });
+        needReload = needReload || !!result?.reload;
+      }
     }
-    const product = products.value.find(p => p.sku === sku);
-    const issue = qtyIssue(product, sum, parts[0].item?.legal_entity || null);
+    const issue = qtyIssue(prod, sum, parts.find(p => p.item)?.item?.legal_entity || null);
     if (issue) toast.info('Сохранено, но не по правилам', issue);
+    if (needReload) await loadStatus();
   } catch (e) {
     toast.error('Ошибка сохранения', e.message);
   }
