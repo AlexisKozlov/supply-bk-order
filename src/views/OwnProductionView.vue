@@ -59,6 +59,10 @@
             {{ loadingDay ? 'Загрузка…' : 'Обновить' }}
           </button>
           <div class="op-panel-right">
+            <button class="op-btn" :disabled="weekBusy" @click="downloadWeek"
+                    :title="'Заказ на неделю ' + weekLabel + ': два листа по три дня'">
+              {{ weekBusy ? 'Собираю…' : 'Заказ на неделю (Excel)' }}
+            </button>
             <button class="op-btn op-btn-accent" :disabled="!hasDay || sheetsBusy" @click="downloadSheets">
               {{ sheetsBusy ? 'Готовлю…' : 'Загрузочные листы (Excel)' }}
             </button>
@@ -234,6 +238,7 @@ const SupplierOrdersManagerView = defineAsyncComponent(() => import('@/views/Sup
 const loading = ref(true);
 const loadingDay = ref(false);
 const sheetsBusy = ref(false);
+const weekBusy = ref(false);
 const printing = ref('');
 const tab = ref('intake');
 const workshops = ref([]);
@@ -246,6 +251,15 @@ const managerTab = computed(() => ALL_TABS.find(t => t.key === tab.value)?.manag
 const tabHint = computed(() => ALL_TABS.find(t => t.key === tab.value)?.hint || '');
 const shopEntity = computed(() =>
   workshops.value.find(w => w.id === shopId.value)?.legal_entity || PS_ENTITY);
+/** «10.08–15.08» — неделя, в которую попадает выбранная дата (пн–сб). */
+const weekLabel = computed(() => {
+  const d = new Date(date.value + 'T00:00:00');
+  if (isNaN(d)) return '';
+  const back = (d.getDay() + 6) % 7;          // getDay(): вс = 0
+  const mon = new Date(d); mon.setDate(d.getDate() - back);
+  const sat = new Date(mon); sat.setDate(mon.getDate() + 5);
+  return `${fmtDate(ymd(mon))}–${fmtDate(ymd(sat))}`;
+});
 
 function emptyDay() {
   return { sizes: [], restaurants: [], totals: { by_sku: {}, pieces: 0, trays: 0, stacks: 0, pallets: 0 } };
@@ -384,7 +398,14 @@ async function downloadFile(url, filename) {
     credentials: 'include',
     headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' },
   });
-  if (!r.ok) { toast.error('Не получилось', 'Файл не собрался'); return; }
+  if (!r.ok) {
+    // Сервер объясняет причину («на эту неделю заявок нет») — она полезнее,
+    // чем общее «файл не собрался».
+    let reason = 'Файл не собрался';
+    try { reason = (await r.clone().json())?.error || reason; } catch (e) { /* не JSON */ }
+    toast.error('Не получилось', reason);
+    return;
+  }
   const blob = await r.blob();
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -400,6 +421,17 @@ async function downloadSheets() {
     await downloadFile(url, `Загрузочные листы ${fmtDate(date.value)}.xlsx`);
   } finally {
     sheetsBusy.value = false;
+  }
+}
+
+/** Заказ теста на неделю: два листа — пн-вт-ср и чт-пт-сб. */
+async function downloadWeek() {
+  weekBusy.value = true;
+  try {
+    const url = `/api/own-production/week-export?supplier_id=${encodeURIComponent(shopId.value)}&date=${encodeURIComponent(date.value)}`;
+    await downloadFile(url, `Тесто ${weekLabel.value}.xlsx`);
+  } finally {
+    weekBusy.value = false;
   }
 }
 

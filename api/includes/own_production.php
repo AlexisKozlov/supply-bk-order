@@ -249,6 +249,8 @@ function opDayTotals(array $day): array {
 
 /** Дни недели по-русски: 1=пн … 7=вс. */
 const OP_DOW_SHORT = [1 => 'пн', 2 => 'вт', 3 => 'ср', 4 => 'чт', 5 => 'пт', 6 => 'сб', 7 => 'вс'];
+const OP_DOW_FULL = [1 => 'Понедельник', 2 => 'Вторник', 3 => 'Среда', 4 => 'Четверг',
+                     5 => 'Пятница', 6 => 'Суббота', 7 => 'Воскресенье'];
 
 /**
  * График изготовления цеха: день поставки → партии.
@@ -398,6 +400,249 @@ function opRestaurantDates(PDO $pdo, string $supplierId, string $restNum, int $d
     return $out;
 }
 
+// ═══════════════════════ Отчёт цеху на неделю ═══════════════════════
+// Цех работает по бумажной книге: три дня на лист (пн-вт-ср и чт-пт-сб),
+// внутри дня строка на ресторан, а если поставка одна в неделю — две строки,
+// по строке на партию. Колонки повторяют привычную таблицу цеха:
+// на каждый размер штуки и лотки, справа всего лотков и паллет.
+
+/** Понедельник недели, в которую попадает дата. */
+function opWeekMonday(string $date): string {
+    $d = new DateTime($date);
+    $back = (int)$d->format('N') - 1;
+    return $d->modify("-{$back} days")->format('Y-m-d');
+}
+
+/** Строки одного дня: ресторан целиком или по партиям. */
+function opWeekRows(array $day): array {
+    $perTray = [];
+    foreach ($day['sizes'] as $s) $perTray[$s['sku']] = (int)$s['per_tray'];
+
+    $rows = [];
+    foreach ($day['restaurants'] as $r) {
+        $batches = [];
+        foreach (array_keys($r['qty_by_batch'] ?? []) as $b) {
+            if ((int)$b > 0) $batches[] = (int)$b;
+        }
+        sort($batches);
+        $parts = count($batches) > 1
+            ? array_map(fn($b) => ['no' => $b, 'qty' => $r['qty_by_batch'][$b]], $batches)
+            : [['no' => 0, 'qty' => $r['qty']]];
+
+        foreach ($parts as $p) {
+            $trays = [];
+            $traysTotal = 0;
+            foreach ($day['sizes'] as $s) {
+                $q = (float)($p['qty'][$s['sku']] ?? 0);
+                $t = opTrays($q, $perTray[$s['sku']] ?? 0);
+                $trays[$s['sku']] = $t;
+                $traysTotal += $t;
+            }
+            $rows[] = [
+                'title'  => $r['title'] . ($p['no'] ? ' — ' . $p['no'] . '-я партия' : ''),
+                'qty'    => $p['qty'],
+                'trays'  => $trays,
+                'total_trays' => $traysTotal,
+                // Паллета цеха — 4 стопки по 22 лотка. Дробь оставляем: цех по
+                // ней прикидывает загрузку камеры, а не считает целые места.
+                'pallets' => $traysTotal > 0
+                    ? round($traysTotal / (SO_LS_TRAYS_PER_STACK * OP_STACKS_PER_PALLET), 2)
+                    : 0,
+            ];
+        }
+    }
+    return $rows;
+}
+
+/**
+ * Книга «Заказ теста на неделю»: два листа по три дня.
+ * @return array{status:string, xlsx:?string, filename:string}
+ */
+function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
+    require_once __DIR__ . '/../../vendor/autoload.php';
+    require_once __DIR__ . '/so_loading_sheets.php';
+
+    $monday = opWeekMonday($anyDate);
+    $sizes = opGetSizes($pdo, $supplierId);
+    if (!$sizes) return ['status' => 'empty', 'xlsx' => null, 'filename' => ''];
+
+    // Данные по всем дням недели: пустые дни в лист не попадут.
+    $days = [];
+    for ($i = 0; $i < 7; $i++) {
+        $date = (new DateTime($monday))->modify("+{$i} days")->format('Y-m-d');
+        $day = opCollectDay($pdo, $supplierId, $date);
+        if (!$day['restaurants']) continue;
+        $days[$date] = $day;
+    }
+    if (!$days) return ['status' => 'empty', 'xlsx' => null, 'filename' => ''];
+
+    $ss = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $ss->removeSheetByIndex(0);
+
+    $CENTER = \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER;
+    $THIN = \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN;
+    $SOLID = \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID;
+
+    // Колонки: A — ресторан, дальше по паре на размер, затем лотки и паллеты.
+    $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(2 + count($sizes) * 2 + 1);
+
+    $sheets = [
+        ['Пн-Вт-Ср', [1, 2, 3]],
+        ['Чт-Пт-Сб', [4, 5, 6, 7]],   // воскресенье попадает сюда, если вдруг есть
+    ];
+
+    foreach ($sheets as [$title, $dows]) {
+        $sheetDays = [];
+        foreach ($days as $date => $day) {
+            if (in_array((int)(new DateTime($date))->format('N'), $dows, true)) $sheetDays[$date] = $day;
+        }
+
+        $ws = $ss->createSheet();
+        $ws->setTitle($title);
+        $ws->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+        $ws->getPageSetup()->setFitToWidth(1)->setFitToHeight(0);
+        $ws->getColumnDimension('A')->setWidth(34);
+        for ($c = 2; $c <= 2 + count($sizes) * 2; $c++) {
+            $ws->getColumnDimension(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($c))->setWidth(11);
+        }
+        $ws->getColumnDimension($lastCol)->setWidth(11);
+
+        if (!$sheetDays) {
+            $ws->setCellValue('A1', 'На эти дни заявок нет');
+            $ws->getStyle('A1')->getFont()->setItalic(true)->getColor()->setRGB('8A7F72');
+            continue;
+        }
+
+        $row = 1;
+        // Итог по листу — копим по ходу.
+        $sheetQty = [];
+        $sheetTrays = [];
+        $sheetTraysTotal = 0;
+
+        foreach ($sheetDays as $date => $day) {
+            $dt = new DateTime($date);
+            $ws->setCellValue("A{$row}", OP_DOW_FULL[(int)$dt->format('N')] . ', ' . soLsFmtDate($date));
+            $ws->mergeCells("A{$row}:{$lastCol}{$row}");
+            $ws->getStyle("A{$row}")->getFont()->setBold(true)->setSize(13)->getColor()->setRGB('FFFFFF');
+            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB(SO_LS_BROWN);
+            $ws->getRowDimension($row)->setRowHeight(22);
+            $row++;
+
+            // Шапка колонок
+            $ws->setCellValue("A{$row}", 'Ресторан');
+            $col = 2;
+            foreach ($sizes as $s) {
+                $c1 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+                $c2 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col + 1);
+                $ws->setCellValue("{$c1}{$row}", $s['short_name'] . ', шт');
+                $ws->setCellValue("{$c2}{$row}", 'лотков');
+                $col += 2;
+            }
+            $cTrays = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+            $ws->setCellValue("{$cTrays}{$row}", 'Лотков');
+            $ws->setCellValue("{$lastCol}{$row}", 'Паллет');
+            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true)->getColor()->setRGB('502314');
+            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('F4EDE4');
+            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER)->setWrapText(true);
+            $ws->getStyle("A{$row}")->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_LEFT);
+            $headRow = $row;
+            $row++;
+
+            $dayQty = [];
+            $dayTrays = [];
+            $dayTraysTotal = 0;
+            $zebra = false;
+
+            foreach (opWeekRows($day) as $r) {
+                $ws->setCellValue("A{$row}", $r['title']);
+                $col = 2;
+                foreach ($sizes as $s) {
+                    $c1 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+                    $c2 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col + 1);
+                    $q = (float)($r['qty'][$s['sku']] ?? 0);
+                    $t = (int)($r['trays'][$s['sku']] ?? 0);
+                    $ws->setCellValue("{$c1}{$row}", $q > 0 ? $q : null);
+                    $ws->setCellValue("{$c2}{$row}", $t > 0 ? $t : null);
+                    $dayQty[$s['sku']] = ($dayQty[$s['sku']] ?? 0) + $q;
+                    $dayTrays[$s['sku']] = ($dayTrays[$s['sku']] ?? 0) + $t;
+                    $col += 2;
+                }
+                $ws->setCellValue("{$cTrays}{$row}", $r['total_trays'] ?: null);
+                $ws->setCellValue("{$lastCol}{$row}", $r['pallets'] ?: null);
+                $dayTraysTotal += $r['total_trays'];
+                if ($zebra) {
+                    $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('FBF8F4');
+                }
+                $zebra = !$zebra;
+                $row++;
+            }
+
+            // Итог дня
+            $ws->setCellValue("A{$row}", 'Итого за день');
+            $col = 2;
+            foreach ($sizes as $s) {
+                $c1 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+                $c2 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col + 1);
+                $ws->setCellValue("{$c1}{$row}", $dayQty[$s['sku']] ?: null);
+                $ws->setCellValue("{$c2}{$row}", $dayTrays[$s['sku']] ?: null);
+                $sheetQty[$s['sku']] = ($sheetQty[$s['sku']] ?? 0) + ($dayQty[$s['sku']] ?? 0);
+                $sheetTrays[$s['sku']] = ($sheetTrays[$s['sku']] ?? 0) + ($dayTrays[$s['sku']] ?? 0);
+                $col += 2;
+            }
+            $ws->setCellValue("{$cTrays}{$row}", $dayTraysTotal ?: null);
+            $ws->setCellValue("{$lastCol}{$row}", $dayTraysTotal > 0
+                ? round($dayTraysTotal / (SO_LS_TRAYS_PER_STACK * OP_STACKS_PER_PALLET), 2) : null);
+            $sheetTraysTotal += $dayTraysTotal;
+            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true);
+            $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB('F4EDE4');
+
+            // Рамки на блок дня
+            $ws->getStyle("A{$headRow}:{$lastCol}{$row}")->getBorders()->getAllBorders()
+                ->setBorderStyle($THIN)->getColor()->setRGB('D8CCBD');
+            $ws->getStyle("B{$headRow}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER);
+            // Штуки и лотки — целые, паллеты с сотыми: иначе «160.0» в каждой ячейке.
+            $firstDataRow = $headRow + 1;
+            $ws->getStyle("B{$firstDataRow}:{$cTrays}{$row}")->getNumberFormat()->setFormatCode('#,##0');
+            $ws->getStyle("{$lastCol}{$firstDataRow}:{$lastCol}{$row}")->getNumberFormat()->setFormatCode('0.00');
+            $row += 2;
+        }
+
+        // Итог по листу
+        $ws->setCellValue("A{$row}", 'ВСЕГО (' . mb_strtolower($title) . ')');
+        $col = 2;
+        foreach ($sizes as $s) {
+            $c1 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+            $c2 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col + 1);
+            $ws->setCellValue("{$c1}{$row}", $sheetQty[$s['sku']] ?: null);
+            $ws->setCellValue("{$c2}{$row}", $sheetTrays[$s['sku']] ?: null);
+            $col += 2;
+        }
+        $ws->setCellValue("{$cTrays}{$row}", $sheetTraysTotal ?: null);
+        $ws->setCellValue("{$lastCol}{$row}", $sheetTraysTotal > 0
+            ? round($sheetTraysTotal / (SO_LS_TRAYS_PER_STACK * OP_STACKS_PER_PALLET), 2) : null);
+        $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true)->setSize(12)->getColor()->setRGB('FFFFFF');
+        $ws->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType($SOLID)->getStartColor()->setRGB(SO_LS_BROWN);
+        $ws->getStyle("B{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal($CENTER);
+        $ws->getStyle("B{$row}:{$cTrays}{$row}")->getNumberFormat()->setFormatCode('#,##0');
+        $ws->getStyle("{$lastCol}{$row}")->getNumberFormat()->setFormatCode('0.00');
+        $ws->getRowDimension($row)->setRowHeight(20);
+    }
+
+    $ss->setActiveSheetIndex(0);
+    $tmp = tempnam(sys_get_temp_dir(), 'opweek');
+    (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($ss))->save($tmp);
+    $data = file_get_contents($tmp);
+    @unlink($tmp);
+    $ss->disconnectWorksheets();
+
+    $sunday = (new DateTime($monday))->modify('+5 days')->format('Y-m-d');
+    return [
+        'status'   => 'ok',
+        'xlsx'     => $data,
+        'filename' => 'Тесто ' . soLsFmtDate($monday) . '-' . soLsFmtDate($sunday) . '.xlsx',
+    ];
+}
+
 // ═══════════════════════ Маршруты ═══════════════════════
 
 if (($endpoint ?? '') !== 'own-production') return;
@@ -431,6 +676,24 @@ if ($opAction === 'day' && $method === 'GET') {
         'totals'      => opDayTotals($day),
         'stacks_per_pallet' => OP_STACKS_PER_PALLET,
     ]);
+}
+
+// ─── Отчёт цеху: неделя выбранной даты, два листа по три дня ───
+if ($opAction === 'week-export' && $method === 'GET') {
+    $supplierId = trim((string)($_GET['supplier_id'] ?? ''));
+    $date = trim((string)($_GET['date'] ?? ''));
+    if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        opRespond(['error' => 'Нужны цех и дата (ГГГГ-ММ-ДД)'], 400);
+    }
+    opRequireWorkshop($pdo, $supplierId, $opUser);
+    $book = opBuildWeekXlsx($pdo, $supplierId, $date);
+    if ($book['status'] !== 'ok') opRespond(['error' => 'На эту неделю заявок нет'], 404);
+
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $book['filename'] . '"; filename*=UTF-8\'\'' . rawurlencode($book['filename']));
+    header('Content-Length: ' . strlen($book['xlsx']));
+    echo $book['xlsx'];
+    exit;
 }
 
 // ─── Кабинет: что можно заказать и на какие даты ───
