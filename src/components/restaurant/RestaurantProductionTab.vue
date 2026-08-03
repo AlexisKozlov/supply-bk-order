@@ -523,14 +523,18 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .rpt-step:disabled {
   background: transparent; border-color: #EFE6DA; color: #D8CCBD; cursor: not-allowed;
 }
-/* Число с подписью «лотк.» — единым блоком по центру ячейки. Раньше пара
-   прижималась к левому краю, и цифра стояла не по середине поля. */
-.rpt-qty-box { display: flex; align-items: baseline; justify-content: center; gap: 3px;
-               padding: 0 8px; height: 38px; min-width: 116px;
+/* Само число стоит ровно по центру ячейки, а «лотк.» прижата к правому краю
+   отдельно: если центрировать пару целиком, цифра всегда левее середины. */
+.rpt-qty-box { position: relative; display: flex; align-items: center; justify-content: center;
+               /* Ширина фиксированная: поле внутри тянется на 100%, и без
+                  жёсткого размера ячейка распирала всю строку. */
+               flex: 0 0 116px; width: 116px; box-sizing: border-box;
+               padding: 0 34px 0 8px; height: 38px;
                border: 1.5px solid var(--rpt-line); border-radius: 10px; background: #fff; }
+.rpt-qty-box .rpt-qty-u { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
 .rpt-qty-box.is-on { border-color: var(--rpt-green); background: #F4FAF2; }
-.rpt-input { width: 46px; flex: 0 1 auto; border: 0; background: transparent; outline: none;
-             text-align: right; padding: 0;
+.rpt-input { width: 100%; border: 0; background: transparent; outline: none;
+             text-align: center; padding: 0;
              font-size: 17px; font-weight: 800; color: var(--rpt-brown); height: 38px;
              -moz-appearance: textfield; }
 .rpt-input::-webkit-outer-spin-button, .rpt-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -538,13 +542,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 /* Закрытая заявка: рамка как у поля ввода, чтобы числа читались таблицей,
    а не висели в воздухе. Отличие от открытой формы — приглушённый фон и
    отсутствие кнопок «−» и «+». */
+/* Закрытая заявка — та же сетка, что и в форме: число по центру, «лотк.»
+   отдельной меткой справа. Ширина совпадает с полем ввода. */
 .rpt-qty-static {
-  display: flex; align-items: baseline; justify-content: center; gap: 3px;
-  min-width: 116px; height: 38px; padding: 0 8px;
+  position: relative; display: flex; align-items: center; justify-content: center;
+  flex: 0 0 116px; width: 116px; box-sizing: border-box; height: 38px; padding: 0 34px 0 8px;
   border: 1.5px solid var(--rpt-line); border-radius: 10px; background: #FCFAF7;
 }
-/* Пустая партия: прочерк ровно по центру, а не по базовой линии подписи. */
-.rpt-qty-static:not(.is-on) { align-items: center; }
+.rpt-qty-static .rpt-qty-u { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
 .rpt-qty-static.is-on { border-color: #C6E3C0; background: #F7FBF5; }
 .rpt-qty-static b { font-size: 17px; font-weight: 800; color: var(--rpt-brown); }
 .rpt-qty-static.is-on b { color: var(--rpt-green); }
@@ -582,7 +587,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
   .rpt-hero-timer { text-align: left; }
   .rpt-row { flex-wrap: wrap; }
   .rpt-row-right { width: 100%; justify-content: space-between; }
-  .rpt-input { width: 60px; }
+  .rpt-input { width: 100%; }
 }
 
 .rpt-batches { display: flex; align-items: flex-end; gap: 10px; }
@@ -609,8 +614,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
   .rpt-batch-pieces { margin-left: 0; }
   .rpt-batch-lbl em { display: inline; margin-left: 4px; }
   /* Поле растягивается на всю ширину между «−» и «+». */
-  .rpt-qty-box { flex: 1 1 auto; justify-content: center; }
-  .rpt-qty-static { flex: 1 1 auto; min-width: 0; }
-  .rpt-input { width: 100%; }
+  .rpt-qty-box { flex: 1 1 auto; width: auto; justify-content: center; }
+  .rpt-qty-static { flex: 1 1 auto; width: auto; min-width: 0; }
 }
 </style>

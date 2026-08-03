@@ -60,8 +60,8 @@
           </button>
           <div class="op-panel-right">
             <button class="op-btn" :disabled="weekBusy" @click="downloadWeek"
-                    :title="'Заказ на неделю ' + weekLabel + ': два листа по три дня'">
-              {{ weekBusy ? 'Собираю…' : 'Заказ на неделю (Excel)' }}
+                    :title="'Два листа по три дня: ' + weekLabel">
+              {{ weekBusy ? 'Собираю…' : `Заказ на неделю ${weekLabel}` }}
             </button>
             <button class="op-btn op-btn-accent" :disabled="!hasDay || sheetsBusy" @click="downloadSheets">
               {{ sheetsBusy ? 'Готовлю…' : 'Загрузочные листы (Excel)' }}
@@ -393,6 +393,15 @@ function pickShop(id) {
 }
 
 /** Скачивание файла с сессионным заголовком — окно открыть нельзя. */
+/** Имя файла из заголовка ответа: сервер знает период точнее клиента. */
+function fileNameFromResponse(resp) {
+  const cd = resp.headers.get('Content-Disposition') || '';
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star) { try { return decodeURIComponent(star[1]); } catch (e) { /* битая кодировка */ } }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1] : '';
+}
+
 async function downloadFile(url, filename) {
   const r = await fetch(url, {
     credentials: 'include',
@@ -409,7 +418,7 @@ async function downloadFile(url, filename) {
   const blob = await r.blob();
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = filename;
+  link.download = fileNameFromResponse(r) || filename;
   link.click();
   URL.revokeObjectURL(link.href);
 }

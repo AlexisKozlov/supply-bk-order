@@ -215,7 +215,8 @@
             <button v-if="loadingSheetsAvailable" class="so-btn" @click="exportWorkshopWeek"
                     :disabled="exporting || !selectedDate"
                     title="Заказ теста на всю неделю: два листа по три дня">
-              {{ exporting ? 'Собираю…' : 'Заказ на неделю (Excel)' }}
+              {{ exporting ? 'Собираю…' : 'Заказ на неделю' }}
+              <span v-if="!exporting && weekRangeLabel" class="so-split-count">{{ weekRangeLabel }}</span>
             </button>
             <div v-else class="so-split">
               <button class="so-btn so-split-main" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
@@ -1556,6 +1557,17 @@ async function printLoadingSheets(restaurantNumber) {
   }
 }
 
+/** «03.08–08.08» — неделя (пн–сб), в которую попадает выбранная дата. */
+const weekRangeLabel = computed(() => {
+  if (!selectedDate.value) return '';
+  const d = new Date(selectedDate.value + 'T00:00:00');
+  if (isNaN(d)) return '';
+  const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const sat = new Date(mon); sat.setDate(mon.getDate() + 5);
+  const f = (x) => String(x.getDate()).padStart(2, '0') + '.' + String(x.getMonth() + 1).padStart(2, '0');
+  return `${f(mon)}–${f(sat)}`;
+});
+
 /**
  * Заказ теста на неделю выбранной даты: два листа по три дня.
  * Цеху нужна вся неделя целиком, поэтому день здесь только определяет неделю.
@@ -1574,7 +1586,8 @@ async function exportWorkshopWeek() {
     const blob = await resp.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `Тесто — неделя ${formatDate(selectedDate.value)}.xlsx`;
+    // Имя даёт сервер — в нём диапазон недели, а не выбранный день.
+    a.download = fileNameFromResponse(resp) || `Тесто ${weekRangeLabel.value}.xlsx`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   } catch (e) {
@@ -1582,6 +1595,15 @@ async function exportWorkshopWeek() {
   } finally {
     exporting.value = false;
   }
+}
+
+/** Имя файла из заголовка Content-Disposition (сервер знает период точнее). */
+function fileNameFromResponse(resp) {
+  const cd = resp.headers.get('Content-Disposition') || '';
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star) { try { return decodeURIComponent(star[1]); } catch (e) { /* битая кодировка */ } }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1] : '';
 }
 
 async function downloadLoadingSheets() {

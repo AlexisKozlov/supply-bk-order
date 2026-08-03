@@ -482,16 +482,22 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
     // Ни паллет, ни «всего лотков» цех не просил — он считает по размерам.
     $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(1 + count($sizes) * 2);
 
+    // Вкладки называем числами, а не днями недели: цех ищет лист по дате.
     $sheets = [
-        ['Пн-Вт-Ср', [1, 2, 3]],
-        ['Чт-Пт-Сб', [4, 5, 6, 7]],   // воскресенье попадает сюда, если вдруг есть
+        [[1, 2, 3]],
+        [[4, 5, 6, 7]],   // воскресенье попадает сюда, если вдруг есть
     ];
 
-    foreach ($sheets as [$title, $dows]) {
+    foreach ($sheets as [$dows]) {
         $sheetDays = [];
         foreach ($days as $date => $day) {
             if (in_array((int)(new DateTime($date))->format('N'), $dows, true)) $sheetDays[$date] = $day;
         }
+        // Диапазон берём по календарю, а не по дням с заявками: иначе лист без
+        // одного дня назывался бы «04.08-05.08» и путал бы с соседним.
+        $first = (new DateTime($monday))->modify('+' . ($dows[0] - 1) . ' days')->format('d.m');
+        $last  = (new DateTime($monday))->modify('+' . (min(end($dows), 6) - 1) . ' days')->format('d.m');
+        $title = "{$first}-{$last}";
 
         $ws = $ss->createSheet();
         $ws->setTitle($title);
@@ -591,7 +597,7 @@ function opBuildWeekXlsx(PDO $pdo, string $supplierId, string $anyDate): array {
         }
 
         // Итог по листу
-        $ws->setCellValue("A{$row}", 'ВСЕГО (' . mb_strtolower($title) . ')');
+        $ws->setCellValue("A{$row}", "ВСЕГО за {$title}");
         $col = 2;
         foreach ($sizes as $s) {
             $c1 = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
