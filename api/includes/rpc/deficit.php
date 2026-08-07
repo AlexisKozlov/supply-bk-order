@@ -32,7 +32,7 @@ if ($fn === 'deficit_get_restaurants') {
     if (!$row) respond(['error' => 'expired']);
     $le = $row['legal_entity'];
     $group = getEntityGroup($le);
-    $s2 = $pdo->prepare("SELECT id, number, address, city FROM restaurants WHERE legal_entity_group = ? ORDER BY sort_order");
+    $s2 = $pdo->prepare("SELECT id, number, address, city FROM restaurants WHERE legal_entity_group = ? AND active = 1 ORDER BY sort_order");
     $s2->execute([$group]);
     respond($s2->fetchAll());
 }

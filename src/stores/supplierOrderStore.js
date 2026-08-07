@@ -93,6 +93,14 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  // Повторное подключение: возвращает график и товары, снятые отключением
+  async function adminReconnectSupplier(supplierId) {
+    return api('admin/reconnect-supplier', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId }),
+    });
+  }
+
   // Отключение (not delete) — просто снимает флаг so_enabled
   async function adminDisconnectSupplier(supplierId) {
     return api('admin/disconnect-supplier', {
@@ -320,7 +328,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     // Ресторан
     loadSuppliers, loadProducts, loadMyOrder, loadMyOrders, submitOrder,
     // Отдел закупок
-    adminGetSuppliers, adminGetAvailableSuppliers, adminRegisterSupplier, adminDisconnectSupplier,
+    adminGetSuppliers, adminGetAvailableSuppliers, adminRegisterSupplier, adminReconnectSupplier, adminDisconnectSupplier,
     adminGetStatus, adminGetOverview, adminGetOrders, adminGetOrder,
     adminUpdateOrder, adminDeleteOrder,
     adminGetSettings, adminSaveSettings,

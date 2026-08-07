@@ -291,7 +291,7 @@
         <div v-if="missingRestaurants.length" class="sc-missing">
           <div class="sc-missing-head" @click="showMissing = !showMissing">
             <span class="sc-missing-icon">{{ showMissing ? '▾' : '▸' }}</span>
-            <span>Не заполнили: <b>{{ missingRestaurants.length }}</b> из {{ restaurantStore.restaurants.length }}</span>
+            <span>Не заполнили: <b>{{ missingRestaurants.length }}</b> из {{ restaurantStore.activeRestaurants.length }}</span>
           </div>
           <div v-if="showMissing" class="sc-missing-list">
             <span v-for="r in missingRestaurants" :key="r.number" class="sc-missing-tag">
@@ -806,9 +806,9 @@ const answeredRestaurants = computed(() => {
 });
 
 const missingRestaurants = computed(() => {
-  if (!collectionData.value?.data || !restaurantStore.restaurants.length) return [];
+  if (!collectionData.value?.data || !restaurantStore.activeRestaurants.length) return [];
   const answered = answeredRestaurants.value;
-  return restaurantStore.restaurants
+  return restaurantStore.activeRestaurants
     .filter(r => !answered.has(String(r.number)))
     .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
 });
@@ -1203,7 +1203,7 @@ const mergedRows = computed(() => {
   if (!collectionData.value) return [];
   const allData = collectionData.value.data || [];
   const restMap = new Map();
-  for (const r of restaurantStore.restaurants) {
+  for (const r of restaurantStore.activeRestaurants) {
     const key = String(r.number);
     restMap.set(key, {
       restaurant: key,

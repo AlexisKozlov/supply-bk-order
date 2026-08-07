@@ -653,7 +653,7 @@ function convertToUnit(val, from, to) {
 
 function calculate() {
   const schedMap = restaurantStore.scheduleByRestaurant;
-  const rests = restaurantStore.restaurants;
+  const rests = restaurantStore.activeRestaurants;
   const sMap = new Map(); for (const d of stockData.value) sMap.set(d.restaurantNumber, d.value);
   const cMap = new Map(); for (const d of consumptionData.value) cMap.set(d.restaurantNumber, d.value);
 

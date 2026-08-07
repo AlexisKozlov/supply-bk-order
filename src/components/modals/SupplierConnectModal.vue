@@ -26,10 +26,19 @@
             <label v-for="s in availableSuppliers" :key="s.id" class="scm-supplier-item" :class="{ selected: supplierId === s.id }">
               <input type="radio" :value="s.id" v-model="supplierId" />
               <div class="scm-supplier-info">
-                <div class="scm-supplier-name">{{ s.short_name }}</div>
+                <div class="scm-supplier-name">
+                  {{ s.short_name }}
+                  <span v-if="s.has_saved_config" class="scm-saved-tag">настройки сохранены</span>
+                </div>
                 <div class="scm-supplier-full">{{ s.full_name || '—' }}</div>
               </div>
             </label>
+          </div>
+
+          <div v-if="selectedSupplier?.has_saved_config" class="scm-saved-note">
+            Этот поставщик уже был подключён. Сохранились {{ savedSummary }}.
+            Нажмите <b>«Вернуть настройки»</b> — всё поднимется как было.
+            Кнопка «Настроить заново» проведёт по шагам и перезапишет старые настройки.
           </div>
         </div>
 
@@ -214,7 +223,15 @@
       <div class="scm-footer">
         <button class="scm-btn-outline" @click="tryClose">Отмена</button>
         <button v-if="step > 0" class="scm-btn-outline" @click="step--">← Назад</button>
-        <button v-if="step < steps.length - 1" class="scm-btn-primary" @click="nextStep" :disabled="!canNext">Далее →</button>
+        <button v-if="step === 0 && selectedSupplier?.has_saved_config"
+                class="scm-btn-primary" @click="restoreSaved" :disabled="restoring">
+          {{ restoring ? 'Возвращаем...' : 'Вернуть настройки' }}
+        </button>
+        <button v-if="step < steps.length - 1"
+                :class="(step === 0 && selectedSupplier?.has_saved_config) ? 'scm-btn-outline' : 'scm-btn-primary'"
+                @click="nextStep" :disabled="!canNext">
+          {{ (step === 0 && selectedSupplier?.has_saved_config) ? 'Настроить заново →' : 'Далее →' }}
+        </button>
         <button v-else class="scm-btn-primary" @click="submit" :disabled="saving">
           {{ saving ? 'Подключение...' : 'Подключить' }}
         </button>
@@ -255,6 +272,41 @@ async function loadAvailable() {
     availableSuppliers.value = await soStore.adminGetAvailableSuppliers(orderStore.settings.legalEntity);
   } catch (e) { toast.error('Ошибка загрузки поставщиков'); }
   finally { loadingAvailable.value = false; }
+}
+
+// Сохранённые настройки прошлого подключения: их можно вернуть одной кнопкой,
+// не проходя мастер заново. Мастер перезаписывает график и товары, поэтому
+// раньше повторное подключение означало «набрать всё руками ещё раз».
+const savedSummary = computed(() => {
+  const s = selectedSupplier.value;
+  if (!s) return '';
+  const parts = [];
+  if (s.saved_restaurants) parts.push(`график по ${s.saved_restaurants} ${plural(s.saved_restaurants, 'ресторану', 'ресторанам', 'ресторанам')}`);
+  if (s.saved_products) parts.push(`${s.saved_products} ${plural(s.saved_products, 'товар', 'товара', 'товаров')} в шаблоне`);
+  return parts.join(' и ');
+});
+
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+  return many;
+}
+
+const restoring = ref(false);
+async function restoreSaved() {
+  if (!supplierId.value || restoring.value) return;
+  restoring.value = true;
+  try {
+    const res = await soStore.adminReconnectSupplier(supplierId.value);
+    if (res.error) { toast.error('Ошибка: ' + res.error); return; }
+    toast.success('Настройки поставщика возвращены');
+    saveSnapshot(); // закрываем без вопроса о несохранённых данных
+    emit('connected', res.supplier);
+    emit('close');
+  } catch (e) {
+    toast.error('Ошибка: ' + (e.message || e));
+  } finally { restoring.value = false; }
 }
 
 // ═══ Шаг 2: график ═══
@@ -540,6 +592,16 @@ onMounted(() => {
 .scm-supplier-item.selected { border-color: #E76F51; background: #fff2e0; }
 .scm-supplier-info { flex: 1; }
 .scm-supplier-name { font-weight: 700; color: #502314; font-size: 14px; }
+.scm-saved-tag {
+  margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+  background: #eaf6ec; color: #1f7a3d; border: 1px solid #bfe3c8;
+  font-size: 11px; font-weight: 600; vertical-align: middle;
+}
+.scm-saved-note {
+  margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+  background: #f4faf5; border: 1px solid #cfe8d5;
+  color: #2c5c3a; font-size: 13px; line-height: 1.5;
+}
 .scm-supplier-full { font-size: 12px; color: #8b7355; margin-top: 2px; }
 
 /* Step 2: schedule grid */

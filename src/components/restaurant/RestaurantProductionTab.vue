@@ -13,6 +13,12 @@
       <p class="rpt-empty-hint">Обратитесь в отдел закупок</p>
     </div>
 
+    <div v-else-if="!accepting" class="rpt-empty">
+      <h2>{{ workshop.name }}</h2>
+      <p>{{ pauseMessage || 'Приём заявок на тесто временно приостановлен.' }}</p>
+      <p class="rpt-empty-hint">Обратитесь в отдел закупок</p>
+    </div>
+
     <div v-else-if="!dates.length" class="rpt-empty">
       <h2>{{ workshop.name }}</h2>
       <p>Дни поставки теста для вашего ресторана не настроены.</p>
@@ -184,6 +190,9 @@ async function showConfirm(title, message, opts) {
 const loading = ref(true);
 const error = ref('');
 const workshop = ref(null);
+// Пауза приёма заявок цехом — тот же выключатель, что у обычных поставщиков.
+const accepting = ref(true);
+const pauseMessage = ref('');
 const sizes = ref([]);
 const dates = ref([]);
 const selectedDate = ref('');
@@ -275,6 +284,8 @@ async function load() {
   try {
     const data = await api('my-form');
     workshop.value = data.workshop || null;
+    accepting.value = data.accepting !== false;
+    pauseMessage.value = data.pause_message || '';
     traysPerStack.value = Number(data.trays_per_stack) || 22;
     sizes.value = data.sizes || [];
     dates.value = data.dates || [];

@@ -281,8 +281,13 @@ if ($subpoint === 'list' && $method === 'GET') {
                 if ($sid) $bySupplier[$sid]['selected_tg_ids'][] = (int)$r['ro_tg_sub_id'];
             }
         }
-        // жёсткий выключатель закупок
-        $mSt = $pdo->prepare("SELECT supplier_id FROM so_reminder_mutes WHERE restaurant_id = ? AND supplier_id IN ($ph)");
+        // Жёсткий выключатель закупок. Строки, созданные самим рестораном
+        // (created_by = 'ro:<номер>', так писала старая версия кабинета), сюда
+        // не считаем — иначе ресторану показывался баннер «выключил отдел
+        // закупок» на собственное действие.
+        $mSt = $pdo->prepare("SELECT supplier_id FROM so_reminder_mutes
+                               WHERE restaurant_id = ? AND supplier_id IN ($ph)
+                                 AND (created_by IS NULL OR created_by NOT LIKE 'ro:%')");
         $mSt->execute(array_merge([$rrRestPk], $portIds));
         foreach ($mSt->fetchAll(PDO::FETCH_COLUMN) as $sid) {
             if (isset($bySupplier[$sid])) $bySupplier[$sid]['reminder_muted'] = true;
@@ -443,8 +448,11 @@ if ($subpoint === 'set' && $method === 'POST') {
     rrRespond(['success' => true]);
 }
 
-// Портальный поставщик: ресторан вкл/выкл напоминания о заявке (общий с
-// закупками флаг so_reminder_mutes).
+// Портальный поставщик: ресторан вкл/выкл напоминания о заявке.
+// ВЫКЛЮЧЕНИЕ пишем в СВОЮ подписку, а не в so_reminder_mutes: та таблица —
+// «глушилка» отдела закупок, и после собственного выключения ресторану
+// показывался баннер «напоминания выключил отдел закупок».
+// ВКЛЮЧЕНИЕ снимает оба выключателя — включить может любая сторона.
 if ($subpoint === 'so-mute' && $method === 'POST') {
     $supplierId = trim((string)($body['supplier_id'] ?? ''));
     if (!$supplierId) rrRespond(['error' => 'supplier_id обязателен'], 400);
@@ -455,16 +463,29 @@ if ($subpoint === 'so-mute' && $method === 'POST') {
     $muted = !empty($body['muted']);
     $by = 'ro:' . $rrUser['restaurant_number'];
     if ($muted) {
-        $pdo->prepare("INSERT IGNORE INTO so_reminder_mutes (supplier_id, restaurant_id, created_by) VALUES (?, ?, ?)")
-            ->execute([$supplierId, $rrRestPk, $by]);
+        // Новой строке telegram_enabled = 1: без подписки крон и так слал в
+        // Telegram всем аккаунтам ресторана, и обратное включение не должно
+        // молча обрывать этот канал.
+        $pdo->prepare("
+            INSERT INTO restaurant_reminder_subscriptions
+                (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, cron_managed, updated_at, updated_by)
+            VALUES (?, ?, 0, 0, 1, 1, NOW(), ?)
+            ON DUPLICATE KEY UPDATE
+                is_enabled = 0,
+                portal_enabled = 0,
+                cron_managed = 1,
+                updated_at = NOW(),
+                updated_by = VALUES(updated_by)
+        ")->execute([$rrRestPk, $supplierId, $by]);
     } else {
         $pdo->prepare("DELETE FROM so_reminder_mutes WHERE supplier_id = ? AND restaurant_id = ?")
             ->execute([$supplierId, $rrRestPk]);
         // Своя подписка тоже могла быть выключена — включаем, чтобы состояние
         // переключателя совпадало с реальной рассылкой и с видом у закупок.
-        $pdo->prepare("UPDATE restaurant_reminder_subscriptions SET is_enabled = 1
+        $pdo->prepare("UPDATE restaurant_reminder_subscriptions
+                          SET is_enabled = 1, portal_enabled = 1, updated_at = NOW(), updated_by = ?
                         WHERE supplier_id = ? AND restaurant_id = ? AND cron_managed = 1")
-            ->execute([$supplierId, $rrRestPk]);
+            ->execute([$by, $supplierId, $rrRestPk]);
     }
     rrRespond(['success' => true, 'muted' => $muted]);
 }

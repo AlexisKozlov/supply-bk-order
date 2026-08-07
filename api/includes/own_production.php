@@ -97,6 +97,25 @@ function opRequireWorkshop(PDO $pdo, string $supplierId, $sessionUser = null): a
 }
 
 /**
+ * Приём заявок цехом: тот же выключатель «Приостановить приём», что и у
+ * обычных поставщиков (so_supplier_settings.is_accepting_orders). У цеха своя
+ * подача заявок, поэтому флаг нужно проверять здесь — иначе пауза стояла бы
+ * в настройках, а кабинет продолжал принимать тесто.
+ */
+function opAcceptance(PDO $pdo, string $supplierId): array {
+    static $cache = [];
+    if (isset($cache[$supplierId])) return $cache[$supplierId];
+    $st = $pdo->prepare("SELECT is_accepting_orders, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+    $st->execute([$supplierId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $msg = trim((string)($row['pause_message'] ?? ''));
+    return $cache[$supplierId] = [
+        'accepting'     => $row === false ? true : ((int)$row['is_accepting_orders'] === 1),
+        'pause_message' => $msg !== '' ? $msg : null,
+    ];
+}
+
+/**
  * Размеры теста из шаблона цеха: штук в лотке берём из кратности.
  * План перебирает все даты периода, поэтому список запоминаем на время
  * запроса — иначе один и тот же справочник читался бы десятки раз.
@@ -703,10 +722,14 @@ if ($opAction === 'my-form' && $method === 'GET') {
     }
     unset($d);
 
+    $acceptance = opAcceptance($pdo, (string)$shop['id']);
+
     opRespond([
         'workshop' => ['id' => $shop['id'], 'name' => $shop['short_name']],
         'dates'    => $dates,
         'sizes'    => opGetSizes($pdo, (string)$shop['id']),
+        'accepting'     => $acceptance['accepting'],
+        'pause_message' => $acceptance['pause_message'],
         'split_allowed'     => $splitAllowed,
         'trays_per_stack'   => SO_LS_TRAYS_PER_STACK,
         'stacks_per_pallet' => OP_STACKS_PER_PALLET,
@@ -761,6 +784,12 @@ if ($opAction === 'submit' && $method === 'POST') {
     // Через этот маршрут заказывают только тесто: чужого поставщика в заявку
     // не пропускаем, у него своя механика подачи.
     opRequireWorkshop($pdo, $supplierId);
+
+    // Пауза приёма у цеха — общий выключатель из настроек поставщика.
+    $acceptance = opAcceptance($pdo, $supplierId);
+    if (!$acceptance['accepting']) {
+        opRespond(['error' => $acceptance['pause_message'] ?: 'Приём заявок на тесто временно приостановлен'], 422);
+    }
 
     // Дата должна быть в графике ресторана и приём по ней открыт.
     $dates = opRestaurantDates($pdo, $supplierId, (string)$rest['restaurant_number']);

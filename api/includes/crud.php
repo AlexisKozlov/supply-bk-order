@@ -749,11 +749,50 @@ if ($method === 'DELETE') {
     }
     try {
         // Каскадное удаление дочерних записей — в транзакции
-        $needsTx = ($table === 'orders' && !empty($deletedIds));
+        $needsTx = (in_array($table, ['orders', 'restaurants'], true) && !empty($deletedIds));
         if ($needsTx) $pdo->beginTransaction();
         if ($table === 'orders' && !empty($deletedIds)) {
             $ph = implode(',', array_fill(0, count($deletedIds), '?'));
             $pdo->prepare("DELETE FROM `order_items` WHERE `order_id` IN ($ph)")->execute($deletedIds);
+        }
+        // Ресторан: сносим его настройки и доступы. Часть таблиц связана внешним
+        // ключом без каскада (контакты поставщиков) и просто не давала удалить
+        // ресторан — запрос падал с 500. Остальные ссылаются по номеру, без
+        // ключа: их строки пережили бы удаление и «прилипли» бы к новому
+        // ресторану с тем же номером (вход в кабинет, Telegram, напоминания).
+        // Историю (заявки, заказы, опросы, сборы остатков) не трогаем.
+        if ($table === 'restaurants' && !empty($deletedIds)) {
+            $ph = implode(',', array_fill(0, count($deletedIds), '?'));
+            $numStmt = $pdo->prepare("SELECT `number` FROM `restaurants` WHERE `id` IN ($ph)");
+            $numStmt->execute($deletedIds);
+            $restNumbers = array_column($numStmt->fetchAll(), 'number');
+
+            // Получатели напоминаний висят на подписке, а не на ресторане.
+            $pdo->prepare("DELETE t FROM `restaurant_reminder_tg_subscribers` t
+                             JOIN `restaurant_reminder_subscriptions` s ON s.id = t.subscription_id
+                            WHERE s.restaurant_id IN ($ph)")->execute($deletedIds);
+            foreach ([
+                'restaurant_supplier_contacts',
+                'restaurant_reminder_subscriptions',
+                'supplier_schedule_deadlines',
+                'so_reminder_mutes',
+                'reminder_acknowledgements',
+            ] as $child) {
+                $pdo->prepare("DELETE FROM `$child` WHERE `restaurant_id` IN ($ph)")->execute($deletedIds);
+            }
+            if ($restNumbers) {
+                $nph = implode(',', array_fill(0, count($restNumbers), '?'));
+                foreach ([
+                    'ro_users',
+                    'ro_telegram_subs',
+                    'ro_tg_tokens',
+                    'push_subscriptions',
+                    'veg_telegram_subs',
+                    'veg_delivery_days',
+                ] as $child) {
+                    $pdo->prepare("DELETE FROM `$child` WHERE `restaurant_number` IN ($nph)")->execute($restNumbers);
+                }
+            }
         }
         $s = $pdo->prepare("DELETE FROM `$table` WHERE " . implode(' AND ', $where)); $s->execute($params);
         if ($needsTx) $pdo->commit();

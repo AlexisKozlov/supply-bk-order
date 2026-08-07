@@ -94,10 +94,17 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     return map;
   });
 
+  // Работающие рестораны. Отключённый ресторан не должен появляться в графиках,
+  // сборах и прочих рабочих списках — только в «Базе данных», где его включают
+  // обратно. Флаг из БД приходит строкой, поэтому сравниваем числом.
+  const activeRestaurants = computed(
+    () => restaurants.value.filter(r => Number(r.active ?? 1) === 1)
+  );
+
   const restaurantsByDay = computed(() => {
     const map = new Map();
     for (let d = 1; d <= 6; d++) map.set(d, []);
-    for (const r of restaurants.value) {
+    for (const r of activeRestaurants.value) {
       const rSched = scheduleByRestaurant.value.get(String(r.id));
       if (!rSched) continue;
       for (const [day, s] of rSched) {
@@ -365,7 +372,7 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   }
 
   return {
-    restaurants, schedule, loading, loaded, mainSubscriptions,
+    restaurants, activeRestaurants, schedule, loading, loaded, mainSubscriptions,
     scheduleByRestaurant, restaurantsByDay, regions, lastUpdate,
     load, saveScheduleCell, saveScheduleOrderDeadline, saveRestaurant, saveRestaurantNote, deleteRestaurant, invalidate, entityToGroup,
     mainSubscriptionFor,

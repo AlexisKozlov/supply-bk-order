@@ -2606,14 +2606,62 @@ if ($soAction === 'admin') {
         $where = ["is_active = 1", "so_enabled = 0"];
         $params = [];
         soAppendAllowedSupplierGroupFilter($sessionUser, $legalEntity, $where, $params, 'legal_entity_group', 'id');
+        // Сохранённые настройки прошлого подключения: сколько строк графика и
+        // товаров вернётся, если подключить поставщика обратно. Мастер по ним
+        // предлагает «вернуть как было» вместо настройки с нуля.
         $s = $pdo->prepare("
-            SELECT id, short_name, full_name, legal_entity, legal_entity_group
+            SELECT id, short_name, full_name, legal_entity, legal_entity_group,
+                   (SELECT COUNT(DISTINCT ss.restaurant_id) FROM supplier_schedules ss
+                     WHERE ss.supplier_id = suppliers.id AND ss.disabled_by_disconnect = 1) AS saved_restaurants,
+                   (SELECT COUNT(*) FROM so_templates t
+                     WHERE t.supplier_id = suppliers.id AND t.disabled_by_disconnect = 1) AS saved_products
             FROM suppliers
             WHERE " . implode(' AND ', $where) . "
             ORDER BY short_name
         ");
         $s->execute($params);
-        soRespond(['suppliers' => $s->fetchAll()]);
+        $rows = $s->fetchAll();
+        foreach ($rows as &$r) {
+            $r['saved_restaurants'] = (int)$r['saved_restaurants'];
+            $r['saved_products']    = (int)$r['saved_products'];
+            $r['has_saved_config']  = ($r['saved_restaurants'] > 0 || $r['saved_products'] > 0);
+        }
+        unset($r);
+        soRespond(['suppliers' => $rows]);
+    }
+
+    // --- Повторное подключение: возвращаем настройки, снятые отключением ---
+    // Кнопка «Вернуть настройки» в мастере. Мастер настраивает поставщика с
+    // нуля и перезаписывает график с шаблоном, поэтому для возврата нужен
+    // отдельный маршрут: он просто поднимает то, что погасило отключение.
+    if ($adminAction === 'reconnect-supplier' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        $supplier = soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        $updatedBy = resolveActorName($pdo, $sessionUser);
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("UPDATE suppliers SET so_enabled = 1 WHERE id = ?")->execute([$supplierId]);
+            $sch = $pdo->prepare("UPDATE supplier_schedules
+                                     SET is_active = 1, disabled_by_disconnect = 0, updated_at = NOW(), updated_by = ?
+                                   WHERE supplier_id = ? AND disabled_by_disconnect = 1");
+            $sch->execute([$updatedBy, $supplierId]);
+            $tpl = $pdo->prepare("UPDATE so_templates SET is_active = 1, disabled_by_disconnect = 0
+                                   WHERE supplier_id = ? AND disabled_by_disconnect = 1");
+            $tpl->execute([$supplierId]);
+            $pdo->commit();
+            $restored = ['schedules' => $sch->rowCount(), 'templates' => $tpl->rowCount()];
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('reconnect-supplier error: ' . $e->getMessage());
+            soRespond(['error' => 'Не удалось вернуть настройки поставщика'], 500);
+        }
+        try {
+            auditLog($pdo, 'so_supplier_reconnected', 'supplier', $supplierId, $updatedBy, [
+                'supplier_id' => $supplierId,
+                'restored'    => $restored,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
+        soRespond(['success' => true, 'supplier' => $supplier, 'restored' => $restored]);
     }
 
     // --- Отключение поставщика от SO-модуля (не удаление, просто скрыть) ---
@@ -2625,9 +2673,12 @@ if ($soAction === 'admin') {
         $pdo->beginTransaction();
         try {
             $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
-            $pdo->prepare("UPDATE supplier_schedules SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
+            // Помечаем строки, которые гасит именно отключение: при обратном
+            // подключении поднимаем только их, а убранные раньше вручную
+            // остаются выключенными.
+            $pdo->prepare("UPDATE supplier_schedules SET is_active = 0, disabled_by_disconnect = 1 WHERE supplier_id = ? AND is_active = 1")->execute([$supplierId]);
             $pdo->prepare("DELETE FROM so_supplier_temp_schedule_periods WHERE supplier_id = ?")->execute([$supplierId]);
-            $pdo->prepare("UPDATE so_templates SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
+            $pdo->prepare("UPDATE so_templates SET is_active = 0, disabled_by_disconnect = 1 WHERE supplier_id = ? AND is_active = 1")->execute([$supplierId]);
             $pdo->commit();
         } catch (InvalidArgumentException $e) {
             $pdo->rollBack();

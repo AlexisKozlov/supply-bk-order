@@ -48,7 +48,8 @@
     </div>
 
     <!-- ═══ TABLE MODE ═══ -->
-    <div v-else-if="viewMode === 'table'" class="pf-wrap">
+    <div v-else-if="viewMode === 'table'" ref="tableWrap" class="pf-wrap ds-scroll"
+         :class="{ 'is-panning': panning }" @mousedown="onPanStart">
       <table class="pf-main-table">
         <thead>
           <tr>
@@ -468,6 +469,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', onKey);
   clearTimeout(longPressTimer);
+  onPanEnd();
 });
 
 watch(() => orderStore.settings.legalEntity, (le) => {
@@ -477,7 +479,7 @@ watch(() => orderStore.settings.legalEntity, (le) => {
 
 // ═══ Filtering ═══
 const filteredRestaurants = computed(() => {
-  let list = store.restaurants;
+  let list = store.activeRestaurants;
   if (filterRegion.value) {
     list = list.filter(r => r.region === filterRegion.value);
   }
@@ -738,6 +740,40 @@ async function clearDeadlineEdit() {
 async function cancelDeadlineEdit() {
   if (!(await deadlineGuard.confirmClose(editingDeadline.value))) return;
   editingDeadline.value = null;
+}
+
+// ═══ Прокрутка таблицы мышью ═══
+// Таблица шире экрана, а колёсико прокручивает только вниз. Даём таскать её
+// зажатой мышью — как карту. Поля ввода, кнопки и перетаскиваемые чипы времени
+// не трогаем: там свои действия.
+const tableWrap = ref(null);
+const panning = ref(false);
+let panFrom = null;
+
+function onPanStart(e) {
+  if (e.button !== 0 || !tableWrap.value) return;
+  if (e.target.closest('input, textarea, select, button, a, [draggable="true"]')) return;
+  panFrom = { x: e.clientX, scroll: tableWrap.value.scrollLeft, moved: false };
+  window.addEventListener('mousemove', onPanMove);
+  window.addEventListener('mouseup', onPanEnd);
+}
+
+function onPanMove(e) {
+  if (!panFrom || !tableWrap.value) return;
+  const dx = e.clientX - panFrom.x;
+  // Пока сдвиг меньше 4 px — это обычный клик, не мешаем выделению и dblclick.
+  if (!panFrom.moved && Math.abs(dx) < 4) return;
+  panFrom.moved = true;
+  panning.value = true;
+  e.preventDefault();
+  tableWrap.value.scrollLeft = panFrom.scroll - dx;
+}
+
+function onPanEnd() {
+  panFrom = null;
+  panning.value = false;
+  window.removeEventListener('mousemove', onPanMove);
+  window.removeEventListener('mouseup', onPanEnd);
 }
 
 // ═══ Drag & drop (move delivery between days) ═══
@@ -1041,7 +1077,13 @@ function formatLastUpdate(upd) {
 .ds-view :deep(.pf-wrap) {
   border: 1px solid var(--border);
   box-shadow: 0 1px 4px rgba(80, 35, 20, 0.05);
+  /* Дней недели и колонок больше, чем влезает: без этого таблица уезжала
+     за край экрана и правые дни было не достать. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
+/* Таблицу можно таскать зажатой мышью — курсор показывает, что это возможно. */
+.ds-view :deep(.ds-scroll.is-panning) { cursor: grabbing; user-select: none; }
 .ds-view :deep(.pf-main-table) {
   font-size: 12px;
   border-collapse: collapse;

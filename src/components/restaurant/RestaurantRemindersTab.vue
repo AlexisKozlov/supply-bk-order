@@ -671,24 +671,35 @@ async function saveSubscription(group, patch) {
 }
 
 async function onToggleEnabled(group, checked) {
-  // Портальный поставщик: переключатель общий с отделом закупок. Включение
-  // снимает и «глушилку» закупок, и выключение в своей подписке.
+  // Портальный поставщик: переключатель общий с отделом закупок — выключить и
+  // включить может любая сторона. Но СВОЁ выключение пишем в свою подписку,
+  // иначе оно выглядело бы как «выключил отдел закупок».
   if (group.so_enabled) {
+    if (!checked) {
+      // Без подписки крон слал напоминания всем Telegram-аккаунтам ресторана.
+      // Создавая первую строку выключением, канал не гасим — иначе обратное
+      // включение вернуло бы напоминания только в кабинет.
+      const patch = { is_enabled: 0 };
+      if (!group.subscription) patch.telegram_enabled = 1;
+      await saveSubscription(group, patch);
+      return;
+    }
     saving[group.supplier_id] = true;
     try {
+      // Включение снимает и «глушилку» закупок, если она стояла.
       await roFetch('/api/restaurant-reminders/so-mute', {
         method: 'POST',
-        body: { supplier_id: group.supplier_id, muted: checked ? 0 : 1 },
+        body: { supplier_id: group.supplier_id, muted: 0 },
       });
-      group.reminder_muted = !checked;
-      if (group.subscription) group.subscription.is_enabled = checked;
+      group.reminder_muted = false;
+      if (group.subscription) group.subscription.is_enabled = true;
     } catch (e) {
       toast.error(e.message || 'Ошибка');
       return;
     } finally {
       saving[group.supplier_id] = false;
     }
-    if (checked && group.subscription) await saveSubscription(group, { is_enabled: 1 });
+    if (group.subscription) await saveSubscription(group, { is_enabled: 1 });
     return;
   }
   saveSubscription(group, { is_enabled: checked ? 1 : 0 });

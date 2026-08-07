@@ -716,7 +716,7 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
             SELECT DISTINCT r.number, r.legal_entity_group
             FROM restaurants r
             JOIN push_subscriptions ps ON ps.restaurant_number = r.number AND ps.legal_entity_group = r.legal_entity_group
-            WHERE r.legal_entity_group = ?
+            WHERE r.legal_entity_group = ? AND r.active = 1
               AND NOT EXISTS (
                 SELECT 1 FROM stock_collection_data scd
                 WHERE scd.collection_id = ? AND scd.restaurant_number = r.number
