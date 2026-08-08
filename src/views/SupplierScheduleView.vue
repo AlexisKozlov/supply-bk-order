@@ -75,8 +75,10 @@
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
                   <span v-if="(subscriptionFor(rest)?.tg_names || []).length" class="ssv-rest-sub-count">{{ subscriptionFor(rest).tg_names.length }}</span>
                 </span>
-                <span v-if="tgBlockedFor(rest)" class="ssv-rest-blocked" :title="tgBlockedTitle(rest)">
-                  бот заблокирован
+                <span v-if="tgBlockedFor(rest)" class="ssv-rest-blocked"
+                      :class="{ 'is-partial': tgBlockedFor(rest).alive > 0 }"
+                      :title="tgBlockedTitle(rest)">
+                  {{ tgBlockedLabel(rest) }}
                 </span>
               </div>
               <span class="ssv-rest-addr" :title="fullAddress(rest)">{{ shortAddress(rest) }}</span>
@@ -236,9 +238,9 @@ const loading = ref(true);
 const rows = ref([]);
 const defaults = ref({});
 const subscriptions = ref({}); // { supplier_id: { restaurant_id: { is_enabled, telegram_enabled, tg_names } } }
-// Рестораны, где ВСЕ привязанные сотрудники заблокировали бота: напоминания
-// им не доходят, и раньше это было видно только в логе крона.
-const tgBlocked = ref({}); // { restaurant_number: 'дата первой блокировки' }
+// Рестораны, где кто-то из привязанных сотрудников заблокировал бота.
+// { restaurant_number: { blocked: [{name, username, at}], alive, total } }
+const tgBlocked = ref({});
 const suppliers = ref([]);
 const restaurants = ref([]);
 
@@ -416,11 +418,30 @@ function tgBlockedFor(rest) {
   return tgBlocked.value[String(rest.restaurant_number)] || null;
 }
 
+function ruDate(v) {
+  return String(v || '').slice(0, 10).split('-').reverse().join('.');
+}
+
+// Заблокировали все — напоминания не доходят вообще. Заблокировал один из
+// нескольких (частый случай — уволившийся сотрудник) — напоминания идут
+// остальным, но список получателей пора почистить.
+function tgBlockedLabel(rest) {
+  const info = tgBlockedFor(rest);
+  if (!info) return '';
+  if (info.alive > 0) return `${info.blocked.length} из ${info.total} не получает`;
+  return 'никто не получает';
+}
+
 function tgBlockedTitle(rest) {
-  const d = tgBlockedFor(rest);
-  if (!d) return '';
-  const dt = String(d).slice(0, 10).split('-').reverse().join('.');
-  return `Сотрудники ресторана заблокировали бота ${dt} — напоминания в Telegram не доходят. Свяжитесь с рестораном.`;
+  const info = tgBlockedFor(rest);
+  if (!info) return '';
+  const who = info.blocked
+    .map(b => `${b.name}${b.username ? ' (@' + b.username + ')' : ''} — ${ruDate(b.at)}`)
+    .join('\n');
+  const head = info.alive > 0
+    ? `Заблокировали бота ${info.blocked.length} из ${info.total} привязанных сотрудников.\nОстальные напоминания получают — если человек уволился, отвяжите его.`
+    : `Бота заблокировали все привязанные сотрудники — напоминания в Telegram не доходят вообще.\nСвяжитесь с рестораном и привяжите работающий аккаунт.`;
+  return head + '\n\nКто заблокировал:\n' + who;
 }
 
 function subscriptionTitle(rest) {
@@ -786,12 +807,16 @@ onMounted(loadData);
 .ssv-rest-num { font-weight: 700; font-size: 13px; color: #2b2b2b; }
 .ssv-rest-addr { font-size: 11px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .ssv-rest-le { font-size: 10px; color: #999; font-weight: 600; }
-/* Ресторан заблокировал бота — напоминания в Telegram не доходят. */
+/* Кто-то заблокировал бота. Красный — не получает никто; жёлтый — часть
+   получателей (обычно уволившийся сотрудник), напоминания ещё доходят. */
 .ssv-rest-blocked {
   display: inline-block; margin-left: 6px; padding: 1px 6px;
   border-radius: 999px; background: #fdecec; border: 1px solid #f3bfbf;
   color: #a83232; font-size: 10px; font-weight: 700; white-space: nowrap;
   cursor: help;
+}
+.ssv-rest-blocked.is-partial {
+  background: #fff6e5; border-color: #f0d3a0; color: #96601a;
 }
 
 .ssv-td-cell { text-align: center; cursor: pointer; user-select: none; position: relative; transition: background 0.12s; }

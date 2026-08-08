@@ -111,25 +111,46 @@
             }
         }
 
-        // Рестораны, чьи сотрудники заблокировали бота: напоминания им не
-        // доходят, а узнать об этом было негде — отказ виден только в логе
-        // крона. Отдаём номер и дату первой блокировки, чтобы закупщик увидел
-        // это прямо в графике и позвонил.
+        // Кто из сотрудников ресторана заблокировал бота. Раньше об этом можно
+        // было узнать только из лога крона. Важно различать два случая:
+        // заблокировали ВСЕ (ресторан не получает ничего) и заблокировал один
+        // из нескольких (например, уволившийся) — во втором случае напоминания
+        // доходят, но список получателей стоит почистить. Поэтому отдаём имена
+        // и сколько живых получателей осталось, а не просто флаг.
         $tgBlocked = [];
         try {
             $bl = $pdo->prepare("
-                SELECT t.restaurant_number, MIN(t.tg_blocked_at) AS blocked_at
+                SELECT t.restaurant_number, t.first_name, t.username, t.tg_blocked_at,
+                       t.notify_so_reminders
                 FROM ro_telegram_subs t
                 JOIN restaurants r ON r.number = t.restaurant_number
                      AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = t.legal_entity_group COLLATE utf8mb4_unicode_ci
                      AND r.active = 1
-                WHERE t.tg_blocked_at IS NOT NULL AND r.legal_entity_group = ?
-                GROUP BY t.restaurant_number
-                HAVING SUM(t.tg_blocked_at IS NULL) = 0
+                WHERE r.legal_entity_group = ?
+                  AND (t.verified_at IS NOT NULL
+                       OR (t.must_reverify_by IS NOT NULL AND t.must_reverify_by > NOW()))
+                ORDER BY t.restaurant_number, t.tg_blocked_at IS NULL, t.id
             ");
             $bl->execute([$group]);
-            foreach ($bl->fetchAll() as $b) {
-                $tgBlocked[(string)$b['restaurant_number']] = $b['blocked_at'];
+            $byRest = [];
+            foreach ($bl->fetchAll() as $t) {
+                $rn = (string)$t['restaurant_number'];
+                if (!isset($byRest[$rn])) $byRest[$rn] = ['blocked' => [], 'alive' => 0, 'total' => 0];
+                $byRest[$rn]['total']++;
+                if ($t['tg_blocked_at'] !== null) {
+                    $byRest[$rn]['blocked'][] = [
+                        'name'     => $t['first_name'] ?: ($t['username'] ? '@' . $t['username'] : 'без имени'),
+                        'username' => $t['username'] ?: null,
+                        'at'       => $t['tg_blocked_at'],
+                    ];
+                } elseif ((int)$t['notify_so_reminders'] === 1) {
+                    // Живой получатель — только тот, кто и не заблокировал,
+                    // и не выключил напоминания о заявках у себя в боте.
+                    $byRest[$rn]['alive']++;
+                }
+            }
+            foreach ($byRest as $rn => $info) {
+                if ($info['blocked']) $tgBlocked[$rn] = $info;
             }
         } catch (PDOException $e) {
             error_log('[schedules] tg_blocked failed: ' . $e->getMessage());
