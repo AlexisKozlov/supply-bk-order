@@ -2100,10 +2100,25 @@ if ($soAction === 'submit-order' && $method === 'POST') {
 
     // Валидация кратности и минимума по шаблону поставщика
     if (!empty($items)) {
-        $tplCheck = $pdo->prepare("SELECT sku, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1 AND order_disabled = 0");
+        $tplCheck = $pdo->prepare("SELECT id, sku, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1 AND order_disabled = 0");
         $tplCheck->execute([$supplierId, $rest['legal_entity']]);
+        $tplRows = $tplCheck->fetchAll();
+
+        // Доступность товара по регионам/ресторанам проверялась только при
+        // показе списка. Подача её не смотрела: товар, ограниченный другими
+        // ресторанами, спокойно уходил в заявку прямым запросом — из бота,
+        // с несвежей вкладки или при авто-повторе прошлой заявки.
+        $visByTpl = soLoadTemplateVisibility($pdo, array_column($tplRows, 'id'), 'access');
+        $restRegionSub = (string)($rest['region'] ?? '');
+        $restNumSub    = (string)($rest['restaurant_number'] ?? '');
         $tplMap = [];
-        foreach ($tplCheck->fetchAll() as $t) {
+        foreach ($tplRows as $t) {
+            $vis = $visByTpl[(int)$t['id']] ?? null;
+            if ($vis
+                && !in_array($restRegionSub, $vis['regions'], true)
+                && !in_array($restNumSub, $vis['restaurants'], true)) {
+                continue; // товар не предназначен этому ресторану
+            }
             $tplMap[$t['sku']] = $t;
         }
         $valErrors = [];
@@ -2263,6 +2278,20 @@ if ($soAction === 'submit-order' && $method === 'POST') {
                 ];
             }
             $aggregated[$sku]['quantity'] += $qty;
+        }
+
+        // Название берём из шаблона, если клиент его не прислал: иначе позиция
+        // уходит в матрицу приёма и в Excel поставщику пустой строкой без
+        // наименования. Веб-кабинет название шлёт, а бот и внешние вызовы — нет.
+        $missingName = array_keys(array_filter($aggregated, fn($it) => trim((string)$it['product_name']) === ''));
+        if ($missingName) {
+            $ph = implode(',', array_fill(0, count($missingName), '?'));
+            $nm = $pdo->prepare("SELECT sku, product_name FROM so_templates
+                                  WHERE supplier_id = ? AND legal_entity = ? AND sku IN ($ph)");
+            $nm->execute(array_merge([$supplierId, $le], $missingName));
+            foreach ($nm->fetchAll() as $t) {
+                $aggregated[$t['sku']]['product_name'] = $t['product_name'];
+            }
         }
 
         // Вставляем позиции (UNIQUE KEY order_id+sku гарантирует отсутствие дублей).
@@ -3832,9 +3861,17 @@ if ($soAction === 'admin') {
                     $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $item['id']]);
                 } else {
                     $oldVal = 0;
-                    // Создаём новую позицию (админ добавил количество для товара, которого не было в заказе)
+                    // Создаём новую позицию (админ добавил количество для товара, которого не было в заказе).
+                    // Название без запроса берём из шаблона — иначе строка уйдёт
+                    // поставщику и ресторану без наименования.
+                    $newName = trim((string)($productName ?? ''));
+                    if ($newName === '') {
+                        $nm = $pdo->prepare("SELECT product_name FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND sku = ? LIMIT 1");
+                        $nm->execute([$suppId, $le, $sku]);
+                        $newName = (string)($nm->fetchColumn() ?: '');
+                    }
                     $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty, batch_no) VALUES (?, ?, ?, ?, 0, ?, ?)")
-                        ->execute([$orderId, $body['product_id'] ?? '', $sku, $productName ?? '', $val, $batchNo]);
+                        ->execute([$orderId, $body['product_id'] ?? '', $sku, $newName, $val, $batchNo]);
                 }
                 $pdo->commit();
             } catch (Exception $e) {
