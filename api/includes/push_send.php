@@ -26,10 +26,14 @@ function pushSendToRestaurant(PDO $pdo, int $restaurantNumber, string $legalEnti
     $vapidSubject = $_ENV['VAPID_SUBJECT'] ?? 'mailto:support@example.com';
     if (!$vapidPublic || !$vapidPrivate) return 0;
 
+    // Отключённому ресторану push не шлём — как и в Telegram.
     $stmt = $pdo->prepare("
-        SELECT id, endpoint, p256dh, auth
-        FROM push_subscriptions
-        WHERE restaurant_number = ? AND legal_entity_group = ?
+        SELECT p.id, p.endpoint, p.p256dh, p.auth
+        FROM push_subscriptions p
+        JOIN restaurants r ON r.number = p.restaurant_number
+             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = p.legal_entity_group COLLATE utf8mb4_unicode_ci
+             AND r.active = 1
+        WHERE p.restaurant_number = ? AND p.legal_entity_group = ?
     ");
     $stmt->execute([$restaurantNumber, $legalEntityGroup]);
     $rows = $stmt->fetchAll();

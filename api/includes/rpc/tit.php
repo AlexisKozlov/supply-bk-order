@@ -36,6 +36,44 @@ $titRequireStaff = function () use ($authUser) {
     if (!$authUser) respond(['error' => 'Требуется авторизация'], 401);
 };
 
+// ─────────────────────────────────────────────────────────────
+// Разделение по юр. лицам.
+//
+// Модуль его не проверял вовсе: список отдавал заявки всех юрлиц сразу, а
+// карточка открывалась по любому id. Из-за этого внешние пользователи с
+// доступом к модулю (цех ПРЦ — только «Пицца Стар») видели и могли править
+// заявки Бургер Кинга: поставщиков, даты, номера машин и телефоны водителей.
+// Админ по-прежнему видит всё.
+// ─────────────────────────────────────────────────────────────
+
+/** Дописывает в WHERE ограничение по юрлицам пользователя. */
+$titEntityFilter = function (array &$where, array &$args, string $alias = 'r') use ($authUser) {
+    if (($authUser['role'] ?? '') === 'admin') return;
+    $ents = $authUser['legal_entities'] ?? '';
+    if (is_string($ents)) $ents = json_decode($ents, true);
+    $ents = is_array($ents) ? array_values(array_filter($ents)) : [];
+    if (!$ents) { $where[] = '1=0'; return; }   // без привязки к юрлицам — ничего не показываем
+    $where[] = $alias . '.legal_entity IN (' . implode(',', array_fill(0, count($ents), '?')) . ')';
+    foreach ($ents as $e) $args[] = $e;
+};
+
+/** Доступ к конкретной заявке. Возвращает её юрлицо. */
+$titRequireRequestAccess = function ($id) use ($pdo, $authUser) {
+    $s = $pdo->prepare("SELECT legal_entity FROM tit_requests WHERE id = ?");
+    $s->execute([(int)$id]);
+    $le = $s->fetchColumn();
+    if ($le === false) respond(['error' => 'Заявка не найдена'], 404);
+    if (!checkLegalEntityAccess($authUser, (string)$le)) respond(['error' => 'Нет доступа к этой заявке'], 403);
+    return (string)$le;
+};
+
+/** Доступ к юрлицу, под которым заявку создают или переносят. */
+$titRequireEntity = function ($legalEntity) use ($authUser) {
+    if (!checkLegalEntityAccess($authUser, (string)$legalEntity)) {
+        respond(['error' => 'Нет доступа к этому юр. лицу'], 403);
+    }
+};
+
 /**
  * Соберёт массив строк xlsx по заявке (порядок и формат — как у формы ТиТ).
  * Время сохраняется как Excel-serial-number (день + часть от 24 часов).
@@ -152,6 +190,7 @@ if ($fn === 'tit_list') {
 
     $where = ['1=1'];
     $args = [];
+    $titEntityFilter($where, $args);
     if ($group)    { $where[] = 'r.legal_entity_group = ?'; $args[] = $group; }
     if ($status !== '' && in_array($status, ['WAITING','DATA_RECEIVED','READY','SENT','CANCELLED'], true)) {
         $where[] = 'r.status = ?'; $args[] = $status;
@@ -195,6 +234,9 @@ if ($fn === 'tit_get') {
     $r->execute([$id]);
     $req = $r->fetch();
     if (!$req) respond(['error' => 'Заявка не найдена'], 404);
+    if (!checkLegalEntityAccess($authUser, (string)($req['legal_entity'] ?? ''))) {
+        respond(['error' => 'Нет доступа к этой заявке'], 403);
+    }
 
     $vStmt = $pdo->prepare("SELECT * FROM tit_vehicles WHERE request_id = ? AND deleted_at IS NULL ORDER BY id");
     $vStmt->execute([$id]);
@@ -270,14 +312,19 @@ if ($fn === 'tit_unread_count') {
     // Считаем только «полезные» непривязанные письма — те, где парсер нашёл
     // номер машины, телефон или есть вложение (предположительно скан накладной).
     // Шум вроде «принято» от менеджеров поставщиков сюда не попадает.
-    $st = $pdo->query("
+    // Счётчик заявок — по своим юрлицам, иначе бейдж звал бы в чужие заявки.
+    $naWhere = ["status = 'DATA_RECEIVED'"];
+    $naArgs = [];
+    $titEntityFilter($naWhere, $naArgs, 'tit_requests');
+    $st = $pdo->prepare("
         SELECT
-          (SELECT COUNT(*) FROM tit_requests WHERE status = 'DATA_RECEIVED') AS need_action,
+          (SELECT COUNT(*) FROM tit_requests WHERE " . implode(' AND ', $naWhere) . ") AS need_action,
           (SELECT COUNT(*) FROM tit_email_log
              WHERE status = 'UNMATCHED' AND is_ignored = 0
                AND (parsed_plate IS NOT NULL OR parsed_phone IS NOT NULL OR has_attachment = 1)
           ) AS unmatched
     ");
+    $st->execute($naArgs);
     respond($st->fetch() ?: ['need_action' => 0, 'unmatched' => 0]);
 }
 
@@ -320,6 +367,8 @@ if ($fn === 'tit_create_quick') {
             $legalEntity = $entitiesInGroup[0] ?? ($group === 'PS' ? 'ООО "Пицца Стар"' : 'ООО "Бургер БК"');
         }
     }
+    // Юрлицо приходит из браузера — проверяем, что оно доступно пользователю.
+    $titRequireEntity($legalEntity);
 
     $ins = $pdo->prepare("
         INSERT INTO tit_requests
@@ -343,6 +392,9 @@ if ($fn === 'tit_update_basic') {
     $current->execute([$id]);
     $row = $current->fetch();
     if (!$row) respond(['error' => 'Заявка не найдена'], 404);
+    if (!checkLegalEntityAccess($authUser, (string)($row['legal_entity'] ?? ''))) {
+        respond(['error' => 'Нет доступа к этой заявке'], 403);
+    }
     // После отправки охране править нельзя — это бы расходилось с уже посланным xlsx.
     if ($row['status'] === 'SENT') respond(['error' => 'Заявка уже отправлена охране'], 409);
 
@@ -364,9 +416,14 @@ if ($fn === 'tit_update_basic') {
         $supplierEmail = (string)($sup['email'] ?? '');
         if (!$legalEntity) $legalEntity = (string)($sup['legal_entity'] ?? '');
         $group = (string)($sup['legal_entity_group'] ?: getEntityGroup($legalEntity));
-    } elseif ($legalEntity && $legalEntity !== $row['legal_entity']) {
-        $group = getEntityGroup($legalEntity);
     }
+    // Группа ВСЕГДА следует за юрлицом. Раньше при смене поставщика группа
+    // бралась из его карточки, а юрлицо оставалось прежним — так появилась
+    // заявка с юрлицом «Бургер БК» и группой PS, и списки по группе и по
+    // юрлицу расходились.
+    if ($legalEntity) $group = getEntityGroup($legalEntity);
+    // Перенести заявку можно только в доступное юрлицо.
+    $titRequireEntity($legalEntity);
 
     $pdo->prepare("
         UPDATE tit_requests
@@ -410,6 +467,7 @@ if ($fn === 'tit_create_manual') {
     if ($supplierId === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deliveryDate) || $legalEntity === '') {
         respond(['error' => 'Укажите поставщика, дату и юрлицо'], 400);
     }
+    $titRequireEntity($legalEntity);
     $sStmt = $pdo->prepare("SELECT id, short_name, full_name, email FROM suppliers WHERE id = ?");
     $sStmt->execute([$supplierId]);
     $sup = $sStmt->fetch();
@@ -440,6 +498,7 @@ if ($fn === 'tit_cancel') {
     $titRequireStaff();
     $id = (int)($body['id'] ?? 0);
     if (!$id) respond(['error' => 'Не указан id'], 400);
+    $titRequireRequestAccess($id);
     $pdo->prepare("UPDATE tit_requests SET status = 'CANCELLED', updated_at = NOW() WHERE id = ?")->execute([$id]);
     respond(['success' => true]);
 }
@@ -453,6 +512,7 @@ if ($fn === 'tit_delete') {
     $titRequireStaff();
     $id = (int)($body['id'] ?? 0);
     if (!$id) respond(['error' => 'Не указан id'], 400);
+    $titRequireRequestAccess($id);
     $pdo->beginTransaction();
     try {
         $pdo->prepare("UPDATE tit_email_log SET request_id = NULL, status = 'UNMATCHED' WHERE request_id = ?")
@@ -472,6 +532,7 @@ if ($fn === 'tit_delete') {
 if ($fn === 'tit_vehicle_save') {
     $titRequireStaff();
     $requestId   = (int)($body['request_id'] ?? 0);
+    if ($requestId) $titRequireRequestAccess($requestId);
     $vehicleId   = (int)($body['vehicle_id'] ?? 0);
     $plateRaw    = trim((string)($body['plate'] ?? ''));
     $phoneRaw    = trim((string)($body['phone'] ?? ''));
@@ -569,6 +630,7 @@ if ($fn === 'tit_vehicle_delete') {
     $vehicleId = (int)($body['vehicle_id'] ?? 0);
     $requestId = (int)($body['request_id'] ?? 0);
     if (!$vehicleId) respond(['error' => 'Не указан id'], 400);
+    if ($requestId) $titRequireRequestAccess($requestId);
     // Привязка к заявке обязательна: иначе подделанный запрос с чужим
     // vehicle_id мог бы удалить машину из чужой открытой заявки. Если
     // request_id не задан или машина не из той заявки — UPDATE никого не
@@ -587,6 +649,7 @@ if ($fn === 'tit_apply_supplier_default') {
     $titRequireStaff();
     $requestId = (int)($body['request_id'] ?? 0);
     if (!$requestId) respond(['error' => 'Не указана заявка'], 400);
+    $titRequireRequestAccess($requestId);
     $req = $pdo->prepare("SELECT supplier_id, status FROM tit_requests WHERE id = ?");
     $req->execute([$requestId]);
     $r = $req->fetch();
@@ -632,6 +695,7 @@ if ($fn === 'tit_preview_xlsx_rows') {
     $titRequireStaff();
     $id = (int)($body['id'] ?? 0);
     if (!$id) respond(['error' => 'Не указан id'], 400);
+    $titRequireRequestAccess($id);
     respond(['rows' => $titBuildXlsxRows($id)]);
 }
 
@@ -642,6 +706,7 @@ if ($fn === 'tit_download_xlsx') {
     $titRequireStaff();
     $id = (int)($body['id'] ?? 0);
     if (!$id) respond(['error' => 'Не указан id'], 400);
+    $titRequireRequestAccess($id);
     $rows = $titBuildXlsxRows($id);
     if (!$rows) respond(['error' => 'В заявке нет машин для выгрузки'], 400);
     $bin = $titRenderXlsx($rows);
@@ -664,6 +729,7 @@ if ($fn === 'tit_send_to_security') {
     $customSubject = trim((string)($body['subject'] ?? ''));
     $customBody    = trim((string)($body['body_text'] ?? ''));
     if (!$id) respond(['error' => 'Не указан id'], 400);
+    $titRequireRequestAccess($id);
 
     $rows = $titBuildXlsxRows($id);
     if (!$rows) respond(['error' => 'В заявке нет машин для отправки'], 400);
@@ -828,6 +894,7 @@ if ($fn === 'tit_mark_sent') {
     $titRequireStaff();
     $id = (int)($body['id'] ?? 0);
     if (!$id) respond(['error' => 'Не указан id'], 400);
+    $titRequireRequestAccess($id);
 
     $req = $pdo->prepare("SELECT id, status FROM tit_requests WHERE id = ?");
     $req->execute([$id]);
@@ -914,6 +981,7 @@ if ($fn === 'tit_email_link') {
     $emailId   = (int)($body['email_id'] ?? 0);
     $requestId = (int)($body['request_id'] ?? 0);
     if (!$emailId || !$requestId) respond(['error' => 'Укажите email_id и request_id'], 400);
+    $titRequireRequestAccess($requestId);
 
     // Достаём распознанные парсером поля из письма
     $eStmt = $pdo->prepare("SELECT parsed_plate, parsed_phone, parsed_via FROM tit_email_log WHERE id = ?");

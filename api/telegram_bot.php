@@ -192,10 +192,16 @@ function editMessageReplyMarkup($chatId, $messageId, $replyMarkup = null) {
  * Возвращает массив с id, restaurant_number, legal_entity_group, либо null.
  */
 function rrFindRoSub($pdo, $chatId) {
+    // Ресторан должен быть работающим: у отключённого учётки кабинета гасят,
+    // а привязки к боту оставались живыми.
     $s = $pdo->prepare("
-        SELECT id, restaurant_number, legal_entity_group, first_name, username
-        FROM ro_telegram_subs
-        WHERE chat_id = ? AND verified_at IS NOT NULL
+        SELECT rs.id, rs.restaurant_number, rs.legal_entity_group, rs.first_name, rs.username
+        FROM ro_telegram_subs rs
+        JOIN restaurants r
+               ON r.number = rs.restaurant_number
+              AND r.active = 1
+              AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
+        WHERE rs.chat_id = ? AND rs.verified_at IS NOT NULL
         LIMIT 1
     ");
     $s->execute([$chatId]);
@@ -2067,7 +2073,11 @@ if (isset($input['callback_query'])) {
         $targetDate = $parts[3];
 
         // chat_id → ресторан (через ro_telegram_subs)
-        $s = $pdo->prepare("SELECT restaurant_number, legal_entity_group, first_name, username FROM ro_telegram_subs WHERE chat_id = ? AND verified_at IS NOT NULL LIMIT 1");
+        $s = $pdo->prepare("SELECT rs.restaurant_number, rs.legal_entity_group, rs.first_name, rs.username
+            FROM ro_telegram_subs rs
+            JOIN restaurants r ON r.number = rs.restaurant_number AND r.active = 1
+                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
+            WHERE rs.chat_id = ? AND rs.verified_at IS NOT NULL LIMIT 1");
         $s->execute([$chatId]);
         $tgUser = $s->fetch();
         if (!$tgUser) { answerCallback($cb['id'], 'Привязка не найдена'); exit; }
@@ -2119,7 +2129,11 @@ if (isset($input['callback_query'])) {
         $targetDate = $parts[1];
         $returnDow  = (int)$parts[2];
 
-        $s = $pdo->prepare("SELECT restaurant_number, legal_entity_group, first_name, username FROM ro_telegram_subs WHERE chat_id = ? AND verified_at IS NOT NULL LIMIT 1");
+        $s = $pdo->prepare("SELECT rs.restaurant_number, rs.legal_entity_group, rs.first_name, rs.username
+            FROM ro_telegram_subs rs
+            JOIN restaurants r ON r.number = rs.restaurant_number AND r.active = 1
+                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
+            WHERE rs.chat_id = ? AND rs.verified_at IS NOT NULL LIMIT 1");
         $s->execute([$chatId]);
         $tgUser = $s->fetch();
         if (!$tgUser) { answerCallback($cb['id'], 'Привязка не найдена'); exit; }

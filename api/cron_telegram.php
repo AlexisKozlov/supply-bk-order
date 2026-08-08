@@ -329,7 +329,12 @@ if ($hour === 9 && $minute < 5) {
             $critSql = "SELECT p.name, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) AS days_left, p.supplier
                         FROM analysis_data a
                         LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
-                        WHERE a.consumption > 0 AND a.stock > 0" . $leFilter . "
+                        WHERE a.consumption > 0 AND a.stock > 0"
+                        // Здесь два юрлица в запросе (остатки и карточки), поэтому
+                        // фильтру нужен явный алиас: без него MySQL отвечал
+                        // «Column 'legal_entity' is ambiguous», блок молча падал,
+                        // и утренняя сводка уходила без критических остатков.
+                        . str_replace(' legal_entity IN', ' a.legal_entity IN', $leFilter) . "
                         HAVING days_left <= 3 ORDER BY days_left ASC LIMIT 5";
             $s = $pdo->prepare($critSql);
             $s->execute($leParams);
@@ -1995,6 +2000,18 @@ try {
 // Очистка истёкших сессий
 try {
     $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
+} catch (Exception $e) {}
+
+// Одноразовые ссылки входа из бота живут минуты, но никогда не удалялись:
+// накопилось больше 6 тысяч просроченных записей с апреля. Держим неделю —
+// этого хватает, чтобы разобрать жалобу «ссылка не открылась».
+try {
+    $pdo->exec("DELETE FROM ro_tg_tokens WHERE expires_at < NOW() - INTERVAL 7 DAY");
+} catch (Exception $e) {}
+
+// Просроченные сессии кабинета ресторана — та же уборка.
+try {
+    $pdo->exec("DELETE FROM ro_user_sessions WHERE expires_at < NOW() - INTERVAL 7 DAY");
 } catch (Exception $e) {}
 
 echo "Отправлено: {$sent}\n";

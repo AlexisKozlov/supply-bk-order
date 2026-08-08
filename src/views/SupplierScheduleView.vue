@@ -75,6 +75,9 @@
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0v5l1.5 2.5h-15L6 14V9Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
                   <span v-if="(subscriptionFor(rest)?.tg_names || []).length" class="ssv-rest-sub-count">{{ subscriptionFor(rest).tg_names.length }}</span>
                 </span>
+                <span v-if="tgBlockedFor(rest)" class="ssv-rest-blocked" :title="tgBlockedTitle(rest)">
+                  бот заблокирован
+                </span>
               </div>
               <span class="ssv-rest-addr" :title="fullAddress(rest)">{{ shortAddress(rest) }}</span>
               <span class="ssv-rest-le" :title="rest.legal_entity">{{ shortLegalEntity(rest.legal_entity) }}</span>
@@ -233,6 +236,9 @@ const loading = ref(true);
 const rows = ref([]);
 const defaults = ref({});
 const subscriptions = ref({}); // { supplier_id: { restaurant_id: { is_enabled, telegram_enabled, tg_names } } }
+// Рестораны, где ВСЕ привязанные сотрудники заблокировали бота: напоминания
+// им не доходят, и раньше это было видно только в логе крона.
+const tgBlocked = ref({}); // { restaurant_number: 'дата первой блокировки' }
 const suppliers = ref([]);
 const restaurants = ref([]);
 
@@ -404,6 +410,17 @@ function subscriptionFor(rest) {
   if (!sup) return null;
   const m = subscriptions.value[sup.id] || {};
   return m[rest.restaurant_id] || null;
+}
+
+function tgBlockedFor(rest) {
+  return tgBlocked.value[String(rest.restaurant_number)] || null;
+}
+
+function tgBlockedTitle(rest) {
+  const d = tgBlockedFor(rest);
+  if (!d) return '';
+  const dt = String(d).slice(0, 10).split('-').reverse().join('.');
+  return `Сотрудники ресторана заблокировали бота ${dt} — напоминания в Telegram не доходят. Свяжитесь с рестораном.`;
 }
 
 function subscriptionTitle(rest) {
@@ -678,6 +695,7 @@ async function loadData() {
     rows.value = list.data.rows || [];
     defaults.value = list.data.default_deadlines || {};
     subscriptions.value = list.data.subscriptions || {};
+    tgBlocked.value = list.data.tg_blocked || {};
   }
   if (dir.data) {
     suppliers.value = dir.data.suppliers || [];
@@ -768,6 +786,13 @@ onMounted(loadData);
 .ssv-rest-num { font-weight: 700; font-size: 13px; color: #2b2b2b; }
 .ssv-rest-addr { font-size: 11px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .ssv-rest-le { font-size: 10px; color: #999; font-weight: 600; }
+/* Ресторан заблокировал бота — напоминания в Telegram не доходят. */
+.ssv-rest-blocked {
+  display: inline-block; margin-left: 6px; padding: 1px 6px;
+  border-radius: 999px; background: #fdecec; border: 1px solid #f3bfbf;
+  color: #a83232; font-size: 10px; font-weight: 700; white-space: nowrap;
+  cursor: help;
+}
 
 .ssv-td-cell { text-align: center; cursor: pointer; user-select: none; position: relative; transition: background 0.12s; }
 .ssv-td-cell:hover { background: #fff8f5; }

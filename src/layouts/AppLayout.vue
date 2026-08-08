@@ -772,9 +772,19 @@ async function loadBadges() {
           .catch(() => ({ count: 0 }))
       : Promise.resolve({ count: 0 })
 
+    // Счётчики просим только по доступным разделам. Раньше чат и корректировки
+    // дёргались у всех: у кого нет прав, каждые 30 секунд получал отказ —
+    // сотни бесполезных запросов в день и мусор в логах.
+    const chatPromise = userStore.hasAccess('chat', 'view')
+      ? db.rpc('chat_unread_total')
+      : Promise.resolve({ data: null })
+    const corrPromise = userStore.hasAccess('corrections', 'view')
+      ? db.from('order_corrections').select('id').eq('status', 'pending').limit(100)
+      : Promise.resolve({ data: null })
+
     const [chatRes, corrRes, scanUnknownRes] = await Promise.all([
-      db.rpc('chat_unread_total'),
-      db.from('order_corrections').select('id').eq('status', 'pending').limit(100),
+      chatPromise,
+      corrPromise,
       scanUnknownPromise,
     ])
     badgeCounts.value = {}

@@ -194,11 +194,14 @@ function botGetSubscribedRestaurants($pdo, $chatId) {
     // Подписка считается «активной» если она подтверждена (verified_at) либо
     // ещё в переходном периоде (must_reverify_by > NOW()). Непривязанные старые
     // подписки после дедлайна перестают возвращаться.
+    // Ресторан обязан быть работающим: у отключённого учётки кабинета гасят, а
+    // привязки к боту оставались живыми, и его сотрудники продолжали получать
+    // данные и меню в Telegram.
     $s = $pdo->prepare("
         SELECT rs.restaurant_number, r.address, r.city, r.legal_entity_group,
                rs.verified_at, rs.must_reverify_by
         FROM ro_telegram_subs rs
-        LEFT JOIN restaurants r
+        JOIN restaurants r
                ON r.number = rs.restaurant_number
               AND r.active = 1
               AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
@@ -2245,7 +2248,11 @@ function restNotifToggle($chatId, $msgId, $field) {
 // Функция отправки уведомления подписчикам ресторана
 function restNotifySubscribers($pdo, $botToken, $restaurantNumber, $text, $replyMarkup = null) {
     global $SITE_URL;
-    $s = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
+    // Отключённому ресторану не пишем: его учётки кабинета погашены.
+    $s = $pdo->prepare("SELECT DISTINCT rs.chat_id FROM ro_telegram_subs rs
+        JOIN restaurants r ON r.number = rs.restaurant_number AND r.active = 1
+        WHERE rs.restaurant_number=? AND rs.notify_confirmations = 1
+          AND (rs.verified_at IS NOT NULL OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))");
     $s->execute([$restaurantNumber]);
     $chatIds = $s->fetchAll(PDO::FETCH_COLUMN);
     foreach ($chatIds as $cid) {

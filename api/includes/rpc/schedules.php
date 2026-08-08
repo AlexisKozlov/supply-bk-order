@@ -111,10 +111,35 @@
             }
         }
 
+        // Рестораны, чьи сотрудники заблокировали бота: напоминания им не
+        // доходят, а узнать об этом было негде — отказ виден только в логе
+        // крона. Отдаём номер и дату первой блокировки, чтобы закупщик увидел
+        // это прямо в графике и позвонил.
+        $tgBlocked = [];
+        try {
+            $bl = $pdo->prepare("
+                SELECT t.restaurant_number, MIN(t.tg_blocked_at) AS blocked_at
+                FROM ro_telegram_subs t
+                JOIN restaurants r ON r.number = t.restaurant_number
+                     AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = t.legal_entity_group COLLATE utf8mb4_unicode_ci
+                     AND r.active = 1
+                WHERE t.tg_blocked_at IS NOT NULL AND r.legal_entity_group = ?
+                GROUP BY t.restaurant_number
+                HAVING SUM(t.tg_blocked_at IS NULL) = 0
+            ");
+            $bl->execute([$group]);
+            foreach ($bl->fetchAll() as $b) {
+                $tgBlocked[(string)$b['restaurant_number']] = $b['blocked_at'];
+            }
+        } catch (PDOException $e) {
+            error_log('[schedules] tg_blocked failed: ' . $e->getMessage());
+        }
+
         respond([
             'rows' => $schedules,
             'default_deadlines' => $defaults,
             'subscriptions' => $subscriptions,
+            'tg_blocked' => $tgBlocked,
         ]);
     }
 
