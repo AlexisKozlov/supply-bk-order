@@ -1784,7 +1784,10 @@ if ($soAction === 'suppliers' && $method === 'GET') {
                 $orderDow = (int)$dateInfo['order_day'];
                 $deadlineInfo = $checkDeadline($sid, $deliveryDateStr);
                 $order = $ordersMap[$sid][$deliveryDateStr] ?? null;
-                if ($deadlineInfo['status'] === 'closed' && !$order) continue;
+                // День с прошедшим дедлайном раньше выбрасывался, если ресторан
+                // ничего не подал: день просто исчезал из списка, и это читалось
+                // как поломка портала — звонили в закупки. Оставляем его со
+                // статусом closed, кабинет показывает пометку «Приём закрыт».
                 $availableDates[] = [
                     'order_date'       => $dateInfo['order_date'],
                     'order_day_name'   => $dayNamesFull[$orderDow] ?? '',
@@ -1840,7 +1843,9 @@ if ($soAction === 'suppliers' && $method === 'GET') {
                     $allowedWeeks[$monday] = true;
                 }
                 $availableDates = array_values(array_filter($availableDates, function ($d) use ($allowedWeeks, $weekMonday) {
-                    // Закрытые сюда доходят только с уже поданной заявкой — показываем.
+                    // Закрытые показываем всегда: и с поданной заявкой, и без неё
+                    // (ресторан должен видеть, что срок прошёл). Слот недели они
+                    // не занимают — иначе следующая неделя не открылась бы.
                     if (($d['deadline_status'] ?? '') === 'closed') return true;
                     return isset($allowedWeeks[$weekMonday($d['delivery_date'])]);
                 }));
