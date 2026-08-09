@@ -218,6 +218,20 @@ function wasNotified($pdo, $type, $legalEntity, $chatId, $intervalSeconds) {
     } catch (Exception $e) { return false; }
 }
 
+/** «1 день», «2 дня», «5 дней» — чтобы в сводке не было «прошло 2 дн.». */
+function plural_days($n) {
+    $n = abs((int)$n);
+    $t = $n % 100;
+    if ($t >= 11 && $t <= 14) return 'дней';
+    switch ($n % 10) {
+        case 1:  return 'день';
+        case 2:
+        case 3:
+        case 4:  return 'дня';
+        default: return 'дней';
+    }
+}
+
 function logNotification($pdo, $type, $legalEntity, $chatId) {
     global $DRY_RUN;
     // В режиме проверки не отмечаем «уже отправлено» — иначе настоящее
@@ -723,24 +737,58 @@ try {
     error_log('[cron_telegram] payment reminder error: ' . $e->getMessage());
 }
 
-// ═══ Просроченные оплаты ═══
-// Раньше портал вёл платёж до «заявка подана» и на этом замолкал. Дальше
-// никто не следил: два платежа Скандипакку висели просроченными пять дней,
-// и заметили их только на проверке. Здесь — единственное место, где
-// напоминают уже ПОСЛЕ подачи заявки.
+// ═══ Требуют внимания: один дайджест вместо россыпи сообщений ═══
 //
-// Частота нарочно убывающая: первые три дня ежедневно, дальше раз в неделю.
-// Ежедневное повторение месяцами приучает не читать (так вышло с задачами:
-// 40 одинаковых сообщений в день с мая).
+// Раньше каждое напоминание уходило отдельным сообщением, и в понедельник
+// человек получал бы семь штук подряд: четыре про приёмку, три про акции.
+// Ровно то, от чего уходим — россыпь одинаковых уведомлений перестают
+// читать целиком (так вышло с задачами: 40 сообщений в день с мая).
 //
-// Пишем только тем, кто по этому платежу работает. Копии руководителям
-// не рассылаем — это осознанное решение, не забытая доработка.
+// Теперь на человека приходит одно письмо со всеми его хвостами:
+//   • просроченные оплаты — портал вёл платёж до «заявка подана» и замолкал,
+//     два платежа Скандипакку висели просроченными пять дней;
+//   • неотмеченная приёмка — пока её нет, план-факт по заказу не посчитать;
+//   • акции, закрытые по дате, — статус «Завершённая» не ставил никто ни разу.
 //
-// В выходные молчим: платёж всё равно не проведут. Пробный прогон
-// (--dry-run) выходные игнорирует — он ничего не отправляет, и без этого
-// новое напоминание нельзя было бы проверить в субботу или воскресенье.
+// Когда шлём: если появился хотя бы один новый хвост — сразу, со всем списком.
+// Если новых нет, а старые висят — повтор раз в шесть дней. Ежедневного
+// повторения нет намеренно.
+//
+// Только по будням: платёж в выходной не проведут, приёмку не отметят.
+// Пробный прогон (--dry-run) выходные игнорирует — он ничего не отправляет.
 if (!$isWeekend || $DRY_RUN) {
     try {
+        // Цифры и пороги должны совпадать с блоком «Требуют внимания»
+        // на дашборде (api/includes/rpc/attention.php).
+        $DIGEST_REPEAT = 518400; // 6 суток
+        $digest = [];            // chat_id => ['payments'=>[], 'receiving'=>[], 'marketing'=>[], 'fresh'=>bool]
+
+        $chatStmt = $pdo->prepare("
+            SELECT telegram_chat_id FROM users
+            WHERE name = ? AND telegram_chat_id IS NOT NULL
+              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
+        ");
+        $chatCache = [];
+        $chatOf = function ($name) use ($chatStmt, &$chatCache) {
+            if (!$name) return null;
+            if (array_key_exists($name, $chatCache)) return $chatCache[$name];
+            $chatStmt->execute([$name]);
+            return $chatCache[$name] = ($chatStmt->fetchColumn() ?: null);
+        };
+        // Добавить пункт получателю. $key — чтобы понять, новый он или уже был.
+        $add = function ($chatId, $section, $line, $key) use (&$digest, $pdo, $DIGEST_REPEAT) {
+            if (!isset($digest[$chatId])) {
+                $digest[$chatId] = ['payments' => [], 'receiving' => [], 'marketing' => [], 'keys' => [], 'fresh' => false];
+            }
+            $digest[$chatId][$section][] = $line;
+            $digest[$chatId]['keys'][] = $key;
+            if (!wasNotified($pdo, 'attention_digest', $key, $chatId, $DIGEST_REPEAT)) {
+                $digest[$chatId]['fresh'] = true;
+            }
+        };
+
+        // ── 1. Просроченные оплаты ──────────────────────────────────────
+        $statusRu = ['upcoming' => 'предстоит', 'request_due' => 'нужна заявка', 'requested' => 'заявка подана'];
         $overdue = $pdo->query("
             SELECT sp.id, sp.supplier, sp.amount, sp.currency, sp.status,
                    sp.payment_due_date, sp.legal_entity,
@@ -754,79 +802,24 @@ if (!$isWeekend || $DRY_RUN) {
               AND sp.payment_due_date < CURDATE()
             ORDER BY sp.payment_due_date
         ")->fetchAll();
-
-        // Чат живого сотрудника: без привязки к Telegram или с давней
-        // блокировкой бота слать некуда.
-        $chatStmt = $pdo->prepare("
-            SELECT telegram_chat_id FROM users
-            WHERE name = ? AND telegram_chat_id IS NOT NULL
-              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
-        ");
-        $chatOf = function ($name) use ($chatStmt) {
-            if (!$name) return null;
-            $chatStmt->execute([$name]);
-            return $chatStmt->fetchColumn() ?: null;
-        };
-
-        $statusRu = [
-            'upcoming'    => 'предстоит',
-            'request_due' => 'нужна заявка',
-            'requested'   => 'заявка подана',
-        ];
-
         foreach ($overdue as $p) {
             $days = (int)$p['overdue_days'];
-            // Первые три дня — ежедневно (20 ч, чтобы не проскочить мимо суток),
-            // дальше — раз в неделю.
-            $interval = $days <= 3 ? 72000 : 604800;
-
-            $amountStr = $p['amount']
+            $amount = $p['amount']
                 ? number_format((float)$p['amount'], 2, ',', ' ') . ' ' . ($p['currency'] ?: 'RUB')
                 : 'сумма не указана';
-            $dueFmt = date('d.m.Y', strtotime($p['payment_due_date']));
-            $dayWord = ($days % 10 === 1 && $days % 100 !== 11) ? 'день' : 'дн.';
-
-            $text  = "🔴 <b>Платёж просрочен на {$days} {$dayWord}</b>\n";
-            $text .= "─────────────────────\n";
-            $text .= "📦 Поставщик: <b>{$p['supplier']}</b>\n";
-            $text .= "💵 Сумма: <b>{$amountStr}</b>\n";
-            $text .= "📅 Оплатить надо было: <b>{$dueFmt}</b>\n";
-            $text .= "📋 Статус: " . ($statusRu[$p['status']] ?? $p['status']) . "\n";
-            if ($p['legal_entity']) $text .= "🏢 {$p['legal_entity']}\n";
-            $text .= "\n<i>Если платёж прошёл — отметьте его оплаченным в разделе «Оплаты поставщиков».</i>";
-
-            // Кому: автор платежа, кто подавал заявку, автор заказа.
-            $names = array_unique(array_filter([$p['pay_author'], $p['requester'], $p['order_author']]));
-            $reached = [];
-            foreach ($names as $name) {
+            $line = "• <b>{$p['supplier']}</b> — {$amount}\n"
+                  . "   срок " . date('d.m.Y', strtotime($p['payment_due_date']))
+                  . ", просрочен на {$days} " . plural_days($days)
+                  . " (" . ($statusRu[$p['status']] ?? $p['status']) . ")";
+            foreach (array_unique(array_filter([$p['pay_author'], $p['requester'], $p['order_author']])) as $name) {
                 $chatId = $chatOf($name);
-                if (!$chatId || isset($reached[$chatId])) continue;
-                $reached[$chatId] = true;
-                if (wasNotified($pdo, 'payment_overdue', "pay_{$p['id']}", $chatId, $interval)) continue;
-                tgSend($chatId, $text);
-                logNotification($pdo, 'payment_overdue', "pay_{$p['id']}", $chatId);
-                $sent++;
+                if ($chatId) $add($chatId, 'payments', $line, "pay_{$p['id']}");
             }
-
         }
-    } catch (Exception $e) {
-        error_log('[cron_telegram] overdue payment reminder error: ' . $e->getMessage());
-    }
-}
 
-// ═══ Неотмеченная приёмка ═══
-// Поставка пришла, а приёмку в портале никто не отметил. Пока её нет,
-// расхождение план-факт по заказу посчитать нельзя, и заказ бесконечно
-// висит открытым. На проверке нашлось четыре таких заказа — самому
-// старшему было 12 дней, и об этом никто не знал.
-//
-// Ждём два дня после поставки: в день привоза отмечать приёмку некогда,
-// на следующий тоже бывает не до того. Порог тот же, что у блока
-// «Требуют внимания» на дашборде — цифры в двух местах должны сходиться.
-// Частота та же, что у просроченных оплат: первые три дня ежедневно,
-// дальше раз в неделю. Пишем автору заказа — он её и отмечает.
-if (!$isWeekend || $DRY_RUN) {
-    try {
+        // ── 2. Неотмеченная приёмка ─────────────────────────────────────
+        // Ждём два дня после поставки: в день привоза отмечать некогда,
+        // на следующий тоже бывает не до того.
         $notReceived = $pdo->query("
             SELECT o.id, o.supplier, o.legal_entity, o.delivery_date, o.created_by,
                    DATEDIFF(CURDATE(), o.delivery_date) AS late_days,
@@ -837,75 +830,30 @@ if (!$isWeekend || $DRY_RUN) {
               AND DATEDIFF(CURDATE(), o.delivery_date) >= 2
             ORDER BY o.delivery_date
         ")->fetchAll();
-
-        $recvChat = $pdo->prepare("
-            SELECT telegram_chat_id FROM users
-            WHERE name = ? AND telegram_chat_id IS NOT NULL
-              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
-        ");
-
         foreach ($notReceived as $o) {
-            if (!$o['created_by']) continue;
-            $recvChat->execute([$o['created_by']]);
-            $chatId = $recvChat->fetchColumn();
+            $chatId = $chatOf($o['created_by']);
             if (!$chatId) continue;
-
             $days = (int)$o['late_days'];
-            $interval = $days <= 3 ? 72000 : 604800;
-            if (wasNotified($pdo, 'order_not_received', "ord_{$o['id']}", $chatId, $interval)) continue;
-
-            $dayWord = ($days % 10 === 1 && $days % 100 !== 11) ? 'день' : 'дн.';
-            $dateFmt = date('d.m.Y', strtotime($o['delivery_date']));
-
-            $text  = "📦 <b>Приёмка не отмечена, прошло {$days} {$dayWord}</b>\n";
-            $text .= "─────────────────────\n";
-            $text .= "🚚 Поставщик: <b>{$o['supplier']}</b>\n";
-            $text .= "📅 Поставка была: <b>{$dateFmt}</b>\n";
-            $text .= "📋 Позиций в заказе: {$o['items']}\n";
-            if ($o['legal_entity']) $text .= "🏢 {$o['legal_entity']}\n";
-            $text .= "\n<i>Отметьте приёмку в разделе «Поставки». Пока её нет, расхождение план-факт по заказу не посчитать.</i>";
-
-            tgSend($chatId, $text);
-            logNotification($pdo, 'order_not_received', "ord_{$o['id']}", $chatId);
-            $sent++;
+            $line = "• <b>{$o['supplier']}</b> — поставка "
+                  . date('d.m.Y', strtotime($o['delivery_date']))
+                  . ", прошло {$days} " . plural_days($days)
+                  . " ({$o['items']} поз.)";
+            $add($chatId, 'receiving', $line, "ord_{$o['id']}");
         }
-    } catch (Exception $e) {
-        error_log('[cron_telegram] not received reminder error: ' . $e->getMessage());
-    }
-}
 
-// ═══ Завершение акций по дате ═══
-// Статус «Завершённая» не ставил никто и никогда: все шесть акций в базе
-// висели активными, включая закончившиеся 4 мая. Список активных при этом
-// врал, а руками статус переключать все забывают.
-//
-// Дата окончания и есть вся правда: этапов, которые продолжались бы после
-// неё, в акциях нет. Поэтому портал закрывает акцию сам, пишет об этом
-// в журнал действий и один раз сообщает автору — со ссылкой на то, как
-// вернуть обратно, если акцию продлили.
-//
-// Работаем только по будням: если закрыть в субботу и промолчать, статус
-// поменяется незаметно — акция уже не «активна», и в понедельник её никто
-// не найдёт, чтобы сообщить.
-if (!$isWeekend || $DRY_RUN) {
-    try {
+        // ── 3. Акции, завершённые по дате ───────────────────────────────
+        // Дата окончания — вся правда: этапов, которые продолжались бы после
+        // неё, в акциях нет. Статус меняем сразу, а сообщение уходит в общем
+        // дайджесте. Закрытие само по себе делает дайджест «свежим», иначе
+        // акция тихо сменила бы статус и человек об этом не узнал.
         $ended = $pdo->query("
-            SELECT id, name, type, date_from, date_to, legal_entity, created_by
+            SELECT id, name, date_from, date_to, legal_entity, created_by
             FROM marketing_activities
             WHERE status = 'active' AND date_to IS NOT NULL AND date_to < CURDATE()
             ORDER BY date_to
         ")->fetchAll();
-
-        $mktChat = $pdo->prepare("
-            SELECT telegram_chat_id FROM users
-            WHERE name = ? AND telegram_chat_id IS NOT NULL
-              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
-        ");
-
         foreach ($ended as $a) {
-            $fromFmt = $a['date_from'] ? date('d.m.Y', strtotime($a['date_from'])) : '—';
-            $toFmt   = date('d.m.Y', strtotime($a['date_to']));
-
+            $toFmt = date('d.m.Y', strtotime($a['date_to']));
             if (!$DRY_RUN) {
                 $upd = $pdo->prepare("UPDATE marketing_activities SET status = 'completed', updated_at = NOW() WHERE id = ? AND status = 'active'");
                 $upd->execute([$a['id']]);
@@ -919,25 +867,44 @@ if (!$isWeekend || $DRY_RUN) {
                     "Акция «{$a['name']}» завершена автоматически: дата окончания {$toFmt} прошла",
                 ]);
             }
-
-            if (!$a['created_by']) continue;
-            $mktChat->execute([$a['created_by']]);
-            $chatId = $mktChat->fetchColumn();
+            $chatId = $chatOf($a['created_by']);
             if (!$chatId) continue;
+            $fromFmt = $a['date_from'] ? date('d.m.Y', strtotime($a['date_from'])) : '—';
+            $add($chatId, 'marketing', "• <b>{$a['name']}</b> — шла с {$fromFmt} по {$toFmt}", "mkt_{$a['id']}");
+            $digest[$chatId]['fresh'] = true; // разовое событие, молчать нельзя
+        }
 
-            $text  = "🏁 <b>Акция завершена</b>\n";
-            $text .= "─────────────────────\n";
-            $text .= "📣 <b>{$a['name']}</b>\n";
-            $text .= "📅 Шла с {$fromFmt} по {$toFmt}\n";
-            if ($a['legal_entity']) $text .= "🏢 {$a['legal_entity']}\n";
-            $text .= "\n<i>Статус переключён на «Завершённая» — дата окончания прошла. Если акция продлена, верните статус в её карточке.</i>";
+        // ── Собираем и отправляем ───────────────────────────────────────
+        $SITE = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
+        foreach ($digest as $chatId => $d) {
+            if (!$d['fresh']) continue; // новых хвостов нет — молчим до повтора
 
-            tgSend($chatId, $text);
-            logNotification($pdo, 'marketing_completed', "mkt_{$a['id']}", $chatId);
+            $total = count($d['payments']) + count($d['receiving']) + count($d['marketing']);
+            $text  = "📋 <b>Требуют внимания</b> — {$total}\n";
+
+            $sections = [
+                ['payments',  '🔴 <b>Просроченные оплаты</b>',     'Отметьте оплату в разделе «Оплаты поставщиков».'],
+                ['receiving', '📦 <b>Приёмка не отмечена</b>',      'Пока приёмки нет, план-факт по заказу не посчитать.'],
+                ['marketing', '🏁 <b>Акции завершены по дате</b>',  'Статус переключён на «Завершённая». Если акция продлена, верните его в карточке.'],
+            ];
+            foreach ($sections as [$key, $title, $note]) {
+                if (empty($d[$key])) continue;
+                $items = $d[$key];
+                $shown = array_slice($items, 0, 10);
+                $text .= "\n" . $title . " (" . count($items) . ")\n" . implode("\n", $shown) . "\n";
+                if (count($items) > 10) $text .= "   …и ещё " . (count($items) - 10) . "\n";
+                $text .= "<i>{$note}</i>\n";
+            }
+            $text .= "\n<a href=\"{$SITE}/dashboard\">Открыть портал</a>";
+
+            tgSend($chatId, $text, true);
+            foreach (array_unique($d['keys']) as $k) {
+                logNotification($pdo, 'attention_digest', $k, $chatId);
+            }
             $sent++;
         }
     } catch (Exception $e) {
-        error_log('[cron_telegram] marketing autoclose error: ' . $e->getMessage());
+        error_log('[cron_telegram] attention digest error: ' . $e->getMessage());
     }
 }
 
