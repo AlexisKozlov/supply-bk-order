@@ -1416,7 +1416,7 @@
         <button class="imp-close" @click="dismissCurrentImportantPost" aria-label="Закрыть">&times;</button>
         <div class="imp-body">
           <div class="imp-meta">
-            <span class="imp-meta-icon" aria-hidden="true">⚠</span>
+            <span class="imp-meta-icon"><svg class="ico-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.8 20h18.4Z"/><path d="M12 10v4"/><path d="M12 17.4h.01"/></svg></span>
             <span>{{ currentImportantPost.created_by || 'Отдел закупок' }}</span>
             <span class="imp-meta-dot">·</span>
             <span>{{ fmtDateTime(currentImportantPost.published_at || currentImportantPost.created_at) }}</span>
@@ -5424,6 +5424,7 @@ tr.del-err { background: #fef2f2; }
   margin-bottom: 12px;
   max-width: 100%;
 }
+.imp-meta-icon .ico-warn { width: 14px; height: 14px; display: block; }
 .imp-meta-icon { color: #E76F51; font-size: 13px; line-height: 1; }
 .imp-meta-dot { opacity: 0.55; }
 .imp-title {

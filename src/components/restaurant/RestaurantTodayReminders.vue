@@ -28,7 +28,7 @@
                 <span class="rtr-deadline-label">Передайте накладные бухгалтерии в офис</span>
               </template>
               <template v-else-if="it.is_expired">
-                <span class="rtr-status-expired">🚨 Срок подачи истёк</span>
+                <span class="rtr-status-expired"><svg class="ico-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.8 20h18.4Z"/><path d="M12 10v4"/><path d="M12 17.4h.01"/></svg> Срок подачи истёк</span>
                 <span v-if="it.deadline_time" class="rtr-meta">было до {{ fmtTime(it.deadline_time) }}</span>
               </template>
               <template v-else>
@@ -47,7 +47,7 @@
                 <span v-if="it.acknowledged_at" class="rtr-meta">{{ formatAckTime(it.acknowledged_at) }}{{ it.acknowledged_by ? ' · ' + cleanActor(it.acknowledged_by) : '' }}</span>
               </template>
               <template v-else-if="it.is_expired">
-                <span class="rtr-status-expired">🚨 Дедлайн истёк — заявка не подана</span>
+                <span class="rtr-status-expired"><svg class="ico-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.8 20h18.4Z"/><path d="M12 10v4"/><path d="M12 17.4h.01"/></svg> Срок истёк — заявка не подана</span>
                 <span v-if="it.deadline_time" class="rtr-meta">было до {{ fmtTime(it.deadline_time) }}</span>
               </template>
               <template v-else>
@@ -255,7 +255,10 @@ defineExpose({ load });
 .rtr-deadline-time { font-size: 16px; font-weight: 700; color: #b35900; line-height: 1; }
 .rtr-meta { font-size: 11px; color: #888; }
 .rtr-status-done { font-size: 13px; font-weight: 600; color: #1b5e20; }
-.rtr-status-expired { font-size: 13px; font-weight: 600; color: #888; }
+/* Был 🚨 — эмодзи рисует система телефона, на части устройств вместо него
+   пустой квадрат. Значок наследует цвет строки. */
+.rtr-status-expired { font-size: 13px; font-weight: 600; color: #888; display: inline-flex; align-items: center; gap: 5px; }
+.rtr-status-expired .ico-warn { width: 14px; height: 14px; flex: 0 0 auto; }
 .rtr-actions { display: flex; gap: 6px; }
 .rtr-btn-done { padding: 8px 16px; border: none; background: #2e7d32; color: #fff; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer; white-space: nowrap; }
 .rtr-btn-done:hover { background: #1b5e20; }

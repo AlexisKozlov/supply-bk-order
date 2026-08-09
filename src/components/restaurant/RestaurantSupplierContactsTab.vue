@@ -22,7 +22,7 @@
     </div>
 
     <div v-else-if="!groupsVisible.length" class="rsct-state">
-      <div class="rsct-empty-ico">📇</div>
+      <div class="rsct-empty-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.6-1.6 1.7-2.4 3-2.4s2.4.8 3 2.4"/><path d="M15 10h4M15 13.5h4"/></svg></div>
       <div class="rsct-empty-title">Контакты ещё не добавлены</div>
       <div class="rsct-empty-sub">Когда отдел закупок добавит контакты поставщиков, они появятся тут.</div>
     </div>
@@ -215,4 +215,5 @@ onMounted(reload);
   .rsct-cards { padding: 10px; gap: 10px; }
   .rsct-refresh { padding: 6px 12px; }
 }
+.rsct-empty-ico svg { width: 40px; height: 40px; display: block; margin: 0 auto; }
 </style>

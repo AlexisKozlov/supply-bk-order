@@ -26,11 +26,15 @@
           <li>
             <strong>Что дальше.</strong> Заявка приходит закупкам. Статусы:
             <ul class="rco-tut-sub">
-              <li><span class="rco-stat-icon">⏳</span> <strong>Ожидает</strong> — пришло, ещё не разобрали.</li>
-              <li><span class="rco-stat-icon">🛠</span> <strong>В работе</strong> — кто-то из закупок взял в работу.</li>
-              <li><span class="rco-stat-icon">✅</span> <strong>Принято</strong> — изменение войдёт в поставку.</li>
-              <li><span class="rco-stat-icon">❌</span> <strong>Отклонено</strong> — не приняли, рядом будет комментарий почему.</li>
-              <li><span class="rco-stat-icon">⛔</span> <strong>Отменено</strong> — ты сам отозвал заявку.</li>
+              <!-- Значки те же, что в списке заявок ниже. Раньше в подсказке
+                   стояли эмодзи (⏳🛠✅❌⛔), а в самом списке — кружки со
+                   знаками: подсказка не совпадала с тем, что человек видит.
+                   Плюс эмодзи на части телефонов не рисуются вовсе. -->
+              <li><span class="rco-stat-icon">•</span> <strong>Ожидает</strong> — пришло, ещё не разобрали.</li>
+              <li><span class="rco-stat-icon">•</span> <strong>В работе</strong> — кто-то из закупок взял в работу.</li>
+              <li><span class="rco-stat-icon is-approved">✓</span> <strong>Принято</strong> — изменение войдёт в поставку.</li>
+              <li><span class="rco-stat-icon is-rejected">✕</span> <strong>Отклонено</strong> — не приняли, рядом будет комментарий почему.</li>
+              <li><span class="rco-stat-icon is-cancelled">—</span> <strong>Отменено</strong> — ты сам отозвал заявку.</li>
             </ul>
           </li>
           <li>
@@ -109,7 +113,7 @@
             </div>
           </header>
 
-          <p v-if="b.comment" class="rco-batch-comment">💬 {{ b.comment }}</p>
+          <p v-if="b.comment" class="rco-batch-comment"><svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-11.6 7.1L4 20l1.4-5A8 8 0 1 1 21 11.5Z"/></svg> {{ b.comment }}</p>
 
           <ul class="rco-batch-items">
             <li v-for="it in b.items" :key="it.id" class="rco-batch-item" :class="'is-' + it.status">
@@ -241,7 +245,7 @@
             </div>
           </header>
 
-          <p v-if="b.comment" class="rco-batch-comment">💬 {{ b.comment }}</p>
+          <p v-if="b.comment" class="rco-batch-comment"><svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8 8 0 0 1-11.6 7.1L4 20l1.4-5A8 8 0 1 1 21 11.5Z"/></svg> {{ b.comment }}</p>
 
           <ul class="rco-batch-items">
             <li v-for="it in b.items" :key="it.id" class="rco-batch-item" :class="'is-' + it.status">
@@ -687,7 +691,14 @@ onBeforeUnmount(() => {
 .rco-tut-list em { color: #1976d2; font-style: normal; font-weight: 600; }
 .rco-tut-sub { margin: 6px 0 0; padding-left: 4px; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .rco-tut-sub li { display: flex; align-items: baseline; gap: 6px; }
-.rco-stat-icon { font-size: 14px; width: 18px; text-align: center; }
+.rco-stat-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; flex: 0 0 auto;
+  background: #F1EAE0; color: #6B5B4B; font-size: 11px; font-weight: 800; line-height: 1;
+}
+.rco-stat-icon.is-approved { background: #E9F5EC; color: #2E7D4F; }
+.rco-stat-icon.is-rejected { background: #FDEBE9; color: #C0392B; }
+.rco-stat-icon.is-cancelled { background: #F1EFEC; color: #9A8F80; }
 .rco-tut-chip {
   display: inline-block; padding: 1px 7px; border-radius: 5px;
   font-size: 12px; font-weight: 700; vertical-align: 1px;
@@ -1104,4 +1115,5 @@ onBeforeUnmount(() => {
   .rco-unit-btn,
   .rco-unit-fixed { min-width: 70px; padding: 11px 4px; }
 }
+.rco-batch-comment .ico-inline { width: 14px; height: 14px; vertical-align: -2px; flex: 0 0 auto; }
 </style>

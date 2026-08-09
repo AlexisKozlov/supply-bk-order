@@ -77,7 +77,7 @@
                   @change="onPhotoSelected"
                   class="scn-photo-input"
                 />
-                📷 Добавить фото
+                <svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8Z"/><circle cx="12" cy="13" r="3.2"/></svg> Добавить фото
               </label>
               <div v-else class="scn-photo-preview">
                 <img :src="reportPhotoPreview" alt="фото товара" />
@@ -636,4 +636,5 @@ function nearestExpiryShort(value) {
   .scn-card { padding: 14px; }
   .scn-card-name { font-size: 16px; }
 }
+.scn-photo-add .ico-inline, .ico-inline { width: 16px; height: 16px; vertical-align: -3px; }
 </style>
