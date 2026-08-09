@@ -778,7 +778,7 @@ if (!$isWeekend || $DRY_RUN) {
         // Добавить пункт получателю. $key — чтобы понять, новый он или уже был.
         $add = function ($chatId, $section, $line, $key) use (&$digest, $pdo, $DIGEST_REPEAT) {
             if (!isset($digest[$chatId])) {
-                $digest[$chatId] = ['payments' => [], 'receiving' => [], 'marketing' => [], 'keys' => [], 'fresh' => false];
+                $digest[$chatId] = ['payments' => [], 'receiving' => [], 'tenders' => [], 'marketing' => [], 'keys' => [], 'fresh' => false];
             }
             $digest[$chatId][$section][] = $line;
             $digest[$chatId]['keys'][] = $key;
@@ -841,7 +841,40 @@ if (!$isWeekend || $DRY_RUN) {
             $add($chatId, 'receiving', $line, "ord_{$o['id']}");
         }
 
-        // ── 3. Акции, завершённые по дате ───────────────────────────────
+        // ── 3. Зависшие тендеры ─────────────────────────────────────────
+        // Один дедлайн ни о чём не говорит: сразу после него идёт нормальная
+        // работа — оценка предложений, согласование. Признак «зависло» —
+        // дедлайн прошёл И неделю по тендеру никто ничего не менял.
+        // Так «Стаканы девочка» простояли в согласовании 51 день.
+        $tenderStatusRu = [
+            'draft'      => 'черновик',
+            'evaluation' => 'оценка предложений',
+            'approval'   => 'согласование',
+        ];
+        $stuckTenders = $pdo->query("
+            SELECT t.id, t.name, t.status, t.deadline, t.created_by,
+                   DATEDIFF(CURDATE(), t.deadline)         AS late_days,
+                   DATEDIFF(CURDATE(), DATE(t.updated_at)) AS idle_days,
+                   (SELECT COUNT(*) FROM tender_offers o WHERE o.tender_id = t.id) AS offers
+            FROM tenders t
+            WHERE t.status NOT IN ('completed', 'closed', 'archived', 'cancelled')
+              AND t.deadline IS NOT NULL
+              AND t.deadline < CURDATE()
+              AND DATEDIFF(CURDATE(), DATE(t.updated_at)) >= 7
+            ORDER BY t.deadline
+        ")->fetchAll();
+        foreach ($stuckTenders as $t) {
+            $chatId = $chatOf($t['created_by']);
+            if (!$chatId) continue;
+            $idle = (int)$t['idle_days'];
+            $line = "• <b>{$t['name']}</b> — " . ($tenderStatusRu[$t['status']] ?? $t['status'])
+                  . ", предложений {$t['offers']}\n"
+                  . "   дедлайн " . date('d.m.Y', strtotime($t['deadline']))
+                  . ", без движения {$idle} " . plural_days($idle);
+            $add($chatId, 'tenders', $line, "tnd_{$t['id']}");
+        }
+
+        // ── 4. Акции, завершённые по дате ───────────────────────────────
         // Дата окончания — вся правда: этапов, которые продолжались бы после
         // неё, в акциях нет. Статус меняем сразу, а сообщение уходит в общем
         // дайджесте. Закрытие само по себе делает дайджест «свежим», иначе
@@ -879,12 +912,13 @@ if (!$isWeekend || $DRY_RUN) {
         foreach ($digest as $chatId => $d) {
             if (!$d['fresh']) continue; // новых хвостов нет — молчим до повтора
 
-            $total = count($d['payments']) + count($d['receiving']) + count($d['marketing']);
+            $total = count($d['payments']) + count($d['receiving']) + count($d['tenders']) + count($d['marketing']);
             $text  = "📋 <b>Требуют внимания</b> — {$total}\n";
 
             $sections = [
                 ['payments',  '🔴 <b>Просроченные оплаты</b>',     'Отметьте оплату в разделе «Оплаты поставщиков».'],
                 ['receiving', '📦 <b>Приёмка не отмечена</b>',      'Пока приёмки нет, план-факт по заказу не посчитать.'],
+                ['tenders',   '🧾 <b>Тендеры без движения</b>',     'Дедлайн подачи прошёл, а тендер не закрыт.'],
                 ['marketing', '🏁 <b>Акции завершены по дате</b>',  'Статус переключён на «Завершённая». Если акция продлена, верните его в карточке.'],
             ];
             foreach ($sections as [$key, $title, $note]) {

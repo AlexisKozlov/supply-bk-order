@@ -175,25 +175,31 @@ if ($fn === 'attention_overview') {
     // ── 4. Тендеры ──────────────────────────────────────────────────────
     if ($can('tenders')) {
         [$w, $p] = $entityIn('legal_entity');
+        // Один дедлайн ни о чём не говорит: сразу после него идёт нормальная
+        // работа — оценка предложений, согласование. Зависшим считаем тендер,
+        // по которому неделю никто ничего не менял. То же правило в крон-сводке.
+        $statusRu = ['draft' => 'черновик', 'evaluation' => 'оценка предложений', 'approval' => 'согласование'];
         $items = $rows("
             SELECT id, name, status, deadline AS due,
-                   DATEDIFF(CURDATE(), deadline) AS days
+                   DATEDIFF(CURDATE(), deadline)         AS days,
+                   DATEDIFF(CURDATE(), DATE(updated_at)) AS idle
             FROM tenders
             WHERE deadline IS NOT NULL AND deadline < CURDATE()
-              AND status NOT IN ('completed','closed','archived','cancelled') AND $w
+              AND status NOT IN ('completed','closed','archived','cancelled')
+              AND DATEDIFF(CURDATE(), DATE(updated_at)) >= 7 AND $w
             ORDER BY deadline
             LIMIT 50
         ", $p);
         $blocks[] = [
             'key'   => 'tenders',
-            'title' => 'Тендеры',
-            'hint'  => 'срок подачи прошёл, тендер не закрыт',
+            'title' => 'Тендеры без движения',
+            'hint'  => 'дедлайн подачи прошёл, тендер не закрыт и неделю не менялся',
             'route' => 'tenders',
             'count' => count($items),
             'items' => array_map(fn($r) => [
                 'id'       => (int)$r['id'],
                 'title'    => $r['name'],
-                'subtitle' => 'статус: ' . $r['status'],
+                'subtitle' => ($statusRu[$r['status']] ?? $r['status']) . ', без движения ' . (int)$r['idle'] . ' дн.',
                 'date'     => $r['due'],
                 'days'     => (int)$r['days'],
             ], $items),
