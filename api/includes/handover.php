@@ -37,6 +37,8 @@
 // Проверка $endpoint — ниже, перед секцией маршрутов: функции модуля нужны
 // и при подключении из других мест (экспорт, будущие cron-скрипты).
 
+require_once __DIR__ . '/legal_entities.php';
+
 function hoRespond($data, $code = 200) {
     http_response_code($code);
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
@@ -211,6 +213,30 @@ function hoSupplierContacts($pdo, $supplierName) {
     return implode(', ', $parts);
 }
 
+/**
+ * Названия поставщиков для подсказки при добавлении руками.
+ * Справочник фильтруем по ГРУППЕ юрлиц документа: у БК и ВМ он общий,
+ * у ПС свой (см. правило про справочники и рабочие данные).
+ */
+function hoSupplierNames($pdo, array $entities) {
+    if (!$entities) return [];
+    $groups = [];
+    foreach ($entities as $e) {
+        $g = getEntityGroup($e);
+        if ($g) $groups[$g] = true;
+    }
+    if (!$groups) return [];
+    $codes = array_keys($groups);
+    $ph = implode(',', array_fill(0, count($codes), '?'));
+    $s = $pdo->prepare("
+        SELECT DISTINCT short_name
+        FROM suppliers
+        WHERE is_active = 1 AND short_name <> '' AND legal_entity_group IN ($ph)
+        ORDER BY short_name");
+    $s->execute($codes);
+    return array_column($s->fetchAll(), 'short_name');
+}
+
 /** Заполняет документ снимком приходов. Ручные примечания сохраняются. */
 function hoRebuildSuppliers($pdo, array $doc) {
     $entities = json_decode((string)($doc['legal_entities'] ?? ''), true) ?: [];
@@ -238,12 +264,14 @@ function hoRebuildSuppliers($pdo, array $doc) {
     }
 
     // Поставщик, у которого приходов больше нет (заказ перенесли/удалили),
-    // остаётся в документе только если по нему уже написали примечание.
+    // остаётся в документе только если по нему уже написали примечание
+    // или его вписали руками — такую карточку пересборка трогать не должна.
     foreach ($existing as $name => $row) {
         if (isset($collected[$name])) continue;
         $hasNotes = trim((string)$row['attention']) !== ''
             || trim((string)$row['correction_rule']) !== ''
-            || trim((string)$row['docs_rule']) !== '';
+            || trim((string)$row['docs_rule']) !== ''
+            || (int)($row['is_manual'] ?? 0) === 1;
         if (!$hasNotes) {
             $pdo->prepare("DELETE FROM handover_suppliers WHERE id = ?")->execute([(int)$row['id']]);
         } else {
@@ -298,7 +326,8 @@ function hoLoadFull($pdo, array $doc) {
     foreach ($sup->fetchAll() as $row) {
         $row['orders'] = json_decode((string)$row['orders_json'], true) ?: [];
         unset($row['orders_json']);
-        $row['included'] = (int)$row['included'] === 1;
+        $row['included']  = (int)$row['included'] === 1;
+        $row['is_manual'] = (int)$row['is_manual'] === 1;
         $suppliers[] = $row;
     }
 
@@ -447,6 +476,21 @@ if ($hoAction === 'docs' && $hoId !== null && $hoSub === 'rebuild' && $method ==
     hoRespond(['doc' => hoLoadFull($pdo, hoGetDoc($pdo, $hoId)), 'suppliers_found' => $count]);
 }
 
+// ─── Подсказка названий при добавлении поставщика руками ───
+if ($hoAction === 'docs' && $hoId !== null && $hoSub === 'supplier-names' && $method === 'GET') {
+    $doc = hoGetDoc($pdo, $hoId);
+    if (!$doc) hoRespond(['error' => 'Документ не найден'], 404);
+    $entities = json_decode((string)($doc['legal_entities'] ?? ''), true) ?: [];
+    $used = $pdo->prepare("SELECT supplier_name FROM handover_suppliers WHERE doc_id = ?");
+    $used->execute([(int)$hoId]);
+    $taken = array_map('mb_strtolower', array_column($used->fetchAll(), 'supplier_name'));
+    $names = array_values(array_filter(
+        hoSupplierNames($pdo, $entities),
+        fn($n) => !in_array(mb_strtolower($n), $taken, true)
+    ));
+    hoRespond(['names' => $names]);
+}
+
 // ─── Экспорт в Word ───
 if ($hoAction === 'docs' && $hoId !== null && $hoSub === 'export' && $method === 'GET') {
     $doc = hoGetDoc($pdo, $hoId);
@@ -496,6 +540,41 @@ if ($hoAction === 'people' && $hoId !== null && in_array($method, ['PATCH', 'DEL
     $params[] = (int)$hoId;
     $pdo->prepare("UPDATE handover_people SET " . implode(', ', $fields) . " WHERE id = ?")->execute($params);
     hoRespond(['ok' => true]);
+}
+
+// ─── Добавить поставщика руками ───
+// Приходы собираются по заказам автора. У того, кто заказы в портале не
+// заводит, документ соберётся пустым — но передавать дела по поставщику ему
+// всё равно надо. Карточка живёт без приходов и переживает пересборку:
+// её бережёт флаг is_manual.
+if ($hoAction === 'suppliers' && $hoId === null && $method === 'POST') {
+    $docId = (int)($body['doc_id'] ?? 0);
+    hoRequireEditableDoc($pdo, $hoUser, $docId);
+
+    $name = trim((string)($body['supplier_name'] ?? ''));
+    if ($name === '') hoRespond(['error' => 'Нужно название поставщика'], 400);
+    $name = mb_substr($name, 0, 255);
+
+    $dup = $pdo->prepare("SELECT id FROM handover_suppliers WHERE doc_id = ? AND LOWER(supplier_name) = LOWER(?)");
+    $dup->execute([$docId, $name]);
+    if ($dup->fetch()) hoRespond(['error' => 'Такой поставщик в документе уже есть'], 409);
+
+    $max = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) FROM handover_suppliers WHERE doc_id = ?");
+    $max->execute([$docId]);
+    $sort = (int)$max->fetchColumn() + 1;
+
+    $contacts = hoSupplierContacts($pdo, $name);
+    $ins = $pdo->prepare("
+        INSERT INTO handover_suppliers (doc_id, supplier_name, contacts, orders_json, sort_order, is_manual)
+        VALUES (?, ?, ?, '[]', ?, 1)");
+    $ins->execute([$docId, $name, $contacts, $sort]);
+
+    hoRespond([
+        'id'            => (int)$pdo->lastInsertId(),
+        'supplier_name' => $name,
+        'contacts'      => $contacts,
+        'sort_order'    => $sort,
+    ], 201);
 }
 
 // ─── Поставщики документа ───

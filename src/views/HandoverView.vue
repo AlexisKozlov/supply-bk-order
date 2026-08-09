@@ -205,7 +205,7 @@
 
         <div v-if="!current.suppliers.length" class="ho-mini-empty">
           За период не нашлось ни одного заказа, заведённого автором документа.
-          Проверьте даты и нажмите «Обновить приходы».
+          Проверьте даты и нажмите «Обновить приходы» — или впишите поставщика руками.
         </div>
 
         <div v-for="s in current.suppliers" :key="s.id" class="ho-sup" :class="{ 'is-off': !s.included }">
@@ -213,6 +213,7 @@
             <div class="ho-sup-name">
               <span class="ho-sup-caret" :class="{ 'is-open': openSuppliers.has(s.id) }">›</span>
               <b>{{ s.supplier_name }}</b>
+              <span v-if="s.is_manual" class="ho-sup-tag">вписан руками</span>
               <span class="ho-sup-dates">{{ supplierDates(s) }}</span>
             </div>
             <div class="ho-sup-right">
@@ -222,6 +223,8 @@
                        @change="saveSupplier(s, { included: $event.target.checked })" />
                 <span>в документ</span>
               </label>
+              <button v-if="canEdit" class="ho-sup-del" title="Убрать поставщика из документа"
+                      @click.stop="removeSupplier(s)">×</button>
             </div>
           </header>
 
@@ -276,6 +279,23 @@
               <div v-else class="ho-mini-empty">позиции не заполнены</div>
             </div>
           </div>
+        </div>
+
+        <!-- Вписать поставщика, которого нет в заказах: приходов у него не
+             будет, но примечания передать надо. -->
+        <div v-if="canEdit" class="ho-addsup">
+          <template v-if="addingSupplier">
+            <input v-model="newSupplierName" class="ho-input ho-addsup-input" list="ho-supplier-names"
+                   placeholder="название поставщика" @keyup.enter="createSupplier"
+                   @keyup.esc="cancelAddSupplier" ref="newSupplierInput" />
+            <datalist id="ho-supplier-names">
+              <option v-for="n in supplierNames" :key="n" :value="n"></option>
+            </datalist>
+            <button class="ho-btn ho-btn-sm" :disabled="!newSupplierName.trim() || savingSupplier"
+                    @click="createSupplier">{{ savingSupplier ? 'Добавляю…' : 'Добавить' }}</button>
+            <button class="ho-btn ho-btn-sm ho-btn-ghost" @click="cancelAddSupplier">Отмена</button>
+          </template>
+          <button v-else class="ho-btn ho-btn-sm" @click="startAddSupplier">+ Поставщик</button>
         </div>
       </section>
 
@@ -355,6 +375,14 @@ const rebuilding = ref(false);
 const showCreate = ref(false);
 const saveNote = ref('');
 const openSuppliers = ref(new Set());
+
+// Поставщик, вписанный руками: приходов у него не будет, но передать по нему
+// дела надо. Названия подсказываем из справочника, чтобы подтянулись контакты.
+const addingSupplier = ref(false);
+const savingSupplier = ref(false);
+const newSupplierName = ref('');
+const newSupplierInput = ref(null);
+const supplierNames = ref([]);
 
 const form = ref({ title: '', date_from: '', date_to: '', return_date: '', emergency_note: '' });
 
@@ -682,6 +710,58 @@ async function saveSupplier(s, patch) {
   flash('Сохранено');
 }
 
+async function startAddSupplier() {
+  addingSupplier.value = true;
+  newSupplierName.value = '';
+  await nextTick();
+  newSupplierInput.value?.focus();
+  // Подсказка не обязательна: не загрузилась — вписать название всё равно можно.
+  try {
+    const r = await api('GET', `handover/docs/${current.value.doc.id}/supplier-names`);
+    supplierNames.value = r?.names || [];
+  } catch { supplierNames.value = []; }
+}
+
+function cancelAddSupplier() {
+  addingSupplier.value = false;
+  newSupplierName.value = '';
+}
+
+async function createSupplier() {
+  const name = newSupplierName.value.trim();
+  if (!name || savingSupplier.value) return;
+  savingSupplier.value = true;
+  try {
+    const r = await api('POST', 'handover/suppliers', {
+      doc_id: current.value.doc.id,
+      supplier_name: name,
+    });
+    current.value.suppliers.push({
+      id: r.id, supplier_name: r.supplier_name, contacts: r.contacts,
+      correction_rule: '', docs_rule: '', attention: '', person_id: null,
+      included: true, is_manual: true, orders: [], sort_order: r.sort_order,
+    });
+    supplierNames.value = supplierNames.value.filter(n => n !== r.supplier_name);
+    toggleSupplier(r.id);
+    cancelAddSupplier();
+    flash('Поставщик добавлен');
+  } catch (e) {
+    flash(e.message || 'Не удалось добавить');
+  } finally {
+    savingSupplier.value = false;
+  }
+}
+
+async function removeSupplier(s) {
+  const what = s.is_manual
+    ? 'Карточка вписана руками — вернуть её пересборкой не получится.'
+    : 'Вернётся при следующем нажатии «Обновить приходы».';
+  if (!(await confirm('Убрать поставщика?', `${s.supplier_name}. ${what}`,
+      { okText: 'Убрать', danger: true }))) return;
+  await api('DELETE', `handover/suppliers/${s.id}`);
+  current.value.suppliers = current.value.suppliers.filter(x => x.id !== s.id);
+}
+
 async function addItem(kind) {
   const r = await api('POST', 'handover/items', { doc_id: current.value.doc.id, kind });
   if (!current.value.items[kind]) current.value.items[kind] = [];
@@ -856,6 +936,17 @@ onMounted(loadDocs);
 .ho-sup-right { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
 .ho-sup-count { font-size: 12px; font-weight: 700; color: #8A7F72; }
 .ho-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B5544; cursor: pointer; }
+.ho-sup-tag {
+  flex: 0 0 auto; padding: 2px 7px; border-radius: 999px;
+  background: #F3ECE2; color: #8A7F72; font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+.ho-sup-del {
+  width: 26px; height: 26px; flex: 0 0 auto; border: 1.5px solid #E4D9CB; border-radius: 8px;
+  background: #fff; color: #8A7F72; font-size: 16px; line-height: 1; cursor: pointer;
+}
+.ho-sup-del:hover { border-color: #E9B4AF; color: #C0392B; background: #FFF1F0; }
+.ho-addsup { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.ho-addsup-input { max-width: 320px; }
 .ho-sup-body { padding: 4px 12px 14px; border-top: 1.5px solid #EFE7DC; background: #fff; }
 .ho-sup-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
