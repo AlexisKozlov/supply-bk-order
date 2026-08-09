@@ -20,7 +20,16 @@
         <div class="rn-photo" v-if="it.photo_url">
           <img :src="it.photo_url" :alt="it.name" loading="lazy" />
         </div>
-        <div class="rn-photo rn-photo-ph" v-else><span>🍔</span></div>
+        <!-- Заглушка вместо фото. Был бургер-эмодзи — он стоял и у бумажных
+             стаканов, и на части телефонов не отображался вовсе. -->
+        <div class="rn-photo rn-photo-ph" v-else title="Фото пока нет">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="14" rx="2.5" />
+            <circle cx="8.5" cy="10" r="1.6" />
+            <path d="m4 17 4.5-4.5 3 3L15 12l5 5" />
+          </svg>
+        </div>
         <div class="rn-body">
           <h3 class="rn-name">{{ title(it) }}</h3>
           <div class="rn-meta">
@@ -72,7 +81,8 @@ function title(it) {
 .rn-card { background: var(--card); border: 1px solid var(--border-light); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
 .rn-photo { width: 100%; aspect-ratio: 16 / 10; background: var(--bg); overflow: hidden; }
 .rn-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.rn-photo-ph { display: flex; align-items: center; justify-content: center; font-size: 48px; opacity: .35; }
+.rn-photo-ph { display: flex; align-items: center; justify-content: center; color: #C8C1B2; }
+.rn-photo-ph svg { width: 34px; height: 34px; }
 .rn-body { padding: 12px 14px 16px; }
 .rn-name { font-size: 15px; font-weight: 800; color: var(--text); margin: 0 0 6px; }
 .rn-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 8px; }

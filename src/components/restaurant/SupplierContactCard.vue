@@ -4,8 +4,8 @@
       <div class="sc-head-main">
         <div class="sc-name">
           <span class="sc-name-text">{{ contact.name || '(без имени)' }}</span>
-          <span v-if="contact.is_primary" class="sc-badge sc-badge--primary" title="Основной контакт">★</span>
-          <button v-if="contact.name" class="sc-copy sc-copy--inline" type="button" :title="copiedKey==='name' ? 'Скопировано' : 'Скопировать имя'" @click="copy('name', contact.name)">{{ copiedKey==='name' ? '✓' : '⧉' }}</button>
+          <span v-if="contact.is_primary" class="sc-badge sc-badge--primary" title="Основной контакт"><svg class="sc-ico" viewBox="0 0 24 24" fill="currentColor"><path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 9.7l5.9-.8Z"/></svg></span>
+          <button v-if="contact.name" class="sc-copy sc-copy--inline" type="button" :title="copiedKey==='name' ? 'Скопировано' : 'Скопировать имя'" @click="copy('name', contact.name)"><span v-if="copiedKey==='name'"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span><span v-else><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></span></button>
         </div>
         <div v-if="contact.role" class="sc-role">{{ contact.role }}</div>
       </div>
@@ -22,38 +22,38 @@
     <div v-if="hasContacts" class="sc-links">
       <div v-for="(p, idx) in phonesList" :key="'p'+idx" class="sc-link sc-link--phone">
         <a class="sc-link-main" :href="`tel:${p.phone}`">
-          <span class="sc-link-ico">📞</span>
+          <span class="sc-link-ico"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3h3l1.5 4-2 1.5a12 12 0 0 0 6.5 6.5L17 13l4 1.5v3a2 2 0 0 1-2.2 2A17 17 0 0 1 4 7.2 2 2 0 0 1 6 5Z"/></svg></span>
           <span class="sc-link-text">{{ formatPhone(p.phone) }}<span v-if="p.label" class="sc-link-label"> · {{ p.label }}</span></span>
         </a>
-        <button class="sc-copy" type="button" :title="copiedKey===('phone'+idx) ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('phone'+idx, p.phone)">{{ copiedKey===('phone'+idx) ? '✓' : '⧉' }}</button>
+        <button class="sc-copy" type="button" :title="copiedKey===('phone'+idx) ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('phone'+idx, p.phone)"><span v-if="copiedKey==='phone'+idx"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span><span v-else><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></span></button>
       </div>
       <div v-if="contact.telegram" class="sc-link sc-link--tg">
         <a class="sc-link-main" :href="telegramUrl" target="_blank" rel="noopener">
-          <span class="sc-link-ico">✈</span>
+          <span class="sc-link-ico"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 4.5 2.5 12l7 2.5 2.5 7Z"/><path d="m9.5 14.5 4-4"/></svg></span>
           <span class="sc-link-text">{{ telegramLabel }}</span>
         </a>
-        <button class="sc-copy" type="button" :title="copiedKey==='telegram' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('telegram', telegramCopyValue)">{{ copiedKey==='telegram' ? '✓' : '⧉' }}</button>
+        <button class="sc-copy" type="button" :title="copiedKey==='telegram' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('telegram', telegramCopyValue)"><span v-if="copiedKey==='telegram'"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span><span v-else><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></span></button>
       </div>
       <div v-if="contact.whatsapp" class="sc-link sc-link--wa">
         <a class="sc-link-main" :href="`https://wa.me/${stripPlus(contact.whatsapp)}`" target="_blank" rel="noopener">
-          <span class="sc-link-ico">💬</span>
+          <span class="sc-link-ico"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12Z"/></svg></span>
           <span class="sc-link-text">WhatsApp · {{ formatPhone(contact.whatsapp) }}</span>
         </a>
-        <button class="sc-copy" type="button" :title="copiedKey==='whatsapp' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('whatsapp', contact.whatsapp)">{{ copiedKey==='whatsapp' ? '✓' : '⧉' }}</button>
+        <button class="sc-copy" type="button" :title="copiedKey==='whatsapp' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('whatsapp', contact.whatsapp)"><span v-if="copiedKey==='whatsapp'"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span><span v-else><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></span></button>
       </div>
       <div v-if="contact.viber" class="sc-link sc-link--vb">
         <a class="sc-link-main" :href="`viber://chat?number=${encodeURIComponent(contact.viber)}`">
-          <span class="sc-link-ico">📲</span>
+          <span class="sc-link-ico"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></span>
           <span class="sc-link-text">Viber · {{ formatPhone(contact.viber) }}</span>
         </a>
-        <button class="sc-copy" type="button" :title="copiedKey==='viber' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('viber', contact.viber)">{{ copiedKey==='viber' ? '✓' : '⧉' }}</button>
+        <button class="sc-copy" type="button" :title="copiedKey==='viber' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('viber', contact.viber)"><span v-if="copiedKey==='viber'"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span><span v-else><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></span></button>
       </div>
       <div v-if="contact.email" class="sc-link sc-link--mail">
         <a class="sc-link-main" :href="`mailto:${contact.email}`">
-          <span class="sc-link-ico">✉</span>
+          <span class="sc-link-ico"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="m3 7 9 6 9-6"/></svg></span>
           <span class="sc-link-text">{{ contact.email }}</span>
         </a>
-        <button class="sc-copy" type="button" :title="copiedKey==='email' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('email', contact.email)">{{ copiedKey==='email' ? '✓' : '⧉' }}</button>
+        <button class="sc-copy" type="button" :title="copiedKey==='email' ? 'Скопировано' : 'Скопировать'" @click.prevent.stop="copy('email', contact.email)"><span v-if="copiedKey==='email'"><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg></span><span v-else><svg class="sc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></span></button>
       </div>
     </div>
 
@@ -240,7 +240,12 @@ function formatPhone(p) {
   min-width: 0;
 }
 .sc-link-main:hover { background: rgba(0,0,0,0.04); }
-.sc-link-ico { width: 20px; text-align: center; flex-shrink: 0; }
+.sc-link-ico { width: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Эмодзи убраны: на части телефонов они не отображались вовсе (пустой
+   квадратик), а вид гулял от устройства к устройству. Линейные значки
+   наследуют цвет строки. */
+.sc-ico { width: 16px; height: 16px; display: block; }
+.sc-badge--primary .sc-ico { width: 12px; height: 12px; }
 .sc-link-text {
   font-weight: 500;
   word-break: break-all;
