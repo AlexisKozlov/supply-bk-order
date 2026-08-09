@@ -2637,9 +2637,13 @@ if (isset($input['callback_query'])) {
         exit;
     }
     // ═══ Камако / поставщики ═══
+    // Метки кнопок стали короткими (см. soCbSup в bot_rest.php), но у кого-то
+    // в чате мог остаться старый длинный вариант — принимаем оба.
     if (preg_match('/^soord_sup_(.+)$/', $data, $m)) {
         answerCallback($cb['id']);
-        soOrderSelectRest($chatId, $msgId, $m[1]);
+        $sid = soCbResolveSup($pdo, $m[1]);
+        if (!$sid) { editMessage($chatId, $msgId, "Поставщик не найден. Откройте меню заново."); exit; }
+        soOrderSelectRest($chatId, $msgId, $sid);
         exit;
     }
     if (preg_match('/^soord_rest_(.+?)_(\d+)$/', $data, $m)) {
@@ -2648,7 +2652,9 @@ if (isset($input['callback_query'])) {
             editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
             exit;
         }
-        soOrderSelectDay($chatId, $msgId, $m[1], $m[2]);
+        $sid = soCbResolveSup($pdo, $m[1]);
+        if (!$sid) { editMessage($chatId, $msgId, "Поставщик не найден. Откройте меню заново."); exit; }
+        soOrderSelectDay($chatId, $msgId, $sid, $m[2]);
         exit;
     }
     if (preg_match('/^soord_day_(.+?)_(\d+)_back$/', $data, $m)) {
@@ -2657,36 +2663,46 @@ if (isset($input['callback_query'])) {
             editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
             exit;
         }
-        soOrderSelectDay($chatId, $msgId, $m[1], $m[2]);
+        $sid = soCbResolveSup($pdo, $m[1]);
+        if (!$sid) { editMessage($chatId, $msgId, "Поставщик не найден. Откройте меню заново."); exit; }
+        soOrderSelectDay($chatId, $msgId, $sid, $m[2]);
         exit;
     }
-    if (preg_match('/^soord_day_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
+    if (preg_match('/^soord_day_(.+?)_(\d+)_(\d{6}|\d{4}-\d{2}-\d{2})$/', $data, $m)) {
         answerCallback($cb['id']);
         if (!botIsSubscribedToRestaurant($pdo, $chatId, $m[2])) {
             editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
             exit;
         }
-        soOrderShowProducts($chatId, $msgId, $m[1], $m[2], $m[3]);
+        $sid = soCbResolveSup($pdo, $m[1]);
+        $dt  = soCbParseDate($m[3]);
+        if (!$sid || !$dt) { editMessage($chatId, $msgId, "Кнопка устарела. Откройте меню заново."); exit; }
+        soOrderShowProducts($chatId, $msgId, $sid, $m[2], $dt);
         exit;
     }
     // Короткий вариант + старый длинный (у кого-то мог остаться в открытом чате).
-    if ($data === 'soord_closed' || preg_match('/^soord_closed_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data)) {
+    if ($data === 'soord_closed' || preg_match('/^soord_closed_(.+?)_(\d+)_(\d{6}|\d{4}-\d{2}-\d{2})$/', $data)) {
         answerCallback($cb['id'], 'Приём заявок на этот день уже завершён', true);
         exit;
     }
     // Поставка не нужна (заявка-отказ)
-    if (preg_match('/^soord_skip_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
+    if (preg_match('/^soord_skip_(.+?)_(\d+)_(\d{6}|\d{4}-\d{2}-\d{2})$/', $data, $m)) {
         answerCallback($cb['id']);
         if (!botIsSubscribedToRestaurant($pdo, $chatId, $m[2])) {
             editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
             exit;
         }
-        soOrderSkipDelivery($chatId, $msgId, $m[1], $m[2], $m[3]);
+        $sid = soCbResolveSup($pdo, $m[1]);
+        $dt  = soCbParseDate($m[3]);
+        if (!$sid || !$dt) { editMessage($chatId, $msgId, "Кнопка устарела. Откройте меню заново."); exit; }
+        soOrderSkipDelivery($chatId, $msgId, $sid, $m[2], $dt);
         exit;
     }
     if (preg_match('/^sohist_sup_(.+)$/', $data, $m)) {
         answerCallback($cb['id']);
-        soShowMyOrders($chatId, $msgId, $m[1]);
+        $sid = soCbResolveSup($pdo, $m[1]);
+        if (!$sid) { editMessage($chatId, $msgId, "Поставщик не найден. Откройте меню заново."); exit; }
+        soShowMyOrders($chatId, $msgId, $sid);
         exit;
     }
     if (preg_match('/^sohist_rest_(.+?)_(\d+)$/', $data, $m)) {
@@ -2697,7 +2713,9 @@ if (isset($input['callback_query'])) {
             editMessage($chatId, $msgId, "⛔ У вас нет доступа к ресторану №{$m[2]}.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
             exit;
         }
-        soShowRestOrders($chatId, $msgId, $m[1], $m[2]);
+        $sid = soCbResolveSup($pdo, $m[1]);
+        if (!$sid) { editMessage($chatId, $msgId, "Поставщик не найден. Откройте меню заново."); exit; }
+        soShowRestOrders($chatId, $msgId, $sid, $m[2]);
         exit;
     }
     if ($data === 'rest_schedule') {

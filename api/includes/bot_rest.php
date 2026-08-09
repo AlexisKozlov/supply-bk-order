@@ -365,7 +365,7 @@ function soBotOrderRows($pdo, $chatId, array $suppliers) {
             $url = soBotGetWebLink($pdo, $chatId, (string)$sup['id'], (string)$rn);
             if (!$url) {
                 // Кабинет недоступен — старый пошаговый путь как запасной.
-                $rows[] = [['text' => $sup['short_name'], 'callback_data' => 'soord_sup_' . substr($sup['id'], 0, 36)]];
+                $rows[] = [['text' => $sup['short_name'], 'callback_data' => 'soord_sup_' . soCbSup($sup['id'])]];
                 break;
             }
             $rows[] = [['text' => $label, 'web_app' => ['url' => $url]]];
@@ -1030,6 +1030,55 @@ function soBotCountAccessibleSoSuppliers($pdo, $chatId) {
 }
 
 // Камако: выбор ресторана
+/* ─── Короткие метки кнопок бота ───────────────────────────────────────────
+ * Telegram даёт на callback_data 64 байта, и это жёсткий предел: при
+ * переполнении он отвергает ВСЮ клавиатуру целиком, а не одну кнопку —
+ * ресторан получает сообщение без единой кнопки и не понимает, что делать.
+ *
+ * Самая длинная метка была 63 байта из 64: id поставщика занимал 36 символов
+ * (UUID), дата — 10. Запаса не оставалось совсем: один лишний символ где
+ * угодно ломал экран.
+ *
+ * Поэтому в метках держим первые 8 символов id (по 95 поставщикам совпадений
+ * нет, проверено) и дату в виде ГГММДД. Стало 31 байт вместо 63.
+ * Разбор принимает и старый длинный формат: у кого-то в чате могли остаться
+ * сообщения со старыми кнопками.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** id поставщика для кнопки: первые 8 символов. */
+function soCbSup($supplierId) {
+    return substr((string)$supplierId, 0, 8);
+}
+
+/** Дата для кнопки: 2026-08-11 → 260811. */
+function soCbDate($date) {
+    $d = (string)$date;
+    return preg_match('/^\d{4}-(\d{2})-(\d{2})$/', $d, $m)
+        ? substr($d, 2, 2) . $m[1] . $m[2]
+        : $d;
+}
+
+/** Обратно: короткий или полный id → полный id поставщика. Null, если не нашли. */
+function soCbResolveSup($pdo, $token) {
+    $token = (string)$token;
+    if ($token === '') return null;
+    if (strlen($token) === 36) return $token;
+    $st = $pdo->prepare("SELECT id FROM suppliers WHERE id LIKE ? LIMIT 2");
+    $st->execute([$token . '%']);
+    $rows = $st->fetchAll(PDO::FETCH_COLUMN);
+    // Два совпадения — это уже не однозначная ссылка, лучше отказать, чем
+    // показать ресторану чужого поставщика.
+    return count($rows) === 1 ? $rows[0] : null;
+}
+
+/** Обратно: 260811 или 2026-08-11 → 2026-08-11. */
+function soCbParseDate($token) {
+    $t = (string)$token;
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $t)) return $t;
+    if (preg_match('/^(\d{2})(\d{2})(\d{2})$/', $t, $m)) return '20' . $m[1] . '-' . $m[2] . '-' . $m[3];
+    return null;
+}
+
 function soOrderSelectRest($chatId, $msgId, $supplierId) {
     global $pdo;
     tgStateClear($chatId, 'restord');
@@ -1071,7 +1120,7 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
     foreach ($subs as $sub) {
         $rn = $sub['restaurant_number'];
         $label = botFormatSubscribedRestaurant($rn, $sub['legal_entity_group']);
-        $btns[] = [['text' => $label, 'callback_data' => "soord_rest_{$supplierId}_{$rn}"]];
+        $btns[] = [['text' => $label, 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $rn]];
     }
     // Если у пользователя только один so-поставщик — Назад ведёт в главное меню,
     // иначе — обратно к выбору поставщика.
@@ -1133,7 +1182,7 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
             // «не нажималось».
             $btns[] = [['text' => $btnLabel, 'callback_data' => 'soord_closed']];
         } else {
-            $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+            $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => 'soord_day_' . soCbSup($supplierId) . '_' . $restNum . '_' . soCbDate($deliveryDate)]];
         }
     }
 
@@ -1173,7 +1222,7 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     $supCount = soBotCountAccessibleSoSuppliers($pdo, $chatId);
     if (count($myRestsForSup) > 1) {
         // Был промежуточный шаг «выбор ресторана» — возвращаемся туда
-        $backCb = "soord_sup_" . substr($supplierId, 0, 36);
+        $backCb = 'soord_sup_' . soCbSup($supplierId);
     } elseif ($supCount > 1) {
         // Был «выбор поставщика»
         $backCb = 'rest_menu_supplier';
@@ -1205,7 +1254,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         return;
     }
     if (!soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate)) {
-        editMessage($chatId, $msgId, "Для этой даты нет настроенной поставки.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        editMessage($chatId, $msgId, "Для этой даты нет настроенной поставки.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $restNum]]]]);
         return;
     }
     $le = $rest['legal_entity'];
@@ -1305,8 +1354,8 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     ], 1800);
 
     $btns = [
-        [['text' => '🚫 Поставка не нужна', 'callback_data' => "soord_skip_{$supplierId}_{$restNum}_{$deliveryDate}"]],
-        [['text' => '◂ Назад', 'callback_data' => "soord_day_{$supplierId}_{$restNum}_back"]],
+        [['text' => '🚫 Поставка не нужна', 'callback_data' => 'soord_skip_' . soCbSup($supplierId) . '_' . $restNum . '_' . soCbDate($deliveryDate)]],
+        [['text' => '◂ Назад', 'callback_data' => 'soord_day_' . soCbSup($supplierId) . '_' . $restNum . '_back']],
     ];
     if ($msgId) editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
     else sendMessage($chatId, $text, ['inline_keyboard' => $btns]);
@@ -1331,18 +1380,18 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $settings = soGetSupplierSettingsBot($pdo, $supplierId);
     if ((int)($settings['is_accepting_orders'] ?? 1) !== 1) {
         $msg = $settings['pause_message'] ?: 'Приём заявок для этого поставщика временно приостановлен.';
-        editMessage($chatId, $msgId, "❌ {$msg}", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        editMessage($chatId, $msgId, "❌ {$msg}", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $restNum]]]]);
         return;
     }
 
     if (!soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate)) {
-        editMessage($chatId, $msgId, "❌ Для ресторана не настроена поставка на эту дату.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        editMessage($chatId, $msgId, "❌ Для ресторана не настроена поставка на эту дату.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $restNum]]]]);
         return;
     }
 
     $dlStatus = soBotCheckDeadline($pdo, $supplierId, $deliveryDate);
     if ($dlStatus['status'] === 'closed') {
-        editMessage($chatId, $msgId, "❌ Приём заявок на эту дату закрыт" . ($dlStatus['deadline'] ? " (дедлайн: {$dlStatus['deadline']})" : '') . ".", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        editMessage($chatId, $msgId, "❌ Приём заявок на эту дату закрыт" . ($dlStatus['deadline'] ? " (дедлайн: {$dlStatus['deadline']})" : '') . ".", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $restNum]]]]);
         return;
     }
     $le = $rest['legal_entity'];
@@ -1366,7 +1415,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
-        editMessage($chatId, $msgId, "❌ Ошибка сохранения: " . soEsc($e->getMessage()), ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        editMessage($chatId, $msgId, "❌ Ошибка сохранения: " . soEsc($e->getMessage()), ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $restNum]]]]);
         return;
     }
 
@@ -1393,7 +1442,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $confirmText .= "<i>Отдел закупок увидит, что на эту дату ваш ресторан ничего не заказывает.</i>";
 
     $btns = ['inline_keyboard' => [
-        [['text' => '📦 К дням поставщика', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]],
+        [['text' => '📦 К дням поставщика', 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $restNum]],
         [['text' => '◂ В меню', 'callback_data' => 'rest_my_subs']],
     ]];
     editMessage($chatId, $msgId, $confirmText, $btns);
@@ -1527,7 +1576,7 @@ function soOrderProcessInput($chatId, $text) {
     foreach ($items as $it) { $confirmText .= "• " . soEsc($it['product_name']) . ": <b>{$it['quantity']}</b>\n"; }
 
     $btns = ['inline_keyboard' => [
-        [['text' => '📦 К заявкам', 'callback_data' => "soord_sup_{$supplierId}"]],
+        [['text' => '📦 К заявкам', 'callback_data' => 'soord_sup_' . soCbSup($supplierId)]],
         [['text' => '◂ В меню', 'callback_data' => 'rest_my_subs']],
     ]];
     restNotifySubscribers($pdo, $GLOBALS['BOT_TOKEN'] ?? '', $restNum, $confirmText, $btns);
@@ -1580,7 +1629,7 @@ function soShowMyOrders($chatId, $msgId, $supplierId) {
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
         $prettyRest = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
-        $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}", 'callback_data' => "sohist_rest_{$supplierId}_{$sub['restaurant_number']}"]];
+        $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}", 'callback_data' => 'sohist_rest_' . soCbSup($supplierId) . '_' . $sub['restaurant_number']]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -1696,7 +1745,7 @@ function soShowRestOrders($chatId, $msgId, $supplierId, $restNum) {
     $menuBackCallback = 'rest_menu_supplier';
     $backCallback = $subsCount > 1 ? "sohist_sup_{$supplierId}" : $menuBackCallback;
     $btns = [
-        [['text' => '📝 Подать или изменить заявку', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]],
+        [['text' => '📝 Подать или изменить заявку', 'callback_data' => 'soord_rest_' . soCbSup($supplierId) . '_' . $restNum]],
         [['text' => '◂ Назад', 'callback_data' => $backCallback]],
     ];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
