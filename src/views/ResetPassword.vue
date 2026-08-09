@@ -31,7 +31,19 @@
                 :disabled="loading"
               />
               <button type="button" class="ro-toggle-pass" @click="showPassword = !showPassword" tabindex="-1">
-                {{ showPassword ? '🙈' : '👁' }}
+                <svg class="pw-eye-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <template v-if="showPassword">
+                      <path d="M3 3 21 21" />
+                      <path d="M10.6 6.2A9.6 9.6 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.8" />
+                      <path d="M6.6 8.3A16 16 0 0 0 2.5 12S6 18 12 18c1.5 0 2.8-.4 4-.9" />
+                      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+                    </template>
+                    <template v-else>
+                      <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </template>
+                  </svg>
               </button>
             </div>
           </div>
@@ -364,4 +376,6 @@ async function handleReset() {
   color: #502314;
   text-decoration: underline;
 }
+
+.pw-eye-ico { width: 20px; height: 20px; display: block; margin: 0 auto; }
 </style>

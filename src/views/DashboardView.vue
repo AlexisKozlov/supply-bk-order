@@ -36,7 +36,7 @@
           :class="{ 'dash-kpi-link': kpi.link }"
         >
           <div class="dash-kpi-top">
-            <span class="dash-kpi-icon">{{ kpi.icon }}</span>
+            <span class="dash-kpi-icon"><BkIcon :name="kpi.icon" size="md" /></span>
             <span v-if="kpi.delta" class="dash-kpi-delta" :class="kpi.delta > 0 ? 'up' : 'down'">
               {{ kpi.delta > 0 ? '+' : '' }}{{ kpi.delta }}%
             </span>
@@ -66,7 +66,7 @@
 
           <!-- Просроченные поставки -->
           <div class="dash-card" v-if="data.overdueOrders?.length">
-            <div class="dash-card-title">⚠️ Просроченные поставки</div>
+            <div class="dash-card-title"><BkIcon name="warning" size="sm" /> Просроченные поставки</div>
             <div class="dash-overdue-list">
               <div v-for="o in data.overdueOrders" :key="o.id" class="dash-overdue-item">
                 <strong>{{ o.supplier }}</strong>
@@ -81,7 +81,7 @@
         <div class="dash-col">
           <!-- Предстоящие оплаты -->
           <div class="dash-card" v-if="data.upcomingPayments?.length">
-            <div class="dash-card-title">💳 Ближайшие оплаты</div>
+            <div class="dash-card-title"><BkIcon name="payments" size="sm" /> Ближайшие оплаты</div>
             <div class="dash-pay-list">
               <div v-for="p in data.upcomingPayments" :key="p.id" class="dash-pay-item">
                 <strong>{{ p.supplier }}</strong>
@@ -93,7 +93,7 @@
 
           <!-- Активность -->
           <div class="dash-card">
-            <div class="dash-card-title">📊 Активность</div>
+            <div class="dash-card-title"><BkIcon name="analytics" size="sm" /> Активность</div>
             <div class="dash-stats">
               <div class="dash-stat-row"><span>Корректировки ожидают</span><strong>{{ data.correctionsPending }}</strong></div>
               <div class="dash-stat-row"><span>Сообщений в чате</span><strong>{{ data.chatUnread }}</strong></div>
@@ -110,7 +110,7 @@
         <!-- Критичные запасы -->
         <div class="dash-col">
           <div class="dash-card">
-            <div class="dash-card-title">🔴 Критичные запасы (менее 5 дней)</div>
+            <div class="dash-card-title"><BkIcon name="warning" size="sm" /> Критичные запасы (менее 5 дней)</div>
             <div v-if="criticalStock.length" class="dash-crit-list">
               <div v-for="s in criticalStock.slice(0, 10)" :key="s.analog_group" class="dash-crit-item">
                 <span class="dash-crit-name">{{ s.analog_group }}</span>
@@ -123,7 +123,7 @@
 
           <!-- Задачи из протоколов -->
           <div class="dash-card">
-            <div class="dash-card-title">📋 Задачи из протоколов</div>
+            <div class="dash-card-title"><svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h4"/></svg> Задачи из протоколов</div>
             <div v-if="pendingTasks.length" class="dash-tasks-list">
               <div v-for="t in pendingTasks.slice(0, 8)" :key="t.id" class="dash-task-item" :class="{ overdue: t.status === 'overdue' || (t.deadline && t.deadline < todayStr) }">
                 <div class="dash-task-text">{{ t.text }}</div>
@@ -140,7 +140,7 @@
         <!-- Активность команды -->
         <div class="dash-col">
           <div class="dash-card">
-            <div class="dash-card-title">👥 Активность команды</div>
+            <div class="dash-card-title"><BkIcon name="user" size="sm" /> Активность команды</div>
             <div v-if="teamActivity.length" class="dash-activity-list">
               <div v-for="a in teamActivity" :key="a.created_at" class="dash-activity-item">
                 <div class="dash-activity-dot"></div>
@@ -163,6 +163,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
+import BkIcon from '@/components/ui/BkIcon.vue'
 import { activityLabel } from '@/lib/auditActions.js'
 import { useUserStore } from '@/stores/userStore.js'
 import AttentionBlock from '@/components/dashboard/AttentionBlock.vue'
@@ -183,12 +184,12 @@ const topKpis = computed(() => {
   const d = data.value
   const showPricing = userStore.hasAccess('pricing', 'view')
   return [
-    { icon: '📦', value: d.ordersCount || 0, label: 'Заказов', delta: d.ordersDelta },
-    ...(showPricing ? [{ icon: '💰', value: fmtK(d.totalAmount), label: 'Сумма закупок (BYN)', delta: d.amountDelta }] : []),
-    { icon: '🚚', value: (d.deliveredPct || 0) + '%', label: 'Выполнение поставок', delta: null },
-    { icon: '⚠️', value: d.overdueCount || 0, label: 'Просроченные', delta: null, link: '/plan-fact' },
-    { icon: '📉', value: d.lowStockCount || 0, label: 'Низкий запас', delta: null, link: '/analysis' },
-    { icon: '💳', value: d.paymentsUpcoming || 0, label: 'Оплаты', delta: null, link: '/payments' },
+    { icon: 'package', value: d.ordersCount || 0, label: 'Заказов', delta: d.ordersDelta },
+    ...(showPricing ? [{ icon: 'payments', value: fmtK(d.totalAmount), label: 'Сумма закупок (BYN)', delta: d.amountDelta }] : []),
+    { icon: 'delivery', value: (d.deliveredPct || 0) + '%', label: 'Выполнение поставок', delta: null },
+    { icon: 'warning', value: d.overdueCount || 0, label: 'Просроченные', delta: null, link: '/plan-fact' },
+    { icon: 'chartDown', value: d.lowStockCount || 0, label: 'Низкий запас', delta: null, link: '/analysis' },
+    { icon: 'payments', value: d.paymentsUpcoming || 0, label: 'Оплаты', delta: null, link: '/payments' },
   ]
 })
 
@@ -296,7 +297,10 @@ onMounted(() => {
 .dash-kpi-link { cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
 .dash-kpi-link:hover { border-color: var(--bk-brown); transform: translateY(-1px); }
 .dash-kpi-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.dash-kpi-icon { font-size: 20px; }
+.dash-kpi-icon { display: inline-flex; align-items: center; }
+/* Были эмодзи. Их рисует система устройства, и на части телефонов вместо
+   значка пустой квадрат — поймано на вкладке «Накладные». */
+.dash-card-title svg { vertical-align: -3px; margin-right: 2px; }
 .dash-kpi-delta { font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 8px; }
 .dash-kpi-delta.up { color: #2E7D32; background: #E8F5E9; }
 .dash-kpi-delta.down { color: #C62828; background: #FFEBEE; }
@@ -377,4 +381,8 @@ onMounted(() => {
 
 .data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
 .data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
+
+/* Значок вместо эмодзи: эмодзи рисует система, и на части устройств
+   вместо него пустой квадрат (поймано на вкладке «Накладные»). */
+.ico-inline { width: 15px; height: 15px; vertical-align: -2px; flex: 0 0 auto; }
 </style>

@@ -61,7 +61,7 @@
           <div v-if="selectedConv.status === 'open'" class="chat-input-area">
             <input v-model="inputText" class="chat-input" placeholder="Написать ответ..." @keydown.enter="sendMessage" />
             <label class="chat-photo-btn" title="Отправить фото">
-              📷
+              <svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8Z"/><circle cx="12" cy="13" r="3.2"/></svg>
               <input type="file" accept="image/*" style="display:none" @change="sendPhoto" />
             </label>
             <button class="chat-send-btn" :disabled="!inputText.trim() && !uploading" @click="sendMessage">{{ uploading ? '...' : '➤' }}</button>
@@ -336,4 +336,8 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   .chat-msg-photo img { max-width: 200px; max-height: 200px; }
   .chat-sidebar-header h2 { font-size: 14px; }
 }
+
+/* Значок вместо эмодзи: эмодзи рисует система, и на части устройств
+   вместо него пустой квадрат (поймано на вкладке «Накладные»). */
+.ico-inline { width: 15px; height: 15px; vertical-align: -2px; flex: 0 0 auto; }
 </style>

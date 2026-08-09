@@ -20,7 +20,7 @@
             Принятые
           </button>
           <button class="pf-tab" :class="{ active: tab === 'invoices' }" @click="tab = 'invoices'">
-            📷 Накладные
+            <svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8Z"/><circle cx="12" cy="13" r="3.2"/></svg> Накладные
           </button>
         </div>
         <div class="pf-filter">
@@ -65,7 +65,7 @@
 
       <div v-if="invoiceRows.length" class="pf-invoice-result">
         <div class="pf-invoice-actions">
-          <button class="btn" @click="copyInvoiceRows">📋 Скопировать ({{ invoiceRows.length }} строк)</button>
+          <button class="btn" @click="copyInvoiceRows"><svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h4"/></svg> Скопировать ({{ invoiceRows.length }} строк)</button>
           <button class="btn ghost" @click="clearInvoice">🗑 Очистить</button>
           <span v-if="invoiceCopied" class="pf-invoice-copied">✓ скопировано</span>
         </div>
@@ -1293,4 +1293,8 @@ input.pf-invoice-cell.pf-invoice-num { text-align: right; }
   margin-top: 12px; color: var(--text-muted, #777); font-size: 12px;
 }
 .pf-invoice-hint code { background: #f4f4f4; padding: 1px 5px; border-radius: 3px; }
+
+/* Значок вместо эмодзи: эмодзи рисует система, и на части устройств
+   вместо него пустой квадрат (поймано на вкладке «Накладные»). */
+.ico-inline { width: 15px; height: 15px; vertical-align: -2px; flex: 0 0 auto; }
 </style>

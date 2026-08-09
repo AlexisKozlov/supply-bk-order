@@ -131,7 +131,7 @@
         <span class="anv-tab-dot" style="background:#757575"></span> Мёртвый <span v-if="statusCounts.dead" class="anv-tab-cnt anv-tab-cnt-dead">{{ statusCounts.dead }}</span>
       </button>
       <button v-if="hiddenAnalogs.length" class="anv-tab" :class="{ active: showHidden }" @click="showHidden = !showHidden" style="margin-left:auto;">
-        👁 Скрытые <span class="anv-tab-cnt">{{ hiddenAnalogs.length }}</span>
+        <svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="3"/></svg> Скрытые <span class="anv-tab-cnt">{{ hiddenAnalogs.length }}</span>
       </button>
     </div>
 
@@ -1804,4 +1804,8 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 
 .data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
 .data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
+
+/* Значок вместо эмодзи: эмодзи рисует система, и на части устройств
+   вместо него пустой квадрат (поймано на вкладке «Накладные»). */
+.ico-inline { width: 15px; height: 15px; vertical-align: -2px; flex: 0 0 auto; }
 </style>

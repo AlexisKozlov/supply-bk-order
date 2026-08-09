@@ -187,7 +187,7 @@
       </div>
 
       <div v-if="sessionData && !sessionProducts.length" class="dist-empty">
-        <div class="dist-empty-icon">📋</div>
+        <div class="dist-empty-icon"><svg class="ico-inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h4"/></svg></div>
         <div class="dist-empty-text">Нет товаров</div>
         <div class="dist-empty-sub">Добавьте товары в сессию</div>
       </div>
@@ -1081,6 +1081,10 @@ code { background: #fdfbf8; padding: 1px 5px; border-radius: 3px; font-size: 0.9
   .dist-modal { padding: 18px 14px; width: 95vw; }
   .dist-modal.sm { width: 90vw; }
 }
+
+/* Значок вместо эмодзи: эмодзи рисует система, и на части устройств
+   вместо него пустой квадрат (поймано на вкладке «Накладные»). */
+.ico-inline { width: 15px; height: 15px; vertical-align: -2px; flex: 0 0 auto; }
 </style>
 
 <style>
