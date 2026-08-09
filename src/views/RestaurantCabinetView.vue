@@ -358,7 +358,13 @@
               </div>
               <span v-if="!latestImportantPost.is_read" class="info-unread">Новое</span>
             </div>
-            <div class="dash-important-msg ro-post-body" v-html="renderPostMessage(latestImportantPost.message)"></div>
+            <!-- Объявление сворачиваем: развёрнутый текст занимал больше трети
+                 всей страницы на телефоне и отодвигал вниз всё остальное. -->
+            <div class="dash-important-msg ro-post-body" :class="{ 'is-clamped': !importantExpanded }"
+                 v-html="renderPostMessage(latestImportantPost.message)"></div>
+            <button class="dash-important-more" @click="importantExpanded = !importantExpanded">
+              {{ importantExpanded ? 'Свернуть' : 'Читать полностью' }}
+            </button>
             <div v-if="latestImportantPost.files?.length" class="info-attachments">
               <button
                 v-for="file in latestImportantPost.files"
@@ -1763,6 +1769,8 @@ const importantLoading = ref(false);
 const importantPreviewUrls = reactive({});
 const importantImagePreview = reactive({ show: false, url: '', name: '' });
 const latestImportantPost = computed(() => importantPosts.value[0] || null);
+// Объявление показываем свёрнутым: полный текст занимал больше трети экрана.
+const importantExpanded = ref(false);
 const currentImportantPost = computed(() => importantPosts.value.find(p => !p.is_read && Number(p.show_popup || 0) === 1) || null);
 let cabinetBackgroundRunId = 0;
 const stockDirty = computed(() => {
@@ -4293,12 +4301,15 @@ onUnmounted(() => {
 .dash-wrap .dash-actions,
 .dash-wrap .dash-important,
 .dash-wrap .dash-recent { margin-bottom: 0; }
-/* Порядок на мобилке: срочные → сводка → действия → важное → последние */
+/* Порядок на мобилке: срочные → сводка → сервисы → действия → важное → последние.
+   У «Сервисов» порядок не был задан вовсе, поэтому десять плиток уезжали
+   ВЫШЕ срочных карточек: рутина оказывалась над «3 дня без заявки». */
 .dash-wrap .dash-urgent { order: 1; }
 .dash-wrap .dash-grid { order: 2; }
-.dash-wrap .dash-actions { order: 3; }
-.dash-wrap .dash-important { order: 4; }
-.dash-wrap .dash-recent { order: 5; }
+.dash-wrap .dash-services { order: 3; }
+.dash-wrap .dash-actions { order: 4; }
+.dash-wrap .dash-important { order: 5; }
+.dash-wrap .dash-recent { order: 6; }
 
 /* PWA push онбординг */
 .dash-push-onboard {
@@ -4352,6 +4363,7 @@ onUnmounted(() => {
   .dash-col-main, .dash-col-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
   .dash-wrap .dash-urgent,
   .dash-wrap .dash-grid,
+  .dash-wrap .dash-services,
   .dash-wrap .dash-actions,
   .dash-wrap .dash-important,
   .dash-wrap .dash-recent { order: initial; }
@@ -4483,6 +4495,19 @@ onUnmounted(() => {
 .sb-item-link { text-decoration: none; }
 .sb-ext { margin-left: auto; width: 16px; height: 16px; color: #b08a70; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
+.dash-important-msg.is-clamped {
+  max-height: 132px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 62%, transparent 100%);
+}
+.dash-important-more {
+  margin-top: 8px; padding: 0;
+  background: none; border: none;
+  color: #C1502E; font-family: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer;
+}
+.dash-important-more:hover { text-decoration: underline; }
 .dash-important {
   background: white; border: 1px solid #EDE8E3; border-radius: 16px; padding: 16px 18px; margin-bottom: 20px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
@@ -5509,7 +5534,11 @@ tr.del-err { background: #fef2f2; }
   .stock-qty-input { width: auto !important; }
 
   /* Dashboard */
-  .dash-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Три плитки в ряд, а не две: третья висела половинкой с дырой рядом.
+     Правило живёт здесь, ниже по файлу оно перебивало вариант выше. */
+  .dash-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .dash-stat { padding: 14px 6px; }
+  .dash-stat-label { font-size: 9px; letter-spacing: .02em; }
   .dash-action-grid { grid-template-columns: repeat(2, 1fr); }
 
   /* Order sub-tabs */
