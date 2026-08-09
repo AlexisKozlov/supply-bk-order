@@ -4,35 +4,42 @@
       <div class="na-art" aria-hidden="true">
         <!-- Плоская бренд-иллюстрация: бургер и замок-бейдж.
              Без обводок и градиентов — так рисует сам бренд. -->
-        <svg class="na-burger" viewBox="0 0 200 186" xmlns="http://www.w3.org/2000/svg">
+        <!-- Порядок слоёв снизу вверх, как в реальном бургере. Котлета
+             нарисована ДО сыра: так уголки сыра свисают поверх неё и слой
+             читается сыром, а не непонятной жёлтой полосой. -->
+        <svg class="na-burger" viewBox="0 0 200 196" xmlns="http://www.w3.org/2000/svg">
           <!-- верхняя булка -->
-          <path d="M18 96A82 60 0 0 1 182 96Z" fill="var(--bk-bun)" />
-          <ellipse cx="72" cy="66" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(-14 72 66)" />
-          <ellipse cx="102" cy="55" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(6 102 55)" />
-          <ellipse cx="132" cy="68" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(16 132 68)" />
-          <ellipse cx="88" cy="80" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(-6 88 80)" />
-          <ellipse cx="118" cy="81" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(10 118 81)" />
+          <path d="M18 92A82 58 0 0 1 182 92Z" fill="var(--bk-bun)" />
+          <ellipse cx="72" cy="62" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(-14 72 62)" />
+          <ellipse cx="102" cy="51" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(6 102 51)" />
+          <ellipse cx="132" cy="64" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(16 132 64)" />
+          <ellipse cx="88" cy="76" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(-6 88 76)" />
+          <ellipse cx="118" cy="77" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(10 118 77)" />
 
           <!-- салат -->
-          <path d="M16 100c8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0v10H16Z"
+          <path d="M16 96c8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0v10H16Z"
                 fill="var(--bk-green)" />
 
-          <!-- сыр -->
-          <path d="M26 110h148v10l-16 16-14-10-16 12-16-12-14 10-16-16Z" fill="var(--bk-yellow)" />
+          <!-- помидор -->
+          <rect x="24" y="106" width="152" height="16" rx="8" fill="var(--bk-red)" />
 
           <!-- котлета -->
-          <rect x="18" y="126" width="164" height="24" rx="12" fill="var(--bk-brown)" />
+          <rect x="18" y="136" width="164" height="26" rx="13" fill="var(--bk-brown)" />
+
+          <!-- сыр: полоса плюс свисающие уголки поверх котлеты -->
+          <path d="M28 122h144v8l-15 17-15-12-15 15-15-15-15 12-15-17Z" fill="var(--bk-yellow)" />
 
           <!-- нижняя булка -->
-          <path d="M26 152h148v10c0 8-6 14-14 14H40c-8 0-14-6-14-14Z" fill="var(--bk-bun)" />
+          <path d="M26 162h148v12c0 8-6 14-14 14H40c-8 0-14-6-14-14Z" fill="var(--bk-bun)" />
 
-          <!-- замок-бейдж -->
-          <circle cx="160" cy="42" r="34" fill="var(--bk-red)" />
-          <path d="M150 36v-6a10 10 0 0 1 20 0v6" fill="none" stroke="var(--bk-cream)"
-                stroke-width="6.5" stroke-linecap="round" />
-          <rect x="145" y="36" width="30" height="24" rx="6" fill="var(--bk-cream)" />
-          <circle cx="160" cy="46" r="4" fill="var(--bk-red)" />
-          <path d="M160 49.5 157.5 57h5Z" fill="var(--bk-red)" />
+          <!-- замок-бейдж; кремовое кольцо отделяет его от булки -->
+          <circle cx="162" cy="42" r="38" fill="var(--bk-cream)" />
+          <circle cx="162" cy="42" r="32" fill="var(--bk-red)" />
+          <path d="M153 37v-6a9 9 0 0 1 18 0v6" fill="none" stroke="var(--bk-cream)"
+                stroke-width="6" stroke-linecap="round" />
+          <rect x="148" y="37" width="28" height="23" rx="6" fill="var(--bk-cream)" />
+          <circle cx="162" cy="46" r="3.8" fill="var(--bk-red)" />
+          <path d="M162 49.4 159.6 56.5h4.8Z" fill="var(--bk-red)" />
         </svg>
       </div>
 
