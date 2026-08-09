@@ -124,12 +124,17 @@
     <Teleport to="body">
       <div v-if="showLoginModal" class="login-overlay">
         <div class="login-card">
+          <!-- Левая панель была пустой коричневой заливкой. Бургер — тот же,
+               что на страницах состояний: один кадр из ролика с вырезанным
+               фоном, поэтому окно входа и остальной портал смотрятся одним
+               продуктом. -->
           <div class="login-left">
             <div class="login-brand">
               <span class="login-brand-icon"><SupplyLogo :size="40"/></span>
               <div class="login-brand-title">Supply Department</div>
               <div class="login-brand-sub">Портал закупок</div>
             </div>
+            <img class="login-burger" src="/login-burger.png" alt="" />
           </div>
           <div class="login-right">
             <button class="login-close" @click="showLoginModal = false"><BkIcon name="close" size="xs"/></button>
@@ -594,15 +599,27 @@ function confirmLogout() {
 
 /* Login modal */
 .login-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.65); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; }
-.login-card { display: flex; width: 620px; max-width: 95vw; border-radius: 16px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.4); }
-.login-left { width: 200px; flex-shrink: 0; background: linear-gradient(160deg, #502314, #3A1A0C); display: flex; align-items: center; justify-content: center; padding: 32px 16px; }
+.login-card { display: flex; width: 660px; max-width: 95vw; border-radius: 22px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.4); }
+.login-left {
+  width: 230px; flex-shrink: 0;
+  background: linear-gradient(160deg, var(--brand-brown), #3A1A0C);
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding: 30px 16px 0; position: relative; overflow: hidden;
+}
+/* Бургер подпирает нижний край панели и слегка выходит за него — так он
+   читается как часть фона, а не как приклеенная картинка. */
+.login-burger { width: 210px; margin: auto -14px 0; display: block; }
 .login-brand { text-align: center; }
 .login-brand-icon { font-size: 36px; display: block; margin-bottom: 10px; }
-.login-brand-title { font-size: 18px; font-weight: 400; color: #F5E6D0; font-family: 'Flame', 'Sora', sans-serif; }
+.login-brand-title { font-size: 20px; font-weight: 400; color: var(--brand-cream); font-family: 'Flame', 'Sora', sans-serif; }
 .login-brand-sub { font-size: 9px; font-weight: 700; color: rgba(244,162,97,.5); text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
-.login-right { flex: 1; background: #FFFBF5; padding: 32px; position: relative; }
+.login-right { flex: 1; background: var(--brand-cream); padding: 32px; position: relative; }
 .login-close { position: absolute; top: 12px; right: 14px; background: none; border: none; font-size: 18px; color: #A08870; cursor: pointer; }
-.login-form-title { font-size: 18px; font-weight: 800; color: #502314; margin-bottom: 10px; }
+.login-form-title {
+  font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
+  font-size: 24px; font-weight: 700; text-transform: uppercase;
+  color: var(--brand-brown); margin-bottom: 6px; line-height: 1.1;
+}
 .login-mode-tabs { display: flex; gap: 0; margin-bottom: 16px; border-radius: 10px; overflow: hidden; border: 1.5px solid #E8DDD0; }
 .login-mode-tab { flex: 1; padding: 9px 0; border: none; background: #FFFBF5; color: #8B7355; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
 .login-mode-tab.active { background: #502314; color: #F5E6D0; }
@@ -610,12 +627,12 @@ function confirmLogout() {
 .login-form-sub { font-size: 12px; color: #A08870; margin-bottom: 16px; }
 .login-field { margin-bottom: 12px; }
 .login-field label { display: block; font-size: 10px; font-weight: 700; color: #8B7355; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 4px; }
-.login-field select, .login-field input { width: 100%; padding: 10px 12px; border: 1.5px solid #E8DDD0; border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; }
-.login-field select:focus, .login-field input:focus { border-color: #E76F51; outline: none; }
+.login-field select, .login-field input { width: 100%; padding: 12px 14px; border: 1.5px solid #E0D2BE; border-radius: 12px; font-size: 14px; font-family: inherit; background: #fff; }
+.login-field select:focus, .login-field input:focus { border-color: var(--brand-red); outline: none; box-shadow: var(--tk-focus-ring); }
 .login-field input[type="number"] { -moz-appearance: textfield; }
 .login-field input[type="number"]::-webkit-inner-spin-button,
 .login-field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.login-error { color: #E76F51; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.login-error { color: var(--brand-red); font-size: 13px; font-weight: 700; margin-bottom: 8px; }
 .login-forgot-row { display: flex; justify-content: flex-end; margin: -6px 0 10px; }
 .login-ro-hint {
   margin-top: 14px;
@@ -633,8 +650,12 @@ function confirmLogout() {
 .login-consent input { width: 15px; height: 15px; margin-top: 1px; accent-color: #E76F51; flex-shrink: 0; }
 .login-consent a { color: #B52200; font-weight: 700; text-decoration: none; }
 .login-consent a:hover { text-decoration: underline; }
-.login-submit { width: 100%; padding: 11px; border: none; border-radius: 10px; background: #E76F51; color: #fff; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
-.login-submit:hover { background: #B52200; }
+.login-submit {
+  width: 100%; min-height: 48px; padding: 13px; border: none;
+  border-radius: 999px; background: var(--brand-red); color: var(--brand-cream);
+  font-size: 16px; font-weight: 600; font-family: inherit; cursor: pointer; transition: .2s;
+}
+.login-submit:hover { background: var(--brand-brown); }
 .login-submit:disabled { opacity: .5; cursor: default; }
 @media (max-width: 600px) { .login-left { display: none; } }
 
