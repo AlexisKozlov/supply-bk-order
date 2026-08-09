@@ -6,6 +6,9 @@
  * ждём, что на контроле. Приходы и позиции заказов портал подтягивает сам
  * из таблицы orders за период, остальное сотрудник дописывает руками.
  *
+ * Приходы берём только свои — заказы, которые завёл автор документа
+ * (orders.created_by). Иначе в передачу дел попадали все поставки отдела.
+ *
  * Снимок, а не «живая» выборка: собранные заявки сохраняются в
  * handover_suppliers.orders_json. Иначе документ, отданный коллегам,
  * менялся бы задним числом при каждой правке заказа.
@@ -132,17 +135,28 @@ function hoFormatQty(array $item) {
 /**
  * Собирает приходы за период: заказы закупки, сгруппированные по поставщику.
  * Юрлица берём у автора документа — чужие данные в документ не попадают.
+ *
+ * Приходы — только свои: берём заказы, которые завёл сам автор документа
+ * (orders.created_by). Раньше в документ падали все поставки отдела за период,
+ * и человек получал список чужих приходов вперемешку со своими.
+ *
+ * $author пустой — фильтр не применяем: у старых документов автора могло не
+ * быть, и молча обнулять им список приходов нельзя.
  */
-function hoCollectOrders($pdo, $from, $to, array $entities) {
+function hoCollectOrders($pdo, $from, $to, array $entities, $author = '') {
     if (!$entities) return [];
     $ph = implode(',', array_fill(0, count($entities), '?'));
+    $author = trim((string)$author);
+    $byAuthor = $author !== '' ? ' AND created_by = ?' : '';
     $s = $pdo->prepare("
         SELECT id, supplier, delivery_date, legal_entity, note
         FROM orders
         WHERE delivery_date BETWEEN ? AND ?
-          AND legal_entity IN ($ph)
+          AND legal_entity IN ($ph)$byAuthor
         ORDER BY supplier, delivery_date");
-    $s->execute(array_merge([$from, $to], $entities));
+    $params = array_merge([$from, $to], $entities);
+    if ($author !== '') $params[] = $author;
+    $s->execute($params);
     $orders = $s->fetchAll();
     if (!$orders) return [];
 
@@ -200,7 +214,7 @@ function hoSupplierContacts($pdo, $supplierName) {
 /** Заполняет документ снимком приходов. Ручные примечания сохраняются. */
 function hoRebuildSuppliers($pdo, array $doc) {
     $entities = json_decode((string)($doc['legal_entities'] ?? ''), true) ?: [];
-    $collected = hoCollectOrders($pdo, $doc['date_from'], $doc['date_to'], $entities);
+    $collected = hoCollectOrders($pdo, $doc['date_from'], $doc['date_to'], $entities, $doc['author_login'] ?? '');
 
     $s = $pdo->prepare("SELECT * FROM handover_suppliers WHERE doc_id = ?");
     $s->execute([(int)$doc['id']]);
@@ -252,7 +266,7 @@ function hoRebuildSuppliers($pdo, array $doc) {
  */
 function hoSuppliersStale($pdo, array $doc, array $stored): bool {
     $entities = json_decode((string)($doc['legal_entities'] ?? ''), true) ?: [];
-    $fresh = hoCollectOrders($pdo, $doc['date_from'], $doc['date_to'], $entities);
+    $fresh = hoCollectOrders($pdo, $doc['date_from'], $doc['date_to'], $entities, $doc['author_login'] ?? '');
 
     $shape = function (array $bySupplier): array {
         $out = [];
