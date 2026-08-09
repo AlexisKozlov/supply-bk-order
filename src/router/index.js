@@ -76,6 +76,8 @@ const routes = [
       { path: 'keg-returns', name: 'keg-returns', component: () => import('@/views/KegReturnsView.vue'), meta: { title: 'Возврат кег', module: 'keg-returns' } },
       { path: 'keg-returns/schedule', name: 'keg-returns-schedule', component: () => import('@/views/KegReturnsScheduleView.vue'), meta: { title: 'График возврата кег', module: 'keg-returns' } },
       { path: 'tit-requests', name: 'tit-requests', component: () => import('@/views/TitRequestsView.vue'), meta: { title: 'Заявка на пропуск', module: 'tit-requests' } },
+      // Без module в meta — иначе страница отказа сама себя запретила бы.
+      { path: 'no-access', name: 'no-access', component: () => import('@/views/NoAccessView.vue'), meta: { title: 'Нет доступа' } },
     ],
   },
   {
@@ -261,8 +263,6 @@ router.afterEach((to) => {
   syncPwaIdentity(to.path);
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'supplier-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading', 'tasks', 'supply-assistant', 'handover', 'own-production'];
-
 router.beforeEach(async (to) => {
   const userStore = useUserStore();
   // Ждём первое восстановление сессии. Это надёжнее, чем гонка между
@@ -318,14 +318,14 @@ router.beforeEach(async (to) => {
       return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
     }
   }
+  // Нет прав — говорим об этом прямо. Раньше человека молча уносило на первый
+  // доступный раздел: он жал ссылку из чата и оказывался на «Новом заказе»,
+  // не понимая, портал сломался или так задумано.
   if (to.meta.requiresAdmin && userStore.currentUser?.role !== 'admin') {
-    const first = NAV_MODULES.find(m => userStore.hasAccess(m, 'view'));
-    return first ? { name: first } : { name: 'home' };
+    return { name: 'no-access', query: { section: 'admin' } };
   }
   // Модульная проверка прав
   if (to.meta.module && !userStore.hasAccess(to.meta.module, 'view')) {
-    // Редирект на первый доступный модуль
-    const first = NAV_MODULES.find(m => userStore.hasAccess(m, 'view'));
-    return first ? { name: first } : { name: 'home' };
+    return { name: 'no-access', query: { section: to.meta.module } };
   }
 });

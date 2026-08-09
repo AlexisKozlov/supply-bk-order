@@ -108,6 +108,7 @@ export const PAGE_NAMES = ALL_NAV_ITEMS.reduce((acc, item) => {
   'marketing-new': 'Новая активность',
   'marketing-detail': 'Маркетинговая активность',
   'protocol-detail': 'Протокол',
+  'no-access': 'Нет доступа',
 });
 
 // Иконка обязана быть уникальной — одинаковые значки у разных разделов
