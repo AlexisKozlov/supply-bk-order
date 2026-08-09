@@ -116,13 +116,18 @@
           </div>
         </div>
       </section>
-      <div v-if="!filteredGroups.length && !filteredUngrouped.length" class="alg-empty">Ничего не найдено</div>
+      <UiEmptyState v-if="!filteredGroups.length && !filteredUngrouped.length"
+                    title="Ничего не нашлось"
+                    description="Аналоги — это товары, которыми можно заменить друг друга. Проверьте фильтры или заведите группу в карточке товара.">
+        <template #icon><BkIcon name="copy" size="lg" /></template>
+      </UiEmptyState>
     </template>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';

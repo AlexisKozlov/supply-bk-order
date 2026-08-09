@@ -15,7 +15,11 @@
     </div>
 
     <div v-if="loading" class="cl-loading"><BurgerSpinner text="Загрузка..." /></div>
-    <div v-else-if="!links.length" class="cl-empty">Ссылок для этого юрлица пока нет.</div>
+    <UiEmptyState v-else-if="!links.length"
+                  title="Ссылок пока нет"
+                  description="Здесь задаются кнопки, которые ресторан видит у себя в кабинете — например заказ воды или салатов. Добавьте первую.">
+      <template #icon><BkIcon name="link" size="lg" /></template>
+    </UiEmptyState>
     <div v-else class="cl-list">
       <div v-for="l in links" :key="l.id" class="cl-row" :class="{ 'cl-row-off': !l.is_active }">
         <span class="cl-row-icon" :style="supplierIconStyle(l.icon_key)" v-html="trustedSupplierIcon(l.icon_key)"></span>
@@ -106,6 +110,8 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';

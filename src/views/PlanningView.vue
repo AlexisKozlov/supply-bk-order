@@ -159,9 +159,17 @@
     <!-- Таблица -->
     <div v-if="viewOnly && editingPlanId && !showFullPlan && items.length"></div>
     <div v-else-if="isViewer && !viewOnly && !editingPlanId"></div>
-    <div v-else-if="!supplier" style="text-align:center;padding:40px;color:var(--text-muted);">Выберите поставщика</div>
+    <UiEmptyState v-else-if="!supplier"
+                  title="Выберите поставщика"
+                  description="Планирование считается по одному поставщику: выберите его сверху, и портал покажет, что и когда заказывать.">
+      <template #icon><BkIcon name="factory" size="lg" /></template>
+    </UiEmptyState>
     <div v-else-if="suppLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-    <div v-else-if="!items.length" style="text-align:center;padding:40px;color:var(--text-muted);">Нет товаров у «{{ supplier }}»</div>
+    <UiEmptyState v-else-if="!items.length"
+                  title="У поставщика нет товаров"
+                  :description="`За «${supplier}» не закреплено ни одной активной карточки. Проверьте поставщика в карточках товара — раздел «База данных».`">
+      <template #icon><BkIcon name="package" size="lg" /></template>
+    </UiEmptyState>
     <div v-else class="order-table-wrapper" :class="{ 'plan-compact': compactPlan }">
       <table class="order-table plan-table">
         <thead>
@@ -509,6 +517,7 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch, nextTick, triggerRef, inject } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useSupplierStore, loadProductsForSupplier } from '@/stores/supplierStore.js';

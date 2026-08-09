@@ -127,7 +127,11 @@
           </div>
         </div>
       </template>
-      <div v-else class="sl-empty">Нет данных. Загрузите файл остатков склада.</div>
+      <UiEmptyState v-else
+                    title="Остатки не загружены"
+                    description="Сроки годности считаются по остаткам склада из 1С. Загрузите файл — и портал покажет, что скоро испортится.">
+        <template #icon><BkIcon name="shelfLife" size="lg" /></template>
+      </UiEmptyState>
     </div>
 
     <!-- ═══ Вкладка «Сроки годности» ═══ -->
@@ -205,7 +209,11 @@
             </tr>
           </tbody>
         </table>
-        <div v-if="!filteredData.length" class="sl-empty-table">Нет данных по выбранным фильтрам</div>
+        <UiEmptyState v-if="!filteredData.length"
+                      title="Ничего не подходит под фильтры"
+                      description="Снимите часть условий — например, расширьте срок или уберите фильтр по поставщику.">
+          <template #icon><BkIcon name="search" size="lg" /></template>
+        </UiEmptyState>
         <div class="sl-table-footer">
           <span class="sl-shown">Показано {{ filteredData.length }} из {{ enrichedData.length }}</span>
           <div v-if="totalPages > 1" class="sl-pager">
@@ -275,6 +283,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { db } from '@/lib/apiClient.js';
 import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js';
 import { appConfirm, appPrompt, appAlert } from '@/lib/appDialogs.js';

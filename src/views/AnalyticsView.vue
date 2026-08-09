@@ -255,9 +255,11 @@
 
       <!-- ===== PLAN-FACT ===== -->
       <template v-if="activeTab === 'planfact'">
-        <div v-if="!data.planFact.receivedOrders" style="text-align:center;padding:40px;color:var(--text-muted);">
-          <BkIcon name="success" size="sm"/> Нет принятых доставок за выбранный период
-        </div>
+        <UiEmptyState v-if="!data.planFact.receivedOrders"
+                      title="Поставок не было"
+                      description="За выбранный период ни одна доставка не принята. Расширьте период или проверьте, отмечают ли приёмку.">
+          <template #icon><BkIcon name="delivery" size="lg" /></template>
+        </UiEmptyState>
         <template v-else>
           <!-- KPI -->
           <div class="dash-kpi-grid">
@@ -632,9 +634,11 @@
 
       <!-- ===== CHANGES ===== -->
       <template v-if="activeTab === 'changes'">
-        <div v-if="!data.changes.length" style="text-align:center;padding:40px;color:var(--text-muted);">
-          <BkIcon name="success" size="sm"/> Нет значимых изменений за выбранный период
-        </div>
+        <UiEmptyState v-if="!data.changes.length"
+                      title="Всё спокойно"
+                      description="За период не нашлось резких изменений расхода, цен и остатков. Это нормальная ситуация, а не пустой экран.">
+          <template #icon><BkIcon name="success" size="lg" /></template>
+        </UiEmptyState>
         <div v-for="(c, i) in data.changes" :key="i" class="an-change" :class="'sev-' + c.severity">
           <div class="an-change-sev-badge" :class="'an-sev-' + c.severity">{{ c.severity === 'danger' ? 'КРИТИЧНО' : 'ВНИМАНИЕ' }}</div>
           <div class="an-change-body">
@@ -666,6 +670,7 @@ import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 
 const AbcXyzPanel = defineAsyncComponent(() => import('@/views/AbcXyzView.vue'));
 

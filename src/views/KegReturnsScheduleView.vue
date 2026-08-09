@@ -21,7 +21,11 @@
     </div>
 
     <div v-if="loading" class="krs-empty">Загрузка...</div>
-    <div v-else-if="!rows.length" class="krs-empty">Нет ресторанов BK_VM.</div>
+    <UiEmptyState v-else-if="!rows.length"
+                  title="Ресторанов нет"
+                  description="График возврата кег строится по ресторанам «Бургер БК» и «Воглия Матта». Ни одного активного не нашлось.">
+      <template #icon><BkIcon name="kegReturn" size="lg" /></template>
+    </UiEmptyState>
     <template v-else>
       <div class="krs-toolbar">
         <input v-model="search" type="search" class="krs-search" placeholder="Поиск по номеру, городу или адресу..." />
@@ -89,6 +93,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
