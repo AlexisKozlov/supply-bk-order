@@ -981,7 +981,7 @@ function closeImport() {
 /* ═══ Modals ═══ */
 .dist-modal { background: var(--card); border-radius: var(--radius); padding: 24px; width: 480px; max-width: 92vw; max-height: 80vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
 .dist-modal.sm { width: 360px; }
-.modal-title { font-family: 'Flame', sans-serif; font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 16px; }
+.modal-title { font-family: 'Flame', sans-serif; font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 16px; }
 .modal-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block; text-transform: uppercase; letter-spacing: 0.03em; }
 .modal-input { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 14px; box-sizing: border-box; font-family: inherit; color: var(--text); background: var(--card); }
 .modal-input:focus { border-color: var(--bk-brown); outline: none; }

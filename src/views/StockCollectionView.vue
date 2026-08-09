@@ -2008,7 +2008,7 @@ function fmtTime(s) {
 /* Detail */
 .sc-detail-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .sc-detail-info { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.sc-detail-name { font-size: 18px; font-weight: 700; color: var(--brown); font-family: 'Flame', sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-detail-name { font-size: 18px; font-weight: 700; color: var(--brown); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* Token */
@@ -2024,7 +2024,7 @@ function fmtTime(s) {
   margin-bottom: 16px;
 }
 .sc-summary-item { text-align: center; }
-.sc-summary-num { font-size: 18px; font-weight: 700; color: var(--brown); font-family: 'Flame', sans-serif; }
+.sc-summary-num { font-size: 18px; font-weight: 700; color: var(--brown); }
 .sc-summary-lbl { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 
 /* Filter */

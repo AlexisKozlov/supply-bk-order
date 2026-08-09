@@ -213,8 +213,8 @@ onMounted(() => load());
 .cal-nav { display: flex; align-items: center; gap: 6px; position: relative; }
 .cal-month-btn {
   background: white; border: 1.5px solid var(--border); border-radius: 8px;
-  padding: 6px 18px; font-family: 'Flame', sans-serif;
-  font-size: 16px; font-weight: 700; color: var(--bk-brown);
+  padding: 6px 18px;
+  font-size: 16px; font-weight: 600; color: var(--bk-brown);
   cursor: pointer; min-width: 170px; text-align: center; transition: all 0.15s;
 }
 .cal-month-btn:hover { border-color: var(--bk-orange); }

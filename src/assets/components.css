@@ -1101,9 +1101,11 @@ td.plan-td-result:hover {
   flex-wrap: wrap;
 }
 
+/* Заголовок страницы. Flame — витринный шрифт, на мелком кегле он тяжёлый
+   и трудночитаемый, поэтому здесь 20px, а не 18. Ниже 20px Flame не ставим. */
 .page-title {
   font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--bk-brown);
   letter-spacing: 0.3px;

@@ -62,13 +62,13 @@
      (страница «нет доступа»). В обычном интерфейсе НЕ использовать:
      там работает --tk-accent, иначе портал станет пёстрым.
      ═══════════════════════════════════════════════════════════════════ */
-  --bk-red:    #D62300;   /* Fiery Red — главный бренд-цвет */
-  --bk-brown:  #502314;   /* BBQ Brown — текст на кремовом */
-  --bk-orange: #FF8732;   /* Flaming Orange */
-  --bk-yellow: #FFAA00;   /* Melty Yellow — сыр */
-  --bk-cream:  #F5EBDC;   /* Mayo Egg White — фон */
-  --bk-green:  #4C9F38;   /* Crunchy Green — салат */
-  --bk-bun:    #E8A238;   /* булка */
+  --brand-red:    #D62300;   /* Fiery Red — главный бренд-цвет */
+  --brand-brown:  #502314;   /* BBQ Brown — текст на кремовом */
+  --brand-orange: #FF8732;   /* Flaming Orange */
+  --brand-yellow: #FFAA00;   /* Melty Yellow — сыр */
+  --brand-cream:  #F5EBDC;   /* Mayo Egg White — фон */
+  --brand-green:  #4C9F38;   /* Crunchy Green — салат */
+  --brand-bun:    #E8A238;   /* булка */
 
   /* Доп. акцент — для разнообразия в карточках/чипах */
   --tk-violet:      #635BFF;

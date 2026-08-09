@@ -157,7 +157,8 @@ const formatTime = formatMoscowDateTime;
   border: none;
   background: linear-gradient(135deg, #FDBD10, #E8A410);
   color: #1A0E09;
-  font-size: 15px; font-weight: 700; font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
+  /* Flame — только на крупных заголовках: в мелком тексте он трудночитаем. */
+  font-size: 15px; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif;
   cursor: pointer; transition: all .2s;
   box-shadow: 0 4px 20px rgba(253, 189, 16, 0.25);
 }

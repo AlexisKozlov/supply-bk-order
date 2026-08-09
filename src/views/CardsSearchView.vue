@@ -1780,7 +1780,7 @@ onBeforeUnmount(() => {
   border: 1px solid #E8E0D6;
 }
 .login-popup-title {
-  font-family: 'Flame', sans-serif;
+  font-weight: 600;
   font-size: 0.9rem;
   color: #502314;
   margin-bottom: 2px;
@@ -1912,7 +1912,7 @@ select.field-input {
 }
 .admin-panel-header h2 {
   font-family: 'Flame', sans-serif;
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: #2C1810;
   margin: 0;

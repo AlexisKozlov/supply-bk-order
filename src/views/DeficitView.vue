@@ -891,7 +891,7 @@ async function loadHistory() {
 }
 .dfc-res-bar-left { display: flex; align-items: center; gap: 12px; }
 .dfc-res-bar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dfc-res-title { font-family: 'Flame', sans-serif; font-size: 18px; font-weight: 700; color: var(--brown); }
+.dfc-res-title { font-family: 'Flame', sans-serif; font-size: 20px; font-weight: 700; color: var(--brown); }
 
 /* ══════ KPIs ══════ */
 .dfc-kpis {
