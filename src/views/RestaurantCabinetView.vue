@@ -140,7 +140,7 @@
       <!-- Десктоп-топбар -->
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты поставщиков' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : activeTab === 'guides' ? 'Инструкции' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ screenTitle }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров">
@@ -154,7 +154,7 @@
           <span class="mob-topbar-num">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</span>
           <span class="mob-topbar-label">Ресторан</span>
         </div>
-        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'contacts' ? 'Контакты' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : activeTab === 'novelties' ? 'Новинки' : activeTab === 'guides' ? 'Инструкции' : 'Профиль' }}</div>
+        <div class="mob-topbar-screen">{{ screenTitle }}</div>
         <button
           v-if="activeTab !== 'scanner'"
           class="mob-topbar-scan"
@@ -1719,6 +1719,41 @@ const restaurantAddress = computed(() => {
   return city + (addr ? ', ' + addr : '');
 });
 const orderSubTab = ref('delivery');
+
+// Название экрана в шапке. Раньше на телефоне все подстраницы раздела
+// «Заказы» — напоминания, корректировки, сбор заказа, история — подписывались
+// одинаково «Заказы». Боковое меню там скрыто, и шапка остаётся единственным
+// ориентиром: человек не понимал, где он находится.
+const screenTitle = computed(() => {
+  if (activeTab.value !== 'orders') {
+    return {
+      dashboard: 'Главная',
+      info: 'Важная информация',
+      surveys: 'Опросы',
+      stock: 'Сбор остатков',
+      'warehouse-stock': 'Остатки склада',
+      contacts: 'Контакты поставщиков',
+      scanner: 'Сканер товаров',
+      'keg-returns': 'Возврат кег',
+      novelties: 'Новинки',
+      guides: 'Инструкции',
+    }[activeTab.value] || 'Профиль';
+  }
+  const sub = orderSubTab.value || '';
+  if (sub.startsWith('sup_')) {
+    const id = sub.slice(4);
+    return suppliers.value.find(x => String(x.id) === id)?.name || 'Заявка поставщику';
+  }
+  return {
+    delivery: 'Основная поставка',
+    production: 'Собственное производство',
+    corrections: 'Корректировки',
+    assistant: 'Сбор заказа',
+    history: 'История заказов',
+    reminders: 'Напоминания',
+  }[sub] || 'Заказы';
+});
+
 const suppliers = ref([]);
 const defaultOrderSubTab = computed(() => {
   if (roStore.restaurantOrdersEnabled) return 'delivery';

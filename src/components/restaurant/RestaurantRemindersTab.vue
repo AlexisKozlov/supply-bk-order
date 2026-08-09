@@ -473,16 +473,20 @@ function recipientsLabel(selectedIds) {
   return 'Получатели: ' + names[0] + ', ' + names[1] + ' +' + (names.length - 2);
 }
 
-// Чип статуса Push
+// Чип статуса уведомлений на устройстве.
+// Слово «push» ресторану ничего не говорит: человек видел «Push заблокирован»
+// и не понимал ни что это, ни что делать.
 const pushChipLabel = computed(() => {
-  if (push.permission.value === 'denied') return 'Push заблокирован';
-  return push.isSubscribed.value ? 'Push: вкл' : 'Включить push';
+  if (push.permission.value === 'denied') return 'Уведомления запрещены';
+  return push.isSubscribed.value ? 'Уведомления включены' : 'Включить уведомления';
 });
 const pushChipTitle = computed(() => {
-  if (push.permission.value === 'denied') return 'Разрешение заблокировано в браузере';
+  if (push.permission.value === 'denied') {
+    return 'Вы запретили уведомления в браузере. Разрешить: значок замка слева от адреса → Уведомления → Разрешить.';
+  }
   return push.isSubscribed.value
-    ? 'Push в этом браузере включён. Кликни, чтобы выключить.'
-    : 'Кликни, чтобы получать напоминания, даже когда вкладка закрыта.';
+    ? 'Уведомления на это устройство включены. Нажмите, чтобы выключить.'
+    : 'Нажмите, чтобы напоминания приходили на это устройство, даже когда кабинет закрыт.';
 });
 function onPushChipClick() {
   if (push.busy.value) return;
