@@ -68,7 +68,7 @@
               </div>
               <div class="tgl-field">
                 <label>Пароль</label>
-                <input v-model="password" type="password" placeholder="Введите пароль" />
+                <UiPasswordInput v-model="password" placeholder="Введите пароль" />
               </div>
               <label class="tgl-consent">
                 <input v-model="acceptedDataRules" type="checkbox" :disabled="loggingIn" />
@@ -90,6 +90,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
+import UiPasswordInput from '@/components/ui/UiPasswordInput.vue';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { useCanvasParticles } from '@/composables/useCanvasParticles.js';

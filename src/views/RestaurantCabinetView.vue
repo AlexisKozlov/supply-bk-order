@@ -1269,9 +1269,9 @@
           </div>
         </div>
         <form @submit.prevent="changePassword" class="pf-form">
-          <input v-model="pwOld" type="password" placeholder="Текущий пароль" class="pf-input" autocomplete="current-password" />
-          <input v-model="pwNew" type="password" placeholder="Новый пароль" class="pf-input" autocomplete="new-password" />
-          <input v-model="pwConfirm" type="password" placeholder="Повтор нового пароля" class="pf-input" autocomplete="new-password" />
+          <UiPasswordInput v-model="pwOld" placeholder="Текущий пароль" input-class="pf-input" autocomplete="current-password" />
+          <UiPasswordInput v-model="pwNew" placeholder="Новый пароль" input-class="pf-input" autocomplete="new-password" />
+          <UiPasswordInput v-model="pwConfirm" placeholder="Повтор нового пароля" input-class="pf-input" autocomplete="new-password" />
           <div v-if="pwError" class="pf-msg pf-msg-err">{{ pwError }}</div>
           <div v-if="pwSuccess" class="pf-msg pf-msg-ok">Пароль изменён</div>
           <button type="submit" class="pf-btn primary block" :disabled="pwLoading || !pwOld || !pwNew">
@@ -1589,6 +1589,7 @@ import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber, ENTITY_GROUP_BK_VM } from '@/lib/legalEntities.js';
 import { useSupportContact } from '@/lib/supportContact.js';
+import UiPasswordInput from '@/components/ui/UiPasswordInput.vue';
 
 const supportTg = useSupportContact();
 import RestaurantGuidesTab from '@/components/restaurant/RestaurantGuidesTab.vue';

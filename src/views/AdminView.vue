@@ -949,7 +949,7 @@
             <div class="modal-row-2">
               <div class="modal-field" style="flex:1;">
                 <span class="modal-field-label">Пароль</span>
-                <input type="password" v-model="form.password" :placeholder="userModal.user ? 'Не менять — оставить пустым' : 'Пароль'" />
+                <UiPasswordInput v-model="form.password" :placeholder="userModal.user ? 'Не менять — оставить пустым' : 'Пароль'" />
               </div>
               <div class="modal-field" style="width:155px;flex-shrink:0;">
                 <span class="modal-field-label">Роль</span>
@@ -1089,6 +1089,7 @@ import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } 
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import UiPasswordInput from '@/components/ui/UiPasswordInput.vue';
 import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 
 const router = useRouter();

@@ -131,10 +131,9 @@
         <div v-if="showAdminLogin && !isAdmin" class="login-popup">
           <div class="login-popup-title">Вход в базу данных</div>
           <input v-model="adminUserName" type="email" class="field-input" placeholder="Введите email" autocomplete="email" />
-          <input
+          <UiPasswordInput
             v-model="adminPassword"
-            type="password"
-            class="field-input"
+            input-class="field-input"
             placeholder="Пароль"
             @keydown.enter="loginAdmin"
           />
@@ -364,6 +363,7 @@
 import { ref, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUserStore } from '../stores/userStore'
 import { appConfirm } from '@/lib/appDialogs.js'
+import UiPasswordInput from '@/components/ui/UiPasswordInput.vue';
 import { useSupportContact } from '@/lib/supportContact.js'
 
 const supportTg = useSupportContact()
