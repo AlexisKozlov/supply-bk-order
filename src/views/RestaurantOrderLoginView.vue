@@ -48,8 +48,12 @@
             <div class="ro-side-title">{{ loginBrand.title }}</div>
             <div class="ro-side-sub">{{ loginBrand.subtitle }}</div>
           </div>
-          <!-- Бургер прячем у Пицца Стар: там он был бы не к месту. -->
+          <!-- У каждого юрлица своя картинка: бургер для Бургер Кинга,
+               пицца для Пицца Стар (это Додо). Пицца лежит в кремовом круге —
+               «на тарелке»: вырезать у неё фон нельзя, сыр по цвету почти
+               совпадает с фоном и исчезал вместе с ним. -->
           <img v-if="loginBrand.themeClass !== 'ro-theme-ps'" class="ro-side-burger" src="/login-burger.png" alt="" />
+          <img v-else class="ro-side-pizza" src="/login-pizza.jpg" alt="" />
         </aside>
 
         <div class="ro-main">
@@ -513,6 +517,16 @@ async function handleLogin() {
 .ro-side-sub { font-size: 12px; opacity: .65; margin-top: 4px; }
 /* Бургер подпирает нижний край панели — так он часть фона, а не наклейка. */
 .ro-side-burger { width: 200px; margin: auto -12px 0; display: block; }
+.ro-side-pizza {
+  width: 176px; height: 176px;
+  margin: auto auto 26px;
+  display: block;
+  border-radius: 50%;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
+}
+/* Пицца Стар — своя тема: тёмно-фиолетовая, как боковое меню ПС в портале.
+   Коричневый Бургер Кинга там был чужим. */
+.ro-theme-ps .ro-side { background: linear-gradient(160deg, #2D1236, #1A0A1E); }
 .ro-main { padding: 28px; }
 
 /* Глазок пароля был еле заметен: тонкая иконка без фона на светлом поле.
@@ -671,6 +685,7 @@ async function handleLogin() {
   .ro-logo-wrap svg { width: 34px; height: 34px; }
   .ro-side-sub { display: none; }
   .ro-side-burger { display: none; }
+  .ro-side-pizza { display: none; }
   .ro-main { padding: 20px 18px; }
 }
 
