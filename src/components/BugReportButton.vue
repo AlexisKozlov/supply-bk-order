@@ -316,7 +316,14 @@ function stopChatPoll() {
 
 function startBgReplyPoll() {
   stopBgReplyPoll();
-  bgReplyTimer = setInterval(() => { checkNewReplies(); }, 60000);
+  // Раз в минуту и в фоновых вкладках — это был самый дёргаемый адрес портала:
+  // 21 716 запросов за сутки ради значка «ответили на баг-репорт». Пять минут
+  // и только когда вкладка на экране: значок не срочный, а трафик и батарея
+  // у ресторанов не бесконечные.
+  bgReplyTimer = setInterval(() => {
+    if (document.hidden) return;
+    checkNewReplies();
+  }, 5 * 60 * 1000);
 }
 function stopBgReplyPoll() {
   if (bgReplyTimer) { clearInterval(bgReplyTimer); bgReplyTimer = null; }

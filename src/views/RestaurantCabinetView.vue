@@ -3437,9 +3437,13 @@ async function dismissCurrentBroadcast() {
 function startRestaurantBroadcastPolling() {
   if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
   loadRestaurantBroadcasts();
+  // Было раз в 45 секунд и в свёрнутых вкладках тоже — 21 229 запросов за
+  // сутки. Объявления не срочные: раз в три минуты и только когда кабинет
+  // открыт на экране.
   restaurantBroadcastTimer = setInterval(() => {
+    if (document.hidden) return;
     loadRestaurantBroadcasts();
-  }, 45000);
+  }, 3 * 60 * 1000);
 }
 
 // Имя страницы для heartbeat — то же, что показывается в шапке кабинета.
