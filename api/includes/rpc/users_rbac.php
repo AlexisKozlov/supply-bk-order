@@ -78,6 +78,44 @@ if ($fn === 'set_user_preference') {
 //
 // $fn === 'user_login_stats' — сводка по всем: последний вход и сколько раз.
 // $fn === 'user_login_history' — последние входы одного человека, с адресом.
+// ═══ Закрыть / вернуть доступ ═══
+// Таблица users в CRUD помечена только для чтения, поэтому правка идёт
+// отдельным методом. Ставит крон cron_disable_stale_users.php, снимает
+// администратор кнопкой в карточке сотрудника.
+if ($fn === 'set_user_disabled') {
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['error' => 'Нет прав доступа'], 403);
+
+    $name     = trim((string)($body['name'] ?? ''));
+    $disabled = !empty($body['disabled']);
+    $reason   = mb_substr(trim((string)($body['reason'] ?? '')), 0, 255);
+    if ($name === '') respond(['error' => 'Не указан сотрудник'], 400);
+
+    $s = $pdo->prepare("SELECT name, role FROM users WHERE name = ? LIMIT 1");
+    $s->execute([$name]);
+    $target = $s->fetch(PDO::FETCH_ASSOC);
+    if (!$target) respond(['error' => 'Сотрудник не найден'], 404);
+
+    // Остаться без единого администратора страшнее, чем оставить лишний доступ.
+    if ($disabled && $target['role'] === 'admin') {
+        respond(['error' => 'Администратору доступ так не закрывают'], 400);
+    }
+    if ($disabled && $target['name'] === ($caller['name'] ?? '')) {
+        respond(['error' => 'Нельзя закрыть доступ самому себе'], 400);
+    }
+
+    if ($disabled) {
+        $pdo->prepare("UPDATE users SET disabled_at = NOW(), disabled_reason = ? WHERE name = ?")
+            ->execute([$reason ?: 'закрыл администратор', $name]);
+        // Живые сессии гасим сразу, иначе человек продолжит работать до их конца.
+        $pdo->prepare("DELETE FROM user_sessions WHERE user_name = ?")->execute([$name]);
+    } else {
+        $pdo->prepare("UPDATE users SET disabled_at = NULL, disabled_reason = NULL WHERE name = ?")
+            ->execute([$name]);
+    }
+    respond(['success' => true]);
+}
+
 if ($fn === 'user_login_stats') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['error' => 'Нет прав доступа'], 403);

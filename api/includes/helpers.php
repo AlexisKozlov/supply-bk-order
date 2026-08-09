@@ -1060,7 +1060,7 @@ function getSessionUser($pdo) {
                         }
                         // Эмулируем сессию для скачивания: имя пользователя есть, остальное
                         // не нужно (uploads-обработчики не требуют role/legal_entities).
-                        $u = $pdo->prepare("SELECT name, role, display_role, legal_entities, supplier_scope, permissions, created_at, telegram_chat_id, hidden_modules FROM users WHERE name = ? LIMIT 1");
+                        $u = $pdo->prepare("SELECT name, role, display_role, legal_entities, supplier_scope, permissions, created_at, telegram_chat_id, hidden_modules FROM users WHERE name = ? AND disabled_at IS NULL LIMIT 1");
                         $u->execute([$row['user_name']]);
                         $userRow = $u->fetch();
                         if ($userRow) {
@@ -1100,6 +1100,7 @@ function getSessionUser($pdo) {
         JOIN users u ON u.name = s.user_name
         WHERE s.token = ?
           AND s.expires_at > NOW()
+          AND u.disabled_at IS NULL
           AND s.created_at > (NOW() - INTERVAL CASE WHEN u.role = 'admin' THEN 7 ELSE 30 END DAY)
     ");
     $s->execute([$token]);

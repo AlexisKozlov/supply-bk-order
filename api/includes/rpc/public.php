@@ -23,10 +23,14 @@ if ($fn === 'check_user_password') {
     if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
     // Account-level rate-limit: защита от distributed brute-force одного аккаунта.
     if (!checkAccountRateLimit($pdo, $email, 5, 10)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
-    $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,supplier_scope,permissions,created_at,telegram_chat_id,hidden_modules FROM users WHERE email=?");
+    $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,supplier_scope,permissions,created_at,telegram_chat_id,hidden_modules,disabled_at FROM users WHERE email=?");
     $s->execute([$email]); $u = $s->fetch();
     if (!$u) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
     if (!verifyAndMigratePassword($pdo, $u['name'], $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
+    // Отключённая учётка: пароль верный, но вход закрыт. Отвечаем отдельным
+    // кодом, а не «неверный пароль» — иначе человек будет бесконечно сбрасывать
+    // пароль и звонить, что портал сломался.
+    if (!empty($u['disabled_at'])) respond(['success'=>false,'error'=>'account_disabled']);
     $le = $u['legal_entities'];
     $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
     $displayRole = $u['display_role'] ?? null;

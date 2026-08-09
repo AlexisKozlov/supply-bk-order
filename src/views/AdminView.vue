@@ -77,6 +77,11 @@
               <span v-else-if="u.role === 'viewer'" class="adm-badge adm-badge-viewer">читатель</span>
               <span v-if="u.name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
               <span v-if="isLocked(u)" class="adm-badge adm-badge-locked" :title="`${lockouts[u.name]} неудачных попыток за 10 мин`">🔒 заблокирован</span>
+              <!-- Отключение по неактивности: ставит крон, снимает кнопка ниже.
+                   Это не то же самое, что временная блокировка после неудачных
+                   попыток входа, поэтому и метка отдельная. -->
+              <span v-if="u.disabled_at" class="adm-badge adm-badge-off"
+                    :title="`Доступ закрыт ${fmtDateTime(u.disabled_at)}${u.disabled_reason ? ' — ' + u.disabled_reason : ''}`">доступ закрыт</span>
             </div>
             <div v-if="u.email" class="adm-user-email">{{ u.email }}</div>
             <div class="adm-user-meta">
@@ -96,6 +101,7 @@
 
           <div class="adm-user-actions">
             <button class="adm-act-btn" :class="{ 'adm-act-locked': isLocked(u) }" @click.stop="resetLoginAttempts(u)" :title="isLocked(u) ? 'Заблокирован — сбросить попытки входа' : 'Сбросить попытки входа'"><BkIcon name="key" size="sm"/></button>
+            <button v-if="u.disabled_at" class="adm-act-btn adm-act-restore" @click.stop="restoreAccess(u)" title="Вернуть доступ"><BkIcon name="restore" size="sm"/></button>
             <button class="adm-act-btn" @click.stop="openUserModal(u)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
@@ -1980,6 +1986,17 @@ function initials(name) {
   return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
+// Вернуть доступ отключённому: обнуляем обе колонки. Отдельная кнопка, а не
+// поле в форме редактирования — чтобы возврат был в один клик и заметен.
+async function restoreAccess(u) {
+  if (!(await appConfirm('Вернуть доступ?', `${u.name} снова сможет войти в портал.`))) return;
+  // Через CRUD нельзя: users помечена только для чтения. Отдельный метод.
+  const { data, error } = await db.rpc('set_user_disabled', { name: u.name, disabled: false });
+  if (error || data?.error) { toast.error('Не получилось', error || data.error); return; }
+  toast.success('Доступ возвращён', u.name);
+  await loadUsers();
+}
+
 async function loadUsers() {
   loading.value = true;
   try {
@@ -2684,6 +2701,8 @@ onUnmounted(() => {
 .adm-badge-admin { background: #FFEBEE; color: #C62828; }
 .adm-badge-viewer { background: #E3F2FD; color: #1565C0; }
 .adm-badge-you { background: #E8F5E9; color: #2E7D32; }
+.adm-badge-off { background: #F3EBE3; color: #6B5A50; }
+.adm-act-restore { color: #16A364; }
 .adm-badge-locked { background: #FFEBEE; color: #C62828; font-weight: 700; }
 
 .adm-user-entities { display: flex; gap: 4px; flex-shrink: 0; }
