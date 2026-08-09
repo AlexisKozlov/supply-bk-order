@@ -135,7 +135,9 @@ const filteredOrders = computed(() => {
 .src-supplier { background: #EFF6FF; color: #2563eb; }
 .src-planeta { background: #ECFDF5; color: #16a34a; }
 .status-badge.st-submitted { background: #ECFDF5; color: #16a34a; }
-.status-badge.st-locked   { background: #FEF2F2; color: #dc2626; }
+/* Не красный: закрытый приём — обычное завершённое состояние, а не ошибка.
+   Красным весь список выглядел так, будто у ресторана всё сломано. */
+.status-badge.st-locked   { background: #F5F0EB; color: #6B5A50; }
 .status-badge.st-draft    { background: #F5F0EB; color: #8b7355; }
 .hist-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hist-meta-pill { font-size: 12px; color: #6b4f3a; background: #F7F2EC; border-radius: 8px; padding: 2px 8px; font-weight: 600; }
