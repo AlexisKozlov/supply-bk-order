@@ -874,6 +874,73 @@ if (!$isWeekend || $DRY_RUN) {
     }
 }
 
+// ═══ Завершение акций по дате ═══
+// Статус «Завершённая» не ставил никто и никогда: все шесть акций в базе
+// висели активными, включая закончившиеся 4 мая. Список активных при этом
+// врал, а руками статус переключать все забывают.
+//
+// Дата окончания и есть вся правда: этапов, которые продолжались бы после
+// неё, в акциях нет. Поэтому портал закрывает акцию сам, пишет об этом
+// в журнал действий и один раз сообщает автору — со ссылкой на то, как
+// вернуть обратно, если акцию продлили.
+//
+// Работаем только по будням: если закрыть в субботу и промолчать, статус
+// поменяется незаметно — акция уже не «активна», и в понедельник её никто
+// не найдёт, чтобы сообщить.
+if (!$isWeekend || $DRY_RUN) {
+    try {
+        $ended = $pdo->query("
+            SELECT id, name, type, date_from, date_to, legal_entity, created_by
+            FROM marketing_activities
+            WHERE status = 'active' AND date_to IS NOT NULL AND date_to < CURDATE()
+            ORDER BY date_to
+        ")->fetchAll();
+
+        $mktChat = $pdo->prepare("
+            SELECT telegram_chat_id FROM users
+            WHERE name = ? AND telegram_chat_id IS NOT NULL
+              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
+        ");
+
+        foreach ($ended as $a) {
+            $fromFmt = $a['date_from'] ? date('d.m.Y', strtotime($a['date_from'])) : '—';
+            $toFmt   = date('d.m.Y', strtotime($a['date_to']));
+
+            if (!$DRY_RUN) {
+                $upd = $pdo->prepare("UPDATE marketing_activities SET status = 'completed', updated_at = NOW() WHERE id = ? AND status = 'active'");
+                $upd->execute([$a['id']]);
+                if (!$upd->rowCount()) continue; // кто-то успел закрыть руками
+                $pdo->prepare("
+                    INSERT INTO audit_log (action, entity_type, entity_id, user_name, legal_entity, details)
+                    VALUES ('marketing_auto_completed', 'marketing_activities', ?, 'Портал', ?, ?)
+                ")->execute([
+                    (string)$a['id'],
+                    $a['legal_entity'],
+                    "Акция «{$a['name']}» завершена автоматически: дата окончания {$toFmt} прошла",
+                ]);
+            }
+
+            if (!$a['created_by']) continue;
+            $mktChat->execute([$a['created_by']]);
+            $chatId = $mktChat->fetchColumn();
+            if (!$chatId) continue;
+
+            $text  = "🏁 <b>Акция завершена</b>\n";
+            $text .= "─────────────────────\n";
+            $text .= "📣 <b>{$a['name']}</b>\n";
+            $text .= "📅 Шла с {$fromFmt} по {$toFmt}\n";
+            if ($a['legal_entity']) $text .= "🏢 {$a['legal_entity']}\n";
+            $text .= "\n<i>Статус переключён на «Завершённая» — дата окончания прошла. Если акция продлена, верните статус в её карточке.</i>";
+
+            tgSend($chatId, $text);
+            logNotification($pdo, 'marketing_completed', "mkt_{$a['id']}", $chatId);
+            $sent++;
+        }
+    } catch (Exception $e) {
+        error_log('[cron_telegram] marketing autoclose error: ' . $e->getMessage());
+    }
+}
+
 // ═══ Напоминания о сборе остатков ═══
 try {
     // Активные сборы старше 4 часов — напоминаем незаполнившим ресторанам

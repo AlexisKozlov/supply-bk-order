@@ -1281,6 +1281,7 @@ const AUDIT_ACTION_LABELS = {
   tender_created: 'Создан', tender_updated: 'Изменён', tender_deleted: 'Удалён',
   // Маркетинг
   marketing_created: 'Создана', marketing_updated: 'Изменена', marketing_deleted: 'Удалена',
+  marketing_auto_completed: 'Завершена по дате',
   // Корректировки
   correction_created: 'Создана', correction_approved: 'Подтверждена', correction_rejected: 'Отклонена',
   correction_reviewed: 'Рассмотрена',

@@ -51,6 +51,7 @@ export const ACTIVITY_LABELS = {
   marketing_created: 'создал активность',
   marketing_updated: 'изменил активность',
   marketing_deleted: 'удалил активность',
+  marketing_auto_completed: 'завершил акцию по дате',
   // Корректировки
   correction_created: 'создал корректировку',
   correction_approved: 'подтвердил корректировку',
