@@ -9,14 +9,60 @@
 
     <!-- Вкладки -->
     <div class="ub-tabs">
-      <button :class="['ub-tab', { active: tab === 'unknown' }]" @click="tab = 'unknown'">
+      <button :class="['ub-tab', { active: tab === 'unknown' }]" @click="setTab('unknown')">
         Ненайденные
         <span v-if="unknownNewCount > 0" class="ub-tab-badge">{{ unknownNewCount }}</span>
       </button>
-      <button :class="['ub-tab', { active: tab === 'all' }]" @click="onTabAll">
+      <button :class="['ub-tab', { active: tab === 'all' }]" @click="setTab('all')">
         Все штрихкоды
       </button>
+      <button :class="['ub-tab', { active: tab === 'conflicts' }]" @click="setTab('conflicts')">
+        Конфликты
+        <span v-if="health.conflicts > 0" class="ub-tab-badge">{{ health.conflicts }}</span>
+      </button>
     </div>
+
+    <!-- ════════════ Вкладка «Конфликты» ════════════ -->
+    <div v-if="tab === 'conflicts'">
+      <p class="ub-hint">
+        Один штрихкод стоит у двух разных товаров, и оба в ассортименте одного юрлица.
+        Сканер в ресторане показывает первый попавшийся и приписывает, что есть и второй.
+        Уберите лишнюю привязку у того товара, которому этот код не принадлежит.
+        Одинаковый код у разных юрлиц — это нормально, сюда он не попадает.
+      </p>
+
+      <div class="ub-table-wrap">
+        <table class="ub-table">
+          <thead>
+            <tr>
+              <th>Штрихкод</th>
+              <th>SKU</th>
+              <th>Название товара</th>
+              <th>Юрлицо</th>
+              <th>Спорит с</th>
+              <th>Источник</th>
+              <th class="ub-th-actions">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!conflictsLoading && !conflictItems.length">
+              <td colspan="7" class="ub-empty">Конфликтов нет</td>
+            </tr>
+            <tr v-for="row in conflictItems" :key="row.id">
+              <td><code class="ub-gtin">{{ row.barcode }}</code></td>
+              <td><code class="ub-sku">{{ row.sku }}</code></td>
+              <td class="ub-name-cell">{{ row.product_name || '—' }}</td>
+              <td>{{ row.legal_entity || '—' }}</td>
+              <td class="ub-name-cell ub-conflict-with">{{ row.conflict_with || '—' }}</td>
+              <td>{{ sourceLabel(row.source) }}</td>
+              <td class="ub-actions">
+                <button class="ub-act-btn ub-act-ignore" title="Отвязать этот код от этого товара" @click="deleteBarcodeRow(row)">✕</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div><!-- /tab=conflicts -->
 
     <!-- ════════════ Вкладка «Ненайденные» ════════════ -->
     <div v-if="tab === 'unknown'">
@@ -180,6 +226,13 @@
             <option value="migration">Миграция</option>
           </select>
         </div>
+        <div class="ub-field">
+          <label>Товар</label>
+          <select v-model="allFilterInactive" class="ub-input" @change="loadAll">
+            <option value="">Любой</option>
+            <option value="1">Снят с ассортимента ({{ health.inactive }})</option>
+          </select>
+        </div>
         <div class="ub-field ub-field-grow">
           <label>Поиск</label>
           <input type="text" v-model="allFilterSearch" class="ub-input" placeholder="Штрихкод, SKU или название товара" @keydown.enter="loadAll" />
@@ -221,7 +274,11 @@
                 </select>
               </td>
               <td><code class="ub-sku">{{ row.sku }}</code></td>
-              <td class="ub-name-cell">{{ row.product_name || '—' }}</td>
+              <td class="ub-name-cell">
+                {{ row.product_name || '—' }}
+                <span v-if="Number(row.product_active) === 0" class="ub-flag ub-flag-off">снят с ассортимента</span>
+                <span v-if="row.conflict_with" class="ub-flag ub-flag-warn" :title="'Этот же код у: ' + row.conflict_with">тот же код у другого товара</span>
+              </td>
               <td>{{ row.legal_entity || '—' }}</td>
               <td class="ub-num">
                 <button class="ub-star" :class="{ active: row.is_primary }" :title="row.is_primary ? 'Основной' : 'Сделать основным'" @click="toggleBarcodePrimary(row)">
@@ -324,6 +381,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -331,8 +389,11 @@ import { appConfirm } from '@/lib/appDialogs.js';
 
 const toast = useToastStore();
 const orderStore = useOrderStore();
+const route = useRoute();
+const router = useRouter();
 
-const tab = ref('unknown'); // 'unknown' | 'all'
+const VALID_TABS = ['unknown', 'all', 'conflicts'];
+const tab = ref(VALID_TABS.includes(route.query.tab) ? route.query.tab : 'unknown');
 
 const items = ref([]);
 const loading = ref(false);
@@ -363,7 +424,14 @@ const allItems = ref([]);
 const allLoading = ref(false);
 const allFilterType = ref('');
 const allFilterSource = ref('');
+const allFilterInactive = ref('');
 const allFilterSearch = ref('');
+
+// ─── Вкладка «Конфликты» ───
+const conflictItems = ref([]);
+const conflictsLoading = ref(false);
+// Счётчики для значка на вкладке и подписи к фильтру.
+const health = ref({ conflicts: 0, inactive: 0 });
 
 // ─── Модалка добавления/привязки штрихкода ───
 const bindModal = ref(null);
@@ -374,9 +442,14 @@ const unknownNewCount = computed(() => {
   return items.value.filter(i => i.status === 'new').length;
 });
 
-function onTabAll() {
-  tab.value = 'all';
-  if (allItems.value.length === 0) loadAll();
+// У каждой вкладки свой адрес: ссылку на «Конфликты» можно кинуть коллеге.
+function setTab(name) {
+  tab.value = name;
+  if (name === 'all' && allItems.value.length === 0) loadAll();
+  if (name === 'conflicts') loadConflicts();
+  const q = { ...route.query };
+  if (name === 'unknown') delete q.tab; else q.tab = name;
+  router.replace({ query: q });
 }
 
 async function loadAll() {
@@ -385,6 +458,7 @@ async function loadAll() {
     const params = new URLSearchParams();
     if (allFilterType.value) params.set('type', allFilterType.value);
     if (allFilterSource.value) params.set('source', allFilterSource.value);
+    if (allFilterInactive.value) params.set('inactive', '1');
     if (allFilterSearch.value.trim()) params.set('q', allFilterSearch.value.trim());
     params.set('limit', '300');
     const res = await fetch(`/api/ro/admin/barcodes?${params}`, { headers: apiHeaders() });
@@ -397,6 +471,30 @@ async function loadAll() {
   } finally {
     allLoading.value = false;
   }
+}
+
+async function loadConflicts() {
+  conflictsLoading.value = true;
+  try {
+    const res = await fetch('/api/ro/admin/barcodes?conflicts=1&limit=300', { headers: apiHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка загрузки');
+    conflictItems.value = data.barcodes || [];
+  } catch (e) {
+    console.error(e);
+    toast.error('Не удалось загрузить конфликты', e.message || '');
+  } finally {
+    conflictsLoading.value = false;
+  }
+}
+
+async function loadHealth() {
+  try {
+    const res = await fetch('/api/ro/admin/barcodes-health', { headers: apiHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    health.value = { conflicts: data.conflicts || 0, inactive: data.inactive || 0 };
+  } catch (e) { /* значки — не повод ронять страницу */ }
 }
 
 function openBindModal(barcode) {
@@ -456,7 +554,7 @@ function onBindModalSearchInput() {
   }, 250);
 }
 
-async function submitBindModal() {
+async function submitBindModal(force = false) {
   if (!bindModal.value || !bindModal.value.selectedSku || !bindModal.value.barcode) return;
   bindModal.value.saving = true;
   bindModal.value.error = '';
@@ -469,9 +567,24 @@ async function submitBindModal() {
         barcode: bindModal.value.barcode.trim(),
         barcode_type: bindModal.value.type,
         is_primary: !!bindModal.value.isPrimary,
+        force: !!force,
       }),
     });
     const data = await res.json();
+    // Код уже стоит на другом товаре того же юрлица. Не запрещаем — бывает
+    // законно (одна и та же упаковка заведена штукой и коробкой), но
+    // спрашиваем: молча привязать значит поломать сканер и не сказать об этом.
+    if (res.status === 409 && Array.isArray(data.conflict)) {
+      const who = data.conflict.map(c => `${c.sku} — ${c.name}`).join('\n');
+      bindModal.value.saving = false;
+      const ok = await appConfirm(
+        `Штрихкод ${bindModal.value.barcode.trim()} уже привязан к другому товару:\n\n${who}\n\n` +
+        'В сканере ресторана будет показываться первый попавшийся из них. Всё равно привязать?',
+        { okText: 'Всё равно привязать', danger: true }
+      );
+      if (!ok) return;
+      return submitBindModal(true);
+    }
     if (!res.ok) throw new Error(data.error || 'Ошибка');
 
     // Если этот штрихкод был в «Ненайденных» — отметим как resolved.
@@ -483,6 +596,7 @@ async function submitBindModal() {
     toast.success('Штрихкод сохранён');
     closeBindModal();
     if (tab.value === 'all') loadAll();
+    loadHealth();
   } catch (e) {
     bindModal.value.error = e.message || 'неизвестная ошибка';
   } finally {
@@ -536,7 +650,11 @@ async function deleteBarcodeRow(row) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Ошибка');
     allItems.value = allItems.value.filter(r => r.id !== row.id);
+    conflictItems.value = conflictItems.value.filter(r => r.id !== row.id);
     toast.success('Штрихкод удалён');
+    loadHealth();
+    // Пара распалась — второй товар из этой пары больше не конфликтует.
+    if (tab.value === 'conflicts') loadConflicts();
   } catch (e) {
     toast.error('Не удалось удалить', e.message || '');
   }
@@ -689,6 +807,10 @@ function fmtDate(s) {
 onMounted(() => {
   load();
   loadSubscribers();
+  loadHealth();
+  // Зашли по прямой ссылке на вкладку — сразу грузим её данные.
+  if (tab.value === 'all') loadAll();
+  if (tab.value === 'conflicts') loadConflicts();
 });
 
 onBeforeUnmount(() => {
@@ -833,6 +955,18 @@ onBeforeUnmount(() => {
 .ub-photo-none { color: #d1d5db; }
 
 .ub-name-cell { max-width: 260px; }
+
+/* Пометки у названия товара: «снят с ассортимента», «тот же код у другого» */
+.ub-flag {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 10px;
+  font-size: 11px; white-space: nowrap; vertical-align: middle;
+}
+.ub-flag-off  { background: #f3f4f6; color: #6b7280; }
+.ub-flag-warn { background: #fdf0e6; color: #9a5b1c; cursor: help; }
+
+/* Фон строке не задаём: на этой вкладке конфликт — каждая строка,
+   подсветка ничего не выделяет, а зебру перебивает через одну. */
+.ub-conflict-with { color: #9a5b1c; }
 .ub-rep-name { font-weight: 600; color: #111827; line-height: 1.3; }
 .ub-rep-comment {
   font-size: 11px; color: #6b7280; margin-top: 3px;

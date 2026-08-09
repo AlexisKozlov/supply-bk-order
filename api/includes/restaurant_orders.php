@@ -3858,7 +3858,24 @@ if ($roAction === 'scan-product' && $method === 'GET') {
     $found = $s->fetchAll();
 
     if (empty($found)) {
-        roRespond(['found' => false, 'gtin' => $gtin]);
+        // Код в базе есть, но все товары по нему сняты с ассортимента. Раньше
+        // ресторан видел «товар не найден» и слал заявку администратору, а
+        // разбираться было не с чем — товар просто вывели. Отвечаем честно.
+        $dWhere = ["b.barcode = ?", "p.is_active = 0"];
+        $dParams = [$gtin];
+        applyEntityTextFilter($group, $dWhere, $dParams, 'p.legal_entity');
+        $d = $pdo->prepare("SELECT DISTINCT p.sku, p.name
+                            FROM products p
+                            INNER JOIN product_barcodes b ON b.sku = p.sku
+                            WHERE " . implode(' AND ', $dWhere) . "
+                            ORDER BY p.name LIMIT 3");
+        $d->execute($dParams);
+        $discontinued = $d->fetchAll();
+        roRespond([
+            'found'         => false,
+            'gtin'          => $gtin,
+            'discontinued'  => $discontinued,
+        ]);
     }
 
     // Берём первый (приоритет — юрлицо ресторана)
@@ -7156,25 +7173,76 @@ if (strpos($roAction, 'admin') === 0) {
             $where[] = "b.source = ?";
             $params[] = $source;
         }
+        // Конфликт: один и тот же код у двух РАЗНЫХ товаров, и оба в ассортименте
+        // у одного юрлица. Сканер в таком случае показывает первый попавшийся,
+        // а какой из них верный — знает только человек. Так «Чизкейк New York»
+        // и «Чизкейк банановый» у Пиццы Стар делили код 4620058452796.
+        // Разные юрлица с одним кодом конфликтом НЕ считаем: один и тот же
+        // товар заведён у БК и у ПС — это норма.
+        if (!empty($_GET['conflicts'])) {
+            $where[] = "EXISTS (
+                SELECT 1 FROM product_barcodes b2
+                JOIN products p2 ON p2.sku = b2.sku AND p2.is_active = 1
+                WHERE b2.barcode = b.barcode AND b2.sku <> b.sku
+                  AND p2.legal_entity IN (SELECT p3.legal_entity FROM products p3 WHERE p3.sku = b.sku AND p3.is_active = 1)
+            )";
+        }
+        // Код есть, а товара в ассортименте нет: ресторан сканирует и получает
+        // «не найден», хотя товар просто сняли.
+        if (!empty($_GET['inactive'])) {
+            $where[] = "NOT EXISTS (SELECT 1 FROM products pa WHERE pa.sku = b.sku AND pa.is_active = 1)";
+        }
 
+        // GROUP BY b.id обязателен: один SKU может быть заведён у нескольких
+        // юрлиц, и без группировки одна запись штрихкода превращалась в две
+        // строки списка с одинаковым id (428 записей показывались как 438).
         $sql = "SELECT b.id, b.sku, b.barcode, b.barcode_type, b.qty_per_unit, b.is_primary,
                        b.source, b.created_by, b.created_at,
-                       p.name AS product_name, p.legal_entity, p.unit_of_measure
+                       MIN(p.name) AS product_name,
+                       GROUP_CONCAT(DISTINCT p.legal_entity ORDER BY p.legal_entity SEPARATOR ', ') AS legal_entity,
+                       MIN(p.unit_of_measure) AS unit_of_measure,
+                       MAX(COALESCE(p.is_active, 0)) AS product_active,
+                       (SELECT GROUP_CONCAT(DISTINCT CONCAT(b2.sku, ' · ', p2.name) SEPARATOR ' | ')
+                          FROM product_barcodes b2
+                          JOIN products p2 ON p2.sku = b2.sku AND p2.is_active = 1
+                         WHERE b2.barcode = b.barcode AND b2.sku <> b.sku
+                           AND p2.legal_entity IN (SELECT p3.legal_entity FROM products p3 WHERE p3.sku = b.sku AND p3.is_active = 1)
+                       ) AS conflict_with
                 FROM product_barcodes b
                 LEFT JOIN products p ON p.sku = b.sku
                 WHERE " . implode(' AND ', $where) . "
-                ORDER BY b.created_at DESC
+                GROUP BY b.id
+                ORDER BY " . (!empty($_GET['conflicts']) ? "b.barcode, b.sku" : "b.created_at DESC") . "
                 LIMIT $limit OFFSET $offset";
         $s = $pdo->prepare($sql);
         $s->execute($params);
         $rows = $s->fetchAll();
 
-        $countSql = "SELECT COUNT(*) FROM product_barcodes b LEFT JOIN products p ON p.sku = b.sku WHERE " . implode(' AND ', $where);
+        $countSql = "SELECT COUNT(DISTINCT b.id) FROM product_barcodes b LEFT JOIN products p ON p.sku = b.sku WHERE " . implode(' AND ', $where);
         $cnt = $pdo->prepare($countSql);
         $cnt->execute($params);
         $total = (int)$cnt->fetchColumn();
 
         roRespond(['barcodes' => $rows, 'total' => $total]);
+    }
+
+    // --- Сколько сейчас конфликтов и «повисших» кодов (для значков на вкладках) ---
+    // GET /api/ro/admin/barcodes-health
+    if ($adminAction === 'barcodes-health' && $method === 'GET') {
+        $conflicts = (int)$pdo->query("
+            SELECT COUNT(*) FROM (
+                SELECT b.barcode
+                FROM product_barcodes b
+                JOIN products p ON p.sku = b.sku AND p.is_active = 1
+                GROUP BY b.barcode, p.legal_entity
+                HAVING COUNT(DISTINCT b.sku) > 1
+            ) t
+        ")->fetchColumn();
+        $inactive = (int)$pdo->query("
+            SELECT COUNT(*) FROM product_barcodes b
+            WHERE NOT EXISTS (SELECT 1 FROM products pa WHERE pa.sku = b.sku AND pa.is_active = 1)
+        ")->fetchColumn();
+        roRespond(['conflicts' => $conflicts, 'inactive' => $inactive]);
     }
 
     // --- Добавить штрихкод ---
@@ -7196,6 +7264,29 @@ if (strpos($roAction, 'admin') === 0) {
         $exists = $pdo->prepare("SELECT sku FROM products WHERE sku = ? LIMIT 1");
         $exists->execute([$sku]);
         if (!$exists->fetchColumn()) roRespond(['error' => 'Товар не найден'], 404);
+
+        // Этот код уже висит на другом товаре того же юрлица, и оба в ассортименте?
+        // Тогда сканер начнёт показывать первый попавшийся. Не запрещаем совсем
+        // (бывает законно: «Сахар 1 кг» и «Сахар 1 кг ШТУКА» — один и тот же
+        // мешок), но заставляем подтвердить: force = «да, знаю, привязывай».
+        if (empty($body['force'])) {
+            $conf = $pdo->prepare("
+                SELECT DISTINCT b2.sku, p2.name, p2.legal_entity
+                FROM product_barcodes b2
+                JOIN products p2 ON p2.sku = b2.sku AND p2.is_active = 1
+                WHERE b2.barcode = ? AND b2.sku <> ?
+                  AND p2.legal_entity IN (SELECT p3.legal_entity FROM products p3 WHERE p3.sku = ? AND p3.is_active = 1)
+                LIMIT 5
+            ");
+            $conf->execute([$barcode, $sku, $sku]);
+            $clash = $conf->fetchAll();
+            if ($clash) {
+                roRespond([
+                    'error'    => 'Этот штрихкод уже привязан к другому товару',
+                    'conflict' => $clash,
+                ], 409);
+            }
+        }
 
         $createdBy = $sessionUser['name'] ?? 'admin';
 

@@ -21,12 +21,27 @@
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/>
           </svg>
         </div>
-        <div class="scn-notfound-title">Товар не найден</div>
+        <div class="scn-notfound-title">
+          {{ discontinued.length ? 'Товар снят с ассортимента' : 'Товар не найден' }}
+        </div>
         <div class="scn-notfound-code">Штрихкод: <b>{{ result.gtin }}</b></div>
+
+        <!-- Код в базе есть, но товар вывели. Раньше здесь было «не найден»,
+             и ресторан слал заявку администратору впустую. -->
+        <div v-if="discontinued.length" class="scn-discontinued">
+          <div v-for="d in discontinued" :key="d.sku" class="scn-discontinued-item">
+            {{ d.name }} <span class="scn-discontinued-sku">{{ d.sku }}</span>
+          </div>
+          <p class="scn-discontinued-hint">
+            Заказать его больше нельзя. Если это ошибка — сообщите администратору ниже.
+          </p>
+        </div>
 
         <div v-if="!reported" class="scn-report-form">
           <p class="scn-report-hint">
-            Заполните, пожалуйста, что это за товар — это поможет администратору завести его в базу.
+            {{ discontinued.length
+              ? 'Если товар всё-таки должен быть в ассортименте — напишите, администратор проверит.'
+              : 'Заполните, пожалуйста, что это за товар — это поможет администратору завести его в базу.' }}
           </p>
 
           <label class="scn-field">
@@ -218,6 +233,9 @@ const reportPhoto = ref(null);
 const reportPhotoPreview = ref('');
 const reportPhotoError = ref('');
 
+// Товары, у которых такой штрихкод есть, но их сняли с ассортимента.
+const discontinued = computed(() => result.value?.discontinued || []);
+
 const scannedTypeLabel = computed(() => {
   const t = result.value?.product?.scanned_barcode_type;
   if (!t || t === 'unknown') return '';
@@ -265,6 +283,11 @@ async function onDetected(code) {
   try {
     const data = await roStore.scanProduct(code);
     result.value = data;
+    // Товар снят с ассортимента — название уже знаем, незачем заставлять
+    // набирать его вручную. Останется дописать, почему он всё-таки нужен.
+    if (!data?.found && data?.discontinued?.length && !reportName.value.trim()) {
+      reportName.value = data.discontinued[0].name;
+    }
     // Останавливаем камеру после успешного распознавания
     scannerRef.value?.stopCamera?.();
   } catch (e) {
@@ -515,6 +538,14 @@ function nearestExpiryShort(value) {
 .scn-notfound-icon { color: #c0392b; opacity: 0.7; }
 .scn-notfound-title { font-size: 17px; font-weight: 700; color: #2b1a0e; }
 .scn-notfound-code { color: #6b5a4a; font-size: 14px; }
+
+.scn-discontinued {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  background: #f4f1ed; border: 1px solid #e0d9d0; text-align: left;
+}
+.scn-discontinued-item { font-size: 14px; color: #3f3630; margin-bottom: 2px; }
+.scn-discontinued-sku { color: #8b7f74; font-size: 12px; font-family: ui-monospace, monospace; }
+.scn-discontinued-hint { margin: 8px 0 0; font-size: 13px; color: #6b5a4a; }
 .scn-notfound-actions {
   display: flex; flex-direction: column; gap: 8px; margin-top: 8px; width: 100%; max-width: 320px;
 }
