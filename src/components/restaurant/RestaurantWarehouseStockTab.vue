@@ -42,7 +42,7 @@
         <div class="whs-list-head">
           <span>Номенклатура</span><span>Остаток</span><span>Срок годности</span>
         </div>
-        <div v-for="item in filteredItems" :key="item.key" class="whs-row" :class="{ soon: item.days_left >= 0 && item.days_left <= 7 }">
+        <div v-for="item in visibleItems" :key="item.key" class="whs-row" :class="{ soon: item.days_left >= 0 && item.days_left <= 7 }">
           <div class="whs-row-main">
             <div class="whs-name">
               <button class="whs-copy whs-sku" type="button" title="Скопировать артикул и товар" @click="copyTitle(item)">
@@ -79,13 +79,16 @@
             </div>
           </div>
         </div>
+        <button v-if="hiddenCount" class="whs-more" type="button" @click="shown += PAGE">
+          Показать ещё {{ Math.min(hiddenCount, PAGE) }} · осталось {{ hiddenCount }}
+        </button>
       </div>
     </div>
   </section>
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { formatDateTime as fmtDateTime } from '@/lib/roUtils.js';
 
 const props = defineProps({
@@ -129,6 +132,14 @@ const filteredItems = computed(() => {
       .some(v => String(v || '').toLowerCase().includes(q));
   });
 });
+
+// Показываем список порциями: 159 позиций разом давали 28 000 пикселей —
+// на телефоне это 34 экрана прокрутки и заметная задержка отрисовки.
+const PAGE = 30;
+const shown = ref(PAGE);
+const visibleItems = computed(() => filteredItems.value.slice(0, shown.value));
+const hiddenCount = computed(() => Math.max(0, filteredItems.value.length - shown.value));
+watch([search, storageFilter], () => { shown.value = PAGE; });
 
 function toggleItem(key) { openItems[key] = !openItems[key]; }
 function formatQty(value) {
@@ -393,4 +404,12 @@ async function exportToExcel() {
   .whs-batch > span:nth-of-type(3)::before { content: 'Срок:'; }
   .whs-batch > span:nth-of-type(4)::before { content: 'Статус:'; }
 }
+.whs-more {
+  display: block; width: 100%;
+  margin-top: 10px; padding: 12px;
+  border: 1.5px solid #E8E0D6; border-radius: 12px;
+  background: #fff; color: #502314;
+  font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.whs-more:hover { border-color: #E76F51; color: #C1502E; }
 </style>

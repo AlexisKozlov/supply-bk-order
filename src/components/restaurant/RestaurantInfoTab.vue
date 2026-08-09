@@ -47,7 +47,13 @@
             <span v-if="!post.is_read" class="info-card-dot" aria-label="Новое"></span>
           </header>
           <h3 v-if="post.title" class="info-card-title">{{ post.title }}</h3>
-          <div class="info-card-message ro-post-body" v-html="renderPostMessage(post.message)"></div>
+          <!-- Длинные посты сворачиваем: восемь развёрнутых объявлений давали
+               почти 7000 пикселей, ленту нельзя было пробежать глазами. -->
+          <div class="info-card-message ro-post-body" :class="{ 'is-clamped': !expanded[post.id] }"
+               v-html="renderPostMessage(post.message)"></div>
+          <button class="info-card-more" type="button" @click="expanded[post.id] = !expanded[post.id]">
+            {{ expanded[post.id] ? 'Свернуть' : 'Читать полностью' }}
+          </button>
 
           <div v-if="post.files?.length" class="info-card-files">
             <button v-for="file in post.files" :key="file.id"
@@ -168,6 +174,9 @@ function closePreview() {
   imagePreview.url = '';
   imagePreview.name = '';
 }
+
+// Какие посты развёрнуты. По умолчанию все свёрнуты.
+const expanded = reactive({});
 </script>
 
 <style scoped>
@@ -277,6 +286,18 @@ function closePreview() {
   margin: 0; color: #4B3527; font-size: 14.5px; line-height: 1.55;
 }
 .info-card-message.ro-post-body { white-space: normal; }
+.info-card-message.is-clamped {
+  max-height: 128px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 60%, transparent 100%);
+}
+.info-card-more {
+  margin-top: 8px; padding: 0;
+  background: none; border: none;
+  color: #C1502E; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.info-card-more:hover { text-decoration: underline; }
 .info-card-message.ro-post-body p { margin: 0 0 8px; }
 .info-card-message.ro-post-body p:last-child { margin-bottom: 0; }
 .info-card-message.ro-post-body ul, .info-card-message.ro-post-body ol { margin: 6px 0 10px 20px; padding: 0; }
