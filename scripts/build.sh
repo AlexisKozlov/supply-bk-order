@@ -100,6 +100,35 @@ mv "$STAGE" dist
 # поэтому под удаление не попадают — проверено на боевом.
 find dist/assets -maxdepth 1 -type f -mtime +3 -delete 2>/dev/null || true
 
+# Возраста мало: если собирать много раз за один день, все чанки моложе трёх
+# суток и не удаляются. За день активной работы так набралось 8753 файла и
+# 275 МБ. Поэтому вдобавок оставляем не больше KEEP_VERSIONS вариантов
+# каждого чанка (по дате, свежие сверху) — старые версии всё равно нужны
+# только тем, у кого открыта прошлая сборка.
+KEEP_VERSIONS=6
+python3 - "$KEEP_VERSIONS" <<'PYCLEAN' || true
+import os, re, sys
+keep = int(sys.argv[1])
+d = 'dist/assets'
+groups = {}
+for f in os.listdir(d):
+    if not f.endswith('.js') and not f.endswith('.css'):
+        continue
+    base = re.sub(r'-[A-Za-z0-9_-]{6,}\.(js|css)$', '', f)
+    groups.setdefault(base, []).append(f)
+removed = 0
+for base, files in groups.items():
+    if len(files) <= keep:
+        continue
+    files.sort(key=lambda f: os.path.getmtime(os.path.join(d, f)), reverse=True)
+    for f in files[keep:]:
+        try:
+            os.remove(os.path.join(d, f)); removed += 1
+        except OSError:
+            pass
+print(f'[build.sh] лишних версий чанков удалено: {removed}')
+PYCLEAN
+
 # Сборка успешно подменена — staging больше нет, чистить нечего.
 trap - EXIT
 echo "[build.sh] сборка завершена, dist подменён атомарно"

@@ -4025,7 +4025,9 @@ function startCabinetBackgroundLoading() {
   const tasks = [
     ['important-posts', () => importantPosts.value.length ? loadImportantImagePreviews(1) : loadImportantPostsWithOptions({ previewAll: false })],
     ['stock-status',    () => checkStockCollection()],
-    ['broadcasts',      () => loadRestaurantBroadcasts()],
+    // Объявления здесь НЕ грузим: их уже тянет startRestaurantBroadcastPolling
+    // сразу при старте, а потом каждые 45 секунд. Две одинаковые загрузки
+    // подряд были видны в сети при каждом открытии кабинета.
     ['surveys',         () => surveyItems.value.length ? null : loadSurveyList()],
     ['previous-orders', () => loadPreviousDeliveryOrders()],
     ['novelties',       () => noveltiesItems.value.length ? null : loadNovelties()],
