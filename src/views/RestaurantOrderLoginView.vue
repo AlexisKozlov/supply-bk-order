@@ -1,24 +1,6 @@
 <template>
   <div class="ro-login-page" :class="loginBrand.themeClass">
     <div class="ro-login-content">
-      <!-- Логотип -->
-      <div class="ro-brand">
-        <div class="ro-logo-wrap">
-          <svg width="48" height="48" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
-            <circle cx="16" cy="16" r="10" fill="#E76F51"/>
-            <circle cx="32" cy="16" r="10" fill="#F4A261"/>
-            <circle cx="16" cy="32" r="10" fill="#F4A261"/>
-            <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
-            <circle cx="24" cy="24" r="8.5" fill="#502314"/>
-            <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">{{ loginBrand.logoLetter }}</text>
-          </svg>
-        </div>
-        <div>
-          <div class="ro-brand-title">{{ loginBrand.title }}</div>
-          <div class="ro-brand-subtitle">{{ loginBrand.subtitle }}</div>
-        </div>
-      </div>
-
       <!-- Telegram auto-login -->
       <div v-if="pendingTgToken && !tgLoading" class="ro-login-card">
         <div class="ro-card-header">
@@ -48,8 +30,29 @@
         <p style="color:#502314; font-size:15px; font-weight:600; margin:0">Вход через Telegram...</p>
       </div>
 
-      <!-- Карточка входа -->
-      <div v-else class="ro-login-card">
+      <!-- Карточка входа: слева бренд, справа форма. Раньше логотип, карточка
+           и подсказки шли друг под другом, и страница не влезала в экран. -->
+      <div v-else class="ro-login-card ro-card-split">
+        <aside class="ro-side">
+          <div class="ro-side-top">
+            <div class="ro-logo-wrap">
+              <svg width="44" height="44" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
+                <circle cx="16" cy="16" r="10" fill="#E76F51"/>
+                <circle cx="32" cy="16" r="10" fill="#F4A261"/>
+                <circle cx="16" cy="32" r="10" fill="#F4A261"/>
+                <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
+                <circle cx="24" cy="24" r="8.5" fill="#502314"/>
+                <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">{{ loginBrand.logoLetter }}</text>
+              </svg>
+            </div>
+            <div class="ro-side-title">{{ loginBrand.title }}</div>
+            <div class="ro-side-sub">{{ loginBrand.subtitle }}</div>
+          </div>
+          <!-- Бургер прячем у Пицца Стар: там он был бы не к месту. -->
+          <img v-if="loginBrand.themeClass !== 'ro-theme-ps'" class="ro-side-burger" src="/login-burger.png" alt="" />
+        </aside>
+
+        <div class="ro-main">
         <div class="ro-card-header">
           <div class="ro-card-icon">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#E76F51" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -143,17 +146,18 @@
             </template>
           </button>
         </form>
-      </div>
 
-      <!-- Подсказки -->
-      <div class="ro-login-footer">
-        {{ loginBrand.footer }}
-        <span class="ro-help-sep">·</span>
-        <a class="ro-help-link" :href="`https://t.me/${supportTg}`" target="_blank" rel="noopener">Нужна помощь?</a>
-        <span class="ro-help-sep">·</span>
-        <!-- Обратная дорога на портал: с главной ресторан теперь уводится
-             в кабинет, и без этой ссылки сотрудник не смог бы войти. -->
-        <a class="ro-help-link" href="/?showLogin=true">Вход для сотрудников</a>
+        <!-- Подсказки внизу правой колонки: отдельным блоком под карточкой они
+             тянули страницу в прокрутку. -->
+        <div class="ro-login-footer">
+          <a class="ro-help-link" :href="`https://t.me/${supportTg}`" target="_blank" rel="noopener">Нужна помощь?</a>
+          <span class="ro-help-sep">·</span>
+          <!-- Обратная дорога на портал: с главной ресторан теперь уводится
+               в кабинет, и без этой ссылки закупщик не смог бы войти.
+               «Для сотрудников» звучало так, будто ресторан не сотрудник. -->
+          <a class="ro-help-link" href="/?showLogin=true">Вход для отдела закупок</a>
+        </div>
+        </div>
       </div>
     </div>
   </div>
@@ -358,7 +362,7 @@ async function handleLogin() {
   flex-direction: column;
   align-items: center;
   width: 100%;
-  max-width: 420px;
+  max-width: 700px;
 }
 
 /* Логотип */
@@ -391,7 +395,7 @@ async function handleLogin() {
 /* Карточка */
 .ro-login-card {
   background: white;
-  border-radius: 20px;
+  border-radius: 22px;
   padding: 32px;
   width: 100%;
   box-shadow:
@@ -408,8 +412,8 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 28px;
-  padding-bottom: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
   border-bottom: 1px solid #f0ebe4;
 }
 .ro-card-icon {
@@ -439,7 +443,7 @@ async function handleLogin() {
 
 /* Поля */
 .ro-field {
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 .ro-field label {
   display: flex;
@@ -487,20 +491,48 @@ async function handleLogin() {
   font-size: 16px;
   font-weight: 700;
 }
+
+/* ─── Две колонки: слева бренд, справа форма ─── */
+.ro-card-split {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  padding: 0;
+  overflow: hidden;
+  align-items: stretch;
+}
+.ro-side {
+  background: linear-gradient(160deg, var(--brand-brown), #3A1A0C);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 26px 16px 0; text-align: center;
+}
+.ro-side-top { color: var(--brand-cream); }
+.ro-side-title {
+  font-family: 'Flame', var(--tk-font);
+  font-size: 20px; font-weight: 700; margin-top: 10px; line-height: 1.15;
+}
+.ro-side-sub { font-size: 12px; opacity: .65; margin-top: 4px; }
+/* Бургер подпирает нижний край панели — так он часть фона, а не наклейка. */
+.ro-side-burger { width: 200px; margin: auto -12px 0; display: block; }
+.ro-main { padding: 28px; }
+
+/* Глазок пароля был еле заметен: тонкая иконка без фона на светлом поле.
+   Теперь это явная круглая кнопка. */
 .pw-eye-ico { width: 20px; height: 20px; display: block; }
 .ro-toggle-pass {
   position: absolute;
-  right: 10px;
+  right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  background: none;
-  border: none;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: rgba(80, 35, 20, .07);
+  color: var(--brand-brown);
   cursor: pointer;
-  font-size: 18px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  opacity: 0.6;
+  transition: background .15s, color .15s;
 }
+.ro-toggle-pass:hover { background: rgba(214, 35, 0, .12); color: var(--brand-red); }
+.ro-toggle-pass:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 .ro-toggle-pass:hover { opacity: 1; }
 
 /* Ошибка */
@@ -604,7 +636,9 @@ async function handleLogin() {
 /* Подвал стал тёмным: фон страницы теперь кремовый, белый текст на нём
    был не виден. */
 .ro-login-footer {
-  margin-top: 20px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #f0ebe4;
   color: rgba(80, 35, 20, 0.45);
   font-size: 12px;
   text-align: center;
@@ -627,10 +661,27 @@ async function handleLogin() {
 }
 
 /* Мобильная адаптация */
+@media (max-width: 720px) {
+  /* На телефоне бренд-панель становится узкой полосой сверху, бургер прячем:
+     он съедал пол-экрана и форма уходила под сгиб. */
+  .ro-card-split { grid-template-columns: 1fr; }
+  .ro-side { flex-direction: row; align-items: center; gap: 12px; padding: 12px 18px; text-align: left; }
+  .ro-side-top { display: flex; align-items: center; gap: 12px; }
+  .ro-side-title { font-size: 16px; margin-top: 0; }
+  .ro-logo-wrap svg { width: 34px; height: 34px; }
+  .ro-side-sub { display: none; }
+  .ro-side-burger { display: none; }
+  .ro-main { padding: 20px 18px; }
+}
+
 @media (max-width: 480px) {
-  .ro-login-page { padding: 16px; }
-  .ro-login-card { padding: 24px; border-radius: 16px; }
-  .ro-brand-title { font-size: 18px; }
-  .ro-card-header { flex-direction: column; text-align: center; gap: 10px; }
+  /* Экран телефона должен вмещать форму целиком: прокрутка ради двух
+     чекбоксов раздражает больше, чем плотная вёрстка. */
+  .ro-login-page { padding: 10px; }
+  .ro-login-card { border-radius: 18px; }
+  .ro-main { padding: 16px; }
+  .ro-card-header { margin-bottom: 14px; padding-bottom: 12px; gap: 10px; }
+  .ro-field { margin-bottom: 12px; }
+  .ro-login-footer { margin-top: 12px; padding-top: 10px; }
 }
 </style>
