@@ -778,7 +778,7 @@ if (!$isWeekend || $DRY_RUN) {
         // Добавить пункт получателю. $key — чтобы понять, новый он или уже был.
         $add = function ($chatId, $section, $line, $key) use (&$digest, $pdo, $DIGEST_REPEAT) {
             if (!isset($digest[$chatId])) {
-                $digest[$chatId] = ['payments' => [], 'receiving' => [], 'tenders' => [], 'marketing' => [], 'keys' => [], 'fresh' => false];
+                $digest[$chatId] = ['payments' => [], 'receiving' => [], 'tenders' => [], 'distribution' => [], 'surveys' => [], 'marketing' => [], 'keys' => [], 'fresh' => false];
             }
             $digest[$chatId][$section][] = $line;
             $digest[$chatId]['keys'][] = $key;
@@ -874,7 +874,76 @@ if (!$isWeekend || $DRY_RUN) {
             $add($chatId, 'tenders', $line, "tnd_{$t['id']}");
         }
 
-        // ── 4. Акции, завершённые по дате ───────────────────────────────
+        // ── 4. Сессии распределения без движения ────────────────────────
+        // Возраст сессии сам по себе ни о чём не говорит. Смотрим на две
+        // вещи: сколько строк отгружено и сколько дней по сессии никто
+        // ничего не менял. Так «картофельные стрипсы» оказались отгружены
+        // полностью — сессию просто забыли закрыть.
+        $stuckDist = $pdo->query("
+            SELECT s.id, s.name, s.created_by,
+                   DATE(s.created_at) AS started,
+                   (SELECT COUNT(*) FROM dist_entries e
+                      JOIN dist_session_products sp ON sp.id = e.session_product_id
+                     WHERE sp.session_id = s.id) AS total,
+                   (SELECT COUNT(*) FROM dist_entries e
+                      JOIN dist_session_products sp ON sp.id = e.session_product_id
+                     WHERE sp.session_id = s.id AND e.shipped = 1) AS shipped,
+                   DATEDIFF(CURDATE(), COALESCE(
+                       (SELECT MAX(DATE(e.updated_at)) FROM dist_entries e
+                          JOIN dist_session_products sp ON sp.id = e.session_product_id
+                         WHERE sp.session_id = s.id),
+                       DATE(s.created_at))) AS idle_days
+            FROM dist_sessions s
+            WHERE s.closed_at IS NULL
+            HAVING idle_days >= 7
+            ORDER BY idle_days DESC
+        ")->fetchAll();
+        foreach ($stuckDist as $s) {
+            $chatId = $chatOf($s['created_by']);
+            if (!$chatId) continue;
+            $idle  = (int)$s['idle_days'];
+            $done  = (int)$s['shipped'];
+            $total = (int)$s['total'];
+            $tail  = ($total > 0 && $done >= $total)
+                ? 'отгружено всё, осталось закрыть'
+                : "отгружено {$done} из {$total}";
+            $line = "• <b>{$s['name']}</b> — {$tail}\n"
+                  . "   открыта с " . date('d.m.Y', strtotime($s['started']))
+                  . ", без движения {$idle} " . plural_days($idle);
+            $add($chatId, 'distribution', $line, "dist_{$s['id']}");
+        }
+
+        // ── 5. Опросы, на которые перестали отвечать ────────────────────
+        // «Открыт больше 30 дней» — плохой признак: опрос по кабинету идёт
+        // с 4 мая и до сих пор собирает ответы, закрывать его рано.
+        // Признак «пора закрывать» — две недели без единого нового ответа.
+        $staleSurveys = $pdo->query("
+            SELECT s.id, s.title, s.created_by, DATE(s.sent_at) AS sent,
+                   (SELECT COUNT(DISTINCT r.restaurant_number) FROM survey_responses r
+                     WHERE r.survey_id = s.id) AS answers,
+                   (SELECT MAX(DATE(r.submitted_at)) FROM survey_responses r
+                     WHERE r.survey_id = s.id) AS last_answer,
+                   DATEDIFF(CURDATE(), COALESCE(
+                       (SELECT MAX(DATE(r.submitted_at)) FROM survey_responses r WHERE r.survey_id = s.id),
+                       DATE(s.sent_at))) AS quiet_days
+            FROM surveys s
+            WHERE s.status = 'active' AND s.sent_at IS NOT NULL
+            HAVING quiet_days >= 14
+            ORDER BY quiet_days DESC
+        ")->fetchAll();
+        foreach ($staleSurveys as $s) {
+            $chatId = $chatOf($s['created_by']);
+            if (!$chatId) continue;
+            $quiet = (int)$s['quiet_days'];
+            $line = "• <b>{$s['title']}</b> — ответили {$s['answers']}\n"
+                  . "   " . ($s['last_answer']
+                        ? 'последний ответ ' . date('d.m.Y', strtotime($s['last_answer']))
+                        : 'разослан ' . date('d.m.Y', strtotime($s['sent'])) . ', ответов нет')
+                  . ", тишина {$quiet} " . plural_days($quiet);
+            $add($chatId, 'surveys', $line, "srv_{$s['id']}");
+        }
+
+        // ── 6. Акции, завершённые по дате ───────────────────────────────
         // Дата окончания — вся правда: этапов, которые продолжались бы после
         // неё, в акциях нет. Статус меняем сразу, а сообщение уходит в общем
         // дайджесте. Закрытие само по себе делает дайджест «свежим», иначе
@@ -912,13 +981,16 @@ if (!$isWeekend || $DRY_RUN) {
         foreach ($digest as $chatId => $d) {
             if (!$d['fresh']) continue; // новых хвостов нет — молчим до повтора
 
-            $total = count($d['payments']) + count($d['receiving']) + count($d['tenders']) + count($d['marketing']);
+            $total = count($d['payments']) + count($d['receiving']) + count($d['tenders'])
+                   + count($d['distribution']) + count($d['surveys']) + count($d['marketing']);
             $text  = "📋 <b>Требуют внимания</b> — {$total}\n";
 
             $sections = [
                 ['payments',  '🔴 <b>Просроченные оплаты</b>',     'Отметьте оплату в разделе «Оплаты поставщиков».'],
                 ['receiving', '📦 <b>Приёмка не отмечена</b>',      'Пока приёмки нет, план-факт по заказу не посчитать.'],
                 ['tenders',   '🧾 <b>Тендеры без движения</b>',     'Дедлайн подачи прошёл, а тендер не закрыт.'],
+                ['distribution', '🚚 <b>Распределение не закрыто</b>', 'Закройте сессию, когда всё отгружено.'],
+                ['surveys',   '📊 <b>Опросы без новых ответов</b>',  'Две недели тишины — можно закрывать и смотреть итоги.'],
                 ['marketing', '🏁 <b>Акции завершены по дате</b>',  'Статус переключён на «Завершённая». Если акция продлена, верните его в карточке.'],
             ];
             foreach ($sections as [$key, $title, $note]) {

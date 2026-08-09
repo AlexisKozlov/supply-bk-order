@@ -237,25 +237,42 @@ if ($fn === 'attention_overview') {
     // ── 6. Сессии распределения ─────────────────────────────────────────
     if ($can('distribution')) {
         [$w, $p] = $groupIn('legal_entity_group');
+        // Возраст сессии сам по себе ни о чём не говорит. Смотрим, сколько
+        // строк отгружено и сколько дней по сессии ничего не меняли: так
+        // видно и брошенные, и те, где отгружено всё и осталось закрыть.
+        // То же правило в крон-сводке.
         $items = $rows("
-            SELECT id, name, DATE(created_at) AS due,
-                   DATEDIFF(CURDATE(), DATE(created_at)) AS days
-            FROM dist_sessions
-            WHERE closed_at IS NULL AND created_at < NOW() - INTERVAL 30 DAY AND $w
-            ORDER BY created_at
+            SELECT s.id, s.name, DATE(s.created_at) AS due,
+                   (SELECT COUNT(*) FROM dist_entries e
+                      JOIN dist_session_products sp ON sp.id = e.session_product_id
+                     WHERE sp.session_id = s.id) AS total,
+                   (SELECT COUNT(*) FROM dist_entries e
+                      JOIN dist_session_products sp ON sp.id = e.session_product_id
+                     WHERE sp.session_id = s.id AND e.shipped = 1) AS shipped,
+                   DATEDIFF(CURDATE(), COALESCE(
+                       (SELECT MAX(DATE(e.updated_at)) FROM dist_entries e
+                          JOIN dist_session_products sp ON sp.id = e.session_product_id
+                         WHERE sp.session_id = s.id),
+                       DATE(s.created_at))) AS days
+            FROM dist_sessions s
+            WHERE s.closed_at IS NULL AND $w
+            HAVING days >= 7
+            ORDER BY days DESC
             LIMIT 50
         ", $p);
         $blocks[] = [
             'key'    => 'distribution',
-            'title'  => 'Сессии распределения',
-            'hint'   => 'открыта больше 30 дней',
+            'title'  => 'Распределение не закрыто',
+            'hint'   => 'по сессии неделю ничего не меняли',
             'route'  => 'distribution',
             'action' => 'close_session',
             'count'  => count($items),
             'items'  => array_map(fn($r) => [
                 'id'       => (int)$r['id'],
                 'title'    => $r['name'],
-                'subtitle' => 'открыта с ' . $r['due'],
+                'subtitle' => ((int)$r['total'] > 0 && (int)$r['shipped'] >= (int)$r['total'])
+                    ? 'отгружено всё, осталось закрыть'
+                    : 'отгружено ' . (int)$r['shipped'] . ' из ' . (int)$r['total'],
                 'date'     => $r['due'],
                 'days'     => (int)$r['days'],
             ], $items),
@@ -265,26 +282,36 @@ if ($fn === 'attention_overview') {
     // ── 7. Опросы ───────────────────────────────────────────────────────
     if ($can('surveys')) {
         [$w, $p] = $groupIn('legal_entity_group');
+        // «Открыт больше 30 дней» — плохой признак: опрос по кабинету идёт
+        // с 4 мая и до сих пор собирает ответы. Пора закрывать, когда две
+        // недели никто не отвечает. То же правило в крон-сводке.
         $items = $rows("
-            SELECT s.id, s.title, DATE(s.created_at) AS due,
-                   DATEDIFF(CURDATE(), DATE(s.created_at)) AS days,
-                   (SELECT COUNT(*) FROM survey_responses r WHERE r.survey_id = s.id) AS answers
+            SELECT s.id, s.title, DATE(s.sent_at) AS due,
+                   (SELECT COUNT(DISTINCT r.restaurant_number) FROM survey_responses r
+                     WHERE r.survey_id = s.id) AS answers,
+                   (SELECT MAX(DATE(r.submitted_at)) FROM survey_responses r
+                     WHERE r.survey_id = s.id) AS last_answer,
+                   DATEDIFF(CURDATE(), COALESCE(
+                       (SELECT MAX(DATE(r.submitted_at)) FROM survey_responses r WHERE r.survey_id = s.id),
+                       DATE(s.sent_at))) AS days
             FROM surveys s
-            WHERE s.status = 'active' AND s.created_at < NOW() - INTERVAL 30 DAY AND $w
-            ORDER BY s.created_at
+            WHERE s.status = 'active' AND s.sent_at IS NOT NULL AND $w
+            HAVING days >= 14
+            ORDER BY days DESC
             LIMIT 50
         ", $p);
         $blocks[] = [
             'key'    => 'surveys',
-            'title'  => 'Опросы',
-            'hint'   => 'открыт больше 30 дней',
+            'title'  => 'Опросы без новых ответов',
+            'hint'   => 'две недели тишины — можно закрывать и смотреть итоги',
             'route'  => 'surveys',
             'action' => 'close_survey',
             'count'  => count($items),
             'items'  => array_map(fn($r) => [
                 'id'       => (int)$r['id'],
                 'title'    => $r['title'],
-                'subtitle' => 'ответов: ' . (int)$r['answers'],
+                'subtitle' => 'ответили ' . (int)$r['answers']
+                    . ($r['last_answer'] ? ', последний ' . $r['last_answer'] : ', ответов нет'),
                 'date'     => $r['due'],
                 'days'     => (int)$r['days'],
             ], $items),
