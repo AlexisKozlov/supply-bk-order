@@ -124,6 +124,54 @@ if ($fn === 'attention_overview') {
         ];
     }
 
+    // ── 1.5 Своя передача дел, которая скоро начнётся ───────────────────
+    // Черновик никому не помогает: замещающие видят только финальный
+    // документ. Показываем автору, пока есть время дозаполнить.
+    // Своя = где author_login совпадает с именем, как в hoCanEdit.
+    if ($can('handover')) {
+        $items = $rows("
+            SELECT d.id, d.title, d.date_from, d.date_to,
+                   DATEDIFF(d.date_from, CURDATE()) AS days_left,
+                   (SELECT COUNT(*) FROM handover_people p WHERE p.doc_id = d.id) AS people,
+                   (SELECT COUNT(*) FROM handover_items i
+                     WHERE i.doc_id = d.id AND i.kind <> 'weekly') AS items
+            FROM handover_docs d
+            WHERE d.status <> 'final'
+              AND d.date_from IS NOT NULL
+              AND d.author_login = ?
+              AND d.date_from <= CURDATE() + INTERVAL 7 DAY
+              AND COALESCE(d.date_to, d.date_from) >= CURDATE()
+            ORDER BY d.date_from
+            LIMIT 20
+        ", [$me]);
+        $blocks[] = [
+            'key'    => 'handover',
+            'title'  => 'Передача дел не готова',
+            'hint'   => 'скоро начинается, а документ ещё черновик',
+            'route'  => 'handover',
+            'count'  => count($items),
+            'items'  => array_map(function ($r) {
+                $left = (int)$r['days_left'];
+                $gaps = [];
+                if (!(int)$r['people']) $gaps[] = 'замещающих нет';
+                if (!(int)$r['items'])  $gaps[] = 'тем и контрольных точек нет';
+                $label = $left > 1  ? "через {$left} дн."
+                       : ($left === 1 ? 'завтра'
+                       : ($left === 0 ? 'сегодня' : 'уже идёт'));
+                return [
+                    'id'         => (int)$r['id'],
+                    'title'      => $r['title'],
+                    'subtitle'   => $gaps ? implode(', ', $gaps) : 'осталось перевести в финал',
+                    'date'       => $r['date_from'],
+                    'days'       => null,
+                    'days_label' => $label,
+                    // Красным — когда откладывать уже некуда.
+                    'urgent'     => $left <= 1,
+                ];
+            }, $items),
+        ];
+    }
+
     // ── 2. Оплаты поставщикам ───────────────────────────────────────────
     if ($can('plan-fact')) {
         [$w, $p] = $entityIn('legal_entity');

@@ -27,8 +27,10 @@
               <div v-if="it.subtitle" class="att-item-sub">{{ it.subtitle }}</div>
             </div>
 
-            <span v-if="it.days !== null" class="att-days" :class="daysClass(it.days)">
-              {{ it.days }} дн.
+            <!-- Обычно считаем «сколько дней просрочено». Передача дел ещё не
+                 просрочена, а только начинается, поэтому у неё своя подпись. -->
+            <span v-if="it.days_label || it.days !== null" class="att-days" :class="daysClass(it)">
+              {{ it.days_label || (it.days + ' дн.') }}
             </span>
 
             <div class="att-item-actions">
@@ -105,7 +107,9 @@ const ACTION_LABELS = {
 };
 function actionLabel(a) { return ACTION_LABELS[a] || 'Готово'; }
 
-function daysClass(d) {
+function daysClass(it) {
+  if (it.urgent) return 'is-old';   // срочность задана явно, а не числом дней
+  const d = it.days;
   if (d >= 30) return 'is-old';
   if (d >= 7) return 'is-mid';
   return '';

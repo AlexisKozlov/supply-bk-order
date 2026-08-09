@@ -778,7 +778,7 @@ if (!$isWeekend || $DRY_RUN) {
         // Добавить пункт получателю. $key — чтобы понять, новый он или уже был.
         $add = function ($chatId, $section, $line, $key) use (&$digest, $pdo, $DIGEST_REPEAT) {
             if (!isset($digest[$chatId])) {
-                $digest[$chatId] = ['tasks' => [], 'payments' => [], 'receiving' => [], 'tenders' => [], 'distribution' => [], 'surveys' => [], 'marketing' => [], 'keys' => [], 'buttons' => [], 'fresh' => false];
+                $digest[$chatId] = ['tasks' => [], 'handover' => [], 'payments' => [], 'receiving' => [], 'tenders' => [], 'distribution' => [], 'surveys' => [], 'marketing' => [], 'keys' => [], 'buttons' => [], 'fresh' => false];
             }
             $digest[$chatId][$section][] = $line;
             $digest[$chatId]['keys'][] = $key;
@@ -835,6 +835,46 @@ if (!$isWeekend || $DRY_RUN) {
                     ]];
                 }
             }
+        }
+
+        // ── 0.5 Передача дел, которая вот-вот начнётся, а она черновик ──
+        // Документ №5 «10.08 — 23.08» пролежал черновиком с 6 августа: в нём
+        // сами подтянулись поставщики и пустой шаблон недели, а замещающих не
+        // назначили ни одного. Пока он черновик, его никто не видит как
+        // руководство к действию, и в первый день отпуска выясняется, что
+        // непонятно, кто за что отвечает.
+        $handover = $pdo->query("
+            SELECT d.id, d.title, d.date_from, d.date_to, d.author_login,
+                   DATEDIFF(d.date_from, CURDATE()) AS days_left,
+                   (SELECT COUNT(*) FROM handover_people p WHERE p.doc_id = d.id) AS people,
+                   (SELECT COUNT(*) FROM handover_items i
+                     WHERE i.doc_id = d.id AND i.kind <> 'weekly') AS items,
+                   (SELECT COUNT(*) FROM handover_items i
+                     WHERE i.doc_id = d.id AND i.kind = 'weekly' AND COALESCE(i.c2, '') <> '') AS weekly
+            FROM handover_docs d
+            WHERE d.status <> 'final'
+              AND d.date_from IS NOT NULL
+              AND d.date_from <= CURDATE() + INTERVAL 3 DAY
+              AND COALESCE(d.date_to, d.date_from) >= CURDATE()
+            ORDER BY d.date_from
+        ")->fetchAll();
+        foreach ($handover as $h) {
+            $chatId = $chatOf($h['author_login']);
+            if (!$chatId) continue;
+            $left = (int)$h['days_left'];
+            $when = $left > 1  ? "начинается через {$left} " . plural_days($left)
+                  : ($left === 1 ? 'начинается завтра'
+                  : ($left === 0 ? 'начинается сегодня'
+                  : 'уже идёт с ' . date('d.m.Y', strtotime($h['date_from']))));
+            // Перечисляем ровно то, чего не хватает: «доделай» без списка
+            // человек читает и не понимает, что именно доделывать.
+            $gaps = [];
+            if (!(int)$h['people']) $gaps[] = 'замещающих не назначено';
+            if (!(int)$h['items'])  $gaps[] = 'тем и контрольных точек нет';
+            if (!(int)$h['weekly']) $gaps[] = 'недельный ритм пустой';
+            $tail = $gaps ? implode(', ', $gaps) : 'осталось перевести из черновика в финал';
+            $line = "• <b>{$h['title']}</b> — {$when}, документ ещё черновик\n   {$tail}";
+            $add($chatId, 'handover', $line, "hov_{$h['id']}");
         }
 
         // ── 1. Просроченные оплаты ──────────────────────────────────────
@@ -1031,8 +1071,8 @@ if (!$isWeekend || $DRY_RUN) {
         foreach ($digest as $chatId => $d) {
             if (!$d['fresh']) continue; // новых хвостов нет — молчим до повтора
 
-            $total = count($d['tasks']) + count($d['payments']) + count($d['receiving']) + count($d['tenders'])
-                   + count($d['distribution']) + count($d['surveys']) + count($d['marketing']);
+            $total = count($d['tasks']) + count($d['handover']) + count($d['payments']) + count($d['receiving'])
+                   + count($d['tenders']) + count($d['distribution']) + count($d['surveys']) + count($d['marketing']);
             $text  = "📋 <b>Требуют внимания</b> — {$total}\n";
 
             // Кнопок меньше, чем задач — говорим об этом, иначе выглядит так,
@@ -1044,6 +1084,7 @@ if (!$isWeekend || $DRY_RUN) {
 
             $sections = [
                 ['tasks',     '🗓 <b>Просроченные задачи</b>',      $taskNote],
+                ['handover',  '🤝 <b>Передача дел не готова</b>',   'Пока документ черновик, замещающие его не видят.'],
                 ['payments',  '🔴 <b>Просроченные оплаты</b>',     'Отметьте оплату в разделе «Оплаты поставщиков».'],
                 ['receiving', '📦 <b>Приёмка не отмечена</b>',      'Пока приёмки нет, план-факт по заказу не посчитать.'],
                 ['tenders',   '🧾 <b>Тендеры без движения</b>',     'Дедлайн подачи прошёл, а тендер не закрыт.'],
