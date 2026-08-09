@@ -240,6 +240,39 @@ function hoRebuildSuppliers($pdo, array $doc) {
     return count($collected);
 }
 
+/**
+ * Список приходов в документе — снимок на момент сборки, а не живая выборка:
+ * иначе примечания к поставщику разъезжались бы с данными. Обратная сторона —
+ * снимок устаревает молча. Так в передаче дел №5 осталась «БелАсва»: когда
+ * документ собирали, её приход стоял на 11 августа, потом заказ передвинули
+ * на 6-е, а в документе он висел как будущий.
+ *
+ * Сравниваем состав «поставщик → даты приходов» и говорим фронту, что пора
+ * нажать «Обновить приходы».
+ */
+function hoSuppliersStale($pdo, array $doc, array $stored): bool {
+    $entities = json_decode((string)($doc['legal_entities'] ?? ''), true) ?: [];
+    $fresh = hoCollectOrders($pdo, $doc['date_from'], $doc['date_to'], $entities);
+
+    $shape = function (array $bySupplier): array {
+        $out = [];
+        foreach ($bySupplier as $name => $orders) {
+            $dates = array_map(fn($o) => (string)($o['date'] ?? ''), $orders);
+            sort($dates);
+            $out[$name] = $dates;
+        }
+        ksort($out);
+        return $out;
+    };
+    $storedShape = [];
+    foreach ($stored as $s) {
+        // Поставщик без приходов — добавлен руками, его в сравнение не берём.
+        if (empty($s['orders'])) continue;
+        $storedShape[$s['supplier_name']] = $s['orders'];
+    }
+    return $shape($fresh) !== $shape($storedShape);
+}
+
 function hoLoadFull($pdo, array $doc) {
     $id = (int)$doc['id'];
     $people = $pdo->prepare("SELECT * FROM handover_people WHERE doc_id = ? ORDER BY sort_order, id");
@@ -348,6 +381,7 @@ if ($hoAction === 'docs' && $hoId !== null && $hoSub === null && $method === 'GE
     if (!$doc) hoRespond(['error' => 'Документ не найден'], 404);
     $full = hoLoadFull($pdo, $doc);
     $full['can_edit'] = hoCanEdit($hoUser, $doc);
+    $full['suppliers_stale'] = hoSuppliersStale($pdo, $doc, $full['suppliers']);
     hoRespond($full);
 }
 
@@ -369,7 +403,20 @@ if ($hoAction === 'docs' && $hoId !== null && $hoSub === null && $method === 'PA
     if (!$fields) hoRespond(['error' => 'Нечего менять'], 400);
     $params[] = (int)$hoId;
     $pdo->prepare("UPDATE handover_docs SET " . implode(', ', $fields) . " WHERE id = ?")->execute($params);
-    hoRespond(['doc' => hoLoadFull($pdo, hoGetDoc($pdo, $hoId))]);
+
+    // Сдвинули период — пересобираем приходы сразу. Раньше список оставался от
+    // старых дат, и человек видел поставки, которых в его отсутствие не будет.
+    $datesChanged = false;
+    foreach (['date_from', 'date_to'] as $f) {
+        if (array_key_exists($f, $body) && (string)$body[$f] !== (string)($doc[$f] ?? '')) $datesChanged = true;
+    }
+    $updated = hoGetDoc($pdo, $hoId);
+    if ($datesChanged) hoRebuildSuppliers($pdo, $updated);
+
+    $full = hoLoadFull($pdo, hoGetDoc($pdo, $hoId));
+    $full['can_edit'] = hoCanEdit($hoUser, $updated);
+    $full['suppliers_stale'] = hoSuppliersStale($pdo, $updated, $full['suppliers']);
+    hoRespond(['doc' => $full, 'suppliers_rebuilt' => $datesChanged]);
 }
 
 // ─── Удалить документ ───

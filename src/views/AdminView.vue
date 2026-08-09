@@ -77,6 +77,11 @@
             <div v-if="u.email" class="adm-user-email">{{ u.email }}</div>
             <div class="adm-user-meta">
               {{ u.display_role || ({ admin: 'Администратор', manager: 'Руководитель', viewer: 'Читатель' }[u.role] || 'Сотрудник') }}
+              <!-- Журнал входов вёлся с марта, но нигде не показывался.
+                   Клик открывает последние 20 входов с адресом. -->
+              <span class="adm-user-login" :class="loginClass(u)"
+                    title="Показать историю входов"
+                    @click.stop="openLoginHistory(u)">{{ loginLabel(u) }}</span>
             </div>
           </div>
 
@@ -91,6 +96,29 @@
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
           </div>
+        </div>
+      </div>
+
+      <!-- История входов одного сотрудника -->
+      <div v-if="loginHistory" class="adm-lh-overlay" @click.self="loginHistory = null">
+        <div class="adm-lh">
+          <div class="adm-lh-head">
+            <h3>Входы в портал — {{ loginHistory.name }}</h3>
+            <button class="adm-lh-close" @click="loginHistory = null">✕</button>
+          </div>
+          <p v-if="loginHistory.loading" class="adm-lh-empty">Загружаем…</p>
+          <p v-else-if="!loginHistory.rows.length" class="adm-lh-empty">Записей нет — этот человек ни разу не заходил.</p>
+          <table v-else class="adm-lh-table">
+            <thead><tr><th>Когда</th><th>Откуда</th><th>Логин</th></tr></thead>
+            <tbody>
+              <tr v-for="(r, i) in loginHistory.rows" :key="i">
+                <td>{{ fmtDateTime(r.created_at) }}</td>
+                <td class="adm-lh-ip">{{ r.ip || '—' }}</td>
+                <td class="adm-lh-mail">{{ r.email || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="adm-lh-note">Показаны последние 20 входов. Журнал ведётся с марта 2026.</p>
         </div>
       </div>
     </div>
@@ -1079,6 +1107,17 @@ const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);
 const lockouts = ref({});
+// { имя: { last_login, days_since, logins_total, logins_30d } }
+const loginStats = ref({});
+const loginHistory = ref(null);
+
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+}
 
 const allEntities = LEGAL_ENTITIES;
 
@@ -1938,8 +1977,46 @@ async function loadUsers() {
       return u;
     });
     loadLockouts();
+    loadLoginStats();
   } catch { toast.error('Ошибка', 'Не удалось загрузить пользователей'); }
   finally { loading.value = false; }
+}
+
+// Когда человек последний раз заходил в портал. Журнал входов пишется с
+// марта, но до сих пор нигде не показывался: таблица лежала в другой
+// сортировке, чем users, и JOIN по имени падал с ошибкой.
+async function loadLoginStats() {
+  try {
+    const { data } = await db.rpc('user_login_stats');
+    loginStats.value = (data && data.stats) || {};
+  } catch { loginStats.value = {}; }
+}
+
+function loginLabel(u) {
+  const s = loginStats.value[u.name];
+  if (!s || !s.last_login) return 'ни разу не заходил';
+  const d = s.days_since;
+  const when = d <= 0 ? 'сегодня' : (d === 1 ? 'вчера' : `${d} ${plural(d, 'день', 'дня', 'дней')} назад`);
+  return `был ${when}`;
+}
+// Красным — кто не заходил дольше двух месяцев или не заходил вообще:
+// у такого сотрудника доступ живёт сам по себе.
+function loginClass(u) {
+  const s = loginStats.value[u.name];
+  if (!s || !s.last_login) return 'is-never';
+  if (s.days_since >= 60) return 'is-never';
+  if (s.days_since >= 30) return 'is-stale';
+  return '';
+}
+
+async function openLoginHistory(u) {
+  loginHistory.value = { name: u.name, rows: [], loading: true };
+  try {
+    const { data } = await db.rpc('user_login_history', { name: u.name });
+    loginHistory.value = { name: u.name, rows: (data && data.history) || [], loading: false };
+  } catch {
+    loginHistory.value = { name: u.name, rows: [], loading: false };
+  }
 }
 
 // Кто сейчас заблокирован по числу неудачных попыток входа (за 10 минут).
@@ -2159,6 +2236,17 @@ async function loadCronReminders() {
   } finally {
     cronLoading.value = false;
   }
+}
+
+// Дата и время входа — всегда полностью, включая год: журнал ведётся с марта,
+// и «12.03 09:40» без года читается неоднозначно.
+function fmtDateTime(ts) {
+  if (!ts) return '—';
+  try {
+    const dt = new Date(String(ts).replace(' ', 'T'));
+    return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+           ' ' + dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  } catch { return ts; }
 }
 
 function fmtCronTime(ts) {
@@ -2546,6 +2634,34 @@ onUnmounted(() => {
 }
 .adm-user-email { font-size: 11px; color: var(--text-muted); margin-top: 1px; opacity: .7; }
 .adm-user-meta { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+.adm-user-login {
+  margin-left: 8px; padding: 0 6px; border-radius: 8px; cursor: pointer;
+  background: rgba(0, 0, 0, .04);
+}
+.adm-user-login:hover { background: rgba(0, 0, 0, .08); }
+.adm-user-login.is-stale { color: #9a6b12; background: rgba(154, 107, 18, .12); }
+.adm-user-login.is-never { color: #b4432e; background: rgba(180, 67, 46, .12); }
+
+.adm-lh-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .35);
+  display: flex; align-items: center; justify-content: center; z-index: 60; padding: 16px;
+}
+.adm-lh {
+  background: var(--card-bg, #fff); border-radius: 12px; padding: 16px 18px;
+  width: min(560px, 100%); max-height: 80vh; overflow: auto;
+}
+.adm-lh-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.adm-lh-head h3 { margin: 0; font-size: 15px; }
+.adm-lh-close { border: none; background: none; font-size: 16px; cursor: pointer; color: var(--text-muted); }
+.adm-lh-empty { color: var(--text-muted); font-size: 13px; padding: 16px 0; }
+.adm-lh-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.adm-lh-table th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-muted); font-weight: 600; padding: 4px 8px 4px 0;
+}
+.adm-lh-table td { padding: 4px 8px 4px 0; border-top: 1px solid var(--border, #eceff2); white-space: nowrap; }
+.adm-lh-ip, .adm-lh-mail { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-muted); }
+.adm-lh-note { margin: 10px 0 0; font-size: 11.5px; color: var(--text-muted); }
 
 .adm-badge {
   display: inline-block; padding: 1px 7px; border-radius: 4px;

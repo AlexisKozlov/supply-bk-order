@@ -102,7 +102,9 @@
                   @click="toggleStatus">
             {{ current.doc.status === 'final' ? 'Готов' : 'Черновик' }}
           </button>
-          <button class="ho-btn ho-btn-ghost" :disabled="rebuilding" @click="rebuild">
+          <!-- Пересобрать может только автор документа: у остальных кнопка
+               давала 403 и выглядела как поломка. -->
+          <button v-if="canEdit" class="ho-btn ho-btn-ghost" :disabled="rebuilding" @click="rebuild">
             {{ rebuilding ? 'Собираю…' : 'Обновить приходы' }}
           </button>
           <button class="ho-btn" @click="downloadDocx">Скачать Word</button>
@@ -147,8 +149,12 @@
                    @change="saveDoc({ emergency_note: current.doc.emergency_note })" />
           </label>
         </div>
-        <p v-if="periodChanged" class="ho-warn">
-          Период изменился. Нажмите «Обновить приходы», чтобы пересобрать список поставок.
+        <!-- Список приходов — снимок на момент сборки. Заказ могли перенести
+             или отменить уже после, и тогда в документе висит поставка,
+             которой не будет. Сравнение делает сервер. -->
+        <p v-if="current.suppliers_stale" class="ho-warn">
+          Заказы менялись с момента сборки — список приходов устарел.
+          <button v-if="canEdit" class="ho-warn-btn" :disabled="rebuilding" @click="rebuild">Обновить приходы</button>
         </p>
       </section>
 
@@ -347,7 +353,6 @@ const rebuilding = ref(false);
 const showCreate = ref(false);
 const saveNote = ref('');
 const openSuppliers = ref(new Set());
-const periodAtLoad = ref('');
 
 const form = ref({ title: '', date_from: '', date_to: '', return_date: '', emergency_note: '' });
 
@@ -399,10 +404,9 @@ const BLOCKS = [
 
 const canEdit = computed(() => current.value?.can_edit !== false);
 const includedSuppliers = computed(() => (current.value?.suppliers || []).filter(s => s.included));
-const periodChanged = computed(() => {
-  if (!current.value) return false;
-  return periodAtLoad.value !== `${current.value.doc.date_from}|${current.value.doc.date_to}`;
-});
+// Раньше здесь было «period changed» — предупреждение, что даты сдвинули и
+// надо нажать «Обновить приходы». Теперь сервер пересобирает список сам, а
+// об устаревшем снимке говорит флаг suppliers_stale.
 
 /**
  * apiClient возвращает { data, error }. Оборачиваем, чтобы в коде страницы
@@ -587,7 +591,6 @@ async function createDoc() {
 
 function setCurrent(full) {
   current.value = full;
-  periodAtLoad.value = `${full.doc.date_from}|${full.doc.date_to}`;
   openSuppliers.value = new Set();
   growAll();
 }
@@ -604,7 +607,16 @@ function closeDoc() {
 
 async function saveDoc(patch) {
   if (!canEdit.value) return;
-  await api('PATCH', `handover/docs/${current.value.doc.id}`, patch);
+  const r = await api('PATCH', `handover/docs/${current.value.doc.id}`, patch);
+  // Сдвинули период — сервер сам пересобрал приходы, показываем новый список.
+  // Раньше приходилось помнить про кнопку «Обновить приходы», и в документе
+  // оставались поставки от старых дат.
+  if (r?.suppliers_rebuilt && r?.doc) {
+    setCurrent(r.doc);
+    flash('Сохранено, приходы пересобраны');
+    return;
+  }
+  if (r?.doc) current.value.suppliers_stale = r.doc.suppliers_stale;
   flash('Сохранено');
 }
 
@@ -784,7 +796,13 @@ onMounted(loadDocs);
 .ho-warn {
   margin: 10px 0 0; padding: 8px 12px; border-radius: 10px;
   background: #FFF4E8; color: #C25E12; font-size: 12.5px; font-weight: 600;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
+.ho-warn-btn {
+  border: 1px solid #C25E12; background: none; color: #C25E12;
+  border-radius: 8px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.ho-warn-btn:disabled { opacity: .55; cursor: default; }
 .ho-savenote { margin: -8px 0 12px; font-size: 12.5px; font-weight: 700; color: #2E8B57; }
 
 .ho-grid-head { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }

@@ -71,6 +71,54 @@ if ($fn === 'set_user_preference') {
     respond(['success' => true]);
 }
 
+// ═══ Кто когда заходил в портал ═══
+// Журнал login_log пишется с марта, но лежал в другой сортировке, чем users:
+// JOIN по имени падал, и данные никуда не выводились. После миграции
+// 20260809_login_log_collation отдаём их админке.
+//
+// $fn === 'user_login_stats' — сводка по всем: последний вход и сколько раз.
+// $fn === 'user_login_history' — последние входы одного человека, с адресом.
+if ($fn === 'user_login_stats') {
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['error' => 'Нет прав доступа'], 403);
+    $s = $pdo->query("
+        SELECT u.name,
+               MAX(l.created_at)                                    AS last_login,
+               COUNT(l.id)                                          AS logins_total,
+               SUM(l.created_at >= NOW() - INTERVAL 30 DAY)         AS logins_30d,
+               DATEDIFF(CURDATE(), DATE(MAX(l.created_at)))         AS days_since
+        FROM users u
+        LEFT JOIN login_log l ON l.user_name = u.name
+        GROUP BY u.id, u.name
+    ");
+    $out = [];
+    foreach ($s->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $out[$r['name']] = [
+            'last_login'   => $r['last_login'],
+            'logins_total' => (int)$r['logins_total'],
+            'logins_30d'   => (int)$r['logins_30d'],
+            'days_since'   => $r['last_login'] === null ? null : (int)$r['days_since'],
+        ];
+    }
+    respond(['stats' => $out]);
+}
+
+if ($fn === 'user_login_history') {
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['error' => 'Нет прав доступа'], 403);
+    $name = trim((string)($body['name'] ?? ''));
+    if ($name === '') respond(['error' => 'Не указан пользователь'], 400);
+    $s = $pdo->prepare("
+        SELECT created_at, ip, email
+        FROM login_log
+        WHERE user_name = ?
+        ORDER BY created_at DESC
+        LIMIT 20
+    ");
+    $s->execute([$name]);
+    respond(['history' => $s->fetchAll(PDO::FETCH_ASSOC)]);
+}
+
 if ($fn === 'get_user_list') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
