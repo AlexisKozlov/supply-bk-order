@@ -1,45 +1,56 @@
 <template>
   <div class="na">
-    <div class="na-wrap">
-      <!-- Замок: смысловая графика, а не украшение. Дужка защёлкивается,
-           корпус обводится, из скважины расходятся волны. -->
+    <div class="na-card">
       <div class="na-art" aria-hidden="true">
-        <!-- viewBox обрезан по самому замку: иначе фигура занимала треть кадра
-             и выглядела мелкой. Волны выходят за границы — overflow: visible. -->
-        <svg class="na-lock" viewBox="46 28 128 152" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle class="na-ring na-ring-1" cx="110" cy="132" r="58" />
-          <circle class="na-ring na-ring-2" cx="110" cy="132" r="58" />
+        <!-- Плоская бренд-иллюстрация: бургер и замок-бейдж.
+             Без обводок и градиентов — так рисует сам бренд. -->
+        <svg class="na-burger" viewBox="0 0 200 186" xmlns="http://www.w3.org/2000/svg">
+          <!-- верхняя булка -->
+          <path d="M18 96A82 60 0 0 1 182 96Z" fill="var(--bk-bun)" />
+          <ellipse cx="72" cy="66" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(-14 72 66)" />
+          <ellipse cx="102" cy="55" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(6 102 55)" />
+          <ellipse cx="132" cy="68" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(16 132 68)" />
+          <ellipse cx="88" cy="80" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(-6 88 80)" />
+          <ellipse cx="118" cy="81" rx="7" ry="4.6" fill="var(--bk-cream)" transform="rotate(10 118 81)" />
 
-          <path class="na-shackle" d="M78 96V72a32 32 0 0 1 64 0v24" />
+          <!-- салат -->
+          <path d="M16 100c8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0 8-11 16-11 24 0v10H16Z"
+                fill="var(--bk-green)" />
 
-          <rect class="na-body-fill" x="58" y="94" width="104" height="82" rx="18" />
-          <rect class="na-body" x="58" y="94" width="104" height="82" rx="18" />
+          <!-- сыр -->
+          <path d="M26 110h148v10l-16 16-14-10-16 12-16-12-14 10-16-16Z" fill="var(--bk-yellow)" />
 
-          <g class="na-hole">
-            <circle cx="110" cy="126" r="10" />
-            <path d="M110 136 106 152h8Z" />
-          </g>
+          <!-- котлета -->
+          <rect x="18" y="126" width="164" height="24" rx="12" fill="var(--bk-brown)" />
+
+          <!-- нижняя булка -->
+          <path d="M26 152h148v10c0 8-6 14-14 14H40c-8 0-14-6-14-14Z" fill="var(--bk-bun)" />
+
+          <!-- замок-бейдж -->
+          <circle cx="160" cy="42" r="34" fill="var(--bk-red)" />
+          <path d="M150 36v-6a10 10 0 0 1 20 0v6" fill="none" stroke="var(--bk-cream)"
+                stroke-width="6.5" stroke-linecap="round" />
+          <rect x="145" y="36" width="30" height="24" rx="6" fill="var(--bk-cream)" />
+          <circle cx="160" cy="46" r="4" fill="var(--bk-red)" />
+          <path d="M160 49.5 157.5 57h5Z" fill="var(--bk-red)" />
         </svg>
       </div>
 
       <div class="na-content">
-        <span class="na-status" style="--i: 0">Доступ закрыт</span>
+        <span class="na-stop">Стоп-лист</span>
 
-        <h1 class="na-title" style="--i: 1">
-          <!-- Пробел перед переносом обязателен: на мобильном <br> скрыт,
-               и без него получалось «Аналитика»вам». -->
-          <template v-if="sectionLabel">Раздел «{{ sectionLabel }}» <br />вам пока не открыт</template>
-          <template v-else>Этот раздел вам пока не открыт</template>
+        <h1 class="na-title">
+          <template v-if="sectionLabel">«{{ sectionLabel }}»<br />не для вас</template>
+          <template v-else>Этот раздел не для вас</template>
         </h1>
 
-        <p class="na-text" style="--i: 2">
-          Так и задумано: доступ к разделам выдаёт администратор портала.
-          Напишите
+        <p class="na-text">
+          Доступ к разделам выдаёт администратор портала. Напишите
           <a class="na-link" :href="`https://t.me/${support}`" target="_blank" rel="noopener">@{{ support }}</a>
-          и скажите, какой раздел нужен для работы.
+          и скажите, что нужно для работы — включит.
         </p>
 
-        <div class="na-actions" style="--i: 3">
+        <div class="na-actions">
           <button class="na-btn na-btn-primary" @click="goBack">Вернуться назад</button>
           <router-link v-if="homeRoute" :to="{ name: homeRoute }" class="na-btn">На главную</router-link>
         </div>
@@ -55,6 +66,9 @@
  * Раньше человек без прав на раздел просто оказывался на «Новом заказе» —
  * без объяснения. Выглядело как поломка портала: жмёшь ссылку, попадаешь
  * не туда. Теперь роутер ведёт сюда и передаёт ключ раздела в ?section=.
+ *
+ * «Стоп-лист» — слово из ресторана: так называют позицию, которой сейчас
+ * нет. Аудитория портала поймёт мгновенно.
  */
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -89,187 +103,106 @@ function goBack() {
 
 <style scoped>
 .na {
-  display: flex; align-items: center;
-  min-height: 68vh;
-  padding: var(--tk-s-7) var(--tk-s-5);
+  display: flex; align-items: center; justify-content: center;
+  min-height: 72vh;
+  padding: var(--tk-s-6) var(--tk-s-4);
 }
-.na-wrap {
+
+/* Кремовая плашка — фирменный фон, а не белый лист интерфейса. */
+.na-card {
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   align-items: center;
   gap: var(--tk-s-7);
   width: 100%;
-  max-width: 780px;
-  margin: 0 auto;
+  max-width: 860px;
+  padding: var(--tk-s-7);
+  border-radius: 28px;
+  background: var(--bk-cream);
 }
 
-/* ── Графика ── */
 .na-art { display: flex; justify-content: center; }
-.na-lock { width: 100%; max-width: 220px; height: auto; overflow: visible; }
+.na-burger { width: 100%; max-width: 260px; height: auto; display: block; }
 
-.na-ring {
-  fill: none;
-  stroke: var(--tk-accent);
-  stroke-width: 1.5;
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: na-pulse 3.6s cubic-bezier(.22, .61, .36, 1) infinite;
-}
-.na-ring-2 { animation-delay: 1.8s; }
-
-.na-shackle {
-  fill: none;
-  stroke: var(--tk-n-400);
-  stroke-width: 13;
-  stroke-linecap: round;
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: na-shackle-lock 700ms cubic-bezier(.34, 1.4, .64, 1) both;
-  animation-delay: 120ms;
-}
-
-.na-body-fill {
-  fill: var(--tk-accent-soft);
-  opacity: 0;
-  animation: na-fade 400ms ease both;
-  animation-delay: 640ms;
-}
-.na-body {
-  fill: none;
-  stroke: var(--tk-accent);
-  stroke-width: 4;
-  stroke-linejoin: round;
-  stroke-dasharray: 380;
-  stroke-dashoffset: 380;
-  animation: na-draw 900ms cubic-bezier(.65, 0, .35, 1) both;
-  animation-delay: 300ms;
-}
-
-.na-hole {
-  fill: var(--tk-accent-text);
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: na-pop 420ms cubic-bezier(.34, 1.5, .64, 1) both;
-  animation-delay: 980ms;
-}
-
-@keyframes na-shackle-lock {
-  from { transform: translateY(-16px) scaleY(1.12); opacity: 0; }
-  to   { transform: translateY(0) scaleY(1); opacity: 1; }
-}
-@keyframes na-draw {
-  from { stroke-dashoffset: 380; }
-  to   { stroke-dashoffset: 0; }
-}
-@keyframes na-fade  { from { opacity: 0; } to { opacity: 1; } }
-@keyframes na-pop   { from { opacity: 0; transform: scale(.2); } to { opacity: 1; transform: scale(1); } }
-@keyframes na-pulse {
-  0%   { opacity: 0;   transform: scale(.62); }
-  22%  { opacity: .38; }
-  100% { opacity: 0;   transform: scale(1.35); }
-}
-
-/* ── Текст ── */
-.na-content > * {
-  opacity: 0;
-  animation: na-rise 460ms cubic-bezier(.22, .61, .36, 1) both;
-  animation-delay: calc(360ms + var(--i, 0) * 90ms);
-}
-@keyframes na-rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.na-status {
+/* Плашка «Стоп-лист» — слово из ресторанной кухни. */
+.na-stop {
   display: inline-block;
-  padding: var(--tk-s-1) var(--tk-s-3);
+  padding: 6px var(--tk-s-4);
   border-radius: var(--tk-r-pill);
-  background: var(--tk-accent-soft);
-  color: var(--tk-accent-text);
-  font-size: var(--tk-fz-xs);
+  background: var(--bk-red);
+  color: var(--bk-cream);
+  font-family: 'Flame', var(--tk-font);
+  font-size: var(--tk-fz-md);
   font-weight: var(--tk-fw-bold);
-  letter-spacing: .06em;
+  letter-spacing: .1em;
   text-transform: uppercase;
 }
+
 .na-title {
   font-family: 'Flame', var(--tk-font);
-  font-size: var(--tk-fz-display);
+  font-size: var(--tk-fz-hero);
   font-weight: var(--tk-fw-bold);
-  line-height: var(--tk-lh-tight);
-  color: var(--tk-text);
-  margin: var(--tk-s-4) 0 var(--tk-s-3);
+  line-height: 1.02;
+  letter-spacing: -.01em;
+  color: var(--bk-brown);
+  margin: var(--tk-s-4) 0 var(--tk-s-4);
+  text-transform: uppercase;
 }
+
 .na-text {
-  font-size: var(--tk-fz-lg);
-  line-height: var(--tk-lh-loose);
-  color: var(--tk-text-secondary);
+  font-size: var(--tk-fz-xl);
+  line-height: var(--tk-lh-base);
+  color: var(--bk-brown);
   margin: 0 0 var(--tk-s-6);
-  max-width: 46ch;
+  max-width: 42ch;
 }
 .na-link {
-  color: var(--tk-accent-text);
-  font-weight: var(--tk-fw-semibold);
+  color: var(--bk-red);
+  font-weight: var(--tk-fw-bold);
   text-decoration: none;
-  border-bottom: 1.5px solid var(--tk-accent-soft-strong);
-  transition: border-color var(--tk-transition);
+  box-shadow: inset 0 -2px 0 currentColor;
 }
-.na-link:hover { border-bottom-color: var(--tk-accent); }
 .na-link:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); border-radius: var(--tk-r-sm); }
 
-.na-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-2); }
+.na-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-3); }
 .na-btn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: var(--tk-touch-min);
-  padding: var(--tk-s-2) var(--tk-s-5);
-  border: 1.5px solid var(--tk-border);
-  border-radius: var(--tk-r-md);
-  background: var(--tk-bg-card);
-  color: var(--tk-text-secondary);
-  font-family: inherit;
-  font-size: var(--tk-fz-lg);
-  font-weight: var(--tk-fw-semibold);
+  padding: var(--tk-s-3) var(--tk-s-6);
+  border: 2.5px solid var(--bk-brown);
+  border-radius: var(--tk-r-pill);
+  background: transparent;
+  color: var(--bk-brown);
+  font-family: 'Flame', var(--tk-font);
+  font-size: var(--tk-fz-xl);
+  font-weight: var(--tk-fw-bold);
   text-decoration: none;
   cursor: pointer;
-  transition: transform var(--tk-transition), border-color var(--tk-transition),
-              background var(--tk-transition), color var(--tk-transition),
-              box-shadow var(--tk-transition);
+  transition: background var(--tk-transition), color var(--tk-transition),
+              border-color var(--tk-transition);
 }
-.na-btn:hover { transform: translateY(-1px); border-color: var(--tk-accent); color: var(--tk-accent-text); }
+.na-btn:hover { background: var(--bk-brown); color: var(--bk-cream); }
 .na-btn:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 .na-btn-primary {
-  border-color: var(--tk-accent);
-  background: var(--tk-accent);
-  color: var(--tk-n-0);
-  box-shadow: var(--tk-shadow-card);
+  border-color: var(--bk-red);
+  background: var(--bk-red);
+  color: var(--bk-cream);
 }
-.na-btn-primary:hover {
-  background: var(--tk-accent-hover);
-  border-color: var(--tk-accent-hover);
-  color: var(--tk-n-0);
-  box-shadow: var(--tk-shadow-card-hover);
-}
+.na-btn-primary:hover { background: var(--bk-brown); border-color: var(--bk-brown); }
 
-@media (max-width: 720px) {
-  .na { min-height: auto; padding: var(--tk-s-6) var(--tk-s-4); }
-  .na-wrap { grid-template-columns: 1fr; gap: var(--tk-s-5); justify-items: start; }
-  .na-lock { max-width: 132px; }
-  .na-title { font-size: var(--tk-fz-h2); }
+@media (max-width: 760px) {
+  .na { min-height: auto; padding: var(--tk-s-4) var(--tk-s-3); }
+  .na-card {
+    grid-template-columns: 1fr;
+    gap: var(--tk-s-5);
+    padding: var(--tk-s-6) var(--tk-s-5);
+    border-radius: 22px;
+  }
+  .na-burger { max-width: 168px; }
+  .na-title { font-size: var(--tk-fz-display); }
   .na-title br { display: none; }
+  .na-text { font-size: var(--tk-fz-lg); }
   .na-actions { width: 100%; }
   .na-btn { flex: 1 1 auto; }
-}
-
-/* Правило дизайн-системы: анимация не навязывается тем, кто её отключил. */
-@media (prefers-reduced-motion: reduce) {
-  .na-ring { animation: none; opacity: 0; }
-  .na-shackle, .na-body, .na-body-fill, .na-hole, .na-content > * {
-    animation: none;
-    opacity: 1;
-    transform: none;
-    stroke-dashoffset: 0;
-  }
-  .na-btn:hover { transform: none; }
 }
 </style>
