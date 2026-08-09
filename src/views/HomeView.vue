@@ -151,7 +151,16 @@
                 </div>
                 <div class="login-field">
                   <label>Пароль</label>
-                  <input ref="passwordInput" v-model="password" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doLogin" :disabled="loginLoading" />
+                  <div class="login-pw">
+                    <input ref="passwordInput" v-model="password" :type="showPassword ? 'text' : 'password'"
+                           placeholder="Введите пароль" autocomplete="current-password"
+                           @keydown.enter="doLogin" :disabled="loginLoading" />
+                    <button type="button" class="login-pw-eye" tabindex="-1"
+                            :title="showPassword ? 'Скрыть пароль' : 'Показать пароль'"
+                            @click="showPassword = !showPassword">
+                      <BkIcon :name="showPassword ? 'eyeOff' : 'eye'" size="sm" />
+                    </button>
+                  </div>
                 </div>
                 <div class="login-forgot-row">
                   <router-link to="/staff-forgot-password" class="login-forgot-link">Забыли пароль?</router-link>
@@ -253,6 +262,9 @@ let _loaderTimers = [];
 
 const selectedUser = ref('');
 const password = ref('');
+// Показать введённый пароль: без этого человек с длинным паролем не понимает,
+// опечатался он или сервер отказал.
+const showPassword = ref(false);
 const passwordInput = ref(null);
 const loginError = ref('');
 const loginLoading = ref(false);
@@ -627,6 +639,15 @@ function confirmLogout() {
 .login-form-sub { font-size: 12px; color: #A08870; margin-bottom: 16px; }
 .login-field { margin-bottom: 12px; }
 .login-field label { display: block; font-size: 10px; font-weight: 700; color: #8B7355; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 4px; }
+.login-pw { position: relative; }
+.login-pw input { padding-right: 44px; }
+.login-pw-eye {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 8px; cursor: pointer; color: #A08870;
+}
+.login-pw-eye:hover { color: var(--brand-red); background: rgba(214,35,0,.08); }
+.login-pw-eye:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 .login-field select, .login-field input { width: 100%; padding: 12px 14px; border: 1.5px solid #E0D2BE; border-radius: 12px; font-size: 14px; font-family: inherit; background: #fff; }
 .login-field select:focus, .login-field input:focus { border-color: var(--brand-red); outline: none; box-shadow: var(--tk-focus-ring); }
 .login-field input[type="number"] { -moz-appearance: textfield; }
