@@ -91,8 +91,17 @@ if ($__nowHour < 9 || $__nowHour >= 22) {
 // Раньше возвращала raw JSON или false. Никто из вызывающих этим не
 // пользуется кроме «if (tgSend(...))», поэтому возвращаем bool.
 // PDO передаём в опции — клиент сам пометит заблокированных пользователей.
+// Режим проверки: `php cron_telegram.php --dry-run` печатает, что ушло бы,
+// и никому ничего не шлёт. Нужен, чтобы проверять новые напоминания на боевых
+// данных, не дёргая живых людей.
+$DRY_RUN = in_array('--dry-run', $argv ?? [], true);
+
 function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
-    global $pdo;
+    global $pdo, $DRY_RUN;
+    if ($DRY_RUN) {
+        echo "\n--- [проверка] кому: $chatId ---\n" . strip_tags($text) . "\n";
+        return true;
+    }
     $opts = ['pdo' => $pdo];
     if ($disablePreview) $opts['disable_preview'] = true;
     if ($replyMarkup)    $opts['reply_markup']    = $replyMarkup;
@@ -210,6 +219,10 @@ function wasNotified($pdo, $type, $legalEntity, $chatId, $intervalSeconds) {
 }
 
 function logNotification($pdo, $type, $legalEntity, $chatId) {
+    global $DRY_RUN;
+    // В режиме проверки не отмечаем «уже отправлено» — иначе настоящее
+    // напоминание потом не уйдёт, его задавит ограничитель повторов.
+    if (!empty($DRY_RUN)) return;
     try {
         $chatId = (int)$chatId;
         $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id) VALUES (?,?,?)")
@@ -708,6 +721,118 @@ try {
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] payment reminder error: ' . $e->getMessage());
+}
+
+// ═══ Просроченные оплаты ═══
+// Раньше портал вёл платёж до «заявка подана» и на этом замолкал. Дальше
+// никто не следил: два платежа Скандипакку висели просроченными пять дней,
+// и заметили их только на проверке. Здесь — единственное место, где
+// напоминают уже ПОСЛЕ подачи заявки.
+//
+// Частота нарочно убывающая: первые три дня ежедневно, дальше раз в неделю.
+// Ежедневное повторение месяцами приучает не читать (так вышло с задачами:
+// 40 одинаковых сообщений в день с мая). После недели просрочки копия уходит
+// руководителям — тем, у кого есть доступ к юрлицу платежа.
+//
+// В выходные молчим: платёж всё равно не проведут. Пробный прогон
+// (--dry-run) выходные игнорирует — он ничего не отправляет, и без этого
+// новое напоминание нельзя было бы проверить в субботу или воскресенье.
+if (!$isWeekend || $DRY_RUN) {
+    try {
+        $overdue = $pdo->query("
+            SELECT sp.id, sp.supplier, sp.amount, sp.currency, sp.status,
+                   sp.payment_due_date, sp.legal_entity,
+                   sp.created_by AS pay_author, sp.paid_by AS requester,
+                   o.created_by  AS order_author,
+                   DATEDIFF(CURDATE(), sp.payment_due_date) AS overdue_days
+            FROM supplier_payments sp
+            LEFT JOIN orders o ON o.id = sp.order_id
+            WHERE sp.status NOT IN ('paid', 'cancelled')
+              AND sp.payment_due_date IS NOT NULL
+              AND sp.payment_due_date < CURDATE()
+            ORDER BY sp.payment_due_date
+        ")->fetchAll();
+
+        // Чат живого сотрудника: без привязки к Telegram или с давней
+        // блокировкой бота слать некуда.
+        $chatStmt = $pdo->prepare("
+            SELECT telegram_chat_id FROM users
+            WHERE name = ? AND telegram_chat_id IS NOT NULL
+              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
+        ");
+        $chatOf = function ($name) use ($chatStmt) {
+            if (!$name) return null;
+            $chatStmt->execute([$name]);
+            return $chatStmt->fetchColumn() ?: null;
+        };
+
+        $statusRu = [
+            'upcoming'    => 'предстоит',
+            'request_due' => 'нужна заявка',
+            'requested'   => 'заявка подана',
+        ];
+
+        foreach ($overdue as $p) {
+            $days = (int)$p['overdue_days'];
+            // Первые три дня — ежедневно (20 ч, чтобы не проскочить мимо суток),
+            // дальше — раз в неделю.
+            $interval = $days <= 3 ? 72000 : 604800;
+
+            $amountStr = $p['amount']
+                ? number_format((float)$p['amount'], 2, ',', ' ') . ' ' . ($p['currency'] ?: 'RUB')
+                : 'сумма не указана';
+            $dueFmt = date('d.m.Y', strtotime($p['payment_due_date']));
+            $dayWord = ($days % 10 === 1 && $days % 100 !== 11) ? 'день' : 'дн.';
+
+            $text  = "🔴 <b>Платёж просрочен на {$days} {$dayWord}</b>\n";
+            $text .= "─────────────────────\n";
+            $text .= "📦 Поставщик: <b>{$p['supplier']}</b>\n";
+            $text .= "💵 Сумма: <b>{$amountStr}</b>\n";
+            $text .= "📅 Оплатить надо было: <b>{$dueFmt}</b>\n";
+            $text .= "📋 Статус: " . ($statusRu[$p['status']] ?? $p['status']) . "\n";
+            if ($p['legal_entity']) $text .= "🏢 {$p['legal_entity']}\n";
+            $text .= "\n<i>Если платёж прошёл — отметьте его оплаченным в разделе «Оплаты поставщиков».</i>";
+
+            // Кому: автор платежа, кто подавал заявку, автор заказа.
+            $names = array_unique(array_filter([$p['pay_author'], $p['requester'], $p['order_author']]));
+            $reached = [];
+            foreach ($names as $name) {
+                $chatId = $chatOf($name);
+                if (!$chatId || isset($reached[$chatId])) continue;
+                $reached[$chatId] = true;
+                if (wasNotified($pdo, 'payment_overdue', "pay_{$p['id']}", $chatId, $interval)) continue;
+                tgSend($chatId, $text);
+                logNotification($pdo, 'payment_overdue', "pay_{$p['id']}", $chatId);
+                $sent++;
+            }
+
+            // Больше недели — подключаем руководителей. Не чаще раза в неделю
+            // и только тем, у кого есть доступ к юрлицу платежа.
+            if ($days > 7) {
+                $bosses = $pdo->query("
+                    SELECT name, legal_entities, telegram_chat_id FROM users
+                    WHERE role IN ('admin','manager') AND telegram_chat_id IS NOT NULL
+                      AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
+                ")->fetchAll();
+                $esc = "⚠️ <b>Просрочка больше недели</b>\n\n" . $text;
+                foreach ($bosses as $b) {
+                    $chatId = $b['telegram_chat_id'];
+                    if (!$chatId || isset($reached[$chatId])) continue;
+                    $les = $b['legal_entities'];
+                    if (is_string($les)) $les = json_decode($les, true) ?: [];
+                    // Пустой список юрлиц = админ без ограничений.
+                    if (!empty($les) && $p['legal_entity'] && !in_array($p['legal_entity'], $les, true)) continue;
+                    $reached[$chatId] = true;
+                    if (wasNotified($pdo, 'payment_overdue_esc', "pay_{$p['id']}", $chatId, 604800)) continue;
+                    tgSend($chatId, $esc);
+                    logNotification($pdo, 'payment_overdue_esc', "pay_{$p['id']}", $chatId);
+                    $sent++;
+                }
+            }
+        }
+    } catch (Exception $e) {
+        error_log('[cron_telegram] overdue payment reminder error: ' . $e->getMessage());
+    }
 }
 
 // ═══ Напоминания о сборе остатков ═══
