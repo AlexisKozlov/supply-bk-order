@@ -55,7 +55,9 @@ defineProps({
 }
 
 .ubs-art { display: flex; justify-content: center; }
-.ubs-art :deep(svg) { width: 100%; max-width: 260px; height: auto; display: block; }
+.ubs-art :deep(svg),
+.ubs-art :deep(video),
+.ubs-art :deep(img) { width: 100%; max-width: 260px; height: auto; display: block; }
 
 .ubs-chip {
   display: inline-block;
@@ -135,7 +137,9 @@ defineProps({
     padding: var(--tk-s-6) var(--tk-s-5);
     border-radius: 22px;
   }
-  .ubs-art :deep(svg) { max-width: 168px; }
+  .ubs-art :deep(svg),
+  .ubs-art :deep(video),
+  .ubs-art :deep(img) { max-width: 168px; }
   /* Перенос в заголовке НЕ скрываем. Пробовали `br { display: none }` —
      слова склеивались в «СТРАНИЦЫНЕ», потому что вокруг переноса пробела нет. */
   .ubs-title { font-size: var(--tk-fz-display); }
