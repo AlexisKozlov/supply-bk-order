@@ -1,13 +1,5 @@
 <template>
   <div class="ro-login-page" :class="loginBrand.themeClass">
-    <!-- Декоративный фон -->
-    <div class="ro-bg-circles">
-      <div class="ro-circle ro-circle-1"></div>
-      <div class="ro-circle ro-circle-2"></div>
-      <div class="ro-circle ro-circle-3"></div>
-      <div class="ro-circle ro-circle-4"></div>
-    </div>
-
     <div class="ro-login-content">
       <!-- Логотип -->
       <div class="ro-brand">
@@ -105,8 +97,22 @@
                 required
                 :disabled="loading"
               />
-              <button type="button" class="ro-toggle-pass" @click="showPassword = !showPassword" tabindex="-1">
-                {{ showPassword ? '🙈' : '👁' }}
+              <button type="button" class="ro-toggle-pass" tabindex="-1"
+                      :title="showPassword ? 'Скрыть пароль' : 'Показать пароль'"
+                      @click="showPassword = !showPassword">
+                <svg class="pw-eye-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <template v-if="showPassword">
+                    <path d="M3 3 21 21" />
+                    <path d="M10.6 6.2A9.6 9.6 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.8" />
+                    <path d="M6.6 8.3A16 16 0 0 0 2.5 12S6 18 12 18c1.5 0 2.8-.4 4-.9" />
+                    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+                  </template>
+                  <template v-else>
+                    <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </template>
+                </svg>
               </button>
             </div>
             <div class="ro-forgot-row">
@@ -333,33 +339,17 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #502314 0%, #7a3a1e 40%, #E76F51 100%);
+  background: var(--brand-cream);
   padding: 20px;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--tk-font);
   position: relative;
   overflow: hidden;
 }
 
-.ro-login-page.ro-theme-ps {
-  background: linear-gradient(135deg, #3b1f12 0%, #8a2d12 45%, #f16a21 100%);
-}
+.ro-login-page.ro-theme-ps { background: var(--brand-cream); }
 
-.ro-login-page.ro-theme-neutral {
-  background: linear-gradient(135deg, #4b3a2f 0%, #7a5a45 45%, #c7773b 100%);
-}
+.ro-login-page.ro-theme-neutral { background: var(--brand-cream); }
 
-/* Декоративные круги */
-.ro-bg-circles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.ro-circle {
-  position: absolute;
-  border-radius: 50%;
-  opacity: 0.08;
-  background: white;
-}
-.ro-circle-1 { width: 400px; height: 400px; top: -100px; right: -100px; }
-.ro-circle-2 { width: 300px; height: 300px; bottom: -80px; left: -80px; }
-.ro-circle-3 { width: 200px; height: 200px; top: 40%; left: 10%; opacity: 0.04; }
-.ro-circle-4 { width: 150px; height: 150px; bottom: 20%; right: 15%; opacity: 0.06; }
 
 .ro-login-content {
   position: relative;
@@ -377,7 +367,7 @@ async function handleLogin() {
   align-items: center;
   gap: 14px;
   margin-bottom: 28px;
-  color: white;
+  color: var(--brand-brown);
 }
 .ro-logo-wrap {
   display: flex;
@@ -385,14 +375,16 @@ async function handleLogin() {
   justify-content: center;
 }
 .ro-brand-title {
+  font-family: 'Flame', var(--tk-font);
   font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--brand-brown);
 }
 .ro-brand-subtitle {
   font-size: 13px;
-  opacity: 0.8;
+  color: var(--brand-brown);
+  opacity: .7;
   margin-top: 2px;
 }
 
@@ -432,9 +424,12 @@ async function handleLogin() {
 }
 .ro-card-header h1 {
   margin: 0;
-  font-size: 20px;
+  font-family: 'Flame', var(--tk-font);
+  font-size: 24px;
   font-weight: 700;
-  color: #502314;
+  text-transform: uppercase;
+  line-height: 1.1;
+  color: var(--brand-brown);
 }
 .ro-card-header p {
   margin: 2px 0 0;
@@ -474,9 +469,9 @@ async function handleLogin() {
 }
 .ro-input-wrap input:focus {
   outline: none;
-  border-color: #E76F51;
+  border-color: var(--brand-red);
   background: white;
-  box-shadow: 0 0 0 4px rgba(231, 111, 81, 0.08);
+  box-shadow: var(--tk-focus-ring);
 }
 .ro-input-wrap input::placeholder { color: #c4b8a8; }
 .ro-input-wrap input[type="number"] { text-align: left; -moz-appearance: textfield; }
@@ -492,6 +487,7 @@ async function handleLogin() {
   font-size: 16px;
   font-weight: 700;
 }
+.pw-eye-ico { width: 20px; height: 20px; display: block; }
 .ro-toggle-pass {
   position: absolute;
   right: 10px;
@@ -531,13 +527,14 @@ async function handleLogin() {
 /* Кнопка входа */
 .ro-submit-btn {
   width: 100%;
+  min-height: 52px;
   padding: 15px;
-  background: linear-gradient(135deg, #E76F51 0%, #e83a1a 100%);
-  color: white;
+  background: var(--brand-red);
+  color: var(--brand-cream);
   border: none;
-  border-radius: 12px;
+  border-radius: 999px;
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   display: flex;
@@ -548,7 +545,7 @@ async function handleLogin() {
   box-shadow: 0 4px 12px rgba(231, 111, 81, 0.3);
 }
 .ro-submit-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #b81e00 0%, #E76F51 100%);
+  background: var(--brand-brown);
   box-shadow: 0 6px 20px rgba(231, 111, 81, 0.4);
   transform: translateY(-1px);
 }
@@ -604,20 +601,23 @@ async function handleLogin() {
 .ro-forgot-link:hover { color: #E76F51; text-decoration: underline; }
 
 /* Футер */
+/* Подвал стал тёмным: фон страницы теперь кремовый, белый текст на нём
+   был не виден. */
 .ro-login-footer {
   margin-top: 20px;
-  color: rgba(255,255,255,0.4);
+  color: rgba(80, 35, 20, 0.45);
   font-size: 12px;
   text-align: center;
 }
 .ro-help-sep { margin: 0 6px; opacity: 0.6; }
 .ro-help-link {
-  color: rgba(255,255,255,0.55);
+  color: var(--brand-red);
+  font-weight: 600;
   text-decoration: none;
   transition: color 0.2s;
 }
 .ro-help-link:hover {
-  color: rgba(255,255,255,0.95);
+  color: var(--brand-brown);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
