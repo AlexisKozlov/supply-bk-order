@@ -14,11 +14,13 @@
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'info' }" type="button" @click="activeManagerTab = 'info'">Важная информация</button>
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'contacts' }" type="button" @click="activeManagerTab = 'contacts'">Контакты поставщиков</button>
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'guides' }" type="button" @click="activeManagerTab = 'guides'">Инструкции</button>
+      <button class="rcm-tab" :class="{ active: activeManagerTab === 'channels' }" type="button" @click="activeManagerTab = 'channels'">Связь</button>
       <button class="rcm-tab" :class="{ active: activeManagerTab === 'settings' }" type="button" @click="activeManagerTab = 'settings'; loadAppSettings()">Настройки кабинета</button>
     </div>
 
     <ManagerSupplierContactsTab v-if="activeManagerTab === 'contacts'" />
     <GuidesEditor v-if="activeManagerTab === 'guides'" />
+    <ManagerChannelsTab v-if="activeManagerTab === 'channels'" />
 
     <div v-if="activeManagerTab === 'settings'" class="rcm-grid">
       <section class="rcm-panel">
@@ -200,13 +202,14 @@ import { appConfirm, appAlert } from '@/lib/appDialogs.js';
 const GuidesEditor = defineAsyncComponent(() => import('@/components/admin/GuidesEditor.vue'));
 
 const ManagerSupplierContactsTab = defineAsyncComponent(() => import('@/components/admin/ManagerSupplierContactsTab.vue'));
+const ManagerChannelsTab = defineAsyncComponent(() => import('@/components/admin/ManagerChannelsTab.vue'));
 
 const route = useRoute();
 const router = useRouter();
 // Список обязан содержать ВСЕ вкладки: значение из ?tab= проверяется по нему,
 // и вкладка, которой здесь нет, откатывается обратно на «info» — с виду
 // «кнопка нажимается, но ничего не происходит».
-const VALID_TABS = ['info', 'contacts', 'guides', 'settings'];
+const VALID_TABS = ['info', 'contacts', 'guides', 'channels', 'settings'];
 const activeManagerTab = ref(VALID_TABS.includes(route.query.tab) ? route.query.tab : 'info');
 
 // При смене вкладки — обновляем ?tab= в URL (можно делиться ссылкой и жать «назад»).

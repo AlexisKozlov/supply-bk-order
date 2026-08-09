@@ -159,6 +159,9 @@ if ($endpoint === 'rpc') {
     // ═══ «Требуют внимания»: сводка незакрытых дел по всем модулям ═══
     require __DIR__ . '/rpc/attention.php';
 
+    // ═══ Каналы связи с ресторанами (вкладка «Связь» в кабинетах) ═══
+    require __DIR__ . '/rpc/restaurant_channels.php';
+
     // ═══ Чат с ресторанами ═══
 
     require __DIR__ . '/rpc/chat.php';
