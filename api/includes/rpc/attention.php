@@ -321,10 +321,20 @@ if ($fn === 'attention_overview') {
     // ── 8. Рестораны без связи ──────────────────────────────────────────
     // Не срок, а незакрытая настройка: до такой точки не дойдёт ни одно
     // напоминание — ни в Telegram, ни в браузер.
+    //
+    // Одной цифрой «56 без связи» это показывать нельзя: под ней две разные
+    // задачи. Отвалившийся ресторан чинится звонком («разблокируйте бота»),
+    // никогда не подключённый — настройкой. А по Пицце Стар не подключены
+    // 49 точек из 51: это не дыры, а непройденный этап внедрения, и списком
+    // из 49 строк он только забьёт экран. Поэтому ПС сводим в одну строку.
     if ($can('restaurant-orders')) {
         [$w, $p] = $groupIn('r.legal_entity_group');
         $items = $rows("
-            SELECT r.number, r.city, r.address
+            SELECT r.number, r.city, r.address, r.legal_entity_group,
+                   (SELECT MAX(DATE(t.tg_blocked_at)) FROM ro_telegram_subs t
+                     WHERE t.restaurant_number = r.number) AS blocked_at,
+                   (SELECT COUNT(*) FROM ro_telegram_subs t
+                     WHERE t.restaurant_number = r.number) AS ever_linked
             FROM restaurants r
             WHERE r.active = 1 AND $w
               AND NOT EXISTS (SELECT 1 FROM ro_telegram_subs t
@@ -332,22 +342,52 @@ if ($fn === 'attention_overview') {
                                 AND t.verified_at IS NOT NULL AND t.tg_blocked_at IS NULL)
               AND NOT EXISTS (SELECT 1 FROM push_subscriptions ps
                               WHERE ps.restaurant_number = r.number)
-            ORDER BY r.sort_order, r.number
-            LIMIT 100
+            ORDER BY r.legal_entity_group, r.sort_order, r.number
+            LIMIT 200
         ", $p);
+
+        // Пиццу Стар не перечисляем поштучно — сводим в одну итоговую строку.
+        $psTotal = 0;
+        $listed  = [];
+        foreach ($items as $r) {
+            if (($r['legal_entity_group'] ?? '') === 'PS') { $psTotal++; continue; }
+            $listed[] = $r;
+        }
+
+        $out = array_map(function ($r) {
+            $where = trim((string)($r['city'] ?? '') . ' ' . (string)($r['address'] ?? ''));
+            $sub = (int)$r['ever_linked'] > 0
+                ? 'заблокировали бота' . ($r['blocked_at'] ? ' ' . date('d.m.Y', strtotime($r['blocked_at'])) : '') . ' — позвонить'
+                : 'не подключался ни разу — настроить';
+            return [
+                'id'       => $r['number'],
+                'title'    => formatRestaurantNumber($r['number']) . ' · ' . $where,
+                'subtitle' => $sub,
+                'date'     => null,
+                'days'     => null,
+            ];
+        }, $listed);
+
+        if ($psTotal > 0) {
+            $psAll = (int)$pdo->query("SELECT COUNT(*) FROM restaurants WHERE active = 1 AND legal_entity_group = 'PS'")->fetchColumn();
+            $out[] = [
+                'id'       => 'ps-summary',
+                // «ещё» уместно только когда выше есть перечисленные рестораны:
+                // при фильтре по одной Пицце Стар строка идёт первой.
+                'title'    => 'Пицца Стар — ' . ($listed ? 'ещё ' : '') . $psTotal . ' точек',
+                'subtitle' => 'подключено ' . max(0, $psAll - $psTotal) . ' из ' . $psAll . ' — нужна отдельная кампания подключения',
+                'date'     => null,
+                'days'     => null,
+            ];
+        }
+
         $blocks[] = [
             'key'   => 'restaurants',
             'title' => 'Рестораны без связи',
             'hint'  => 'нет ни Telegram, ни уведомлений в браузере — напоминания не дойдут',
             'route' => 'restaurant-cabinet-manager',
-            'count' => count($items),
-            'items' => array_map(fn($r) => [
-                'id'       => $r['number'],
-                'title'    => formatRestaurantNumber($r['number']),
-                'subtitle' => trim((string)($r['city'] ?? '') . ' ' . (string)($r['address'] ?? '')),
-                'date'     => null,
-                'days'     => null,
-            ], $items),
+            'count' => count($listed) + $psTotal,
+            'items' => $out,
         ];
     }
 
