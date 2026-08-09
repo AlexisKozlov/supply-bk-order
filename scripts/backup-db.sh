@@ -19,8 +19,24 @@ if [[ ! -r "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# shellcheck disable=SC1090
-set -a; . "$ENV_FILE"; set +a
+# .env НЕЛЬЗЯ подключать через `.` — это не скрипт, а список настроек.
+# Значения там бывают с пробелами и кириллицей, и bash пытался выполнить их
+# как команды: скрипт падал на строке с названием юрлица («command not found»)
+# и молча не делал копию. Поэтому разбираем построчно и берём только
+# нужные ключи.
+read_env() {
+  local key="$1"
+  sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$ENV_FILE" \
+    | head -1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/" -e 's/[[:space:]]*$//'
+}
+DB_HOST="$(read_env DB_HOST)"; DB_HOST="${DB_HOST:-localhost}"
+DB_NAME="$(read_env DB_NAME)"
+DB_USER="$(read_env DB_USER)"
+DB_PASS="$(read_env DB_PASS)"
+if [[ -z "$DB_NAME" || -z "$DB_USER" ]]; then
+  echo "В $ENV_FILE не нашлись DB_NAME/DB_USER" >&2
+  exit 1
+fi
 
 mkdir -p "$DEST_DIR"
 chmod 700 "$DEST_DIR"
@@ -47,3 +63,9 @@ find "$DEST_DIR" -maxdepth 1 -type f -name '*.sql.gz' -printf '%T@ %p\n' \
   | xargs -r rm -f
 
 ls -lh "$out"
+
+# Чистка старых копий: держим 14 последних ежедневных. Копия весит ~4 МБ,
+# то есть весь запас — около 55 МБ. Ручные копии с другими метками
+# (before_*, restaurant_sales_*) не трогаем: их делают перед миграциями,
+# и удалять их по расписанию нельзя.
+ls -t "$DEST_DIR"/daily_*.sql.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
