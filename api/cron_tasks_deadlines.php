@@ -99,8 +99,9 @@ $dupCheck = $pdo->prepare("
 // даже если у автора карточка на его доске всё ещё открыта.
 $assigneesStmt = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ? AND is_done = 0");
 
-$sentTotal = 0;
-$cardsSeen = 0;
+$sentTotal  = 0;
+$cardsSeen  = 0;
+$digestOnly = 0; // из них «просрочена» — в Telegram уходят дайджестом, не отсюда
 
 foreach ($rows as $r) {
     $type = $r['notif_type'];
@@ -129,9 +130,18 @@ foreach ($rows as $r) {
 
         // sourceUser = null: уведомление от системы, не от другого пользователя.
         // taskPushNotif пропустит проверку «себе не шлём» (toUser !== null).
-        taskPushNotif($pdo, $user, $type, (int)$r['card_id'], (int)$r['board_id'], null, $extra);
+        //
+        // «Просрочена» в Telegram отсюда НЕ уходит: одна и та же задача слала
+        // сообщение каждый будний день, и с мая набралось ~40 штук в сутки —
+        // их перестали читать целиком. Просроченные собираются в общий дайджест
+        // «Требуют внимания» (cron_telegram.php) с кнопкой «+7 дней».
+        // В портале колокольчик остаётся ежедневным — он не мешает.
+        // «Завтра срок» и «сегодня срок» шлём как раньше: за жизнь карточки
+        // это одно-два сообщения, спама из них не выходит.
+        taskPushNotif($pdo, $user, $type, (int)$r['card_id'], (int)$r['board_id'], null, $extra, $type !== 'overdue');
         $sentTotal++;
+        if ($type === 'overdue') $digestOnly++;
     }
 }
 
-echo "[" . date('Y-m-d H:i:s') . "] cards={$cardsSeen} sent={$sentTotal}\n";
+echo "[" . date('Y-m-d H:i:s') . "] cards={$cardsSeen} notif={$sentTotal} (в Telegram " . ($sentTotal - $digestOnly) . ", просроченные {$digestOnly} — дайджестом)\n";

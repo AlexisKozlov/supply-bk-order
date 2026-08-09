@@ -92,8 +92,15 @@ if ($fn === 'attention_overview') {
                    (SELECT COUNT(*) FROM protocol_decision_cards pdc WHERE pdc.card_id = c.id) AS from_protocol
             FROM tasks_cards c
             JOIN tasks_boards b ON b.id = c.board_id
+            LEFT JOIN tasks_cards p ON p.id = c.parent_card_id
             WHERE c.is_done = 0 AND c.is_archived = 0
               AND c.due_date IS NOT NULL AND DATE(c.due_date) < CURDATE()
+              AND b.is_archived = 0
+              -- Подзадача закрытой задачи на доске не видна, и напоминание о
+              -- ней выглядит как призрак. Условие то же, что в напоминаниях
+              -- (cron_tasks_deadlines.php и дайджест в cron_telegram.php) —
+              -- иначе дашборд и Telegram показывали бы разные числа.
+              AND (c.parent_card_id IS NULL OR (COALESCE(p.is_done, 0) = 0 AND COALESCE(p.is_archived, 0) = 0))
               AND (b.owner_name = ?
                    OR EXISTS (SELECT 1 FROM tasks_assignees a
                               WHERE a.card_id = c.id AND a.is_done = 0 AND a.user_name = ?))

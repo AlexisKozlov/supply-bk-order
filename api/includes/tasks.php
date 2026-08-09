@@ -262,7 +262,12 @@ function tNotify($pdo, $userName, $title, $message, $cardId) {
 // - кладёт запись в tasks_notifications
 // - если у получателя привязан telegram_chat_id — сразу шлёт в Telegram
 //   (используем готовую sendMessage из bot_rest.php)
-function taskPushNotif($pdo, $toUser, $type, $cardId, $boardId, $sourceUser, $extra = []) {
+//
+// $telegram = false — записать только в портал, без сообщения в Telegram.
+// Так шлются напоминания о просроченных задачах: отдельным сообщением на
+// каждую они давали 40 штук в день и их перестали читать; теперь они
+// собираются в общий дайджест «Требуют внимания» (cron_telegram.php).
+function taskPushNotif($pdo, $toUser, $type, $cardId, $boardId, $sourceUser, $extra = [], $telegram = true) {
     if (!$toUser || $toUser === $sourceUser) return; // себе не шлём
     try {
         $payload = json_encode($extra, JSON_UNESCAPED_UNICODE);
@@ -273,6 +278,7 @@ function taskPushNotif($pdo, $toUser, $type, $cardId, $boardId, $sourceUser, $ex
         error_log('[tasks] taskPushNotif insert error: ' . $e->getMessage());
         return;
     }
+    if (!$telegram) return;
     // Telegram (best-effort, не валим запрос если что-то пошло не так)
     try {
         $chat = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? LIMIT 1");
@@ -365,6 +371,48 @@ function tBoardForRecipient($pdo, $cardId, $userName, $fallbackBoardId) {
         error_log('[tasks] tBoardForRecipient error: ' . $e->getMessage());
     }
     return (int)$fallbackBoardId;
+}
+
+// Последствия смены срока карточки: уведомить всех причастных и, если задача
+// пришла из протокола, перенести дату у решения и у карточек остальных
+// соисполнителей — иначе у одного срок уедет, а у второго останется старый.
+//
+// Саму карточку функция НЕ меняет: её обновляет тот, кто вызвал (PATCH правит
+// сразу несколько полей одним UPDATE, бот — только дату). Вынесено, чтобы
+// перенос срока из Telegram делал ровно то же, что и перенос на портале.
+function tPropagateDueChange($pdo, $cardId, $cardTitle, $boardId, $boardTitle, $newDue, $actor) {
+    $extra = ['card_title' => $cardTitle, 'board_title' => $boardTitle, 'due_date' => $newDue];
+    foreach (tCardRecipients($pdo, $cardId, [$actor]) as $t) {
+        taskPushNotif($pdo, $t, 'due_changed', $cardId, tBoardForRecipient($pdo, $cardId, $t, $boardId), $actor, $extra);
+    }
+
+    $pdcStmt = $pdo->prepare("SELECT decision_id FROM protocol_decision_cards WHERE card_id = ? LIMIT 1");
+    $pdcStmt->execute([$cardId]);
+    $decId = (int)$pdcStmt->fetchColumn();
+    if ($decId <= 0) return;
+
+    $newDate = $newDue ? substr($newDue, 0, 10) : null;
+    $pdo->prepare("UPDATE protocol_decisions SET deadline = ? WHERE id = ?")->execute([$newDate, $decId]);
+
+    $siblings = $pdo->prepare("SELECT card_id FROM protocol_decision_cards WHERE decision_id = ? AND card_id <> ?");
+    $siblings->execute([$decId, $cardId]);
+    foreach ($siblings->fetchAll() as $row) {
+        $sibId = (int)$row['card_id'];
+        $sibCur = $pdo->prepare("SELECT due_date, board_id, title FROM tasks_cards WHERE id = ?");
+        $sibCur->execute([$sibId]);
+        $sib = $sibCur->fetch();
+        if (!$sib) continue;
+        if ($sib['due_date'] === $newDue) continue;
+        $pdo->prepare("UPDATE tasks_cards SET due_date = ? WHERE id = ?")->execute([$newDue, $sibId]);
+        tHistory($pdo, $sibId, $actor, 'updated', [
+            'due_date' => ['from' => $sib['due_date'], 'to' => $newDue],
+            'reason'   => 'sync_from_protocol_sibling',
+        ]);
+        $sibExtra = ['card_title' => $sib['title'], 'board_title' => '', 'due_date' => $newDue];
+        foreach (tCardRecipients($pdo, $sibId, [$actor]) as $rcp) {
+            taskPushNotif($pdo, $rcp, 'due_changed', $sibId, tBoardForRecipient($pdo, $sibId, $rcp, $sib['board_id']), $actor, $sibExtra);
+        }
+    }
 }
 
 // ─── Хелперы таймера карточки (C4) ───
@@ -1811,44 +1859,10 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             }
         }
         if (isset($changes['due_date'])) {
-            $extra = $extraBase + ['due_date' => $changes['due_date']['to']];
-            foreach (tCardRecipients($pdo, $cardId, [$tUserName]) as $t) {
-                taskPushNotif($pdo, $t, 'due_changed', $cardId, tBoardForRecipient($pdo, $cardId, $t, $card['board_id']), $tUserName, $extra);
-            }
-            // Протокольная задача — распространить новую дату на решение и
-            // на карточки остальных соисполнителей. Фронт показывает confirm
-            // перед отправкой PATCH, так что согласие пользователя уже есть.
-            $pdcStmt = $pdo->prepare("SELECT decision_id FROM protocol_decision_cards WHERE card_id = ? LIMIT 1");
-            $pdcStmt->execute([$cardId]);
-            $decId = (int)$pdcStmt->fetchColumn();
-            if ($decId > 0) {
-                $newDue   = $changes['due_date']['to']; // 'YYYY-MM-DD HH:MM:SS' или null
-                $newDate  = $newDue ? substr($newDue, 0, 10) : null;
-                $pdo->prepare("UPDATE protocol_decisions SET deadline = ? WHERE id = ?")
-                    ->execute([$newDate, $decId]);
-                // Карточки остальных соисполнителей: ставим тот же due_date,
-                // пишем историю и шлём уведомления.
-                $siblings = $pdo->prepare("SELECT card_id FROM protocol_decision_cards WHERE decision_id = ? AND card_id <> ?");
-                $siblings->execute([$decId, $cardId]);
-                foreach ($siblings->fetchAll() as $row) {
-                    $sibId = (int)$row['card_id'];
-                    $sibCur = $pdo->prepare("SELECT due_date, board_id, title FROM tasks_cards WHERE id = ?");
-                    $sibCur->execute([$sibId]);
-                    $sib = $sibCur->fetch();
-                    if (!$sib) continue;
-                    if ($sib['due_date'] === $newDue) continue;
-                    $pdo->prepare("UPDATE tasks_cards SET due_date = ? WHERE id = ?")
-                        ->execute([$newDue, $sibId]);
-                    tHistory($pdo, $sibId, $tUserName, 'updated', [
-                        'due_date' => ['from' => $sib['due_date'], 'to' => $newDue],
-                        'reason'   => 'sync_from_protocol_sibling',
-                    ]);
-                    $sibExtra = ['card_title' => $sib['title'], 'board_title' => '', 'due_date' => $newDue];
-                    foreach (tCardRecipients($pdo, $sibId, [$tUserName]) as $rcp) {
-                        taskPushNotif($pdo, $rcp, 'due_changed', $sibId, tBoardForRecipient($pdo, $sibId, $rcp, $sib['board_id']), $tUserName, $sibExtra);
-                    }
-                }
-            }
+            // Уведомления + перенос даты у протокольного решения и карточек
+            // остальных соисполнителей. Фронт показывает confirm перед PATCH,
+            // так что согласие пользователя уже есть.
+            tPropagateDueChange($pdo, $cardId, $card['title'], $card['board_id'], $board['title'] ?? '', $changes['due_date']['to'], $tUserName);
         }
         if (isset($body['is_done'])) {
             $wasDone = (int)$card['is_done'] === 1;

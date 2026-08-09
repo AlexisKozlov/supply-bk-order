@@ -364,6 +364,10 @@ require_once __DIR__ . '/includes/bot_surveys.php';
 require_once __DIR__ . '/includes/bot_chat.php';
 require_once __DIR__ . '/includes/bot_import.php';
 require_once __DIR__ . '/includes/bot_faq.php';
+// Только ради хелперов задач (tHistory / tPropagateDueChange) — кнопка
+// «+7 дней» в дайджесте. Маршруты /tasks/... файл сам пропускает: там стоит
+// выход по $endpoint, а у бота его нет.
+require_once __DIR__ . '/includes/tasks.php';
 
 // ═══ Получить пользователя по chat_id ═══
 
@@ -2305,6 +2309,62 @@ if (isset($input['callback_query'])) {
 
         answerCallback($cb['id'], "Отключено: " . $row['short_name']);
         rrShowMyReminders($pdo, $chatId, $msgId);
+        exit;
+    }
+
+    // Перенести срок просроченной задачи на неделю (кнопка в дайджесте
+    // «Требуют внимания»). Право на это = «ты и есть получатель напоминания»:
+    // владелец доски или соисполнитель, у которого задача ещё в работе.
+    if (str_starts_with($data, 'tsnz_')) {
+        $user = getUser($chatId);
+        if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        $cardId = (int)substr($data, 5);
+        if (!$cardId) { answerCallback($cb['id'], 'Ошибка'); exit; }
+
+        $s = $pdo->prepare("
+            SELECT c.id, c.title, c.due_date, c.board_id, c.is_done, c.is_archived,
+                   b.title AS board_title, b.owner_name
+            FROM tasks_cards c JOIN tasks_boards b ON b.id = c.board_id
+            WHERE c.id = ? LIMIT 1
+        ");
+        $s->execute([$cardId]);
+        $card = $s->fetch();
+        if (!$card)                { answerCallback($cb['id'], 'Задача не найдена'); exit; }
+        if ((int)$card['is_done'] || (int)$card['is_archived']) {
+            answerCallback($cb['id'], 'Задача уже закрыта'); exit;
+        }
+        if (!$card['due_date'])    { answerCallback($cb['id'], 'У задачи нет срока'); exit; }
+
+        $me = $user['name'] ?? '';
+        $isMine = ($card['owner_name'] === $me);
+        if (!$isMine) {
+            $a = $pdo->prepare("SELECT 1 FROM tasks_assignees WHERE card_id = ? AND user_name = ? AND is_done = 0 LIMIT 1");
+            $a->execute([$cardId, $me]);
+            $isMine = (bool)$a->fetchColumn();
+        }
+        if (!$isMine) { answerCallback($cb['id'], '⛔ Это не ваша задача', true); exit; }
+
+        // Считаем от сегодняшнего дня, а не от старого срока: задача просрочена
+        // на 60 дней, и «+7 к старому сроку» оставило бы её просроченной.
+        // Время суток сохраняем — у части задач это осмысленный час.
+        $newDue = date('Y-m-d', strtotime('+7 days')) . substr((string)$card['due_date'], 10);
+        $pdo->prepare("UPDATE tasks_cards SET due_date = ? WHERE id = ?")->execute([$newDue, $cardId]);
+        tHistory($pdo, $cardId, $me, 'updated', [
+            'due_date' => ['from' => $card['due_date'], 'to' => $newDue],
+            'reason'   => 'snooze_from_telegram',
+        ]);
+        tPropagateDueChange($pdo, $cardId, $card['title'], (int)$card['board_id'], $card['board_title'], $newDue, $me);
+
+        // Кнопку убираем — иначе непонятно, нажалась она или нет, и её жмут
+        // повторно, сдвигая срок ещё на неделю.
+        $rows = $cb['message']['reply_markup']['inline_keyboard'] ?? [];
+        $left = [];
+        foreach ($rows as $row) {
+            $keep = array_values(array_filter($row, fn($b) => ($b['callback_data'] ?? '') !== $data));
+            if ($keep) $left[] = $keep;
+        }
+        editMessageReplyMarkup($chatId, $msgId, $left ? ['inline_keyboard' => $left] : null);
+        answerCallback($cb['id'], '🗓 Срок перенесён на ' . date('d.m.Y', strtotime($newDue)));
         exit;
     }
 

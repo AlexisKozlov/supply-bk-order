@@ -778,7 +778,7 @@ if (!$isWeekend || $DRY_RUN) {
         // Добавить пункт получателю. $key — чтобы понять, новый он или уже был.
         $add = function ($chatId, $section, $line, $key) use (&$digest, $pdo, $DIGEST_REPEAT) {
             if (!isset($digest[$chatId])) {
-                $digest[$chatId] = ['payments' => [], 'receiving' => [], 'tenders' => [], 'distribution' => [], 'surveys' => [], 'marketing' => [], 'keys' => [], 'fresh' => false];
+                $digest[$chatId] = ['tasks' => [], 'payments' => [], 'receiving' => [], 'tenders' => [], 'distribution' => [], 'surveys' => [], 'marketing' => [], 'keys' => [], 'buttons' => [], 'fresh' => false];
             }
             $digest[$chatId][$section][] = $line;
             $digest[$chatId]['keys'][] = $key;
@@ -786,6 +786,56 @@ if (!$isWeekend || $DRY_RUN) {
                 $digest[$chatId]['fresh'] = true;
             }
         };
+
+        // ── 0. Просроченные задачи ──────────────────────────────────────
+        // Раньше каждая просроченная задача слала своё сообщение каждый будний
+        // день: 33 задачи давали около 40 сообщений в сутки, и это шло с мая
+        // без единой реакции. Теперь они здесь, а под списком — кнопки
+        // «+7 дней», чтобы перенести срок не заходя в портал.
+        // Условия те же, что в cron_tasks_deadlines.php: открытая карточка на
+        // живой доске, и родитель подзадачи тоже жив (иначе задача на доске не
+        // видна, а напоминание о ней выглядит как призрак).
+        $overdueTasks = $pdo->query("
+            SELECT c.id, c.title, c.board_id, c.due_date,
+                   b.title AS board_title, b.owner_name,
+                   DATEDIFF(CURDATE(), DATE(c.due_date)) AS overdue_days
+            FROM tasks_cards c
+            JOIN tasks_boards b ON b.id = c.board_id
+            LEFT JOIN tasks_cards p ON p.id = c.parent_card_id
+            WHERE c.is_done = 0
+              AND c.is_archived = 0
+              AND c.due_date IS NOT NULL
+              AND DATE(c.due_date) < CURDATE()
+              AND b.is_archived = 0
+              AND (c.parent_card_id IS NULL OR (COALESCE(p.is_done, 0) = 0 AND COALESCE(p.is_archived, 0) = 0))
+            ORDER BY c.due_date
+        ")->fetchAll();
+        // Соисполнители, у которых задача ещё в работе: закрывший свою часть
+        // напоминаний получать не должен, даже если у автора карточка открыта.
+        $taskAssignees = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ? AND is_done = 0");
+        $BTN_LIMIT = 6; // больше кнопок в одном сообщении — уже стена
+        foreach ($overdueTasks as $t) {
+            $taskAssignees->execute([$t['id']]);
+            $people = array_unique(array_filter(array_merge(
+                [$t['owner_name']], array_column($taskAssignees->fetchAll(), 'user_name')
+            )));
+            $days  = (int)$t['overdue_days'];
+            $board = $t['board_title'] ? "\n   📋 {$t['board_title']}" : '';
+            $line  = "• <b>{$t['title']}</b> — просрочена на {$days} " . plural_days($days) . $board;
+            foreach ($people as $name) {
+                $chatId = $chatOf($name);
+                if (!$chatId) continue;
+                $add($chatId, 'tasks', $line, "task_{$t['id']}");
+                if (count($digest[$chatId]['buttons']) < $BTN_LIMIT) {
+                    $short = mb_substr($t['title'], 0, 22);
+                    if (mb_strlen($t['title']) > 22) $short .= '…';
+                    $digest[$chatId]['buttons'][] = [[
+                        'text'          => "🗓 +7 дн: {$short}",
+                        'callback_data' => "tsnz_{$t['id']}",
+                    ]];
+                }
+            }
+        }
 
         // ── 1. Просроченные оплаты ──────────────────────────────────────
         $statusRu = ['upcoming' => 'предстоит', 'request_due' => 'нужна заявка', 'requested' => 'заявка подана'];
@@ -981,11 +1031,19 @@ if (!$isWeekend || $DRY_RUN) {
         foreach ($digest as $chatId => $d) {
             if (!$d['fresh']) continue; // новых хвостов нет — молчим до повтора
 
-            $total = count($d['payments']) + count($d['receiving']) + count($d['tenders'])
+            $total = count($d['tasks']) + count($d['payments']) + count($d['receiving']) + count($d['tenders'])
                    + count($d['distribution']) + count($d['surveys']) + count($d['marketing']);
             $text  = "📋 <b>Требуют внимания</b> — {$total}\n";
 
+            // Кнопок меньше, чем задач — говорим об этом, иначе выглядит так,
+            // будто часть задач перенести нельзя.
+            $taskNote = 'Перенести срок на неделю можно кнопкой ниже.';
+            if (count($d['tasks']) > count($d['buttons'])) {
+                $taskNote .= ' Кнопки — на первые ' . count($d['buttons']) . ', остальные переносятся в портале.';
+            }
+
             $sections = [
+                ['tasks',     '🗓 <b>Просроченные задачи</b>',      $taskNote],
                 ['payments',  '🔴 <b>Просроченные оплаты</b>',     'Отметьте оплату в разделе «Оплаты поставщиков».'],
                 ['receiving', '📦 <b>Приёмка не отмечена</b>',      'Пока приёмки нет, план-факт по заказу не посчитать.'],
                 ['tenders',   '🧾 <b>Тендеры без движения</b>',     'Дедлайн подачи прошёл, а тендер не закрыт.'],
@@ -1003,7 +1061,11 @@ if (!$isWeekend || $DRY_RUN) {
             }
             $text .= "\n<a href=\"{$SITE}/dashboard\">Открыть портал</a>";
 
-            tgSend($chatId, $text, true);
+            // Кнопки есть только у задач: перенести срок — единственное действие,
+            // которое человек делает не глядя. Оплату и приёмку так не отметить,
+            // там нужно видеть суммы и позиции.
+            $markup = $d['buttons'] ? ['inline_keyboard' => $d['buttons']] : null;
+            tgSend($chatId, $text, true, $markup);
             foreach (array_unique($d['keys']) as $k) {
                 logNotification($pdo, 'attention_digest', $k, $chatId);
             }
