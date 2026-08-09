@@ -731,8 +731,10 @@ try {
 //
 // Частота нарочно убывающая: первые три дня ежедневно, дальше раз в неделю.
 // Ежедневное повторение месяцами приучает не читать (так вышло с задачами:
-// 40 одинаковых сообщений в день с мая). После недели просрочки копия уходит
-// руководителям — тем, у кого есть доступ к юрлицу платежа.
+// 40 одинаковых сообщений в день с мая).
+//
+// Пишем только тем, кто по этому платежу работает. Копии руководителям
+// не рассылаем — это осознанное решение, не забытая доработка.
 //
 // В выходные молчим: платёж всё равно не проведут. Пробный прогон
 // (--dry-run) выходные игнорирует — он ничего не отправляет, и без этого
@@ -806,29 +808,6 @@ if (!$isWeekend || $DRY_RUN) {
                 $sent++;
             }
 
-            // Больше недели — подключаем руководителей. Не чаще раза в неделю
-            // и только тем, у кого есть доступ к юрлицу платежа.
-            if ($days > 7) {
-                $bosses = $pdo->query("
-                    SELECT name, legal_entities, telegram_chat_id FROM users
-                    WHERE role IN ('admin','manager') AND telegram_chat_id IS NOT NULL
-                      AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
-                ")->fetchAll();
-                $esc = "⚠️ <b>Просрочка больше недели</b>\n\n" . $text;
-                foreach ($bosses as $b) {
-                    $chatId = $b['telegram_chat_id'];
-                    if (!$chatId || isset($reached[$chatId])) continue;
-                    $les = $b['legal_entities'];
-                    if (is_string($les)) $les = json_decode($les, true) ?: [];
-                    // Пустой список юрлиц = админ без ограничений.
-                    if (!empty($les) && $p['legal_entity'] && !in_array($p['legal_entity'], $les, true)) continue;
-                    $reached[$chatId] = true;
-                    if (wasNotified($pdo, 'payment_overdue_esc', "pay_{$p['id']}", $chatId, 604800)) continue;
-                    tgSend($chatId, $esc);
-                    logNotification($pdo, 'payment_overdue_esc', "pay_{$p['id']}", $chatId);
-                    $sent++;
-                }
-            }
         }
     } catch (Exception $e) {
         error_log('[cron_telegram] overdue payment reminder error: ' . $e->getMessage());
