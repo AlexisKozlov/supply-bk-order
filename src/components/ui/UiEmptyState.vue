@@ -70,6 +70,9 @@ defineEmits(['action']);
   color: var(--tk-n-300);
   margin-bottom: var(--tk-s-3);
 }
+/* BkIcon отдаёт максимум 24px (size="lg"). В пустом состоянии значок должен
+   быть крупным, поэтому растягиваем сам svg, а не просим новый размер. */
+.ui-empty__icon :deep(svg) { width: 48px; height: 48px; }
 
 .ui-empty__title {
   margin: 0 0 var(--tk-s-1);

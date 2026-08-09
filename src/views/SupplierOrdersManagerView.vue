@@ -382,7 +382,11 @@
               </tfoot>
             </table>
           </div>
-          <div v-else class="rom-empty">Нет товаров в шаблоне. Добавьте товары во вкладке «Шаблон товаров».</div>
+          <UiEmptyState v-else
+                        title="Шаблон поставщика пуст"
+                        description="Пока в шаблоне нет товаров, рестораны не смогут ничего заказать у этого поставщика. Наполните его во вкладке «Шаблон товаров».">
+            <template #icon><BkIcon name="clipboard" size="lg" /></template>
+          </UiEmptyState>
         </template>
     </template>
 
@@ -841,7 +845,11 @@
           </div>
           <p class="so-section-hint" style="margin:6px 0">Дедлайн не задан — заявка сразу финальная (ресторан только видит). Задан — ресторан может править до него.</p>
           <div v-if="adhoc.loadingTpl" class="rom-loading"><BurgerSpinner text="Загрузка товаров..." /></div>
-          <div v-else-if="!adhoc.products.length" class="rom-empty">Нет товаров в шаблоне поставщика.</div>
+          <UiEmptyState v-else-if="!adhoc.products.length"
+                        title="Заказывать нечего"
+                        description="У этого поставщика пустой шаблон товаров — добавьте позиции, тогда можно будет создать внеплановую заявку.">
+            <template #icon><BkIcon name="clipboard" size="lg" /></template>
+          </UiEmptyState>
           <div v-else class="rom-table-wrap" style="max-height:340px;overflow:auto">
             <table class="rom-table">
               <thead><tr><th>Товар</th><th style="width:130px">Количество</th></tr></thead>
@@ -1209,6 +1217,8 @@
 
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';

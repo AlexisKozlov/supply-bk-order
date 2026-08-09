@@ -262,9 +262,13 @@
               </tr>
             </tbody>
           </table>
-          <div v-else class="rom-empty">
-            {{ tplFilter ? 'Ничего не найдено' : 'Шаблон пуст. Нажмите «Импортировать из сроков годности» или «+ Добавить товар».' }}
-          </div>
+          <UiEmptyState v-else
+                        :title="tplFilter ? 'Ничего не нашлось' : 'Шаблон пуст'"
+                        :description="tplFilter ? `По запросу «${tplFilter}» совпадений нет.` : 'Шаблон — это список товаров, который видит ресторан при заказе. Наполните его из сроков годности или добавьте позиции вручную.'"
+                        :action-label="tplFilter ? 'Сбросить поиск' : ''"
+                        @action="tplFilter = ''">
+            <template #icon><BkIcon name="clipboard" size="lg" /></template>
+          </UiEmptyState>
         </div>
       </div>
     </template>
@@ -398,9 +402,11 @@
             </tr>
           </tbody>
         </table>
-        <div v-else class="rom-empty">
-          {{ stockDates.length ? 'Нет данных. Выберите дату остатков и дату доставки.' : 'Остатки ещё не загружены. Нажмите «Загрузить остатки из Excel».' }}
-        </div>
+        <UiEmptyState v-else
+                      :title="stockDates.length ? 'Выберите даты' : 'Остатки не загружены'"
+                      :description="stockDates.length ? 'Укажите дату остатков и дату доставки — портал посчитает, чего не хватит.' : 'Загрузите файл остатков из 1С, и расчёт появится здесь.'">
+          <template #icon><BkIcon name="warehouse" size="lg" /></template>
+        </UiEmptyState>
       </div>
       <div v-else class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       </div>
@@ -444,7 +450,11 @@
         </div>
 
         <div v-if="auditLoading && !auditEvents.length" class="rom-loading"><BurgerSpinner text="Загрузка журнала..." /></div>
-        <div v-else-if="!auditEvents.length" class="rom-audit-empty">Событий не найдено</div>
+        <UiEmptyState v-else-if="!auditEvents.length"
+                      title="Событий нет"
+                      description="Здесь появятся правки заказов и шаблонов за выбранный период. Попробуйте расширить период или снять фильтры.">
+          <template #icon><BkIcon name="history" size="lg" /></template>
+        </UiEmptyState>
         <div v-else class="rom-audit-list">
           <div v-for="ev in auditEvents" :key="ev.id" class="rom-audit-row" :class="'act-' + ev.action">
             <div class="rom-audit-time">
@@ -670,7 +680,11 @@
         </div>
         <div class="rom-modal-body" style="max-height:70vh;overflow:auto">
           <div v-if="historyLoading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
-          <div v-else-if="!historyEvents.length" class="rom-no-items">Событий пока нет</div>
+          <UiEmptyState v-else-if="!historyEvents.length"
+                        title="Правок не было"
+                        description="Заказ ни разу не меняли после создания.">
+            <template #icon><BkIcon name="history" size="lg" /></template>
+          </UiEmptyState>
           <div v-else class="rom-audit-list">
             <div v-for="ev in historyEvents" :key="ev.id" class="rom-audit-row" :class="'act-' + ev.action">
               <div class="rom-audit-time">
@@ -1198,6 +1212,8 @@ import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { appConfirm, appAlert, appPrompt } from '@/lib/appDialogs.js';
+import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { formatDate, formatTime, formatDateTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 

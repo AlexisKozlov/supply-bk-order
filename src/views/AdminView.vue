@@ -60,7 +60,11 @@
       </div>
 
       <div v-if="loading" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!users.length" class="adm-empty">Нет пользователей</div>
+      <UiEmptyState v-else-if="!users.length"
+                    title="Сотрудников нет"
+                    description="Ни одной учётной записи. Добавьте первую — человек получит доступ в портал.">
+        <template #icon><BkIcon name="user" size="lg" /></template>
+      </UiEmptyState>
 
       <div v-else class="adm-user-list">
         <div v-for="u in users" :key="u.id" class="adm-user-row" @click="openUserModal(u)">
@@ -363,7 +367,11 @@
         </div>
 
         <div v-if="auditLoading && !auditEntries.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка журнала..." /></div>
-        <div v-else-if="!auditEntries.length" class="adm-empty">Нет записей</div>
+        <UiEmptyState v-else-if="!auditEntries.length"
+                      title="Записей нет"
+                      description="Здесь появятся действия сотрудников за выбранный период. Попробуйте расширить период или снять фильтры.">
+          <template #icon><BkIcon name="history" size="lg" /></template>
+        </UiEmptyState>
 
         <div v-else class="adm-audit-list">
           <div v-for="log in auditEntries" :key="log.id" class="adm-audit-entry">
@@ -457,7 +465,11 @@
         </div>
 
         <div v-if="errorsLoading && !errorEntries.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
-        <div v-else-if="!errorEntries.length" class="adm-empty">Ошибок не обнаружено</div>
+        <UiEmptyState v-else-if="!errorEntries.length"
+                      title="Ошибок нет"
+                      description="Портал не записал ни одной серверной ошибки за выбранный период. Это хорошая новость.">
+          <template #icon><BkIcon name="success" size="lg" /></template>
+        </UiEmptyState>
 
         <div v-else class="adm-audit-list">
           <div v-for="log in errorEntries" :key="log.id" class="adm-audit-entry adm-error-entry" @click="toggleErrorStack(log.id)">
@@ -1077,6 +1089,7 @@ import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } 
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 
 const router = useRouter();
 

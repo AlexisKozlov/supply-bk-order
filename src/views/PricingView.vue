@@ -71,7 +71,13 @@
     <!-- ПРАЙС-ЛИСТ -->
     <div v-if="activeTab === 'prices'">
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!filteredPrices.length" style="text-align:center;padding:40px;color:var(--text-muted);">Цены не найдены</div>
+      <UiEmptyState v-else-if="!filteredPrices.length"
+                    :title="searchQuery ? 'Ничего не нашлось' : 'Цен пока нет'"
+                    :description="searchQuery ? `По запросу «${searchQuery}» совпадений нет. Ищите по артикулу, товару или поставщику.` : 'Цены приходят из протоколов согласования. Как только протокол утвердят, позиции появятся здесь.'"
+                    :action-label="searchQuery ? 'Сбросить поиск' : ''"
+                    @action="searchQuery = ''">
+        <template #icon><BkIcon name="pricing" size="lg" /></template>
+      </UiEmptyState>
       <div v-else>
         <table class="pricing-table">
           <thead>
@@ -188,7 +194,13 @@
     <!-- ПРОТОКОЛЫ (ПСЦ) -->
     <div v-if="activeTab === 'agreements'">
       <div v-if="loadingAgreements" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!filteredAgreements.length" style="text-align:center;padding:40px;color:var(--text-muted);">Протоколы не найдены</div>
+      <UiEmptyState v-else-if="!filteredAgreements.length"
+                    :title="searchQuery ? 'Ничего не нашлось' : 'Протоколов пока нет'"
+                    :description="searchQuery ? `По запросу «${searchQuery}» совпадений нет.` : 'Протокол согласования цены создаётся, когда поставщик присылает новый прайс.'"
+                    :action-label="searchQuery ? 'Сбросить поиск' : ''"
+                    @action="searchQuery = ''">
+        <template #icon><BkIcon name="document" size="lg" /></template>
+      </UiEmptyState>
       <div v-else class="db-grid">
         <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card"
              :class="[agreementCardClass(a), { 'db-card-highlight': highlightedAgreementId === a.id }]"
@@ -227,7 +239,12 @@
     <!-- ДИНАМИКА ЦЕН -->
     <div v-if="activeTab === 'dynamics'">
       <div v-if="dynamicsLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!dynamicsData.length" style="text-align:center;padding:40px;color:var(--text-muted);">Нет данных об изменениях цен</div>
+      <UiEmptyState v-else-if="!dynamicsData.length"
+                    title="Цены пока не менялись"
+                    description="Здесь появится история подорожаний и снижений за выбранный период. Попробуйте расширить период."
+      >
+        <template #icon><BkIcon name="chartUp" size="lg" /></template>
+      </UiEmptyState>
       <template v-else>
         <!-- Сводка -->
         <div class="dyn-summary">
@@ -690,6 +707,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 

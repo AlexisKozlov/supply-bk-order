@@ -14,7 +14,11 @@
     <!-- Collections list -->
     <div v-if="!activeCollection" class="sc-list">
       <div v-if="loading" class="sc-empty"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!collections.length && !loadError" class="sc-empty">Нет сессий сбора. Создайте первую.</div>
+      <UiEmptyState v-else-if="!collections.length && !loadError"
+                    title="Сборов ещё не было"
+                    description="Сбор остатков — это запрос ресторанам: сколько чего осталось. Создайте первый, и рестораны получат письмо.">
+        <template #icon><BkIcon name="stockCollection" size="lg" /></template>
+      </UiEmptyState>
       <div
         v-for="c in collections" :key="c.id"
         class="sc-card"
@@ -670,6 +674,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';

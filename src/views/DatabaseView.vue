@@ -61,7 +61,13 @@
         <button class="db-sort-btn" :class="{ active: prodSortKey === 'supplier' }" @click="toggleProdSort('supplier')">Поставщик {{ prodSortIcon('supplier') }}</button>
       </div>
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!sortedProducts.length" style="text-align:center;padding:40px;color:var(--text-muted);">Карточки не найдены</div>
+      <UiEmptyState v-else-if="!sortedProducts.length"
+                    :title="searchQuery ? 'Ничего не нашлось' : 'Карточек пока нет'"
+                    :description="searchQuery ? `По запросу «${searchQuery}» совпадений нет. Проверьте артикул или название.` : 'Здесь появятся карточки товаров этого юрлица.'"
+                    :action-label="searchQuery ? 'Сбросить поиск' : (isViewer ? '' : '+ Товар')"
+                    @action="searchQuery ? searchQuery = '' : openNew('product')">
+        <template #icon><BkIcon name="package" size="lg" /></template>
+      </UiEmptyState>
       <div v-else class="db-grid">
         <div v-for="p in sortedProducts" :key="p.id" class="db-card" :class="{ 'db-card-inactive': p.is_active === 0 || p.is_active === '0' }" @click="!isViewer && editProduct(p)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
@@ -96,7 +102,13 @@
         <button class="db-sort-btn" :class="{ active: suppSortKey === 'short_name' }" @click="toggleSuppSort('short_name')">Название {{ suppSortIcon('short_name') }}</button>
       </div>
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!sortedSuppliers.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
+      <UiEmptyState v-else-if="!sortedSuppliers.length"
+                    :title="searchQuery ? 'Ничего не нашлось' : 'Поставщиков пока нет'"
+                    :description="searchQuery ? `По запросу «${searchQuery}» совпадений нет.` : 'Добавьте первого поставщика — он появится в заказах и заявках.'"
+                    :action-label="searchQuery ? 'Сбросить поиск' : (isViewer ? '' : '+ Поставщик')"
+                    @action="searchQuery ? searchQuery = '' : openNew('supplier')">
+        <template #icon><BkIcon name="factory" size="lg" /></template>
+      </UiEmptyState>
       <div v-else class="db-grid">
         <div v-for="s in sortedSuppliers" :key="s.id" class="db-card"
              :class="{ 'db-card-highlight': highlightedSupplierId === s.id }"
@@ -125,7 +137,13 @@
     <!-- Группы аналогов -->
     <div v-if="activeTab==='analogs'">
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!filteredAnalogGroups.length" style="text-align:center;padding:40px;color:var(--text-muted);">Группы аналогов не найдены</div>
+      <UiEmptyState v-else-if="!filteredAnalogGroups.length"
+                    :title="searchQuery ? 'Ничего не нашлось' : 'Групп аналогов пока нет'"
+                    :description="searchQuery ? `По запросу «${searchQuery}» совпадений нет.` : 'Группа аналогов задаётся в карточке товара — так портал понимает, чем товар можно заменить.'"
+                    :action-label="searchQuery ? 'Сбросить поиск' : ''"
+                    @action="searchQuery = ''">
+        <template #icon><BkIcon name="copy" size="lg" /></template>
+      </UiEmptyState>
       <div v-else class="analog-groups">
         <div v-for="group in filteredAnalogGroups" :key="group.name" class="analog-group-card">
           <div class="analog-group-header" @click="toggleGroup(group.name)">
@@ -151,7 +169,13 @@
     <!-- Рестораны -->
     <div v-if="activeTab==='restaurants'">
       <div v-if="restaurantStore.loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!filteredRestaurants.length" style="text-align:center;padding:40px;color:var(--text-muted);">Рестораны не найдены</div>
+      <UiEmptyState v-else-if="!filteredRestaurants.length"
+                    :title="searchQuery ? 'Ничего не нашлось' : 'Ресторанов пока нет'"
+                    :description="searchQuery ? `По запросу «${searchQuery}» совпадений нет. Ищите по номеру или адресу.` : 'Добавьте ресторан — он появится в графиках, заявках и кабинете.'"
+                    :action-label="searchQuery ? 'Сбросить поиск' : (isViewer ? '' : '+ Ресторан')"
+                    @action="searchQuery ? searchQuery = '' : openRestaurantModal(null)">
+        <template #icon><BkIcon name="building" size="lg" /></template>
+      </UiEmptyState>
       <div v-else class="db-grid">
         <div v-for="r in filteredRestaurants" :key="r.id" class="db-card" @click="!isViewer && openRestaurantModal(r)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
@@ -176,7 +200,13 @@
     <!-- Рецептуры -->
     <div v-if="activeTab==='recipes'">
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!filteredRecipes.length" style="text-align:center;padding:40px;color:var(--text-muted);">Рецептуры не найдены</div>
+      <UiEmptyState v-else-if="!filteredRecipes.length"
+                    :title="searchQuery ? 'Ничего не нашлось' : 'Рецептур пока нет'"
+                    :description="searchQuery ? `По запросу «${searchQuery}» совпадений нет.` : 'Рецептуры приходят из 1С и показывают, из чего собирается блюдо.'"
+                    :action-label="searchQuery ? 'Сбросить поиск' : ''"
+                    @action="searchQuery = ''">
+        <template #icon><BkIcon name="veg" size="lg" /></template>
+      </UiEmptyState>
       <div v-else class="db-grid">
         <div v-for="r in filteredRecipes" :key="r.id" class="db-card" style="cursor:pointer;" @click="toggleRecipeExpand(r.id)">
           <div class="db-card-top">
@@ -347,6 +377,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { getEntityGroupCode, formatRestaurantNumber, dodoCityLabel } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 
 const EditCardModal = defineAsyncComponent(() => import('@/components/modals/EditCardModal.vue'));
