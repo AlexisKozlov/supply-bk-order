@@ -814,6 +814,66 @@ if (!$isWeekend || $DRY_RUN) {
     }
 }
 
+// ═══ Неотмеченная приёмка ═══
+// Поставка пришла, а приёмку в портале никто не отметил. Пока её нет,
+// расхождение план-факт по заказу посчитать нельзя, и заказ бесконечно
+// висит открытым. На проверке нашлось четыре таких заказа — самому
+// старшему было 12 дней, и об этом никто не знал.
+//
+// Ждём два дня после поставки: в день привоза отмечать приёмку некогда,
+// на следующий тоже бывает не до того. Порог тот же, что у блока
+// «Требуют внимания» на дашборде — цифры в двух местах должны сходиться.
+// Частота та же, что у просроченных оплат: первые три дня ежедневно,
+// дальше раз в неделю. Пишем автору заказа — он её и отмечает.
+if (!$isWeekend || $DRY_RUN) {
+    try {
+        $notReceived = $pdo->query("
+            SELECT o.id, o.supplier, o.legal_entity, o.delivery_date, o.created_by,
+                   DATEDIFF(CURDATE(), o.delivery_date) AS late_days,
+                   (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id) AS items
+            FROM orders o
+            WHERE o.received_at IS NULL
+              AND o.delivery_date IS NOT NULL
+              AND DATEDIFF(CURDATE(), o.delivery_date) >= 2
+            ORDER BY o.delivery_date
+        ")->fetchAll();
+
+        $recvChat = $pdo->prepare("
+            SELECT telegram_chat_id FROM users
+            WHERE name = ? AND telegram_chat_id IS NOT NULL
+              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
+        ");
+
+        foreach ($notReceived as $o) {
+            if (!$o['created_by']) continue;
+            $recvChat->execute([$o['created_by']]);
+            $chatId = $recvChat->fetchColumn();
+            if (!$chatId) continue;
+
+            $days = (int)$o['late_days'];
+            $interval = $days <= 3 ? 72000 : 604800;
+            if (wasNotified($pdo, 'order_not_received', "ord_{$o['id']}", $chatId, $interval)) continue;
+
+            $dayWord = ($days % 10 === 1 && $days % 100 !== 11) ? 'день' : 'дн.';
+            $dateFmt = date('d.m.Y', strtotime($o['delivery_date']));
+
+            $text  = "📦 <b>Приёмка не отмечена, прошло {$days} {$dayWord}</b>\n";
+            $text .= "─────────────────────\n";
+            $text .= "🚚 Поставщик: <b>{$o['supplier']}</b>\n";
+            $text .= "📅 Поставка была: <b>{$dateFmt}</b>\n";
+            $text .= "📋 Позиций в заказе: {$o['items']}\n";
+            if ($o['legal_entity']) $text .= "🏢 {$o['legal_entity']}\n";
+            $text .= "\n<i>Отметьте приёмку в разделе «Поставки». Пока её нет, расхождение план-факт по заказу не посчитать.</i>";
+
+            tgSend($chatId, $text);
+            logNotification($pdo, 'order_not_received', "ord_{$o['id']}", $chatId);
+            $sent++;
+        }
+    } catch (Exception $e) {
+        error_log('[cron_telegram] not received reminder error: ' . $e->getMessage());
+    }
+}
+
 // ═══ Напоминания о сборе остатков ═══
 try {
     // Активные сборы старше 4 часов — напоминаем незаполнившим ресторанам

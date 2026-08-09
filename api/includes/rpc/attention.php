@@ -152,14 +152,14 @@ if ($fn === 'attention_overview') {
                    DATEDIFF(CURDATE(), delivery_date) AS days
             FROM orders
             WHERE received_at IS NULL AND delivery_date IS NOT NULL
-              AND delivery_date < CURDATE() - INTERVAL 2 DAY AND $w2
+              AND DATEDIFF(CURDATE(), delivery_date) >= 2 AND $w2
             ORDER BY delivery_date
             LIMIT 50
         ", $p2);
         $blocks[] = [
             'key'   => 'receiving',
             'title' => 'Приёмка поставок',
-            'hint'  => 'поставка была больше 2 дней назад, приёмка не отмечена',
+            'hint'  => 'с даты поставки прошло 2 дня и больше, приёмка не отмечена',
             'route' => 'plan-fact',
             'count' => count($items),
             'items' => array_map(fn($r) => [
