@@ -19,6 +19,10 @@
       </div>
     </div>
 
+    <!-- Незакрытые дела из всех модулей. Стоит до показателей: пока висит
+         просроченный платёж или неотмеченная приёмка, обороты вторичны. -->
+    <AttentionBlock :legal-entity="entityFilter" />
+
     <div v-if="loading" class="dash-loading"><BurgerSpinner text="Загрузка данных..." /></div>
 
     <template v-else>
@@ -161,6 +165,7 @@ import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
 import { activityLabel } from '@/lib/auditActions.js'
 import { useUserStore } from '@/stores/userStore.js'
+import AttentionBlock from '@/components/dashboard/AttentionBlock.vue'
 
 const userStore = useUserStore()
 const period = ref('week')

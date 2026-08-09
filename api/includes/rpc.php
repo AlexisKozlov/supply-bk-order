@@ -156,6 +156,9 @@ if ($endpoint === 'rpc') {
 
     require __DIR__ . '/rpc/dashboard.php';
 
+    // ═══ «Требуют внимания»: сводка незакрытых дел по всем модулям ═══
+    require __DIR__ . '/rpc/attention.php';
+
     // ═══ Чат с ресторанами ═══
 
     require __DIR__ . '/rpc/chat.php';
