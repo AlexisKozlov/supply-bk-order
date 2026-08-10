@@ -1050,13 +1050,21 @@ if (!$isWeekend || $DRY_RUN) {
                 $upd = $pdo->prepare("UPDATE marketing_activities SET status = 'completed', updated_at = NOW() WHERE id = ? AND status = 'active'");
                 $upd->execute([$a['id']]);
                 if (!$upd->rowCount()) continue; // кто-то успел закрыть руками
+                // details — колонка с проверкой json_valid(): обычный текст она
+                // не принимает, INSERT падает и обрывает всю сводку. Пишем JSON,
+                // как остальной портал.
                 $pdo->prepare("
                     INSERT INTO audit_log (action, entity_type, entity_id, user_name, legal_entity, details)
                     VALUES ('marketing_auto_completed', 'marketing_activities', ?, 'Портал', ?, ?)
                 ")->execute([
                     (string)$a['id'],
                     $a['legal_entity'],
-                    "Акция «{$a['name']}» завершена автоматически: дата окончания {$toFmt} прошла",
+                    json_encode([
+                        'name'      => $a['name'],
+                        'date_to'   => $a['date_to'],
+                        'reason'    => 'дата окончания прошла',
+                        'message'   => "Акция «{$a['name']}» завершена автоматически: дата окончания {$toFmt} прошла",
+                    ], JSON_UNESCAPED_UNICODE),
                 ]);
             }
             $chatId = $chatOf($a['created_by']);
