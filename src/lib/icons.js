@@ -38,7 +38,7 @@ export const icons = {
   // ─── Actions ───
   save: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" fill="#FFF3E0" stroke="#F4A261" stroke-width="1.5"/><path d="M8 12l2.5 3L16 9" stroke="#E76F51" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 7h16" stroke="#F4A261" stroke-width="1" opacity="0.3"/></svg>`,
 
-  send: `<svg viewBox="0 0 24 24" fill="none" stroke="#F4A261" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+  send: `<svg viewBox="0 0 24 24" fill="none"><path d="M21.5 3.2 2.8 10.4a.6.6 0 0 0 .05 1.13l4.9 1.63 1.63 4.9a.6.6 0 0 0 1.13.05z" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5" stroke-linejoin="round"/><path d="M21.5 3.2 7.75 13.16" stroke="#E76F51" stroke-width="1.5" stroke-linecap="round"/><path d="M11.4 16.9 14 14.3" stroke="#F4A261" stroke-width="1.5" stroke-linecap="round"/></svg>`,
 
   import: `<svg viewBox="0 0 24 24" fill="none" stroke="#E76F51" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
 
@@ -72,7 +72,7 @@ export const icons = {
 
   factory: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 20V8l5 4V8l5 4V4h4a1 1 0 011 1v15" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 20h20" stroke="#E76F51" stroke-width="2" stroke-linecap="round"/></svg>`,
 
-  truck: `<svg viewBox="0 0 24 24" fill="none"><rect x="1" y="6" width="14" height="11" rx="2" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5"/><path d="M15 10h3.4a2 2 0 011.6.8L22 13.5V15a2 2 0 01-2 2h-5" fill="#F4A261" stroke="#E76F51" stroke-width="1.5" stroke-linejoin="round"/><circle cx="7" cy="18" r="2.2" fill="#FDBD10" stroke="#E76F51" stroke-width="1.5"/><circle cx="17.5" cy="18" r="2.2" fill="#FDBD10" stroke="#E76F51" stroke-width="1.5"/><rect x="4" y="9" width="3" height="5" rx=".5" fill="#E76F51" opacity="0.3"/><rect x="8" y="9" width="3" height="5" rx=".5" fill="#E76F51" opacity="0.2"/></svg>`,
+  truck: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="3.5" width="20" height="7" rx="3.5" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.5"/><circle cx="6.5" cy="7" r="1.5" fill="#E76F51"/><circle cx="12" cy="7" r="1.5" fill="#FDBD10"/><circle cx="17.5" cy="7" r="1.5" fill="#E76F51"/><rect x="2" y="13.5" width="20" height="7" rx="3.5" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5"/><circle cx="9" cy="17" r="1.5" fill="#F4A261"/><circle cx="15" cy="17" r="1.5" fill="#E76F51"/></svg>`,
 
   building: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.5"/><circle cx="9" cy="7" r="1.2" fill="#E76F51"/><circle cx="15" cy="7" r="1.2" fill="#E76F51"/><circle cx="9" cy="12" r="1.2" fill="#F4A261"/><circle cx="15" cy="12" r="1.2" fill="#F4A261"/><rect x="10" y="18" width="4" height="4" fill="#E76F51"/></svg>`,
 
@@ -170,6 +170,13 @@ export const icons = {
  * Каждая иконка в сайдбаре уникальна, чтобы они не путались между собой.
  */
 export const iconsLight = {
+  // Разделы, у которых светлого варианта не было: в тёмном меню они
+  // рисовались цветными и выбивались из ряда.
+  send: `<svg viewBox="0 0 24 24" fill="none"><path d="M21.5 3.2 2.8 10.4a.6.6 0 0 0 .05 1.13l4.9 1.63 1.63 4.9a.6.6 0 0 0 1.13.05z" fill="rgba(244,162,97,0.18)" stroke="#F4A261" stroke-width="1.8" stroke-linejoin="round"/><path d="M21.5 3.2 7.75 13.16" stroke="#F4A261" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  chartUp: `<svg viewBox="0 0 24 24" fill="none" stroke="#F4A261" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 6.5 13.5 15 8.5 10 2 16.5"/><polyline points="16.5 6.5 22 6.5 22 12"/></svg>`,
+  excel: `<svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="2.5" width="17" height="19" rx="2.2" fill="rgba(244,162,97,0.18)" stroke="#F4A261" stroke-width="1.8"/><path d="M8.5 11l3.5 4.2L8.5 19.4M15.5 11 12 15.2l3.5 4.2" stroke="#F4A261" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 7.5h17" stroke="#F4A261" stroke-width="1.8"/></svg>`,
+  import: `<svg viewBox="0 0 24 24" fill="none" stroke="#F4A261" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 15v4a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-4"/><polyline points="7.5 10 12 14.5 16.5 10"/><line x1="12" y1="14.5" x2="12" y2="3"/></svg>`,
+  user: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="7.5" r="3.8" fill="rgba(244,162,97,0.18)" stroke="#F4A261" stroke-width="1.8"/><path d="M19.5 20.5v-1.5a4 4 0 0 0-4-4h-7a4 4 0 0 0-4 4v1.5" fill="rgba(244,162,97,0.18)" stroke="#F4A261" stroke-width="1.8" stroke-linecap="round"/></svg>`,
   workshop: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 20V10l4 2.5V10l4 2.5V10l4 2.5V8l4 2v10z" fill="rgba(255,213,79,0.18)" stroke="#FFD54F" stroke-width="1.9" stroke-linejoin="round"/><rect x="6" y="15" width="3" height="5" rx="0.6" fill="#FFD54F" opacity="0.7"/><rect x="12" y="15" width="3" height="5" rx="0.6" fill="#FFD54F" opacity="0.7"/><path d="M17 6.5V4" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round"/></svg>`,
   handover: `<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="7" width="19" height="12" rx="2.5" fill="rgba(255,213,79,0.18)" stroke="#FFD54F" stroke-width="1.9"/><path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round"/><path d="M7.5 13h6.5" stroke="#FFD54F" stroke-width="1.9" stroke-linecap="round" opacity="0.55"/><path d="M12.2 10.8L14.8 13l-2.6 2.2" stroke="#FFD54F" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   // ─── Заказы (жёлтый акцент #FFD54F) ───
@@ -239,7 +246,7 @@ export const iconsLight = {
   document: `<svg viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="rgba(206,147,216,0.22)" stroke="#F4A261" stroke-width="1.9"/><path d="M14 2v6h6" stroke="#F4A261" stroke-width="1.9" stroke-linejoin="round" fill="none"/><line x1="8" y1="13" x2="16" y2="13" stroke="#F4A261" stroke-width="1.8" stroke-linecap="round"/><line x1="8" y1="17" x2="13" y2="17" stroke="#F4A261" stroke-width="1.8" stroke-linecap="round" opacity="0.7"/></svg>`,
 
   // График поставок — грузовик (в тон группе «Поставщики»).
-  truck: `<svg viewBox="0 0 24 24" fill="none"><rect x="1.5" y="6.5" width="12" height="9" rx="1.5" fill="rgba(129,199,132,0.2)" stroke="#F4A261" stroke-width="1.8"/><path d="M13.5 9.5h4l3 3.2v2.8h-7z" fill="rgba(129,199,132,0.2)" stroke="#F4A261" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6" cy="17.8" r="2.2" fill="rgba(129,199,132,0.25)" stroke="#F4A261" stroke-width="1.8"/><circle cx="17" cy="17.8" r="2.2" fill="rgba(129,199,132,0.25)" stroke="#F4A261" stroke-width="1.8"/></svg>`,
+  truck: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="3.5" width="20" height="7" rx="3.5" fill="rgba(244,162,97,0.18)" stroke="#F4A261" stroke-width="1.8"/><circle cx="6.5" cy="7" r="1.5" fill="#F4A261"/><circle cx="12" cy="7" r="1.5" fill="#F4A261" opacity="0.4"/><circle cx="17.5" cy="7" r="1.5" fill="#F4A261"/><rect x="2" y="13.5" width="20" height="7" rx="3.5" fill="rgba(244,162,97,0.18)" stroke="#F4A261" stroke-width="1.8"/><circle cx="9" cy="17" r="1.5" fill="#F4A261" opacity="0.4"/><circle cx="15" cy="17" r="1.5" fill="#F4A261"/></svg>`,
 
   // Ссылки кабинета — звенья цепи.
   link: `<svg viewBox="0 0 24 24" fill="none"><path d="M10 13.8a4 4 0 005.9.45l2.7-2.7a4 4 0 00-5.65-5.65l-1.5 1.5" stroke="#F4A261" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 10.2a4 4 0 00-5.9-.45l-2.7 2.7a4 4 0 005.65 5.65l1.5-1.5" stroke="#F4A261" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/></svg>`,
