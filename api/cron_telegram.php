@@ -31,6 +31,7 @@ if (!$BOT_TOKEN) { echo "No TELEGRAM_BOT_TOKEN\n"; exit; }
 $SITE_URL = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
 $GROQ_API_KEY = $_ENV['GROQ_API_KEY'] ?? '';
 $OPENROUTER_API_KEY = $_ENV['OPENROUTER_API_KEY'] ?? '';
+$DEEPSEEK_API_KEY = $_ENV['DEEPSEEK_API_KEY'] ?? '';
 $dsn = 'mysql:host=' . ($_ENV['DB_HOST'] ?? 'localhost') . ';dbname=' . ($_ENV['DB_NAME'] ?? 'supply_bk') . ';charset=utf8mb4';
 $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -130,7 +131,7 @@ function dateFromWeekStartByDow(DateTime $weekStart, int $dow, int $weekOffset =
 // ═══ AI для утренней сводки ═══
 
 function askAIDigest($context) {
-    global $GROQ_API_KEY, $OPENROUTER_API_KEY;
+    global $GROQ_API_KEY, $OPENROUTER_API_KEY, $DEEPSEEK_API_KEY;
 
     $systemPrompt = <<<'PROMPT'
 Ты — краткий аналитик отдела закупок Burger King в Беларуси.
@@ -143,13 +144,22 @@ function askAIDigest($context) {
 Отвечай ТОЛЬКО на русском, без эмодзи, без HTML-тегов. Одна мысль, без вступлений.
 PROMPT;
 
-    // Groq (быстрый, 1-3 сек)
+    // DeepSeek — тот же провайдер и модель, что у ИИ-помощника закупок и
+    // FAQ-бота. Раньше строка ИИ в сводке молча пропадала: Groq-ключа нет,
+    // а бесплатная модель OpenRouter (meta-llama/llama-4-scout:free) снята —
+    // сервис отвечал 404, и это видел только журнал.
+    if ($DEEPSEEK_API_KEY) {
+        $result = callAIDigest($systemPrompt, $context, 'deepseek', $DEEPSEEK_API_KEY);
+        if ($result) return $result;
+    }
+
+    // Groq (быстрый, 1-3 сек) — если когда-нибудь заведут ключ
     if ($GROQ_API_KEY) {
         $result = callAIDigest($systemPrompt, $context, 'groq', $GROQ_API_KEY);
         if ($result) return $result;
     }
 
-    // OpenRouter (fallback)
+    // OpenRouter (последний запасной)
     if ($OPENROUTER_API_KEY) {
         $result = callAIDigest($systemPrompt, $context, 'openrouter', $OPENROUTER_API_KEY);
         if ($result) return $result;
@@ -160,7 +170,11 @@ PROMPT;
 
 function callAIDigest($systemPrompt, $context, $provider, $apiKey) {
     global $SITE_URL;
-    if ($provider === 'groq') {
+    if ($provider === 'deepseek') {
+        $url = 'https://api.deepseek.com/chat/completions';
+        $model = 'deepseek-v4-flash';
+        $headers = ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey];
+    } elseif ($provider === 'groq') {
         $url = 'https://api.groq.com/openai/v1/chat/completions';
         $model = 'llama-3.3-70b-versatile';
         $headers = ['Content-Type: application/json', 'Authorization: Bearer ' . $apiKey];
