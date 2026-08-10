@@ -13,7 +13,8 @@
         </div>
       </div>
       <div class="p-header-right">
-        <span class="p-entity">{{ orderStore.settings.legalEntity }}</span>
+        <!-- Юрлицо — внутренняя информация: гостю его знать незачем. -->
+        <span v-if="userStore.isAuthenticated" class="p-entity">{{ orderStore.settings.legalEntity }}</span>
         <div v-if="userStore.isAuthenticated" class="p-user" @click="showUserMenu = !showUserMenu">
           <div class="p-av">{{ userInitials }}</div>
           <span class="p-uname">{{ userStore.currentUser.name }}</span>
@@ -35,71 +36,103 @@
     </div>
 
     <!-- Body — centered content -->
-    <div class="p-body">
-      <!-- Greeting -->
-      <div class="p-greeting">
-        <h2 v-if="userStore.isAuthenticated">Добрый день, <em>{{ firstName }}</em></h2>
-        <h2 v-else>Портал <em>закупок</em></h2>
-        <p>Управление поставками · Supply Department</p>
-      </div>
-
-      <!-- Dock -->
-      <div class="p-dock">
-        <a
-          v-for="(m, i) in dockModules" :key="m.key"
-          class="p-dock-slot"
-          :href="dockHref(m)"
-          @mouseenter="hoveredIdx = i"
-          @mouseleave="hoveredIdx = null"
-          @click.prevent="m.isFolder ? (showToolsFolder = !showToolsFolder) : m.dim ? stubModule(m.name) : m.public ? goPublic(m.key) : goTo(m.key, m.query)"
-        >
-          <div
-            class="p-dock-item"
-            :class="{
-              'p-dock-dim': m.dim,
-              'p-dock-hovered': hoveredIdx === i,
-              'p-dock-neighbor': hoveredIdx !== null && hoveredIdx !== i && Math.abs(hoveredIdx - i) === 1,
-              'p-dock-folder-active': m.isFolder && showToolsFolder,
-            }"
-          >
-            <div class="p-dock-icon" :class="{ 'p-dock-icon-folder': m.isFolder }" v-html="m.svg"></div>
-            <span class="p-dock-label">{{ m.name }}</span>
-            <span v-if="m.dim" class="p-dock-tag">скоро</span>
+    <div class="p-body" :class="{ 'p-body-dash': userStore.isAuthenticated && activityItems.length }">
+      <!-- ГОСТЬ. Раньше здесь стояли те же плитки разделов, что и у своих:
+           снаружи читался весь состав портала. Теперь — рассказ в двух
+           строках и два входа, без единого названия раздела. -->
+      <div v-if="!userStore.isAuthenticated" class="p-kino">
+        <div class="p-kino-text">
+          <h2 class="p-kino-title">Портал<em>закупок</em></h2>
+          <p class="p-kino-lead">
+            Здесь отдел закупок и рестораны сети ведут поставки: заявки поставщикам,
+            заказы со склада, остатки, сроки годности и графики.
+          </p>
+          <div class="p-kino-actions">
+            <button class="p-guest-btn p-guest-btn-primary" @click="openLogin">Вход для отдела закупок</button>
+            <a class="p-guest-btn" href="/restaurant/login">Вход для ресторана</a>
           </div>
-        </a>
+          <p class="p-guest-note">
+            Нет доступа? Напишите
+            <a :href="`https://t.me/${support}`" target="_blank" rel="noopener">@{{ support }}</a> — заведут учётную запись.
+          </p>
+        </div>
+        <!-- Цепочка поставок: поставщик — склад — ресторан. Крутится сама и
+             беззвучно, один раз, потом замирает на последнем кадре. На
+             телефонах и при «уменьшить движение» — просто картинка.
+             ?v=2 в адресе — потому что статика отдаётся с кешем на неделю:
+             без номера версии у тех, кто уже заходил, остался бы старый
+             ролик. Меняете файл — увеличьте номер. -->
+        <div class="p-kino-art">
+          <video
+            v-if="showChain"
+            src="/home-chain.mp4?v=2"
+            poster="/home-chain.jpg?v=2"
+            autoplay muted playsinline preload="metadata"
+          ></video>
+          <img v-else src="/home-chain.jpg?v=2" alt="" />
+        </div>
       </div>
 
-      <!-- Tools folder popup -->
+      <!-- СОТРУДНИК. Приветствие и три цифры «что сегодня» одной строкой. -->
+      <div v-if="userStore.isAuthenticated" class="p-headline">
+        <h2 class="p-hello">Добрый день, <em>{{ firstName }}</em></h2>
+        <div v-if="statChips.length" class="p-stats">
+          <a v-for="s in statChips" :key="s.key" class="p-stat" :class="'p-stat-' + s.tone"
+             :href="'/' + s.route" @click.prevent="goTo(s.route)">
+            <span class="p-stat-n">{{ s.value }}</span>
+            <span class="p-stat-txt"><b>{{ s.title }}</b>{{ s.sub }}</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Плитки разделов — только вошедшим и только те, что им открыты. -->
+      <div v-if="userStore.isAuthenticated" class="p-bento">
+        <a
+          v-for="t in bentoTiles" :key="t.key"
+          class="p-tile" :class="['p-tile-' + t.tone, { 'p-tile-hero': t.hero }]"
+          :href="'/' + t.route"
+          @click.prevent="goTo(t.route)"
+        >
+          <span v-if="t.badge" class="p-tile-badge">{{ t.badge }}</span>
+          <span class="p-tile-ico"><BkIcon :name="t.icon" size="lg" light /></span>
+          <span class="p-tile-body">
+            <span class="p-tile-name">{{ t.name }}</span>
+            <span v-if="t.note" class="p-tile-note">{{ t.note }}</span>
+          </span>
+        </a>
+        <button class="p-tile p-tile-more" @click="showToolsFolder = true">
+          <span class="p-tile-ico"><BkIcon name="search" size="lg" light /></span>
+          <span class="p-tile-body">
+            <span class="p-tile-name">Ещё {{ restSections.length }} {{ sectionsWord }}</span>
+            <span class="p-tile-note">Поиск по «/»</span>
+          </span>
+        </button>
+      </div>
+
+      <!-- Все остальные доступные разделы -->
       <Transition name="tools-folder">
         <div v-if="showToolsFolder" class="p-tools-folder">
-          <div class="p-tools-folder-title">Инструменты</div>
+          <div class="p-tools-folder-title">Все разделы</div>
           <div class="p-tools-folder-grid">
             <a
-              v-for="t in toolsFolderItems" :key="t.key"
+              v-for="t in restSections" :key="t.route"
               class="p-tools-folder-item"
-              :href="t.public ? toolsPublicHref(t.key) : '/' + t.key"
-              @click.prevent="t.public ? goPublic(t.key) : goTo(t.key); showToolsFolder = false;"
+              :href="'/' + t.route"
+              @click.prevent="goTo(t.route); showToolsFolder = false;"
             >
-              <div class="p-tools-folder-icon" v-html="t.svg"></div>
-              <span class="p-tools-folder-label">{{ t.name }}</span>
+              <div class="p-tools-folder-icon"><BkIcon :name="t.icon" size="lg" /></div>
+              <span class="p-tools-folder-label">{{ t.label }}</span>
             </a>
           </div>
         </div>
       </Transition>
       <div v-if="showToolsFolder" class="p-tools-folder-overlay" @click="showToolsFolder = false"></div>
-
-      <!-- Quick actions -->
-      <div class="p-actions">
-        <a href="/order" class="p-btn p-btn-primary" @click.prevent="goTo('order')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-          Новый заказ
-        </a>
-      </div>
     </div>
 
     <!-- Footer -->
     <footer class="p-footer">
-      <span class="p-footer-ver">Supply Department Portal v2.0.0</span>
+      <span v-if="userStore.isAuthenticated" class="p-footer-ver">Supply Department Portal v2.0.0</span>
+      <span v-else class="p-footer-ver">© Supply Department</span>
       <button v-if="userStore.isAuthenticated" class="p-footer-btn" @click="showLogoutConfirm = true">Выйти из аккаунта</button>
     </footer>
 
@@ -234,6 +267,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted, onBeforeUnmount } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
+import { useSupportContact } from '@/lib/supportContact.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
@@ -241,21 +275,26 @@ import { activityLabel } from '@/lib/auditActions.js';
 import { useCanvasParticles } from '@/composables/useCanvasParticles.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
-import { svgIcons } from '@/lib/homeIcons.js';
+import { ALL_NAV_ITEMS } from '@/lib/navSections.js';
 import { parseRestaurantInput } from '@/lib/legalEntities.js';
 
 
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
+const support = useSupportContact();
 const orderStore = useOrderStore();
 const toast = useToastStore();
 
 const showLogoutConfirm = ref(false);
 const showLoginModal = ref(false);
 const showUserMenu = ref(false);
+// Видео цепочки — только на большом экране и если человек не просил
+// систему поменьше анимировать. Иначе показываем тот же кадр картинкой.
+const showChain = typeof window !== 'undefined'
+  && window.matchMedia('(min-width: 761px)').matches
+  && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const loginRedirectTo = ref(null);
-const hoveredIdx = ref(null);
 const bgCanvas = ref(null);
 const { start: startBg, stop: stopBg } = useCanvasParticles(bgCanvas, {
   orbs: [
@@ -357,35 +396,110 @@ async function checkMaintenanceForHome() {
   } catch { /* noop */ }
 }
 
-const dockModules = [
-  { key: 'order',      name: 'Новый заказ',    svg: svgIcons.order },
-  { key: 'planning',   name: 'Планирование',   svg: svgIcons.planning },
-  { key: 'plan-fact',  name: 'Поставки',       svg: svgIcons.planFact },
-  { key: 'history',    name: 'История',        svg: svgIcons.history },
-  { key: 'database',   name: 'База данных',    svg: svgIcons.database },
-  { key: 'calendar',   name: 'Календарь',      svg: svgIcons.calendar },
-  { key: 'marketing',  name: 'Маркетинг',      svg: svgIcons.marketing },
-  { key: 'tools',      name: 'Инструменты',    svg: svgIcons.tools, isFolder: true },
+// Плитки показываем только те, что человеку открыты: раньше список был
+// один на всех, и человек с урезанными правами тыкал в раздел, который тут
+// же отвечал «нет доступа». Гостю плитки не показываются вовсе.
+// Крупные плитки главной. Порядок — по тому, чем пользуются каждый день.
+// Первая плитка большая: заказ собирают чаще всего остального вместе взятого.
+const ALL_TILES = [
+  { key: 'order',             route: 'order',             name: 'Новый заказ',        icon: 'package',          tone: 'red',    hero: true,
+    note: 'Собрать заказ поставщику — расчёт по расходу, остаткам и буферу.' },
+  { key: 'supplier-orders',   route: 'supplier-orders',   name: 'Заявки поставщикам', icon: 'factory',          tone: 'orange', note: 'Графики, напоминания, Excel поставщику' },
+  { key: 'shelf-life',        route: 'shelf-life',        name: 'Сроки годности',     icon: 'shelfLife',        tone: 'yellow', note: 'Что горит на складе' },
+  { key: 'restaurant-orders', route: 'restaurant-orders', name: 'Заказы ресторанов',  icon: 'restaurantOrders', tone: 'cream',  note: 'Заявки со склада и приёмка' },
+  { key: 'analytics',         route: 'analytics',         name: 'Аналитика',          icon: 'analytics',        tone: 'brown',  note: 'Расход, прогноз, буфер' },
+  { key: 'truck-loading',     route: 'truck-loading',     name: 'Загрузка машин',     icon: 'truckLoad',        tone: 'plain' },
+  { key: 'plan-fact',         route: 'plan-fact',         name: 'Поставки',           icon: 'delivery',         tone: 'plain' },
+  { key: 'tasks',             route: 'tasks',             name: 'Задачи',             icon: 'clipboard',        tone: 'plain' },
 ];
 
-const toolsFolderItems = [
-  { key: 'dashboard',          name: 'Дашборд',                svg: svgIcons.dashboard },
-  { key: 'analytics',          name: 'Аналитика',              svg: svgIcons.analytics },
-  { key: 'analysis',           name: 'Анализ запасов',         svg: svgIcons.analysis },
-  { key: 'restaurant-sales',   name: 'Реализация',             svg: svgIcons.restaurantSales },
-  { key: 'shelf-life',         name: 'Сроки годности',         svg: svgIcons.shelfLife },
-  { key: 'delivery-schedule',  name: 'График доставки',        svg: svgIcons.delivery },
-  { key: 'stock-collection',   name: 'Сбор остатков',          svg: svgIcons.stockCollection },
-  { key: 'deficit',            name: 'Дефицит',                svg: svgIcons.deficit },
-  { key: 'distribution',       name: 'Распределение',          svg: svgIcons.distribution },
-  { key: 'tenders',            name: 'Тендеры',                svg: svgIcons.tenders },
-  { key: 'pallet-calc',        name: 'Паллеты',                svg: svgIcons.palletCalc },
-  { key: 'payments',           name: 'Оплаты',                 svg: svgIcons.payments },
-  { key: 'corrections',        name: 'Корректировки',          svg: svgIcons.corrections },
-  { key: 'surveys',            name: 'Опросы',                 svg: svgIcons.tenders },
-  { key: 'chat',               name: 'Чат',                    svg: svgIcons.chat },
-  { key: 'search',             name: 'Поиск карточек',         svg: svgIcons.search, public: true },
-];
+const bentoTiles = computed(() =>
+  ALL_TILES
+    .filter(t => userStore.hasAccess(t.key, 'view'))
+    .map(t => ({ ...t, badge: tileBadge(t.key) }))
+);
+
+// Всё остальное, что человеку открыто, — во всплывающем окне «Ещё».
+// Список берётся из единого навигационного справочника, поэтому новый
+// раздел появляется здесь сам, без правок этого файла.
+const restSections = computed(() => {
+  const shown = new Set(ALL_TILES.map(t => t.route));
+  const seen = new Set();
+  return ALL_NAV_ITEMS.filter(item => {
+    if (!item.route || shown.has(item.route) || seen.has(item.route)) return false;
+    if (item.module && !userStore.hasAccess(item.module, 'view')) return false;
+    seen.add(item.route);
+    return true;
+  });
+});
+
+const sectionsWord = computed(() => {
+  const n = restSections.value.length % 100;
+  if (n > 10 && n < 20) return 'разделов';
+  const d = n % 10;
+  if (d === 1) return 'раздел';
+  if (d >= 2 && d <= 4) return 'раздела';
+  return 'разделов';
+});
+
+// Три цифры «что сегодня». Считает бэкенд (RPC home_stats): каждая цифра
+// приходит только если у человека есть доступ к своему разделу.
+const homeStats = ref(null);
+
+const statChips = computed(() => {
+  const s = homeStats.value;
+  if (!s) return [];
+  const out = [];
+  if (s.pending) {
+    out.push(s.pending.value > 0
+      ? { key: 'pending', tone: 'red', route: 'supplier-orders', value: s.pending.value,
+          title: plural(s.pending.value, 'заявка не подана', 'заявки не поданы', 'заявок не подано'),
+          sub: `из ${s.pending.total} на сегодня` }
+      : { key: 'pending', tone: 'green', route: 'supplier-orders', value: s.pending.total,
+          title: plural(s.pending.total, 'заявка на сегодня', 'заявки на сегодня', 'заявок на сегодня'),
+          sub: 'все поданы' });
+  }
+  if (s.incoming && s.incoming.value > 0) {
+    out.push({ key: 'incoming', tone: 'orange', route: 'supplier-orders', value: s.incoming.value,
+      title: plural(s.incoming.value, 'поставщик везёт', 'поставщика везут', 'поставщиков везут'),
+      sub: `${s.incoming.orders} ${plural(s.incoming.orders, 'заявка', 'заявки', 'заявок')} на сегодня` });
+  }
+  if (s.expiring && s.expiring.value > 0) {
+    out.push({ key: 'expiring', tone: 'yellow', route: 'shelf-life', value: s.expiring.value,
+      title: 'горит по срокам',
+      sub: `на ${s.expiring.zones} ${plural(s.expiring.zones, 'складе', 'складах', 'складах')} · неделя` });
+  }
+  return out;
+});
+
+function plural(n, one, few, many) {
+  const m = n % 100;
+  if (m > 10 && m < 20) return many;
+  const d = m % 10;
+  if (d === 1) return one;
+  if (d >= 2 && d <= 4) return few;
+  return many;
+}
+
+// Цифра-метка на плитке: то же число, что и в строке сверху, чтобы
+// человек видел его и там, куда собирается нажать.
+function tileBadge(key) {
+  const s = homeStats.value;
+  if (!s) return null;
+  if (key === 'supplier-orders' && s.pending?.value > 0) return `${s.pending.value} не подано`;
+  if (key === 'shelf-life' && s.expiring?.value > 0) return String(s.expiring.value);
+  return null;
+}
+
+async function loadHomeStats() {
+  try {
+    const { data } = await db.rpc('home_stats', {});
+    homeStats.value = data || null;
+  } catch (e) {
+    // Цифры — приятное дополнение, без них главная работает.
+    homeStats.value = null;
+  }
+}
 
 const showToolsFolder = ref(false);
 
@@ -411,6 +525,7 @@ onMounted(async () => {
   startBg();
   checkMaintenanceForHome();
   loadActivity();
+  if (userStore.isAuthenticated) loadHomeStats();
 });
 onBeforeUnmount(() => {
   showLoader.value = false;
@@ -428,7 +543,7 @@ onUnmounted(() => {
 
 function handleOutsideClick(e) {
   if (showUserMenu.value && !e.target.closest('.p-header-right')) showUserMenu.value = false;
-  if (showToolsFolder.value && !e.target.closest('.p-tools-folder') && !e.target.closest('.p-dock-slot')) showToolsFolder.value = false;
+  if (showToolsFolder.value && !e.target.closest('.p-tools-folder') && !e.target.closest('.p-tile-more')) showToolsFolder.value = false;
 }
 
 function openLogin() {
@@ -448,17 +563,6 @@ function _safeTimeout(fn, delay) {
   return id;
 }
 
-function dockHref(m) {
-  if (m.isFolder || m.dim) return '#';
-  if (m.public) return toolsPublicHref(m.key);
-  return '/' + m.key;
-}
-
-function toolsPublicHref(key) {
-  const routes = { search: '/search-cards' };
-  return routes[key] || '/' + key;
-}
-
 function goTo(name, query) {
   if (!userStore.isAuthenticated) { loginRedirectTo.value = '/' + name; openLogin(); return; }
   showLoader.value = true;
@@ -469,18 +573,6 @@ function goTo(name, query) {
     showLoader.value = false;
     router.push(query ? { name, query } : { name });
   }, 1400);
-}
-
-function stubModule(name) { toast.info('В разработке', `${name} — скоро будет доступен`); }
-
-function goPublic(key) {
-  const routes = { search: '/search-cards' };
-  const target = routes[key] || '/' + key;
-  showLoader.value = true;
-  loaderText.value = loaderTexts[0];
-  _safeTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
-  _safeTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
-  _safeTimeout(() => { showLoader.value = false; router.push(target); }, 1400);
 }
 
 async function doLogin() {
@@ -534,10 +626,12 @@ function confirmLogout() {
 </script>
 
 <style scoped>
-.portal { position: fixed; inset: 0; display: flex; flex-direction: column; font-family: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; background: #110a05; }
+/* Главная переведена на фирменный светлый вид — тот же, что вход ресторанов
+   и страницы состояний. Раньше это был единственный тёмный экран портала. */
+.portal { position: fixed; inset: 0; display: flex; flex-direction: column; font-family: var(--tk-font); overflow: auto; background: #1a0e07; }
 .portal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; display: block; }
 
-.p-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 36px; position: relative; z-index: 2; background: rgba(44,26,14,.5); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,.04); flex-shrink: 0; }
+.p-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 36px; position: relative; z-index: 2; background: transparent; border-bottom: 1px solid rgba(255,255,255,.05); flex-shrink: 0; }
 
 /* Maintenance banner */
 .p-maint-banner {
@@ -561,18 +655,97 @@ function confirmLogout() {
 .p-user:hover { background: rgba(255,255,255,.05); }
 .p-av { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #E76F51, #F4A261); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; }
 .p-uname { font-size: 12px; font-weight: 600; color: rgba(245,230,208,.65); }
-.p-login-btn { padding: 8px 20px; border-radius: 10px; border: 2px solid rgba(214,39,0,.4); background: rgba(214,39,0,.15); color: rgba(255,200,160,.8); font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
-.p-login-btn:hover { background: #E76F51; color: #fff; box-shadow: 0 4px 16px rgba(214,39,0,.25); }
+.p-login-btn { padding: 8px 20px; border-radius: var(--tk-r-pill); border: 2px solid rgba(214,39,0,.45); background: rgba(214,39,0,.2); color: #FFD7BE; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
+.p-login-btn:hover { background: var(--brand-red); border-color: var(--brand-red); color: #fff; }
 .p-user-dropdown { position: absolute; top: 100%; right: 0; margin-top: 6px; background: #2C1A0E; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 100; }
 .p-user-dropdown button { display: block; width: 100%; padding: 8px 16px; border: none; background: none; color: rgba(245,230,208,.5); font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer; border-radius: 8px; text-align: left; white-space: nowrap; transition: .15s; }
 .p-user-dropdown button:hover { background: rgba(255,255,255,.05); color: #F5E6D0; }
 
 /* Body */
-.p-body { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; z-index: 1; padding: 0 36px; gap: 36px; min-height: 0; }
-.p-greeting { text-align: center; flex-shrink: 0; }
-.p-greeting h2 { font-size: 30px; font-weight: 900; color: #F5E6D0; line-height: 1.15; font-family: 'Flame', 'Sora', sans-serif; }
-.p-greeting h2 em { font-style: normal; color: #F4A261; }
-.p-greeting p { font-size: 12px; color: rgba(245,230,208,.45); margin-top: 6px; font-weight: 500; }
+.p-body { flex: 1; display: flex; flex-direction: column; position: relative; z-index: 1; padding: 0 36px 26px; gap: 16px; min-height: 0; }
+
+/* ─── Гость: кинокадр ─── */
+.p-kino { flex: 1; display: grid; grid-template-columns: 57fr 43fr; align-items: center; min-height: 0; margin: 0 -36px; }
+.p-kino-text { padding: 0 36px 0 56px; }
+.p-kino-title { font-family: 'Flame', 'Sora', sans-serif; font-size: clamp(38px, 5vw, 62px); line-height: .94;
+  color: #F5E6D0; text-transform: uppercase; letter-spacing: -.5px; margin: 0; }
+.p-kino-title em { font-style: normal; color: #FF8732; display: block; }
+.p-kino-lead { margin: 20px 0 0; font-size: var(--tk-fz-xl); line-height: 1.65; color: rgba(245,230,208,.62); max-width: 44ch; }
+.p-kino-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-3); margin-top: 30px; }
+/* Иллюстрация уходит за край и растворяется в фоне: рамки нет, поэтому
+   светлая картинка не читается как приклеенный прямоугольник.
+   Растворение делаем двумя слоями — по горизонтали на самой картинке, по
+   вертикали на её обёртке. Два градиента в одной маске требуют
+   mask-composite, а он поддержан не везде и молча даёт склейку. */
+.p-kino-art {
+  /* Высота по картинке, а не по колонке: иначе накладка растворения
+     растягивается на пустоту сверху и снизу, и край видео остаётся резким. */
+  position: relative; align-self: center; display: flex; justify-content: center; overflow: hidden;
+}
+.p-kino-art video, .p-kino-art img { width: 150%; max-width: none; display: block; }
+/* Края растворяем накладкой в цвет фона, а не маской: видео браузер рисует
+   отдельным слоем и CSS-маску к нему не применяет — края оставались
+   резаными. Цвета взяты с самого фона: сверху он темнее, снизу теплее.
+   Картинку не затемняем — фильтр делал её грязной. */
+.p-kino-art::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(180deg, #140b05 0%, rgba(20,11,5,.5) 14%, rgba(20,11,5,0) 34%, rgba(42,22,10,0) 70%, rgba(42,22,10,.5) 88%, #2a160a 100%),
+    linear-gradient(90deg, #160c06 0%, rgba(22,12,6,.6) 18%, rgba(22,12,6,0) 46%);
+}
+
+/* ─── Сотрудник: приветствие и три цифры ─── */
+.p-headline { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; flex-shrink: 0; padding-top: 8px; }
+.p-hello { font-family: 'Flame', 'Sora', sans-serif; font-size: 27px; color: #F5E6D0; text-transform: uppercase; margin: 0; }
+.p-hello em { font-style: normal; color: #FF8732; }
+.p-stats { display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.p-stat { display: flex; align-items: center; gap: 10px; text-decoration: none;
+  background: rgba(245,235,220,.07); border: 1px solid rgba(245,230,208,.12);
+  border-radius: var(--tk-r-pill); padding: 8px 18px 8px 12px; transition: background .15s, border-color .15s; }
+.p-stat:hover { background: rgba(245,235,220,.12); border-color: rgba(245,230,208,.28); }
+.p-stat:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
+.p-stat-n { font-family: 'Flame', 'Sora', sans-serif; font-size: 22px; line-height: 1; }
+.p-stat-txt { font-size: 11.5px; line-height: 1.25; color: rgba(245,230,208,.62); }
+.p-stat-txt b { display: block; color: rgba(245,230,208,.9); font-weight: 700; font-size: 12px; }
+.p-stat-red .p-stat-n { color: #FF4A21; }
+.p-stat-orange .p-stat-n { color: var(--brand-orange); }
+.p-stat-yellow .p-stat-n { color: var(--brand-yellow); }
+.p-stat-green .p-stat-n { color: #8FD07A; }
+
+/* ─── Сотрудник: плитки ─── */
+.p-bento { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: minmax(96px, 1fr); grid-auto-flow: row dense; gap: 13px; }
+.p-tile { position: relative; overflow: hidden; border: 0; border-radius: 22px; padding: 18px 22px;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 10px;
+  text-decoration: none; text-align: left; font-family: inherit; cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease; }
+.p-tile:hover { transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0,0,0,.35); }
+.p-tile:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
+.p-tile-ico { align-self: flex-start; opacity: .85; }
+/* Значки в наборе цветные — на фирменных плитках они рябят. Перекрашиваем
+   их в цвет подписи плитки: заливка тем же цветом, но полупрозрачная. */
+.p-tile-ico :deep(svg) [stroke]:not([stroke="none"]) { stroke: currentColor; }
+.p-tile-ico :deep(svg) [fill]:not([fill="none"]) { fill: currentColor; fill-opacity: .18; }
+.p-tile-name { font-family: 'Flame', 'Sora', sans-serif; font-size: 20px; text-transform: uppercase; line-height: 1.05; display: block; }
+.p-tile-note { font-size: 12px; line-height: 1.4; opacity: .72; display: block; margin-top: 5px; }
+.p-tile-badge { position: absolute; top: 16px; right: 18px; font-size: 11px; font-weight: 800;
+  padding: 4px 11px; border-radius: 20px; background: rgba(0,0,0,.18); }
+.p-tile-hero { grid-column: span 2; grid-row: span 2; }
+.p-tile-hero .p-tile-name { font-size: 36px; }
+.p-tile-hero .p-tile-note { font-size: 14px; max-width: 30ch; }
+.p-tile-hero .p-tile-ico :deep(svg) { width: 38px; height: 38px; }
+/* Панель активности висит справа поверх страницы — освобождаем ей место,
+   иначе она накрывает крайний столбец плиток. */
+@media (min-width: 1101px) {
+  .p-body-dash { padding-right: 336px; }
+}
+.p-tile-red { background: var(--brand-red); color: #fff; }
+.p-tile-orange { background: var(--brand-orange); color: #3A1A0C; }
+.p-tile-yellow { background: var(--brand-yellow); color: var(--brand-brown); }
+.p-tile-cream { background: var(--brand-cream); color: var(--brand-brown); }
+.p-tile-brown { background: var(--brand-brown); color: var(--brand-cream); }
+.p-tile-plain, .p-tile-more { background: rgba(245,230,208,.06); color: #F5EBDC; border: 1px solid rgba(245,230,208,.1); }
+.p-tile-more:hover { background: rgba(245,230,208,.11); }
 
 /* Activity dashboard — right center */
 .p-dash { position: fixed; right: 24px; top: 50%; transform: translateY(-50%); z-index: 50; width: 280px; background: rgba(20,12,6,.75); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,.07); border-radius: 16px; padding: 16px; box-shadow: 0 8px 40px rgba(0,0,0,.35); }
@@ -586,34 +759,6 @@ function confirmLogout() {
 .p-dash-detail { color: rgba(245,230,208,.35); }
 .p-dash-time { font-size: 9px; color: rgba(245,230,208,.25); margin-top: 1px; display: block; }
 @media (max-width: 1100px) { .p-dash { display: none; } }
-
-/* Dock — slot/item pattern for stable hover */
-.p-dock { display: flex; gap: 0; padding: 16px 28px; background: rgba(255,255,255,.035); border-radius: 22px; border: 1px solid rgba(255,255,255,.05); align-items: flex-end; flex-shrink: 0; }
-.p-dock-slot { width: 72px; display: flex; justify-content: center; flex-shrink: 0; position: relative; z-index: 1; text-decoration: none; color: inherit; }
-.p-dock-slot:hover { z-index: 10; }
-.p-dock-item { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; transition: transform .25s cubic-bezier(.2,1,.3,1); position: relative; transform-origin: bottom center; will-change: transform; }
-.p-dock-item.p-dock-hovered { transform: scale(1.28) translateY(-10px); }
-.p-dock-item.p-dock-neighbor { transform: scale(1.1) translateY(-4px); }
-.p-dock-item.p-dock-dim { opacity: .35; }
-.p-dock-item.p-dock-dim.p-dock-hovered { opacity: .55; }
-.p-dock-item.p-dock-stub { opacity: .2; }
-.p-dock-item.p-dock-stub.p-dock-hovered { opacity: .35; }
-.p-dock-icon { width: 56px; height: 56px; border-radius: 16px; background: #FAF6EF; border: 1.5px solid rgba(80,35,20,.06); display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 10px rgba(0,0,0,.12); transition: box-shadow .2s; padding: 10px; }
-.p-dock-item.p-dock-hovered .p-dock-icon { box-shadow: 0 10px 28px rgba(0,0,0,.25); }
-.p-dock-icon :deep(svg) { width: 100%; height: 100%; }
-.p-dock-stub .p-dock-icon { background: rgba(250,246,239,.4); border-style: dashed; border-color: rgba(80,35,20,.08); }
-.p-dock-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; font-size: 9px; font-weight: 700; color: rgba(245,230,208,.65); opacity: 0; transition: opacity .18s; white-space: nowrap; text-align: center; pointer-events: none; }
-.p-dock-item.p-dock-hovered .p-dock-label { opacity: 1; }
-.p-dock-tag { position: absolute; top: -6px; right: -4px; font-size: 7px; font-weight: 800; text-transform: uppercase; background: rgba(214,39,0,.12); color: #E76F51; padding: 1px 5px; border-radius: 4px; letter-spacing: .3px; }
-
-/* Actions */
-.p-actions { display: flex; gap: 10px; flex-shrink: 0; }
-.p-btn { padding: 11px 22px; border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: .2s; border: 1.5px solid rgba(255,255,255,.1); background: rgba(255,255,255,.06); color: rgba(245,230,208,.7); display: flex; align-items: center; gap: 7px; }
-.p-btn:hover { border-color: rgba(255,255,255,.15); color: #F5E6D0; background: rgba(255,255,255,.07); }
-.p-btn-primary { border-color: rgba(214,39,0,.3); background: rgba(214,39,0,.12); color: rgba(255,200,160,.8); }
-.p-btn-primary:hover { background: #E76F51; color: #fff; box-shadow: 0 4px 20px rgba(214,39,0,.25); transform: translateY(-1px); }
-.p-btn-primary svg { opacity: .8; }
-.p-btn-primary:hover svg { opacity: 1; }
 
 /* Footer */
 .p-footer { padding: 14px 36px; display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1; border-top: 1px solid rgba(255,255,255,.04); flex-shrink: 0; }
@@ -694,68 +839,76 @@ function confirmLogout() {
 @media (max-width: 600px) { .login-left { display: none; } }
 
 /* Responsive */
+@media (max-width: 1100px) {
+  .p-bento { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 900px) {
+  /* Кинокадр складывается: сначала текст, картинка уходит вниз полосой. */
+  .p-kino { grid-template-columns: 1fr; align-content: center; gap: 22px; margin: 0; padding: 24px 0; }
+  .p-kino-text { padding: 0; text-align: center; }
+  .p-kino-lead { margin-left: auto; margin-right: auto; }
+  .p-kino-actions { justify-content: center; }
+  .p-kino-art { height: auto; }
+  .p-kino-art video, .p-kino-art img { width: 100%; }
+  .p-kino-art::after {
+    background:
+      linear-gradient(180deg, #1a0e07 0%, rgba(26,14,7,0) 20%, rgba(26,14,7,0) 80%, #1a0e07 100%),
+      linear-gradient(90deg, #1a0e07 0%, rgba(26,14,7,0) 16%, rgba(26,14,7,0) 84%, #1a0e07 100%);
+  }
+}
 @media (max-width: 760px) {
   .p-header { padding: 12px 16px; }
-  .p-dock { gap: 0; padding: 12px 16px; flex-wrap: wrap; justify-content: center; border-radius: 16px; }
-  .p-dock-slot { width: 56px; }
-  .p-dock-icon { width: 44px; height: 44px; border-radius: 12px; padding: 8px; }
-  .p-dock-label { font-size: 8px; }
-  .p-greeting h2 { font-size: 22px; }
-  .p-actions { flex-wrap: wrap; justify-content: center; }
-  .p-body { padding: 0 16px; gap: 24px; }
+  .p-body { padding: 0 16px 20px; gap: 14px; }
+  .p-headline { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .p-hello { font-size: 22px; }
+  .p-stats { margin-left: 0; width: 100%; }
+  .p-stat { flex: 1 1 auto; }
+  .p-bento { grid-template-columns: repeat(2, 1fr); grid-auto-rows: minmax(84px, auto); }
+  .p-tile { padding: 14px 16px; border-radius: 18px; }
+  .p-tile-name { font-size: 16px; }
+  .p-tile-hero .p-tile-name { font-size: 24px; }
+  .p-tile-note { display: none; }
+  .p-tile-hero .p-tile-note { display: block; font-size: 12px; }
 }
 @media (max-width: 480px) {
   .p-header { padding: 10px 12px; }
   .p-header-left { gap: 8px; }
-  .p-logo { }
   .p-brand h1 { font-size: 14px; }
   .p-entity { display: none; }
   .p-uname { display: none; }
-  .p-body { padding: 0 10px; gap: 18px; }
-  .p-greeting h2 { font-size: 18px; }
-  .p-greeting p { font-size: 10px; }
-  .p-dock { gap: 0; padding: 10px 8px; border-radius: 14px; }
-  .p-dock-slot { width: 48px; }
-  .p-dock-icon { width: 38px; height: 38px; border-radius: 10px; padding: 7px; }
-  .p-dock-item.p-dock-hovered { transform: scale(1.15) translateY(-6px); }
-  .p-dock-item.p-dock-neighbor { transform: scale(1.05) translateY(-2px); }
-  .p-dock-label { font-size: 7px; }
-  .p-actions { gap: 6px; }
-  .p-btn { padding: 9px 14px; font-size: 12px; border-radius: 10px; }
+  .p-body { padding: 0 10px 16px; }
+  .p-kino-title { font-size: 32px; }
+  .p-tile-hero { grid-column: span 2; grid-row: span 1; }
   .p-footer { padding: 10px 12px; }
   .login-card { flex-direction: column; }
   .login-left { display: none; }
   .login-right { padding: 24px 16px; }
 }
-@media (max-height: 580px) {
-  .p-body { gap: 18px; }
-  .p-greeting h2 { font-size: 22px; }
-  .p-dock-icon { width: 44px; height: 44px; padding: 8px; }
-  .p-dock { padding: 10px 18px; gap: 0; }
-  .p-dock-slot { width: 60px; }
+@media (max-height: 620px) and (min-width: 901px) {
+  /* Низкий экран: плитки не должны выдавливать подвал за край. */
+  .p-bento { grid-auto-rows: minmax(76px, 1fr); gap: 10px; }
+  .p-tile { padding: 12px 16px; }
+  .p-tile-note { display: none; }
+  .p-tile-hero .p-tile-note { display: block; }
 }
 
-/* ═══ TOOLS FOLDER ═══ */
-.p-dock-icon-folder {
-  background: linear-gradient(135deg, #FAF6EF, #F0E8DA) !important;
-  border-color: rgba(214,39,0,.12) !important;
-}
-.p-dock-folder-active .p-dock-icon-folder {
-  box-shadow: 0 0 0 2px rgba(214,39,0,.3), 0 4px 16px rgba(0,0,0,.15) !important;
-}
+/* ═══ ОКНО «ВСЕ РАЗДЕЛЫ» ═══ */
 .p-tools-folder-overlay {
-  position: fixed; inset: 0; z-index: 90;
+  position: fixed; inset: 0; z-index: 90; background: rgba(12,7,4,.5);
 }
+/* Окно всплывает по центру экрана: раньше оно стояло в потоке над дорожкой
+   значков, а теперь дорожки нет — в потоке оно раздвигало бы плитки. */
 .p-tools-folder {
-  position: relative; z-index: 95;
-  background: rgba(20,12,6,.85);
+  position: fixed; z-index: 95;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  background: rgba(20,12,6,.94);
   backdrop-filter: blur(24px);
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 18px;
   padding: 20px 24px;
-  max-width: 520px;
-  width: 100%;
-  box-shadow: 0 12px 48px rgba(0,0,0,.4);
+  width: min(760px, calc(100vw - 32px));
+  max-height: 78vh; overflow: auto;
+  box-shadow: 0 12px 48px rgba(0,0,0,.5);
 }
 .p-tools-folder-title {
   font-size: 10px; font-weight: 700;
@@ -768,7 +921,7 @@ function confirmLogout() {
 }
 .p-tools-folder-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 10px;
 }
 .p-tools-folder-item {
@@ -799,11 +952,11 @@ function confirmLogout() {
 
 .tools-folder-enter-active { animation: toolsFolderIn .25s ease; }
 .tools-folder-leave-active { animation: toolsFolderOut .2s ease; }
-@keyframes toolsFolderIn { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
-@keyframes toolsFolderOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes toolsFolderIn { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+@keyframes toolsFolderOut { from { opacity: 1; transform: translate(-50%, -50%) scale(1); } to { opacity: 0; transform: translate(-50%, -47%) scale(.97); } }
 
 @media (max-width: 760px) {
-  .p-tools-folder { max-width: calc(100% - 32px); padding: 16px; }
+  .p-tools-folder { padding: 16px; }
   .p-tools-folder-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .p-tools-folder-icon { width: 38px; height: 38px; padding: 7px; }
   .p-tools-folder-label { font-size: 9px; }
@@ -866,4 +1019,50 @@ function confirmLogout() {
 .supply-loader-leave-active { animation: loaderFadeOut 0.3s ease; }
 @keyframes loaderFadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes loaderFadeOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* ─── Визитка для гостя ─── */
+.p-guest { max-width: 720px; margin: 0 auto; text-align: center; }
+/* Картинка и видео одного размера — при подмене ничего не прыгает.
+   Рамка и лёгкое приглушение: светлая иллюстрация на тёмной странице
+   иначе бьёт в глаза. */
+.p-guest-art {
+  width: 100%; max-width: 480px; height: auto;
+  display: block; margin: 0 auto 22px;
+  border-radius: var(--tk-r-lg);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+  filter: brightness(.92) saturate(1.05);
+}
+.p-guest-lead {
+  font-size: var(--tk-fz-xl);
+  line-height: var(--tk-lh-loose);
+  color: rgba(245,230,208,.85);
+  margin: 0 0 26px;
+}
+.p-guest-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-3); justify-content: center; }
+.p-guest-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--tk-touch-min);
+  padding: var(--tk-s-3) var(--tk-s-6);
+  border: 2.5px solid rgba(245,230,208,.35);
+  border-radius: var(--tk-r-pill);
+  background: rgba(255,255,255,.06);
+  color: rgba(245,230,208,.9);
+  font-family: inherit; font-size: var(--tk-fz-xl); font-weight: var(--tk-fw-semibold);
+  text-decoration: none; cursor: pointer;
+  transition: background var(--tk-transition), color var(--tk-transition), border-color var(--tk-transition);
+}
+.p-guest-btn:hover { background: rgba(255,255,255,.12); border-color: rgba(245,230,208,.55); color: #F5E6D0; }
+.p-guest-btn:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
+.p-guest-btn-primary { border-color: var(--brand-red); background: var(--brand-red); color: #fff; }
+.p-guest-btn-primary:hover { background: #B52200; border-color: #B52200; color: #fff; }
+.p-guest-note { margin: 22px 0 0; font-size: var(--tk-fz-lg); color: rgba(245,230,208,.55); }
+.p-guest-note a { color: #F4A261; font-weight: var(--tk-fw-bold); text-decoration: none; }
+.p-guest-note a:hover { text-decoration: underline; }
+
+@media (max-width: 620px) {
+  .p-guest-lead { font-size: var(--tk-fz-lg); }
+  .p-guest-actions { flex-direction: column; }
+}
+
 </style>
