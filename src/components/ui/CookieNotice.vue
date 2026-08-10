@@ -24,7 +24,7 @@
 
   <!-- Обычное уведомление, до выбора -->
   <Transition name="cookie-fade">
-    <div v-if="state === 'ask'" class="cookie" role="dialog" aria-label="Использование cookie">
+    <div v-if="state === 'ask'" class="cookie" :class="{ 'cookie-above-tabs': inCabinet }" role="dialog" aria-label="Использование cookie">
       <div class="cookie-text">
         Портал использует только технические cookie — они держат вход в систему и
         помнят выбранное юрлицо. Рекламных и следящих нет. Подробнее — в
@@ -48,13 +48,18 @@
  * Ответ храним в localStorage, а не в cookie: иначе уведомление о cookie
  * само ставило бы cookie до того, как человек его прочитал.
  */
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 
 // На странице правил заглушку не показываем: иначе ссылка «читайте правила»
 // вела бы на экран, который сама же и закрывает.
 const route = useRoute();
+
+// В кабинете ресторана снизу закреплено меню вкладок (.mob-tabbar, 51px) —
+// уведомление садилось прямо на него, и до вкладок было не дотянуться,
+// пока не нажмёшь «Принять».
+const inCabinet = computed(() => (route.path || '').startsWith('/restaurant'));
 
 const KEY = 'sd_cookie_notice_v1';
 const state = ref('hidden');
@@ -86,12 +91,7 @@ function decline() {
 /* ── Уведомление ── */
 .cookie {
   position: fixed;
-  left: 16px; right: 16px;
-  /* В кабинете ресторана снизу закреплено меню (.mob-tabbar, 51px) —
-     уведомление садилось прямо на него, и до вкладок было не дотянуться,
-     пока не нажмёшь «Принять». Поднимаем над меню; --cookie-bottom
-     задаёт кабинет, на остальных страницах отступ обычный. */
-  bottom: var(--cookie-bottom, 16px);
+  left: 16px; right: 16px; bottom: 16px;
   z-index: 9000;
   max-width: 760px;
   margin: 0 auto;
@@ -159,6 +159,11 @@ function decline() {
 }
 .cookie-block-leave { font-size: 13px; color: rgba(245, 230, 208, .45); text-decoration: none; }
 .cookie-block-leave:hover { color: rgba(245, 230, 208, .8); text-decoration: underline; }
+
+/* Меню вкладок кабинета появляется на узких экранах — там же поднимаем. */
+@media (max-width: 768px) {
+  .cookie-above-tabs { bottom: 67px; }
+}
 
 @media (max-width: 560px) {
   .cookie { flex-direction: column; align-items: stretch; text-align: center; gap: 12px; }

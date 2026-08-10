@@ -5695,8 +5695,6 @@ tr.del-err { background: #fef2f2; }
 
   /* Mobile tab bar */
   .mob-tabbar { display: flex !important; }
-  /* Уведомление о cookie (общий компонент) не должно садиться на меню. */
-  :global(:root) { --cookie-bottom: 67px; }
   .cab-topbar { display: none; }
   /* Нижнее меню закреплено поверх страницы, поэтому каждая вкладка кабинета
      заканчивается запасом на его высоту — иначе меню накрывает последнюю
