@@ -203,7 +203,7 @@
 
     <!-- No data -->
     <div v-else-if="!hasData" class="anv-empty">
-      <div style="font-size:28px;margin-bottom:8px;">📊</div>
+      <div style="font-size:28px;margin-bottom:8px;"><BkIcon name="analytics" size="sm" /></div>
       <div style="font-weight:600;margin-bottom:4px;">Загрузите данные</div>
       <div style="font-size:13px;">Нажмите «1С» или «Импорт» чтобы заполнить остатки и расход</div>
     </div>
@@ -240,7 +240,7 @@
                     <td class="anv-td-name">
                       <span class="anv-group-name">{{ group.name }}</span>
                       <span v-if="hiddenAnalogs.includes(group.name) && !showHidden" class="anv-hidden-badge">скрыта</span>
-                      <button v-if="!isViewer && group.totalStock <= 0 && !hiddenAnalogs.includes(group.name)" class="anv-hide-btn-inline" @click.stop="hideAnalog(group.name)" title="Скрыть (товар выведен)">👁</button>
+                      <button v-if="!isViewer && group.totalStock <= 0 && !hiddenAnalogs.includes(group.name)" class="anv-hide-btn-inline" @click.stop="hideAnalog(group.name)" title="Скрыть (товар выведен)"><BkIcon name="eyeOff" size="sm" /></button>
                       <span class="anv-group-cnt">{{ group.items.filter(i => !i._foreign).length }}{{ group.items.some(i => i._foreign) ? '+' + group.items.filter(i => i._foreign).length : '' }}</span>
                       <span v-if="group.totalStock === 0 && group.totalConsumption > 0" class="anv-no-stock">нет на складе</span>
                     </td>

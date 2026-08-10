@@ -26,7 +26,7 @@
               <template v-if="a.consumption"><template v-if="a.stock">, </template>расх: {{ a.consumption }}</template>
               <template v-if="a.transit"><template v-if="a.stock || a.consumption">, </template>тр: {{ a.transit }}</template>
             </span>
-            <span v-if="a.shared" class="am-shared-badge" :title="'Этот аналог также предложен для ' + a.sharedWith">⚠ общий с {{ a.sharedWith }}</span>
+            <span v-if="a.shared" class="am-shared-badge" :title="'Этот аналог также предложен для ' + a.sharedWith"><BkIcon name="warning" size="sm" /> общий с {{ a.sharedWith }}</span>
           </div>
         </div>
 
@@ -46,6 +46,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import ConfirmModal from './ConfirmModal.vue';
 
 const props = defineProps({ merges: Array });

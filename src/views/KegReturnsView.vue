@@ -4,9 +4,9 @@
       <h1 class="page-title">Возврат кег</h1>
       <div class="kr-page-actions">
         <router-link :to="{ name: 'keg-returns-schedule' }" class="btn">График</router-link>
-        <button class="btn" @click="exportExcel" :disabled="!filteredRows.length">📥 Экспорт в Excel</button>
+        <button class="btn" @click="exportExcel" :disabled="!filteredRows.length"><BkIcon name="import" size="sm" /> Экспорт в Excel</button>
         <button class="btn" @click="openImport">Импорт маршрутизации</button>
-        <button class="btn" @click="openNotify" title="Адреса бухгалтерии для писем «Не сдана»">✉️ Письма бухгалтерии</button>
+        <button class="btn" @click="openNotify" title="Адреса бухгалтерии для писем «Не сдана»"><BkIcon name="send" size="sm" /> Письма бухгалтерии</button>
         <button class="btn primary" @click="createOpen = true">+ Создать заявку</button>
       </div>
     </div>
@@ -67,8 +67,8 @@
           <td>{{ row.vehicle || '—' }}</td>
           <td>{{ fmtDateTime(row.updated_at || row.submitted_at || row.created_at) }}</td>
           <td class="kr-td-actions" @click.stop>
-            <button class="kr-action-btn" @click="openEdit(row.id)" title="Открыть">✏️</button>
-            <button class="kr-action-btn kr-action-del" @click="deleteRow(row)" title="Удалить">🗑️</button>
+            <button class="kr-action-btn" @click="openEdit(row.id)" title="Открыть"><BkIcon name="edit" size="sm" /></button>
+            <button class="kr-action-btn kr-action-del" @click="deleteRow(row)" title="Удалить"><BkIcon name="delete" size="sm" /></button>
           </td>
         </tr>
         <tr v-if="!filteredRows.length">
@@ -185,7 +185,7 @@
                     <td>
                       <div>{{ p.row.address }}</div>
                       <div v-if="p.warning && !Object.prototype.hasOwnProperty.call(importOverrides, i)" class="kr-import-hint">
-                        ⚠ {{ p.warning }}
+                        <BkIcon name="warning" size="sm" /> {{ p.warning }}
                       </div>
                     </td>
                     <td>{{ p.row.driver || '—' }}</td>
@@ -256,6 +256,7 @@
 
 <script setup>
 import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';

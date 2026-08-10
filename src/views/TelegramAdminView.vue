@@ -10,7 +10,7 @@
     <!-- Табы -->
     <div class="adm-tabs">
       <button class="adm-tab" :class="{ active: tab === 'bot' }" @click="tab = 'bot'; loadBotInfo()">
-        🤖 Бот
+        <BkIcon name="send" size="sm" /> Бот
       </button>
       <button class="adm-tab" :class="{ active: tab === 'users' }" @click="tab = 'users'">
         <BkIcon name="user" size="sm" /> Подписчики <span class="adm-tab-count" :class="{ active: tab === 'users' }">{{ linkedUsers.length }}</span>
@@ -28,7 +28,7 @@
         <BkIcon name="clipboard" size="sm" /> Лог
       </button>
       <button class="adm-tab" :class="{ active: tab === 'broadcast' }" @click="tab = 'broadcast'; loadBroadcastHistory()">
-        📢 Рассылка
+        <BkIcon name="bell" size="sm" /> Рассылка
       </button>
     </div>
 
@@ -40,7 +40,7 @@
       <template v-else-if="botInfo">
         <!-- Карточка бота -->
         <div class="tga-bot-card">
-          <div class="tga-bot-avatar">🤖</div>
+          <div class="tga-bot-avatar"><BkIcon name="send" size="sm" /></div>
           <div class="tga-bot-info">
             <div class="tga-bot-name">{{ botInfo.first_name }}</div>
             <div class="tga-bot-username">@{{ botInfo.username }}</div>
@@ -113,11 +113,11 @@
           <h3 class="tga-subtitle">Быстрые действия</h3>
           <div class="tga-actions-row">
             <button class="tga-action-btn" @click="sendTestMessage" :disabled="testSending">
-              <span class="tga-action-icon">📨</span>
+              <span class="tga-action-icon"><BkIcon name="send" size="sm" /></span>
               <span>Тестовое сообщение (себе)</span>
             </button>
             <button class="tga-action-btn" @click="loadBotInfo">
-              <span class="tga-action-icon">🔄</span>
+              <span class="tga-action-icon"><BkIcon name="redo" size="sm" /></span>
               <span>Обновить статус</span>
             </button>
           </div>
@@ -251,9 +251,9 @@
               <th title="Просроченная поставка"><BkIcon name="package" size="sm" /></th>
               <th title="Загрузка данных"><BkIcon name="import" size="sm" /></th>
               <th title="Истекающие сроки"><BkIcon name="warning" size="sm" /></th>
-              <th title="Реализация ресторанов">🍽</th>
+              <th title="Реализация ресторанов"><BkIcon name="veg" size="sm" /></th>
               <th title="Остатки заканчиваются"><BkIcon name="chartDown" size="sm" /></th>
-              <th title="Корректировки заказов">✏️</th>
+              <th title="Корректировки заказов"><BkIcon name="edit" size="sm" /></th>
               <th title="Сообщения из ресторанов"><BkIcon name="chat" size="sm" /></th>
             </tr>
           </thead>
@@ -281,9 +281,9 @@
         <span><BkIcon name="package" size="sm" /> Просроченная поставка</span>
         <span><BkIcon name="import" size="sm" /> Загрузка данных</span>
         <span><BkIcon name="warning" size="sm" /> Истекающие сроки</span>
-        <span>🍽 Реализация ресторанов</span>
+        <span><BkIcon name="veg" size="sm" /> Реализация ресторанов</span>
         <span><BkIcon name="chartDown" size="sm" /> Остатки заканчиваются</span>
-        <span>✏️ Корректировки заказов</span>
+        <span><BkIcon name="edit" size="sm" /> Корректировки заказов</span>
         <span><BkIcon name="chat" size="sm" /> Сообщения из ресторанов</span>
       </div>
     </div>
@@ -367,7 +367,7 @@
                 </td>
                 <td>{{ r.firstSub ? formatDate(r.firstSub) : '—' }}</td>
                 <td>
-                  <button v-if="r.activeSubCount" class="tga-btn-sm" @click="sendVegReminder(r)" title="Отправить напоминание">📨</button>
+                  <button v-if="r.activeSubCount" class="tga-btn-sm" @click="sendVegReminder(r)" title="Отправить напоминание"><BkIcon name="send" size="sm" /></button>
                 </td>
               </tr>
             </tbody>
@@ -385,11 +385,11 @@
                 <th style="text-align:left">Подписчик</th>
                 <th style="text-align:left">Рестораны</th>
                 <th title="Напоминания о заявках"><BkIcon name="bell" size="sm" /></th>
-                <th title="Новые периоды приёма">📢</th>
+                <th title="Новые периоды приёма"><BkIcon name="bell" size="sm" /></th>
                 <th title="Подтверждения заявок"><BkIcon name="success" size="sm" /></th>
                 <th title="Напоминания об остатках"><BkIcon name="clipboard" size="sm" /></th>
                 <th title="Новые сборы остатков"><BkIcon name="package" size="sm" /></th>
-                <th title="Возврат кег">🛢</th>
+                <th title="Возврат кег"><BkIcon name="kegReturn" size="sm" /></th>
               </tr>
             </thead>
             <tbody>
@@ -411,11 +411,11 @@
         </div>
         <div class="tga-legend">
           <span><BkIcon name="bell" size="sm" /> Напоминания о заявках</span>
-          <span>📢 Новые периоды приёма</span>
+          <span><BkIcon name="bell" size="sm" /> Новые периоды приёма</span>
           <span><BkIcon name="success" size="sm" /> Подтверждения заявок</span>
           <span><BkIcon name="clipboard" size="sm" /> Напоминания об остатках</span>
           <span><BkIcon name="package" size="sm" /> Новые сборы остатков</span>
-          <span>🛢 Возврат кег</span>
+          <span><BkIcon name="kegReturn" size="sm" /> Возврат кег</span>
         </div>
       </template>
     </div>

@@ -7,7 +7,7 @@
       </div>
       <div class="alg-actions">
         <div class="alg-search-wrap">
-          <span class="alg-search-ico">🔍</span>
+          <span class="alg-search-ico"><BkIcon name="search" size="sm" /></span>
           <input v-model="searchInput" class="alg-input alg-search-input" placeholder="Поиск: код, наименование или группа…" />
           <button v-if="searchInput" class="alg-clear" @click="searchInput = ''; search = ''" title="Очистить">×</button>
         </div>

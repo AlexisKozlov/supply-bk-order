@@ -144,7 +144,7 @@
         <div v-else-if="!settingsUsers.length" class="corr-empty">Нет привязанных пользователей</div>
         <div v-else class="corr-settings-list">
           <div v-for="u in settingsUsers" :key="u.name" class="corr-settings-row" @click="toggleNotification(u)">
-            <span class="corr-toggle">{{ u.correction_notifications ? '✅' : '⬜' }}</span>
+            <span class="corr-toggle">{{ u.correction_notifications ? '<BkIcon name="success" size="sm" />' : '⬜' }}</span>
             <span>{{ u.name }}</span>
           </div>
         </div>
@@ -155,6 +155,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { appConfirm } from '@/lib/appDialogs.js'

@@ -76,7 +76,7 @@
               <span v-if="u.role === 'admin'" class="adm-badge adm-badge-admin">admin</span>
               <span v-else-if="u.role === 'viewer'" class="adm-badge adm-badge-viewer">читатель</span>
               <span v-if="u.name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
-              <span v-if="isLocked(u)" class="adm-badge adm-badge-locked" :title="`${lockouts[u.name]} неудачных попыток за 10 мин`">🔒 заблокирован</span>
+              <span v-if="isLocked(u)" class="adm-badge adm-badge-locked" :title="`${lockouts[u.name]} неудачных попыток за 10 мин`"><BkIcon name="key" size="sm" /> заблокирован</span>
               <!-- Отключение по неактивности: ставит крон, снимает кнопка ниже.
                    Это не то же самое, что временная блокировка после неудачных
                    попыток входа, поэтому и метка отдельная. -->
@@ -759,7 +759,7 @@
             <div class="fb-item-bottom">
               <span class="fb-item-entity">{{ r.legal_entity || '' }}</span>
               <span v-if="r.reply_count" class="fb-item-replies"><BkIcon name="chat" size="sm" /> {{ r.reply_count }}</span>
-              <span v-if="r.screenshots?.length" class="fb-item-attach">📎 {{ r.screenshots.length }}</span>
+              <span v-if="r.screenshots?.length" class="fb-item-attach"><BkIcon name="link" size="sm" /> {{ r.screenshots.length }}</span>
             </div>
           </div>
         </div>
@@ -772,9 +772,9 @@
           <div class="fb-chat-header">
             <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
               <select v-model="bugDetail.status" @change="updateBugStatus(bugDetail)" class="bug-filter-select" style="font-weight:600;font-size:11px;padding:3px 6px;">
-                <option value="new">🟠 Новое</option>
-                <option value="in_progress">🔵 В работе</option>
-                <option value="resolved">🟢 Решено</option>
+                <option value="new">Новое</option>
+                <option value="in_progress">В работе</option>
+                <option value="resolved">Решено</option>
                 <option value="closed">⚫ Закрыто</option>
               </select>
               <span class="fb-chat-title">{{ bugDetail.title }}</span>
@@ -786,7 +786,7 @@
           <details class="fb-chat-info">
             <summary>
               {{ bugDetail.created_by }} · {{ formatBugDate(bugDetail.created_at) }}
-              <span v-if="bugDetail.screenshots?.length"> · 📎 {{ bugDetail.screenshots.length }}</span>
+              <span v-if="bugDetail.screenshots?.length"> · <BkIcon name="link" size="sm" /> {{ bugDetail.screenshots.length }}</span>
             </summary>
             <div class="fb-chat-info-body">
               <p v-if="bugDetail.description" style="font-size:13px;color:var(--text-secondary);white-space:pre-wrap;margin:0 0 8px;line-height:1.5;">{{ bugDetail.description }}</p>
@@ -828,7 +828,7 @@
           <div class="fb-chat-input">
             <label class="fb-attach-btn" title="Прикрепить фото">
               <input type="file" accept="image/*" multiple @change="onBugReplyFiles" style="display:none" />
-              📎
+              <BkIcon name="link" size="sm" />
             </label>
             <textarea v-model="bugReplyText" class="bug-reply-input" placeholder="Enter — отправить" rows="1" @keydown.enter.exact.prevent="sendBugReply" @input="autoResizeReply" @paste="onBugReplyPaste"></textarea>
             <button class="btn primary" :disabled="(!bugReplyText.trim() && !bugReplyImages.length) || bugReplySending" @click="sendBugReply" style="font-size:13px;padding:8px 16px;align-self:flex-end;">
@@ -870,8 +870,8 @@
           </tr>
           <tr class="adm-cron-subhead">
             <th></th><th></th>
-            <th title="portal">📰</th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
-            <th title="portal">📰</th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
+            <th title="portal"><BkIcon name="document" size="sm" /></th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
+            <th title="portal"><BkIcon name="document" size="sm" /></th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
             <th></th>
           </tr>
         </thead>
@@ -2531,7 +2531,7 @@ async function deleteBugReport(r) {
 }
 
 function bugStatusLabel(s) {
-  return { new: '🟠 Новое', in_progress: '🔵 В работе', resolved: '🟢 Решено', closed: '⚫ Закрыто' }[s] || s;
+  return { new: 'Новое', in_progress: 'В работе', resolved: 'Решено', closed: 'Закрыто' }[s] || s;
 }
 
 function formatBugDate(str) {

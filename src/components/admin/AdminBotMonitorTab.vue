@@ -15,7 +15,7 @@
     <div v-if="loading && !data" class="bm-loading">
       <BurgerSpinner text="Загружаем статистику…" />
     </div>
-    <div v-else-if="error" class="bm-error">⚠ {{ error }}</div>
+    <div v-else-if="error" class="bm-error"><BkIcon name="warning" size="sm" /> {{ error }}</div>
 
     <template v-else-if="data">
       <!-- Сводные карточки -->

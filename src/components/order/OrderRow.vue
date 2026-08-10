@@ -41,7 +41,7 @@
         type="number"
         :value="item.consumptionPeriod"
         :class="{ 'consumption-warning': consumptionWarning }"
-        :title="consumptionWarning ? `⚠ Расход отличается от анализа запасов (${nf.format(Math.round(avgConsumption))}), проверьте данные` : ''"
+        :title="consumptionWarning ? `Расход отличается от анализа запасов (${nf.format(Math.round(avgConsumption))}), проверьте данные` : ''"
         @focus="calcConsumption.onFocus"
         @blur="calcConsumption.onBlur"
         @keydown="(e) => handleCalcKeydown(e, 'consumptionPeriod', calcConsumption)"

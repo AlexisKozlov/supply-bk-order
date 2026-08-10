@@ -93,7 +93,7 @@
         <button class="btn small" :disabled="!canRedo || viewOnly" @click="redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
         <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
         <button class="compact-toggle" :class="{ active: compactPlan }" @click="toggleCompactPlan" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
-        <button class="compact-toggle" :class="{ active: showSales }" @click="showSales = !showSales" title="Показать реализацию ресторанов">📊 Реализация</button>
+        <button class="compact-toggle" :class="{ active: showSales }" @click="showSales = !showSales" title="Показать реализацию ресторанов"><BkIcon name="analytics" size="sm" /> Реализация</button>
         <button v-if="excludedCount > 0" class="compact-toggle" :class="{ active: hideExcluded }" @click="hideExcluded = !hideExcluded" :title="hideExcluded ? 'Показать исключённые' : 'Скрыть исключённые'">
           <BkIcon name="eye" size="sm"/> {{ hideExcluded ? 'Показать' : 'Скрыть' }} искл. ({{ excludedCount }})
         </button>
@@ -263,7 +263,7 @@
                 @blur="planCalc.onBlur(); applyEdit(idx, m, $event.target.value)"
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
-              <div v-if="item.plan[m]?.existingBoxes > 0" class="plan-existing-order" :title="'Заказ в пути: ' + item.plan[m].existingBoxes + ' кор'">📦 {{ item.plan[m].existingBoxes }}</div>
+              <div v-if="item.plan[m]?.existingBoxes > 0" class="plan-existing-order" :title="'Заказ в пути: ' + item.plan[m].existingBoxes + ' кор'"><BkIcon name="package" size="sm" /> {{ item.plan[m].existingBoxes }}</div>
               <div v-if="item.plan[m]?.daysRemaining > 1" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining }} дн</div>
             </td>
             <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }" :title="planItemPriceTooltip(item)">

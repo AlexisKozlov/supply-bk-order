@@ -42,7 +42,7 @@
             <div v-if="e.attachments && e.attachments.length" class="tum-attach-list">
               <span class="tum-attach-label">Вложения:</span>
               <button v-for="(f, i) in e.attachments" :key="i" class="tum-attach-btn" @click="downloadAttachment(e.id, i, f.name)">
-                📎 {{ f.name }} <small>({{ formatSize(f.size) }})</small>
+                <BkIcon name="link" size="sm" /> {{ f.name }} <small>({{ formatSize(f.size) }})</small>
               </button>
             </div>
 
@@ -65,6 +65,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { db } from '@/lib/apiClient.js';
 import { useCloseGuard } from '@/composables/useFormDirty.js';
 

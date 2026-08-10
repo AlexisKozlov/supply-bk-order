@@ -2,7 +2,7 @@
   <Transition name="upd-fade">
     <div v-if="needRefresh && !autoHealing" class="upd-banner" :class="{ 'upd-above-nav': isRestaurantArea }" role="alert">
       <div class="upd-content">
-        <div class="upd-icon">🔄</div>
+        <div class="upd-icon"><BkIcon name="redo" size="sm" /></div>
         <div class="upd-text">
           <div class="upd-title">Доступна новая версия портала</div>
           <div class="upd-sub">Нажмите «Обновить», чтобы загрузить свежие изменения.</div>
@@ -20,6 +20,7 @@
 
 <script setup>
 import { computed, ref, onUnmounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRoute } from 'vue-router';
 import { useRegisterSW } from 'virtual:pwa-register/vue';
 

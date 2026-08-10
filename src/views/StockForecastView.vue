@@ -86,7 +86,7 @@
       <div v-if="spoilReport.length" class="sfv-report">
         <div class="sfv-report-head" @click="reportOpen = !reportOpen">
           <span class="sfv-report-chevron" :class="{ open: reportOpen }">&#9656;</span>
-          <span class="sfv-report-title">⚠ Риск просрочки — 3 месяца</span>
+          <span class="sfv-report-title"><BkIcon name="warning" size="sm" /> Риск просрочки — 3 месяца</span>
           <span class="sfv-report-sum">
             рискуем просрочить ≈ <b>{{ expiryKpi.spoilText }}</b>
             в {{ spoilReport.length }} {{ spoilReport.length === 1 ? 'группе' : 'группах' }}
@@ -211,7 +211,7 @@
                         до {{ shortDate(r.goodNearestDate) }}
                       </span>
                       <span v-else class="sfv-muted">—</span>
-                      <span v-if="r.projectedSpoil > 0" class="sfv-exp-risk" title="Прогноз: не успеют продать до срока">⚠ сгорит ≈ {{ dispQty(r.projectedSpoil, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</span>
+                      <span v-if="r.projectedSpoil > 0" class="sfv-exp-risk" title="Прогноз: не успеют продать до срока"><BkIcon name="warning" size="sm" /> сгорит ≈ {{ dispQty(r.projectedSpoil, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</span>
                       <span v-if="r.expiredQty > 0" class="sfv-exp-expired-tag" title="Уже просрочено">просрочено {{ dispQty(r.expiredQty, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</span>
                     </div>
                   </template>
@@ -367,7 +367,7 @@
                           Реальный годный остаток: <b>{{ dispQty(r.effectiveStock, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</b> (хватит на <b>{{ fmtDays(r.effectiveDaysLeft) }}</b> дн по продажам)
                         </div>
                         <div v-if="r.projectedSpoil > 0" class="sfv-spoil-note">
-                          ⚠ Прогноз порчи: при текущих продажах <b>{{ dispQty(r.projectedSpoil, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</b> не успеют продать до срока<span v-if="r.spoilDate"> (к {{ shortDate(r.spoilDate) }})</span>.
+                          <BkIcon name="warning" size="sm" /> Прогноз порчи: при текущих продажах <b>{{ dispQty(r.projectedSpoil, r.qpb) }} {{ unitLbl(r.unit, r.qpb) }}</b> не успеют продать до срока<span v-if="r.spoilDate"> (к {{ shortDate(r.spoilDate) }})</span>.
                         </div>
 
                         <!-- Партии по сроку годности -->
@@ -422,6 +422,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { db } from '@/lib/apiClient.js'
 import { applyEntityGroupFilter, toLocalDateStr } from '@/lib/utils.js'
 import { getEntityGroupCode } from '@/lib/legalEntities.js'

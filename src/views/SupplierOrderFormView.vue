@@ -125,7 +125,7 @@
             <span v-if="d.is_adhoc" class="ro-day-adhoc">довоз</span>
             <span class="ro-day-name">{{ d.delivery_day_name }}</span>
             <span class="ro-day-date">{{ formatDateShort(d.delivery_date) }}</span>
-            <span v-if="d.order?.is_skip" class="ro-day-badge skipped" title="Поставка не нужна">🚫</span>
+            <span v-if="d.order?.is_skip" class="ro-day-badge skipped" title="Поставка не нужна"><BkIcon name="error" size="sm" /></span>
             <span v-else-if="d.order" class="ro-day-badge ok">V</span>
             <span v-else-if="d.deadline_status === 'closed'" class="ro-day-badge closed">X</span>
           </button>
@@ -165,7 +165,7 @@
           <div v-if="currentDateInfo?.deadline_status === 'open' || currentDateInfo?.order" class="ro-products">
             <div v-if="productsLoading" class="ro-loading"><BurgerSpinner /></div>
             <div v-else-if="isSkipOrder" class="ro-skip-banner">
-              <span class="ro-skip-icon">🚫</span>
+              <span class="ro-skip-icon"><BkIcon name="error" size="sm" /></span>
               <strong>Поставка не нужна.</strong>
               <span class="ro-skip-hint">Впишите количества, чтобы отменить.</span>
             </div>
@@ -260,6 +260,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';

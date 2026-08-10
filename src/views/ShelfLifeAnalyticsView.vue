@@ -132,7 +132,7 @@
         </div>
 
         <div class="sla-insight">
-          <div class="sla-insight-icon">💡</div>
+          <div class="sla-insight-icon"><BkIcon name="bulb" size="lg" /></div>
           <p>{{ block.insight }}</p>
         </div>
       </section>
@@ -146,7 +146,7 @@
         <div class="sla-export-section-buttons">
           <div class="sla-export-wrap" ref="exportWrapEl">
             <button class="sla-export-btn" :disabled="!rawRows.length" @click.stop="chartExportMenu = !chartExportMenu">
-              <span class="sla-export-btn-ico">🖼</span>
+              <span class="sla-export-btn-ico"><BkIcon name="document" size="sm" /></span>
               <span>График PNG / SVG ▾</span>
             </button>
             <div v-if="chartExportMenu" class="sla-export-menu">
@@ -157,15 +157,15 @@
             </div>
           </div>
           <button class="sla-export-btn" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadExcel, 'excel')">
-            <span class="sla-export-btn-ico">📊</span>
+            <span class="sla-export-btn-ico"><BkIcon name="analytics" size="sm" /></span>
             <span>{{ exportBusy === 'excel' ? 'Готовится...' : 'Excel' }}</span>
           </button>
           <button class="sla-export-btn" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPdf, 'pdf')">
-            <span class="sla-export-btn-ico">📄</span>
+            <span class="sla-export-btn-ico"><BkIcon name="document" size="sm" /></span>
             <span>{{ exportBusy === 'pdf' ? 'Готовится...' : 'PDF' }}</span>
           </button>
           <button class="sla-export-btn primary" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPptx, 'pptx')">
-            <span class="sla-export-btn-ico">📽</span>
+            <span class="sla-export-btn-ico"><BkIcon name="excel" size="sm" /></span>
             <span>{{ exportBusy === 'pptx' ? 'Готовится...' : 'PowerPoint' }}</span>
           </button>
         </div>
@@ -415,6 +415,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';

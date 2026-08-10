@@ -25,7 +25,7 @@
       <div class="sidebar-nav-scroll">
       <!-- Избранное -->
       <template v-if="pinnedItems.length">
-        <div class="sidebar-section" v-if="!sidebarCollapsed">⭐ Избранное</div>
+        <div class="sidebar-section" v-if="!sidebarCollapsed"><BkIcon name="sparkle" size="sm" /> Избранное</div>
         <nav class="sidebar-nav">
           <router-link v-for="item in pinnedItems" :key="'pin-' + item.route" :to="{ name: item.route }" class="sidebar-item sidebar-item-pinned" :class="{ active: currentRoute === item.route }">
             <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
@@ -44,7 +44,7 @@
                 <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
                 <span v-if="!sidebarCollapsed">{{ item.label }}</span>
                 <span v-if="!sidebarCollapsed && item.newBadge && noveltiesUnseen > 0" class="sidebar-new">NEW</span>
-                <span v-if="!sidebarCollapsed && isPinned(item.route)" class="sidebar-pin-mark">⭐</span>
+                <span v-if="!sidebarCollapsed && isPinned(item.route)" class="sidebar-pin-mark"><BkIcon name="sparkle" size="sm" /></span>
               </router-link>
             </template>
           </nav>
@@ -75,7 +75,7 @@
                   :to="{ name: item.route }"
                   class="sidebar-item"
                   :class="{ active: currentRoute === item.route || (currentRoute || '').startsWith(item.route + '-') }"
-                  :title="isPinned(item.route) ? item.label + ' ⭐' : item.label + ' (ПКМ — закрепить)'"
+                  :title="isPinned(item.route) ? item.label + ' (закреплено)' : item.label + ' (ПКМ — закрепить)'"
                   @contextmenu.prevent="togglePin(item.route)"
                 >
                   <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
@@ -92,7 +92,7 @@
                   :to="{ name: item.route }"
                   class="sidebar-tool-icon"
                   :class="{ active: currentRoute === item.route || (currentRoute || '').startsWith(item.route + '-') }"
-                  :title="item.label + (isPinned(item.route) ? ' ⭐' : ' (ПКМ — закрепить)')"
+                  :title="item.label + (isPinned(item.route) ? ' (закреплено)' : ' (ПКМ — закрепить)')"
                   @contextmenu.prevent="togglePin(item.route)"
                 >
                   <BkIcon :name="item.icon" size="sm" light/>
@@ -152,7 +152,7 @@
             <span v-if="userStore.currentUser.telegram_connected" class="tg-connected">✓</span>
           </a>
           <button class="user-dropdown-btn bug-btn" @click="openBugReport">
-            <span class="bug-icon">🐞</span> Нашли ошибку?
+            <span class="bug-icon"><BkIcon name="bug" size="sm" /></span> Нашли ошибку?
             <span v-if="bugReportRef?.hasNewReplies" class="bug-dot" title="Есть новое сообщение"></span>
           </button>
           <button class="user-dropdown-btn logout" @click="showLogoutConfirm = true; showUserMenu = false;">

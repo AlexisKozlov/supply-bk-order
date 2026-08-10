@@ -17,14 +17,14 @@
     <!-- Как это работает + график этого ресторана -->
     <div class="krt-help">
       <button type="button" class="krt-help-head" @click="helpOpen = !helpOpen">
-        <span class="krt-help-icon">❓</span>
+        <span class="krt-help-icon"><BkIcon name="feedback" size="sm" /></span>
         <span class="krt-help-title">Как это работает</span>
         <span class="krt-help-toggle">{{ helpOpen ? 'свернуть' : 'подробнее' }}</span>
       </button>
 
       <div class="krt-help-schedule">
         <span class="krt-help-sched-item">
-          <span class="krt-sched-ico">📅</span>
+          <span class="krt-sched-ico"><BkIcon name="calendar" size="sm" /></span>
           <span class="krt-sched-label">День приёма</span>
           <span v-if="myReturnDays.length" class="krt-day-chips">
             <span v-for="d in myReturnDays" :key="d" class="krt-day-chip">{{ d }}</span>
@@ -32,7 +32,7 @@
           <span v-else class="krt-help-muted">не задан — уточните в отделе закупок</span>
         </span>
         <span v-if="pickupAddress" class="krt-help-sched-item">
-          <span class="krt-sched-ico">📍</span>
+          <span class="krt-sched-ico"><BkIcon name="note" size="sm" /></span>
           <span class="krt-sched-label">Погрузка</span>
           <span class="krt-sched-val">{{ pickupAddress }}</span>
         </span>
@@ -40,7 +40,7 @@
 
       <div v-if="helpOpen" class="krt-help-body">
         <div style="border:2px solid #C0392B; background:#FDEDEC; border-radius:8px; padding:10px 14px; margin-bottom:12px; line-height:1.5;">
-          <div style="font-weight:800; color:#C0392B; font-size:15px; margin-bottom:2px;">⚠️ Экземпляры ТТН</div>
+          <div style="font-weight:800; color:#C0392B; font-size:15px; margin-bottom:2px;"><BkIcon name="warning" size="sm" /> Экземпляры ТТН</div>
           Экземпляры <b>№ 1, 3 и 4 — отдаются водителю</b>, экземпляр <b>№ 2 — остаётся ресторану</b>.
           Не забудьте взять <b>подписи водителя</b>.
         </div>
@@ -56,7 +56,7 @@
           <b>Сроки:</b> править заявку можно до <b>10:00 предыдущего рабочего дня</b> перед возвратом.
           С 10:00 до 15:00 — только замена испорченного бланка. После 15:00 изменения невозможны.
         </div>
-        <a class="krt-help-pdf" href="/keg-returns-memo.pdf" target="_blank" rel="noopener">📄 Скачать памятку (PDF)</a>
+        <a class="krt-help-pdf" href="/keg-returns-memo.pdf" target="_blank" rel="noopener"><BkIcon name="document" size="sm" /> Скачать памятку (PDF)</a>
       </div>
     </div>
 
@@ -117,6 +117,7 @@
 
 <script setup>
 import { ref, computed } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { iconKeg, iconKegReturn, fmtDate, statusLabel, WEEKDAY_NAMES } from './kegHelpers.js';
 
 const props = defineProps({

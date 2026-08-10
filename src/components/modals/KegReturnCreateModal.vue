@@ -54,7 +54,7 @@
               У ресторана не настроен график возврата — будет введена произвольная дата.
             </div>
             <div v-if="selectedDeadlinePassed" class="kr-cm-hint kr-cm-hint-warn">
-              ⚠️ Дедлайн по этой дате уже прошёл. Ресторану отправка была бы недоступна,
+              <BkIcon name="warning" size="sm" /> Дедлайн по этой дате уже прошёл. Ресторану отправка была бы недоступна,
               но вы как закупщик можете создать и отправить заявку.
             </div>
           </div>
@@ -143,7 +143,7 @@
                   @click="openPhoto(keg)"
                 >
                   <img v-if="keg.photo_url" :src="keg.photo_url" :alt="keg.name" />
-                  <span v-else class="kr-cm-keg-thumb-ph">🛢️</span>
+                  <span v-else class="kr-cm-keg-thumb-ph"><BkIcon name="kegReturn" size="sm" /></span>
                 </button>
                 <div class="kr-cm-keg-info">
                   <div class="kr-cm-keg-name">{{ keg.name }}</div>
@@ -201,6 +201,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { buildAvailableDates, calcDeadlineMs, maskBsoSeries, maskBsoNumber } from '@/components/restaurant/keg/kegHelpers.js';
 import { appConfirm } from '@/lib/appDialogs.js';

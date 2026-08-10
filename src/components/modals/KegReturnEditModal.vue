@@ -92,7 +92,7 @@
                     @click="openKegPhoto(keg)"
                   >
                     <img v-if="keg.photo_url" :src="keg.photo_url" :alt="keg.name" />
-                    <span v-else class="kr-em-keg-thumb-ph">🛢️</span>
+                    <span v-else class="kr-em-keg-thumb-ph"><BkIcon name="kegReturn" size="sm" /></span>
                   </button>
                   <div class="kr-em-keg-info">
                     <div class="kr-em-keg-name">{{ keg.name }}</div>
@@ -120,7 +120,7 @@
                 <path d="M9 8 L15 16 M15 8 L9 16" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
               </svg>
             </button>
-            <button class="btn kr-em-icon-btn" @click="printTtn" :disabled="saving" title="Печать" aria-label="Печать">🖨️</button>
+            <button class="btn kr-em-icon-btn" @click="printTtn" :disabled="saving" title="Печать" aria-label="Печать"><BkIcon name="document" size="sm" /></button>
             <button v-if="!readonly" class="btn btn-danger" @click="cancelReturn" :disabled="saving">Отменить</button>
             <button v-if="form && form.status === 'ROUTED'" class="btn btn-warn" @click="unroute" :disabled="saving" title="Откатить статус в «Отправлена» и уведомить ресторан">Отменить маршрутизацию</button>
             <button v-if="form && form.status === 'ROUTED'" class="btn btn-danger" @click="markNotReturned" :disabled="saving" title="Ресторан не сдал кеги — уведомить бухгалтерию">Не сдана</button>
@@ -183,6 +183,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useCloseGuard } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';

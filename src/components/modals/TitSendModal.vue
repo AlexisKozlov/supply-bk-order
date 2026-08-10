@@ -83,7 +83,7 @@
         </div>
       </div>
 
-      <div v-else-if="error" class="tsm-error">⚠ {{ error }}</div>
+      <div v-else-if="error" class="tsm-error"><BkIcon name="warning" size="sm" /> {{ error }}</div>
       <div v-else class="tsm-loading">Загружаем превью…</div>
 
       <footer v-if="loaded">
@@ -99,6 +99,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { appConfirm, appAlert } from '@/lib/appDialogs.js';

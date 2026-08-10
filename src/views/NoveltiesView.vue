@@ -10,7 +10,7 @@
       </div>
       <div class="nov-actions">
         <div class="nov-search-wrap">
-          <span class="nov-search-ico">🔍</span>
+          <span class="nov-search-ico"><BkIcon name="search" size="sm" /></span>
           <input v-model="search" class="nov-input nov-search-input" placeholder="Поиск: название или артикул…" />
           <button v-if="search" class="nov-clear" @click="search = ''" title="Очистить">×</button>
         </div>
@@ -33,7 +33,7 @@
           {{ noveltyDays }} дней (срок можно изменить).
         </p>
         <div class="nov-search-wrap" style="width:100%">
-          <span class="nov-search-ico">🔍</span>
+          <span class="nov-search-ico"><BkIcon name="search" size="sm" /></span>
           <input v-model="addSearch" class="nov-input nov-search-input" style="width:100%;box-sizing:border-box"
                  placeholder="Название, артикул или код…" autofocus />
         </div>
@@ -63,7 +63,7 @@
       <div v-for="it in filtered" :key="it.product_id" class="nov-card" :class="{ 'nov-card-off': !it.is_current }">
         <div class="nov-thumb" @click="canEdit && openEdit(it)">
           <img v-if="it.photo_url" :src="photoSrc(it)" alt="" />
-          <span v-else class="nov-thumb-ph">🍔</span>
+          <span v-else class="nov-thumb-ph"><BkIcon name="burger" size="sm" /></span>
         </div>
         <div class="nov-body">
           <div class="nov-name-row">
@@ -98,7 +98,7 @@
         <div class="nov-photo-box">
           <div class="nov-photo-prev">
             <img v-if="editing.photo_url" :src="photoSrc(editing)" alt="" />
-            <span v-else class="nov-thumb-ph nov-thumb-ph-lg">🍔</span>
+            <span v-else class="nov-thumb-ph nov-thumb-ph-lg"><BkIcon name="burger" size="sm" /></span>
           </div>
           <div class="nov-photo-ctrls">
             <button class="nov-btn nov-btn-ghost" @click="pickPhoto" :disabled="uploading">
@@ -141,6 +141,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';

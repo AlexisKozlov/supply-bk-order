@@ -10,7 +10,7 @@
         <!-- Шаг 1: Выбор файла -->
         <div v-if="step === 'select'">
           <div class="import-drop-zone" @click="pickFile" @dragover.prevent @drop.prevent="onDrop">
-            <div style="font-size:32px;margin-bottom:8px;">📥</div>
+            <div style="font-size:32px;margin-bottom:8px;"><BkIcon name="import" size="sm" /></div>
             <div style="font-size:14px;font-weight:600;color:var(--text);">Выберите файл .xlsx</div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">или перетащите его сюда</div>
           </div>
@@ -136,7 +136,7 @@
         <!-- Шаг 3: Результат -->
         <div v-if="step === 'result'">
           <div style="text-align:center;padding:20px 0;">
-            <div style="font-size:40px;margin-bottom:10px;">✅</div>
+            <div style="font-size:40px;margin-bottom:10px;"><BkIcon name="success" size="sm" /></div>
             <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:12px;">Импорт завершён</div>
             <div class="import-report">
               <div class="import-report-row">

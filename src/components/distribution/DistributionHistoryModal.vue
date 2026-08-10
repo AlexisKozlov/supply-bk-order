@@ -3,7 +3,7 @@
     <div class="modal" @click.self="$emit('close')">
       <div class="modal-box dist-history-box">
         <div class="dh-header">
-          <h2>🕘 История распределения</h2>
+          <h2><BkIcon name="history" size="sm" /> История распределения</h2>
           <button class="dh-close" @click="$emit('close')" title="Закрыть">×</button>
         </div>
         <div class="dh-sub">Сессия: «{{ sessionName }}»</div>
@@ -48,6 +48,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 

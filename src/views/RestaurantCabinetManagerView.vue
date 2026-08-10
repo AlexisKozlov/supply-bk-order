@@ -165,7 +165,7 @@
                 @click="isImageFile(file) ? previewFile(file) : downloadFile(file)"
               >
                 <img v-if="isImageFile(file) && previewUrls[file.id]" :src="previewUrls[file.id]" :alt="file.file_name" />
-                <span v-else class="rcm-file-icon">📄</span>
+                <span v-else class="rcm-file-icon"><BkIcon name="document" size="sm" /></span>
                 <span class="rcm-attachment-name">{{ file.file_name }}</span>
                 <small>{{ isImageFile(file) ? 'Открыть' : formatFileSize(file.file_size) }}</small>
               </button>
@@ -196,6 +196,7 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref, watch, defineAsyncComponent } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { appConfirm, appAlert } from '@/lib/appDialogs.js';

@@ -56,7 +56,7 @@
             @click="undo"
           ><span class="btn-icon">↶</span><span class="btn-text"> Отменить</span></button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Добавить товар" @click="showAddProduct = true"><span class="btn-icon">＋</span><span class="btn-text"> Товар</span></button>
-          <button class="dist-btn ghost" title="История действий по сессии" @click="showHistory = true"><span class="btn-icon">🕘</span><span class="btn-text"> История</span></button>
+          <button class="dist-btn ghost" title="История действий по сессии" @click="showHistory = true"><span class="btn-icon"><BkIcon name="history" size="sm" /></span><span class="btn-text"> История</span></button>
           <button class="dist-btn ghost" title="Скачать Excel" @click="exportExcel"><span class="btn-icon">⬇</span><span class="btn-text"> Excel</span></button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Импорт из Excel" @click="showImport = true"><span class="btn-icon"><BkIcon name="import" size="sm" /></span><span class="btn-text"> Импорт</span></button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost danger" title="Закрыть сессию" @click="askCloseSession"><span class="btn-icon">✕</span><span class="btn-text"> Закрыть</span></button>
@@ -320,7 +320,7 @@
           <div style="display:flex;gap:8px;margin-bottom:14px">
             <button class="dist-btn ghost" @click="downloadTemplate"><BkIcon name="import" size="sm" /> Скачать шаблон</button>
             <label class="dist-btn primary" style="cursor:pointer">
-              📤 Выбрать файл
+              <BkIcon name="import" size="sm" /> Выбрать файл
               <input type="file" accept=".xlsx,.xls" style="display:none" @change="onFileSelected"/>
             </label>
           </div>

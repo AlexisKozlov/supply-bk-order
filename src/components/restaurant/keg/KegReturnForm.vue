@@ -53,7 +53,7 @@
 
         <!-- Напоминание распечатать ТТН после формирования и до дедлайна -->
         <div v-if="form.status === 'SUBMITTED' && !deadlinePassed" class="krt-print-reminder">
-          <div class="krt-print-reminder-icon">🖨</div>
+          <div class="krt-print-reminder-icon"><BkIcon name="document" size="sm" /></div>
           <div class="krt-print-reminder-text">
             <div class="krt-print-reminder-title">Не забудьте распечатать ТТН на бланке до дедлайна</div>
             <div class="krt-print-reminder-sub">
@@ -127,6 +127,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { statusLabel } from './kegHelpers.js';
 import { useKegForm } from './useKegForm.js';
 import KegFormMainInfo from './KegFormMainInfo.vue';

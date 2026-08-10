@@ -72,14 +72,14 @@
             <td>
               <div class="pay-actions">
                 <template v-if="editId === p.id">
-                  <button class="pay-btn save" @click="saveEdit(p)" title="Сохранить">💾</button>
+                  <button class="pay-btn save" @click="saveEdit(p)" title="Сохранить"><BkIcon name="save" size="sm" /></button>
                   <button class="pay-btn" @click="editId = null" title="Отмена">✕</button>
                 </template>
                 <template v-else>
-                  <button class="pay-btn" @click="startEdit(p)" title="Редактировать">✏️</button>
-                  <button v-if="p.status === 'upcoming' || p.status === 'request_due'" class="pay-btn requested" @click="markRequested(p)" title="Заявка подана">📋</button>
-                  <button v-if="p.status === 'requested'" class="pay-btn approve" @click="markPaid(p)" title="Оплачено">✅</button>
-                  <button v-if="p.status !== 'paid' && p.status !== 'cancelled'" class="pay-btn" @click="cancel(p)" title="Отменить">🗑</button>
+                  <button class="pay-btn" @click="startEdit(p)" title="Редактировать"><BkIcon name="edit" size="sm" /></button>
+                  <button v-if="p.status === 'upcoming' || p.status === 'request_due'" class="pay-btn requested" @click="markRequested(p)" title="Заявка подана"><BkIcon name="clipboard" size="sm" /></button>
+                  <button v-if="p.status === 'requested'" class="pay-btn approve" @click="markPaid(p)" title="Оплачено"><BkIcon name="success" size="sm" /></button>
+                  <button v-if="p.status !== 'paid' && p.status !== 'cancelled'" class="pay-btn" @click="cancel(p)" title="Отменить"><BkIcon name="delete" size="sm" /></button>
                 </template>
               </div>
             </td>
@@ -138,6 +138,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js'
 import { useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'

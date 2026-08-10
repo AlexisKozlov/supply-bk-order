@@ -46,7 +46,7 @@
           {{ activeSupplier.so_enabled ? 'через портал' : 'локальный' }}
         </span>
         <label class="ssv-order-url" title="Если задана — попадёт ссылкой «Оформить заявку» в Telegram-напоминание о подаче заявки">
-          🔗 Ссылка на заявку:
+          <BkIcon name="link" size="sm" /> Ссылка на заявку:
           <input v-model="orderUrlDraft" type="url" placeholder="https://… (необязательно)"
                  @blur="saveOrderUrl" @keydown.enter="$event.target.blur()" />
         </label>
@@ -214,6 +214,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';

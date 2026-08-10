@@ -75,7 +75,7 @@
                   <div v-if="n.card_title" class="notif-card-title">{{ n.card_title }}</div>
                   <div v-if="n.payload?.preview" class="notif-preview">«{{ n.payload.preview }}»</div>
                   <div class="notif-meta">
-                    <span v-if="n.board_title" class="notif-board">📋 {{ n.board_title }}</span>
+                    <span v-if="n.board_title" class="notif-board"><BkIcon name="clipboard" size="sm" /> {{ n.board_title }}</span>
                     <span class="notif-time" :title="n.created_at">{{ notifFormatTime(n.created_at) }}</span>
                   </div>
                 </div>

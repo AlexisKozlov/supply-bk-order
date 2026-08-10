@@ -220,11 +220,11 @@
         </div>
       </div>
 
-      <div v-else-if="error" class="trm-error">⚠ {{ error }}</div>
+      <div v-else-if="error" class="trm-error"><BkIcon name="warning" size="sm" /> {{ error }}</div>
       <div v-else class="trm-loading"><span class="trm-spinner"></span> Загружаем…</div>
 
       <footer class="trm-foot" v-if="loaded && req?.status !== 'SENT'">
-        <button class="trm-btn ghost" @click="deleteRequest" title="Удалить заявку полностью (без следа в логах)">🗑 Удалить</button>
+        <button class="trm-btn ghost" @click="deleteRequest" title="Удалить заявку полностью (без следа в логах)"><BkIcon name="delete" size="sm" /> Удалить</button>
         <button v-if="req?.status !== 'CANCELLED'" class="trm-btn ghost" @click="cancelRequest" title="Отменить, но оставить в логе со статусом «Отменена»">Отменить</button>
         <div style="flex:1"></div>
         <template v-if="req?.status !== 'CANCELLED'">
@@ -241,6 +241,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, defineAsyncComponent } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { db } from '@/lib/apiClient.js';
 import { normalizePlate, normalizePhone } from '@/lib/titNormalize.js';
 import { appConfirm, appAlert } from '@/lib/appDialogs.js';

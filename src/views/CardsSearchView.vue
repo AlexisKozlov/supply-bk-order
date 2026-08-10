@@ -92,7 +92,7 @@
             </div>
             <div class="result-footer">
               <span v-if="card.stockSku" class="result-stock">
-                📦
+                <BkIcon name="package" size="sm" />
                 <template v-if="card.isSameSku">на остатках ({{ card.stockQty }} кор.)</template>
                 <template v-else>на остатках ({{ card.stockQty }} кор.): {{ card.stockSku }} {{ card.stockName }}</template>
               </span>
@@ -361,6 +361,7 @@
 
 <script setup>
 import { ref, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount } from 'vue'
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useUserStore } from '../stores/userStore'
 import { appConfirm } from '@/lib/appDialogs.js'
 import UiPasswordInput from '@/components/ui/UiPasswordInput.vue';

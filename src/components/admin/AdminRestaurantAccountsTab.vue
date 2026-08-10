@@ -115,7 +115,7 @@
               <td class="arat-col-app">
                 <span v-if="u.has_pwa" class="arat-badge app" :title="'Открывали с иконки: ' + formatTime(u.pwa_last_seen_at)">на телефоне</span>
                 <span v-else class="arat-muted">—</span>
-                <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' устройств(а) с уведомлениями'">🔔{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
+                <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' устройств(а) с уведомлениями'"><BkIcon name="bell" size="sm" />{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
               </td>
               <td class="arat-col-meta" :title="u.password_changed_at ? 'Пароль: ' + formatTime(u.password_changed_at) : ''">
                 <span v-if="u.last_login_at">{{ formatTime(u.last_login_at) }}</span>
@@ -152,6 +152,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { parseRestaurantInput } from '@/lib/legalEntities.js';

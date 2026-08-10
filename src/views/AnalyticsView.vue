@@ -534,11 +534,11 @@
             <div class="fc2-stat-sep"></div>
             <div class="fc2-stat">
               <span class="fc2-stat-val fc2-stat-danger">{{ forecastKpi.criticalCount }}</span>
-              <span class="fc2-stat-label">🔴 срочно</span>
+              <span class="fc2-stat-label"><i class="fc2-dot fc2-dot-red"></i> срочно</span>
             </div>
             <div class="fc2-stat">
               <span class="fc2-stat-val fc2-stat-warn">{{ forecastKpi.warningCount }}</span>
-              <span class="fc2-stat-label">🟡 заказать</span>
+              <span class="fc2-stat-label"><i class="fc2-dot fc2-dot-yellow"></i> заказать</span>
             </div>
             <div class="fc2-stat-sep"></div>
             <div class="fc2-stat">
@@ -626,7 +626,7 @@
             <div v-if="!filteredForecastGroups.length" class="fc2-empty">Нет данных по выбранному фильтру</div>
           </div>
           <div class="fc2-legend">
-            🔴 не хватит до новой поставки · 🟡 пора заказывать · 🟢 запаса достаточно.
+            <i class="fc2-dot fc2-dot-red"></i> не хватит до новой поставки · <i class="fc2-dot fc2-dot-yellow"></i> пора заказывать · <i class="fc2-dot fc2-dot-green"></i> запаса достаточно.
             Расход за 14 дней; горизонт = срок поставки + страховые дни; учитываются остаток и «в пути».
           </div>
         </template>
@@ -1162,6 +1162,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Точки-статусы вместо цветных эмодзи-кружков: эмодзи на части устройств
+   рисуется квадратом, а цвет здесь несёт смысл. */
+.fc2-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: baseline; }
+.fc2-dot-red { background: #D62300; }
+.fc2-dot-yellow { background: #FFAA00; }
+.fc2-dot-green { background: #4C9F38; }
+
 .analytics-view { padding: 0; display: flex; flex-direction: column; }
 
 /* ===== Header ===== */

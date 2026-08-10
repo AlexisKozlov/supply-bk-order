@@ -27,7 +27,7 @@
             <strong>Что дальше.</strong> Заявка приходит закупкам. Статусы:
             <ul class="rco-tut-sub">
               <!-- Значки те же, что в списке заявок ниже. Раньше в подсказке
-                   стояли эмодзи (⏳🛠✅❌⛔), а в самом списке — кружки со
+                   стояли эмодзи (<BkIcon name="history" size="sm" /><BkIcon name="gear" size="sm" /><BkIcon name="success" size="sm" /><BkIcon name="error" size="sm" /><BkIcon name="error" size="sm" />), а в самом списке — кружки со
                    знаками: подсказка не совпадала с тем, что человек видит.
                    Плюс эмодзи на части телефонов не рисуются вовсе. -->
               <li><span class="rco-stat-icon">•</span> <strong>Ожидает</strong> — пришло, ещё не разобрали.</li>
@@ -267,6 +267,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { roFetch } from '@/lib/roUtils.js';
 import { appConfirm } from '@/lib/appDialogs.js';

@@ -13,7 +13,7 @@
     </header>
 
     <div v-if="unmatchedCount > 0" class="tit-alert">
-      📩 <b>{{ unmatchedCount }}</b> {{ pluralize(unmatchedCount, 'письмо', 'письма', 'писем') }} от поставщиков
+      <BkIcon name="send" size="sm" /> <b>{{ unmatchedCount }}</b> {{ pluralize(unmatchedCount, 'письмо', 'письма', 'писем') }} от поставщиков
       <span class="tit-alert-explain">— система нашла в них номер машины или скан, но не смогла привязать к конкретной заявке (поставщик ответил с другого ящика или новой темой). Откройте и выберите заявку — данные подтянутся.</span>
       <a href="#" @click.prevent="showUnmatched = true">Открыть и привязать</a>
     </div>
@@ -38,7 +38,7 @@
     </div>
 
     <div v-if="loading && !rows.length" class="tit-empty"><span class="tit-spinner"></span> Загружаем…</div>
-    <div v-else-if="error" class="tit-empty tit-error">⚠ {{ error }}</div>
+    <div v-else-if="error" class="tit-empty tit-error"><BkIcon name="warning" size="sm" /> {{ error }}</div>
     <div v-else-if="!rows.length" class="tit-empty">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5"><path d="M3 7h13l5 5v5a2 2 0 0 1-2 2H3z"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="19" r="2"/></svg>
       <h3>Заявок на пропуск пока нет</h3>
@@ -82,6 +82,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch, defineAsyncComponent } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';

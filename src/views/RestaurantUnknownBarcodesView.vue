@@ -162,7 +162,7 @@
               <td class="ub-name-cell">
                 <div v-if="row.reporter_name" class="ub-rep-name">{{ row.reporter_name }}</div>
                 <div v-if="row.reporter_comment" class="ub-rep-comment" :title="row.reporter_comment">
-                  💬 {{ row.reporter_comment }}
+                  <BkIcon name="chat" size="sm" /> {{ row.reporter_comment }}
                 </div>
                 <span v-if="!row.reporter_name && !row.reporter_comment" class="ub-empty-inline">—</span>
               </td>
@@ -184,7 +184,7 @@
                 />
               </td>
               <td class="ub-actions">
-                <button v-if="row.status === 'new'" class="ub-act-btn ub-act-bind" title="Привязать к товару" @click="openBindModal(row.gtin)">🔗</button>
+                <button v-if="row.status === 'new'" class="ub-act-btn ub-act-bind" title="Привязать к товару" @click="openBindModal(row.gtin)"><BkIcon name="link" size="sm" /></button>
                 <button v-if="row.status !== 'resolved'" class="ub-act-btn ub-act-resolve" title="Разобрано" @click="setStatus(row, 'resolved')">✓</button>
                 <button v-if="row.status !== 'ignored'" class="ub-act-btn ub-act-ignore" title="Игнор" @click="setStatus(row, 'ignored')">✕</button>
                 <button v-if="row.status !== 'new'" class="ub-act-btn ub-act-back" title="Вернуть в новые" @click="setStatus(row, 'new')">↺</button>
@@ -381,6 +381,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js';

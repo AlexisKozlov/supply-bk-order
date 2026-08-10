@@ -20,7 +20,7 @@
       <!-- Левая колонка: меню -->
       <div class="uset-card">
         <div class="uset-card-header">
-          <div class="uset-card-icon">📱</div>
+          <div class="uset-card-icon"><BkIcon name="send" size="lg" /></div>
           <div>
             <div class="uset-card-title">Боковое меню</div>
             <div class="uset-card-desc">Скройте ненужные модули. Они останутся доступны по ссылке.</div>
@@ -70,7 +70,7 @@
            установлено или браузер этого не умеет. -->
       <div v-if="pwaInstall.canInstall.value" class="uset-card">
         <div class="uset-card-header">
-          <div class="uset-card-icon">💻</div>
+          <div class="uset-card-icon"><BkIcon name="key" size="lg" /></div>
           <div>
             <div class="uset-card-title">Портал как приложение</div>
             <div class="uset-card-desc">Своё окно без адресной строки и запуск с рабочего стола.</div>

@@ -70,7 +70,7 @@
                     <span class="dov-item-code">{{ it.external_code || '—' }}</span>
                     <span class="dov-item-name"><b v-if="it.article" class="dov-item-art">{{ it.article }}</b> {{ it.product_name }}</span>
                     <span class="dov-item-qty">{{ it.qtyDisplay }}<span v-if="it.qtyDisplay && it.unit" class="dov-item-unit"> {{ it.unit }}</span></span>
-                    <button class="dov-item-copy" @click="copyItem(it)" title="Скопировать строку">📋</button>
+                    <button class="dov-item-copy" @click="copyItem(it)" title="Скопировать строку"><BkIcon name="clipboard" size="sm" /></button>
                     <button class="dov-item-done" @click="markShipped(rest, it)" title="Отметить отгруженным">✓</button>
                   </div>
                 </div>
@@ -85,6 +85,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
