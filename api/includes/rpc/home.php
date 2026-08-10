@@ -42,7 +42,7 @@
             $leArgs = array_values($entities);
         }
 
-        $out = ['pending' => null, 'incoming' => null, 'expiring' => null];
+        $out = ['pending' => null, 'warehouse' => null, 'unreceived' => null, 'expiring' => null];
 
         // ── 1. Заявки поставщикам, которые сегодня положено подать.
         // Считаем чёрные дыры: строки со статусом draft на сегодняшнюю дату
@@ -70,25 +70,59 @@
             }
         }
 
-        // ── 2. Приходы на сегодня: сколько поставщиков сегодня везёт.
-        // Число поставщиков понятнее числа строк: строк столько же, сколько
-        // ресторанов в заявке, и «55 приходов» ничего не говорит.
-        if ($can('supplier-orders')) {
+        // ── 2. Поставки на склад: заказы отдела закупок с сегодняшней датой
+        // поставки. Раньше здесь стояли те же so_orders, что и в первой
+        // цифре — получалось две цифры про одно и то же. Настоящие приходы
+        // на склад лежат в orders: delivery_date — дата поставки,
+        // received_at — отметка приёмки.
+        if ($can('plan-fact')) {
             try {
                 $st = $pdo->prepare(
-                    "SELECT COUNT(DISTINCT supplier_id) AS suppliers, COUNT(*) AS orders
-                     FROM so_orders
-                     WHERE delivery_date = CURDATE()
-                       AND status IN ('submitted','locked')" . $leSql
+                    "SELECT COUNT(*) AS total,
+                            SUM(received_at IS NOT NULL) AS received,
+                            COUNT(DISTINCT supplier) AS suppliers
+                     FROM orders
+                     WHERE delivery_date = CURDATE()" . $leSql
                 );
                 $st->execute($leArgs);
                 $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
-                $out['incoming'] = [
-                    'value'  => intval($r['suppliers'] ?? 0),
-                    'orders' => intval($r['orders'] ?? 0),
+                $warehouse = [
+                    'value'     => intval($r['total'] ?? 0),
+                    'received'  => intval($r['received'] ?? 0),
+                    'suppliers' => intval($r['suppliers'] ?? 0),
+                    'next_date' => null,
+                    'next_count' => 0,
                 ];
+                // Сегодня пусто — подсказываем, когда ближайшая поставка,
+                // иначе ноль читается как «ничего не везут вообще».
+                if ($warehouse['value'] === 0) {
+                    $st = $pdo->prepare(
+                        "SELECT delivery_date, COUNT(*) AS cnt
+                         FROM orders
+                         WHERE delivery_date > CURDATE()" . $leSql . "
+                         GROUP BY delivery_date ORDER BY delivery_date LIMIT 1"
+                    );
+                    $st->execute($leArgs);
+                    if ($n = $st->fetch(PDO::FETCH_ASSOC)) {
+                        $warehouse['next_date'] = $n['delivery_date'];
+                        $warehouse['next_count'] = intval($n['cnt']);
+                    }
+                }
+                $out['warehouse'] = $warehouse;
+
+                // Поставки, которые приехали, но никто не отметил приёмку.
+                // Смотрим на две недели назад: более старое — это уже не
+                // «забыли отметить», а разбор архива.
+                $st = $pdo->prepare(
+                    "SELECT COUNT(*) AS cnt FROM orders
+                     WHERE received_at IS NULL
+                       AND delivery_date < CURDATE()
+                       AND delivery_date >= CURDATE() - INTERVAL 14 DAY" . $leSql
+                );
+                $st->execute($leArgs);
+                $out['unreceived'] = ['value' => intval($st->fetchColumn())];
             } catch (Throwable $e) {
-                error_log('home_stats incoming: ' . $e->getMessage());
+                error_log('home_stats warehouse: ' . $e->getMessage());
             }
         }
 

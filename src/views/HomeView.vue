@@ -95,7 +95,7 @@
             @keydown.escape="findQuery = ''"
           />
           <button v-if="findQuery" class="p-find-clear" title="Очистить" @click="findQuery = ''; findInput?.focus()">
-            <BkIcon name="close" size="xs" />
+            <BkIcon name="close" size="md" />
           </button>
         </div>
 
@@ -538,10 +538,25 @@ const statChips = computed(() => {
           title: plural(s.pending.total, 'заявка на сегодня', 'заявки на сегодня', 'заявок на сегодня'),
           sub: 'все поданы' });
   }
-  if (s.incoming && s.incoming.value > 0) {
-    out.push({ key: 'incoming', tone: 'orange', route: 'supplier-orders', value: s.incoming.value,
-      title: plural(s.incoming.value, 'поставщик везёт', 'поставщика везут', 'поставщиков везут'),
-      sub: `${s.incoming.orders} ${plural(s.incoming.orders, 'заявка', 'заявки', 'заявок')} на сегодня` });
+  // Поставки на склад — про другое, чем заявки: заявки подают рестораны
+  // поставщикам, а сюда приезжает товар отдела закупок.
+  const w = s.warehouse;
+  if (w && w.value > 0) {
+    const left = w.value - w.received;
+    out.push({ key: 'warehouse', tone: left > 0 ? 'orange' : 'green', route: 'plan-fact', value: w.value,
+      title: plural(w.value, 'поставка на склад', 'поставки на склад', 'поставок на склад'),
+      sub: left > 0
+        ? (w.received > 0 ? `принято ${w.received} из ${w.value}` : 'ещё не принято')
+        : 'всё принято' });
+  } else if (w && w.next_date) {
+    out.push({ key: 'warehouse', tone: 'green', route: 'plan-fact', value: 0,
+      title: 'поставок на склад сегодня',
+      sub: `ближайшая ${formatDay(w.next_date)} — ${w.next_count} ${plural(w.next_count, 'поставка', 'поставки', 'поставок')}` });
+  }
+  if (s.unreceived && s.unreceived.value > 0) {
+    out.push({ key: 'unreceived', tone: 'red', route: 'plan-fact', value: s.unreceived.value,
+      title: plural(s.unreceived.value, 'поставка без приёмки', 'поставки без приёмки', 'поставок без приёмки'),
+      sub: 'за прошлые дни' });
   }
   if (s.expiring && s.expiring.value > 0) {
     out.push({ key: 'expiring', tone: 'yellow', route: 'shelf-life', value: s.expiring.value,
@@ -550,6 +565,14 @@ const statChips = computed(() => {
   }
   return out;
 });
+
+// «11 августа» вместо «2026-08-11».
+function formatDay(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d)) return iso;
+  const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  return `${d.getDate()} ${months[d.getMonth()]}`;
+}
 
 function plural(n, one, few, many) {
   const m = n % 100;
@@ -598,8 +621,11 @@ onMounted(async () => {
   if (userStore.isAuthenticated) {
     loadHomeStats();
     // Курсор сразу в поле: главная теперь и есть поиск, человек может
-    // начать печатать не целясь мышью.
-    nextTick(() => findInput.value?.focus());
+    // начать печатать не целясь мышью. На телефонах не ставим — иначе при
+    // каждом заходе выезжает экранная клавиатура и закрывает пол-экрана.
+    if (window.matchMedia('(min-width: 761px)').matches) {
+      nextTick(() => findInput.value?.focus());
+    }
   }
 });
 onBeforeUnmount(() => {
@@ -618,7 +644,9 @@ onUnmounted(() => {
 /* Анимация фона вынесена в useCanvasParticles */
 
 // «/» ставит курсор в поле — та же привычка, что и в остальном портале.
+// Esc закрывает окно «Все разделы».
 function handleSlashKey(e) {
+  if (e.key === 'Escape' && showToolsFolder.value) { showToolsFolder.value = false; return; }
   if (e.key !== '/' || e.ctrlKey || e.altKey || e.metaKey) return;
   const tag = document.activeElement?.tagName;
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
@@ -810,9 +838,12 @@ input.p-find-input { flex: 1; min-width: 0; padding: 0; border: 0; background: n
   box-shadow: none; border-radius: 0; font-family: inherit; font-size: 19px; font-weight: 500; color: #F5EBDC; }
 input.p-find-input:focus { border: 0; box-shadow: none; outline: none; }
 input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
-.p-find-clear { display: flex; border: 0; background: none; cursor: pointer;
-  color: rgba(245,230,208,.5); padding: 6px; border-radius: 50%; }
-.p-find-clear:hover { color: #F5EBDC; background: rgba(255,255,255,.08); }
+.p-find-clear { display: flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; flex-shrink: 0;
+  border: 0; background: rgba(255,255,255,.07); cursor: pointer;
+  color: rgba(245,230,208,.7); border-radius: 50%; transition: background .15s, color .15s; }
+.p-find-clear:hover { color: #F5EBDC; background: rgba(255,255,255,.16); }
+.p-find-clear:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 
 .p-find-list { width: 100%; display: flex; flex-direction: column; gap: 2px; }
 .p-find-item { display: flex; align-items: center; gap: 12px; padding: 12px 18px;
