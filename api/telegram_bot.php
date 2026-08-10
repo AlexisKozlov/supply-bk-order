@@ -67,9 +67,9 @@ $_INCOMING_CHAT = $input['message']['chat']['id']
     ?? null;
 if ($_INCOMING_CHAT) {
     try {
-        $pdo->prepare("UPDATE users SET tg_blocked_at = NULL WHERE telegram_chat_id = ? AND tg_blocked_at IS NOT NULL")
+        $pdo->prepare("UPDATE users SET tg_blocked_at = NULL, tg_blocked_confirmed_at = NULL WHERE telegram_chat_id = ? AND tg_blocked_at IS NOT NULL")
             ->execute([(string)$_INCOMING_CHAT]);
-        $pdo->prepare("UPDATE ro_telegram_subs SET tg_blocked_at = NULL WHERE chat_id = ? AND tg_blocked_at IS NOT NULL")
+        $pdo->prepare("UPDATE ro_telegram_subs SET tg_blocked_at = NULL, tg_blocked_confirmed_at = NULL WHERE chat_id = ? AND tg_blocked_at IS NOT NULL")
             ->execute([(int)$_INCOMING_CHAT]);
     } catch (Throwable $e) {
         error_log('[telegram_bot] unblock-on-incoming failed: ' . $e->getMessage());

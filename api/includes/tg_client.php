@@ -93,9 +93,14 @@ function tgMarkChatBlocked(PDO $pdo, $chatId, ?string $reason = null): void
 {
     if (!$chatId) return;
     try {
-        $pdo->prepare("UPDATE users SET tg_blocked_at = NOW() WHERE telegram_chat_id = ? AND tg_blocked_at IS NULL")
+        // tg_blocked_at — дата ПЕРВОЙ блокировки, её показывают закупкам
+        // в «Каналах связи», поэтому ставим только один раз.
+        // tg_blocked_confirmed_at обновляем каждый раз: по ней считается,
+        // когда пробовать снова. Без этого окно «через 30 дней попробуем»
+        // открывалось навсегда и портал слал в закрытую дверь бесконечно.
+        $pdo->prepare("UPDATE users SET tg_blocked_at = COALESCE(tg_blocked_at, NOW()), tg_blocked_confirmed_at = NOW() WHERE telegram_chat_id = ?")
             ->execute([(string)$chatId]);
-        $pdo->prepare("UPDATE ro_telegram_subs SET tg_blocked_at = NOW() WHERE chat_id = ? AND tg_blocked_at IS NULL")
+        $pdo->prepare("UPDATE ro_telegram_subs SET tg_blocked_at = COALESCE(tg_blocked_at, NOW()), tg_blocked_confirmed_at = NOW() WHERE chat_id = ?")
             ->execute([(int)$chatId]);
         error_log("[tg-client] marked chat={$chatId} blocked" . ($reason ? " ({$reason})" : ''));
     } catch (Throwable $e) {
@@ -123,6 +128,47 @@ function tgClientResolveToken(array $opts): string
  * @param array  $params   JSON-сериализуемые параметры запроса
  * @param array  $opts     ['token' => ?, 'timeout' => ?, 'connect_timeout' => ?]
  */
+/**
+ * Заблокировал ли этот чат бота.
+ *
+ * Зачем: метку блокировки ставит tgMarkChatBlocked, но учитывали её только
+ * напоминания о заявках (cron_delivery_reminders). Остальные 20+ мест слали
+ * как ни в чём не бывало — за неделю 58 сообщений ушло в никуда, последнее
+ * в тот же день. Чинить каждый запрос по отдельности бессмысленно: в новом
+ * коде фильтр снова забудут. Поэтому проверка живёт здесь, в единственной
+ * точке отправки.
+ *
+ * Через 30 дней пробуем снова: человек мог разблокировать бота, а входящего
+ * сообщения от него так и не было (метку сбрасывает telegram_bot.php).
+ *
+ * Ответ кэшируется на время процесса — рассылка по сотне чатов не должна
+ * превращаться в сотню запросов к базе.
+ */
+function tgChatIsBlocked(PDO $pdo, $chatId): bool
+{
+    static $cache = [];
+    $key = (string)$chatId;
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $st = $pdo->prepare("
+            SELECT 1 FROM ro_telegram_subs
+            WHERE chat_id = ? AND tg_blocked_confirmed_at IS NOT NULL
+              AND tg_blocked_confirmed_at > NOW() - INTERVAL 30 DAY
+            UNION ALL
+            SELECT 1 FROM users
+            WHERE telegram_chat_id = ? AND tg_blocked_confirmed_at IS NOT NULL
+              AND tg_blocked_confirmed_at > NOW() - INTERVAL 30 DAY
+            LIMIT 1
+        ");
+        $st->execute([(int)$chatId, (string)$chatId]);
+        $cache[$key] = (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        // Не смогли проверить — лучше отправить, чем молча потерять сообщение.
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
 function tgClientCall(string $method, array $params, array $opts = []): array
 {
     $token = tgClientResolveToken($opts);
@@ -132,6 +178,21 @@ function tgClientCall(string $method, array $params, array $opts = []): array
             'error_code' => null, 'description' => 'no_token',
             'result' => null, 'curl_error' => null,
         ];
+    }
+
+    // Не долбим тех, кто заблокировал бота: сообщение всё равно не дойдёт,
+    // а Telegram считает такие попытки за нами. Проверяем только отправку
+    // (send*): ответ на нажатие кнопки приходит от активного человека.
+    if (str_starts_with($method, 'send') && !empty($params['chat_id'])) {
+        $pdoCheck = $opts['pdo'] ?? ($GLOBALS['pdo'] ?? null);
+        if ($pdoCheck instanceof PDO && tgChatIsBlocked($pdoCheck, $params['chat_id'])) {
+            $res = [
+                'ok' => false, 'http_code' => 0, 'error_code' => null,
+                'description' => 'skipped_blocked', 'result' => null, 'curl_error' => null,
+            ];
+            tgLogSend($method, $params['chat_id'], $res, $opts);
+            return $res;
+        }
     }
 
     $timeout        = (int)($opts['timeout'] ?? 10);
