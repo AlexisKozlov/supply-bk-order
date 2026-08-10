@@ -1566,11 +1566,44 @@ try {
                 // что в прошлый раз. Если повторять нечего (ресторан ни разу
                 // не подавал), поставки не будет.
                 if ($autoRepeat) {
-                    $prevChk = $pdo->prepare("SELECT 1 FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND legal_entity = ? AND status IN ('submitted','locked') AND delivery_date < ? ORDER BY delivery_date DESC LIMIT 1");
+                    $prevChk = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND legal_entity = ? AND status IN ('submitted','locked') AND delivery_date < ? ORDER BY delivery_date DESC LIMIT 1");
                     $prevChk->execute([$supId, $restNum, $sup['legal_entity'], $deliveryDate]);
-                    $msgText .= $prevChk->fetchColumn()
-                        ? "Поставщику уйдёт повтор вашей прошлой заявки — приедет то же, что в прошлый раз."
-                        : "Повторять нечего: прошлых заявок нет, поставки {$deliveryHuman} не будет.";
+                    $prevId = $prevChk->fetchColumn();
+
+                    // Состав повтора считаем ровно тем же запросом, что и сама
+                    // автоподача ниже: только позиции из АКТУАЛЬНОГО шаблона
+                    // поставщика. Иначе в сообщении оказался бы товар, снятый
+                    // с ассортимента, — а его в заявку не положат.
+                    $repeatItems = [];
+                    if ($prevId) {
+                        $ri = $pdo->prepare("
+                            SELECT soi.product_name, COALESCE(soi.admin_qty, soi.quantity) AS qty
+                            FROM so_order_items soi
+                            JOIN so_templates t
+                              ON t.sku = soi.sku AND t.supplier_id = ? AND t.legal_entity = ? AND t.is_active = 1
+                            WHERE soi.order_id = ? AND COALESCE(soi.admin_qty, soi.quantity) > 0
+                            ORDER BY soi.product_name
+                        ");
+                        $ri->execute([$supId, $sup['legal_entity'], $prevId]);
+                        $repeatItems = $ri->fetchAll(PDO::FETCH_ASSOC);
+                    }
+
+                    if ($repeatItems) {
+                        $msgText .= "Поставщику уйдёт повтор вашей прошлой заявки:\n";
+                        // Заявки здесь на 4-6 позиций, но подстрахуемся: у Telegram
+                        // лимит 4096 символов на сообщение.
+                        $shown = array_slice($repeatItems, 0, 40);
+                        foreach ($shown as $it) {
+                            $qty = rtrim(rtrim(number_format((float)$it['qty'], 2, '.', ' '), '0'), '.');
+                            $msgText .= "• " . htmlspecialchars($it['product_name'], ENT_QUOTES) . " — <b>{$qty}</b>\n";
+                        }
+                        $more = count($repeatItems) - count($shown);
+                        if ($more > 0) $msgText .= "…и ещё {$more}\n";
+                    } elseif ($prevId) {
+                        $msgText .= "Повторять нечего: товары из прошлой заявки сняты с ассортимента, поставки {$deliveryHuman} не будет.";
+                    } else {
+                        $msgText .= "Повторять нечего: прошлых заявок нет, поставки {$deliveryHuman} не будет.";
+                    }
                 } else {
                     $msgText .= "Поставки {$deliveryHuman} не будет.";
                 }
