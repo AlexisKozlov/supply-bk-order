@@ -1547,17 +1547,21 @@ try {
             $dayName = $dayNames[$nextDelivery['dow']] ?? '';
 
             $prettyRestNum = formatRestaurantNumber($restNum);
+            // «Доставка в вторник (2026-08-11)» читается плохо: и предлог не тот,
+            // и дата машинная. Пишем «вторник, 11.08».
+            $deliveryHuman = date('d.m', strtotime($deliveryDate));
             if ($reminderType === 'expired') {
                 $msgText = "⚠️ <b>Дедлайн заявки истёк!</b>\n\n";
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-                $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n\n";
-                $msgText .= "Заявка не была подана.";
+                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n\n";
+                $msgText .= "Заявка не подана, приём закрыт — поставки {$deliveryHuman} не будет.\n\n";
+                $msgText .= "Если товар нужен, напишите в отдел закупок: они могут открыть внеплановую заявку.";
             } elseif ($reminderType === 'evening') {
                 $msgText = "🌙 <b>Напоминание: заявка поставщику</b>\n\n";
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-                $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n";
+                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n";
                 $msgText .= "⏳ Дедлайн завтра: <b>{$deadlineFmt}</b>\n\n";
                 $msgText .= "Не забудьте подать заявку!";
             } else {
@@ -1566,12 +1570,25 @@ try {
                 $msgText = "⏰ <b>Напоминание: заявка поставщику</b>\n\n";
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-                $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n";
+                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n";
                 $msgText .= "⏳ До дедлайна: <b>{$timeLabel}</b> (до {$deadlineFmt})\n\n";
                 $msgText .= "Заявка ещё не подана!";
             }
 
             $restGroup = $byRest[$restNum]['group'] ?? 'BK_VM';
+            // Контакт отдела закупок — из настроек портала, не хардкодом.
+            // helpers.php в этот крон не подключается (там своя инициализация),
+            // поэтому читаем настройку сами и один раз за прогон.
+            static $supportTg = null;
+            if ($supportTg === null) {
+                $supportTg = '';
+                try {
+                    $v = $pdo->query("SELECT svalue FROM app_settings WHERE skey = 'support_telegram' LIMIT 1")->fetchColumn();
+                    $v = ltrim(trim((string)$v), '@');
+                    $v = preg_replace('#^https?://(t\\.me|telegram\\.me)/#i', '', $v);
+                    if (preg_match('/^[A-Za-z0-9_]{1,64}$/', $v)) $supportTg = $v;
+                } catch (Throwable $e) { /* нет настройки — просто без кнопки */ }
+            }
             $redirect = $isWorkshop
                 ? '/restaurant/orders/production'
                 : "/restaurant/orders/supplier/{$supId}";
@@ -1587,18 +1604,34 @@ try {
                 $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL " . RO_AUTH_TOKEN_TTL_MINUTES . " MINUTE), 0)");
                 $logStmt = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)");
                 foreach ($chatIds as $chatId) {
-                    $token = bin2hex(random_bytes(32));
-                    $tokStmt->execute([$token, $chatId, $restNum, $restGroup]);
-                    $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
+                    // Токен автовхода нужен только там, где есть ссылка в кабинет.
+                    // Для истёкшего дедлайна ссылки нет — не плодим живые токены.
+                    $url = '';
+                    if ($reminderType !== 'expired') {
+                        $token = bin2hex(random_bytes(32));
+                        $tokStmt->execute([$token, $chatId, $restNum, $restGroup]);
+                        $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
+                    }
 
                     // Заявку подают в кабинете — ссылка открывает нужную
                     // страницу с автоматическим входом. Пошаговый ввод в чате
                     // убран: там не видно ни примечаний, ни минимального заказа.
-                    $rows = [[[
-                        'text' => $isWorkshop ? '🥖 Заказать тесто' : '📝 Подать заявку',
-                        'url'  => $url,
-                    ]]];
-                    $keyboard = ['inline_keyboard' => $rows];
+                    //
+                    // После истёкшего дедлайна кнопка «Подать заявку» бессмысленна:
+                    // сервер на попытку подачи ответит «Приём заявок на эту дату
+                    // закрыт». Вместо неё — связь с закупками, они единственные,
+                    // кто может открыть внеплановую заявку.
+                    if ($reminderType === 'expired') {
+                        $rows = $supportTg
+                            ? [[['text' => 'Написать в отдел закупок', 'url' => "https://t.me/{$supportTg}"]]]
+                            : [];
+                    } else {
+                        $rows = [[[
+                            'text' => $isWorkshop ? '🥖 Заказать тесто' : '📝 Подать заявку',
+                            'url'  => $url,
+                        ]]];
+                    }
+                    $keyboard = $rows ? ['inline_keyboard' => $rows] : null;
 
                     tgSend($chatId, $msgText, true, $keyboard);
                     $sent++;
@@ -1619,7 +1652,7 @@ try {
                     ];
                     $pushTitle = $pushTitles[$reminderType] ?? '⏰ Напоминание: заявка поставщику';
                     if ($reminderType === 'expired') {
-                        $pushBody = "{$supName}: заявка на {$deliveryDate} не подана, дедлайн истёк.";
+                        $pushBody = "{$supName}: заявка на {$deliveryDate} не подана, приём закрыт. Нужен товар — напишите в закупки.";
                     } else {
                         $pushBody = "{$supName}: подайте заявку на {$deliveryDate}, дедлайн {$deadlineFmt}.";
                     }
