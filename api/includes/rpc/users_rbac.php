@@ -119,23 +119,35 @@ if ($fn === 'set_user_disabled') {
 if ($fn === 'user_login_stats') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['error' => 'Нет прав доступа'], 403);
+    // Последний ВХОД и последняя АКТИВНОСТЬ — разные вещи. Сессия живёт
+    // неделями, поэтому человек, который работает в портале каждый день,
+    // может не вводить пароль месяц. Раньше показывался только вход, и
+    // активные сотрудники выглядели пропавшими. Активность лежит в
+    // user_presence — её обновляет heartbeat.
     $s = $pdo->query("
         SELECT u.name,
                MAX(l.created_at)                                    AS last_login,
                COUNT(l.id)                                          AS logins_total,
                SUM(l.created_at >= NOW() - INTERVAL 30 DAY)         AS logins_30d,
-               DATEDIFF(CURDATE(), DATE(MAX(l.created_at)))         AS days_since
+               DATEDIFF(CURDATE(), DATE(MAX(l.created_at)))         AS days_since,
+               MAX(p.last_seen)                                     AS last_seen,
+               TIMESTAMPDIFF(MINUTE, MAX(p.last_seen), NOW())       AS minutes_since_seen,
+               DATEDIFF(CURDATE(), DATE(MAX(p.last_seen)))          AS days_since_seen
         FROM users u
         LEFT JOIN login_log l ON l.user_name = u.name
+        LEFT JOIN user_presence p ON p.user_name = u.name
         GROUP BY u.id, u.name
     ");
     $out = [];
     foreach ($s->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $out[$r['name']] = [
-            'last_login'   => $r['last_login'],
-            'logins_total' => (int)$r['logins_total'],
-            'logins_30d'   => (int)$r['logins_30d'],
-            'days_since'   => $r['last_login'] === null ? null : (int)$r['days_since'],
+            'last_login'         => $r['last_login'],
+            'logins_total'       => (int)$r['logins_total'],
+            'logins_30d'         => (int)$r['logins_30d'],
+            'days_since'         => $r['last_login'] === null ? null : (int)$r['days_since'],
+            'last_seen'          => $r['last_seen'],
+            'minutes_since_seen' => $r['last_seen'] === null ? null : (int)$r['minutes_since_seen'],
+            'days_since_seen'    => $r['last_seen'] === null ? null : (int)$r['days_since_seen'],
         ];
     }
     respond(['stats' => $out]);

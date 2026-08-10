@@ -89,7 +89,7 @@
               <!-- Журнал входов вёлся с марта, но нигде не показывался.
                    Клик открывает последние 20 входов с адресом. -->
               <span class="adm-user-login" :class="loginClass(u)"
-                    title="Показать историю входов"
+                    :title="loginTitle(u)"
                     @click.stop="openLoginHistory(u)">{{ loginLabel(u) }}</span>
             </div>
           </div>
@@ -2023,21 +2023,50 @@ async function loadLoginStats() {
   } catch { loginStats.value = {}; }
 }
 
+// Показываем последнюю АКТИВНОСТЬ, а не последний вход по паролю. Сессия
+// живёт неделями: человек может работать в портале каждый день и месяц не
+// вводить пароль. Раньше здесь стоял вход, и такие сотрудники выглядели
+// пропавшими — вплоть до красной пометки «давно не заходил».
 function loginLabel(u) {
   const s = loginStats.value[u.name];
-  if (!s || !s.last_login) return 'ни разу не заходил';
-  const d = s.days_since;
-  const when = d <= 0 ? 'сегодня' : (d === 1 ? 'вчера' : `${d} ${plural(d, 'день', 'дня', 'дней')} назад`);
-  return `был ${when}`;
+  if (!s) return 'ни разу не заходил';
+  if (s.minutes_since_seen !== null && s.minutes_since_seen <= 5) return 'сейчас в портале';
+  const d = activeDays(s);
+  if (d === null) return 'ни разу не заходил';
+  if (d <= 0) return 'был сегодня';
+  if (d === 1) return 'был вчера';
+  return `был ${d} ${plural(d, 'день', 'дня', 'дней')} назад`;
 }
-// Красным — кто не заходил дольше двух месяцев или не заходил вообще:
+
+// Сколько дней назад человека последний раз видели. Берём то, что свежее:
+// активность или вход. Вход учитываем на случай, если heartbeat не успел
+// записаться — например, зашли и сразу закрыли вкладку.
+function activeDays(s) {
+  const a = s.days_since_seen;
+  const b = s.days_since;
+  if (a === null && b === null) return null;
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.min(a, b);
+}
+
+// Красным — кого не видели дольше двух месяцев или не видели вообще:
 // у такого сотрудника доступ живёт сам по себе.
 function loginClass(u) {
   const s = loginStats.value[u.name];
-  if (!s || !s.last_login) return 'is-never';
-  if (s.days_since >= 60) return 'is-never';
-  if (s.days_since >= 30) return 'is-stale';
+  const d = s ? activeDays(s) : null;
+  if (d === null) return 'is-never';
+  if (d >= 60) return 'is-never';
+  if (d >= 30) return 'is-stale';
   return '';
+}
+
+// В подсказке — точные даты: активность и отдельно вход по паролю.
+function loginTitle(u) {
+  const s = loginStats.value[u.name];
+  if (!s) return 'Показать историю входов';
+  const fmt = v => v ? new Date(v.replace(' ', 'T')).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : 'нет данных';
+  return `В портале: ${fmt(s.last_seen)}\nВход по паролю: ${fmt(s.last_login)}\nНажмите, чтобы открыть историю входов`;
 }
 
 async function openLoginHistory(u) {

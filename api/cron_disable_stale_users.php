@@ -54,17 +54,30 @@ $log = function ($msg) { echo '[' . date('Y-m-d H:i:s') . '] ' . $msg . "\n"; };
  * users.created_at — varchar, а не дата (историческое). Приводим через
  * STR_TO_DATE по первым 10 символам, иначе сравнение дат молча врёт.
  */
+// Считаем по ПОСЛЕДНЕЙ АКТИВНОСТИ, а не только по входу с паролем. Сессия
+// живёт неделями: человек может работать в портале каждый день и месяцами
+// не вводить пароль. По одному login_log такой сотрудник выглядел бы
+// пропавшим, и крон закрыл бы доступ работающему человеку.
 $sql = "
     SELECT u.name, u.email, u.role,
            MAX(l.created_at) AS last_login,
+           MAX(p.last_seen)  AS last_seen,
            STR_TO_DATE(LEFT(u.created_at, 10), '%Y-%m-%d') AS created_dt
     FROM users u
     LEFT JOIN login_log l ON l.user_name = u.name
+    LEFT JOIN user_presence p ON p.user_name = u.name
     WHERE u.disabled_at IS NULL
       AND u.role <> 'admin'
     GROUP BY u.name, u.email, u.role, u.created_at
-    HAVING DATEDIFF(NOW(), COALESCE(MAX(l.created_at), created_dt)) >= ?
-    ORDER BY COALESCE(MAX(l.created_at), created_dt) ASC
+    HAVING DATEDIFF(NOW(), COALESCE(
+               -- GREATEST с подстановкой даёт '1970-01-01', когда нет ни входа,
+               -- ни активности. NULLIF возвращает это обратно в NULL, иначе
+               -- никогда не заходивший сотрудник считался бы протухшим с 1970
+               -- года и отключался бы в первый же запуск.
+               NULLIF(GREATEST(COALESCE(MAX(l.created_at), '1970-01-01'),
+                               COALESCE(MAX(p.last_seen),  '1970-01-01')), '1970-01-01'),
+               created_dt)) >= ?
+    ORDER BY COALESCE(MAX(p.last_seen), MAX(l.created_at), created_dt) ASC
 ";
 $s = $pdo->prepare($sql);
 $s->execute([$STALE_DAYS]);
@@ -77,12 +90,16 @@ if (!$stale) {
 
 $lines = [];
 foreach ($stale as $u) {
-    $lines[] = $u['last_login']
-        ? "• {$u['name']} — последний вход " . date('d.m.Y', strtotime($u['last_login']))
+    // В письме и в причине пишем именно то, по чему считали, — последнюю
+    // активность. Иначе человек читает «нет входов с марта» и не понимает,
+    // почему доступ закрыли только сейчас.
+    $lastAny = $u['last_seen'] ?: $u['last_login'];
+    $lines[] = $lastAny
+        ? "• {$u['name']} — последний раз в портале " . date('d.m.Y', strtotime($lastAny))
         : "• {$u['name']} — ни разу не заходил, заведён " . date('d.m.Y', strtotime($u['created_dt']));
     if (!$DRY_RUN) {
-        $reason = $u['last_login']
-            ? "нет входов с " . substr((string)$u['last_login'], 0, 10)
+        $reason = $lastAny
+            ? "нет работы в портале с " . substr((string)$lastAny, 0, 10)
             : "ни разу не заходил с " . $u['created_dt'];
         $pdo->prepare("UPDATE users SET disabled_at = NOW(), disabled_reason = ? WHERE name = ?")
             ->execute([mb_substr($reason, 0, 255), $u['name']]);
