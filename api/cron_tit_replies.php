@@ -299,11 +299,19 @@ foreach ($unseen as $msgNum) {
         elseif ($pairs) $parsedVia = 'EMAIL_TEXT';
         elseif ($ocrPlates) $parsedVia = 'EMAIL_OCR';
 
+        // В этот ящик приходит не только про пропуска: возвраты почты, ответы
+        // поставщиков по заявкам, автоответы об отпуске. Раньше всё это оседало
+        // в списке «нераспознанное», и разобрать его было невозможно. Письма,
+        // где нет ни номера машины, ни телефона водителя, сразу помечаем
+        // игнором: запись остаётся (нужна, чтобы не тянуть письмо повторно и
+        // чтобы можно было посмотреть при разборе), но в списке не мешает.
+        $autoIgnored = (!$requestId && $parsedVia === 'NONE' && !$parsedPlate && !$parsedPhone) ? 1 : 0;
+
         $emailLogIns = $pdo->prepare("
             INSERT INTO tit_email_log
                 (request_id, message_id, from_email, from_name, subject, received_at,
-                 body_excerpt, has_attachment, attachment_path, parsed_plate, parsed_phone, parsed_via, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 body_excerpt, has_attachment, attachment_path, parsed_plate, parsed_phone, parsed_via, status, is_ignored)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         $emailLogIns->execute([
             $requestId,
@@ -319,6 +327,7 @@ foreach ($unseen as $msgNum) {
             $parsedPhone,
             $parsedVia,
             $requestId ? 'MATCHED' : 'UNMATCHED',
+            $autoIgnored,
         ]);
         $emailLogId = (int)$pdo->lastInsertId();
 
