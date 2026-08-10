@@ -111,7 +111,7 @@
             <td class="rr-city">{{ row.city }}</td>
             <td>
               <span class="rr-sku">{{ row.sku }}</span> {{ row.product_name }}
-              <span v-if="row.comment" class="rr-comment" :title="row.comment">💬</span>
+              <span v-if="row.comment" class="rr-comment" :title="row.comment"><BkIcon name="chat" size="sm" /></span>
             </td>
             <td><span class="rr-cat-badge" :class="'cat-' + row.category">{{ row.category }}</span></td>
             <td class="rr-num">{{ fmtNum(row.quantity) }}</td>
@@ -154,7 +154,7 @@
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
             <td class="rr-num">
               {{ fmtKg(row.totalWeightKg) }}
-              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td class="rr-num">{{ row.orderCount }}</td>
             <td class="rr-num">{{ row.restCount }}</td>
@@ -167,7 +167,7 @@
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
             <td class="rr-num">
               <strong>{{ fmtKg(totalWeightKg) }}</strong>
-              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td class="rr-num"><strong>{{ totalOrders }}</strong></td>
             <td></td><td></td>
@@ -196,7 +196,7 @@
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
             <td class="rr-num">
               {{ fmtKg(row.totalWeightKg) }}
-              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td class="rr-num">{{ row.itemCount }}</td>
             <td class="rr-num">{{ row.orderCount }}</td>
@@ -208,7 +208,7 @@
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
             <td class="rr-num">
               <strong>{{ fmtKg(totalWeightKg) }}</strong>
-              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td class="rr-num"><strong>{{ totalItems }}</strong></td>
             <td class="rr-num"><strong>{{ totalOrders }}</strong></td>
@@ -238,7 +238,7 @@
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
             <td class="rr-num">
               {{ fmtKg(row.totalWeightKg) }}
-              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td class="rr-num">{{ row.itemCount }}</td>
             <td class="rr-num">{{ row.orderCount }}</td>
@@ -251,7 +251,7 @@
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
             <td class="rr-num">
               <strong>{{ fmtKg(totalWeightKg) }}</strong>
-              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td class="rr-num"><strong>{{ totalItems }}</strong></td>
             <td class="rr-num"><strong>{{ totalOrders }}</strong></td>
@@ -280,7 +280,7 @@
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
             <td class="rr-num">
               {{ fmtKg(row.totalWeightKg) }}
-              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`">⚠</span>
+              <span v-if="row.missingWeightCount" class="rr-warn" :title="`${row.missingWeightCount} позиций без веса — итог может быть занижен`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td class="rr-num">{{ row.uniqueProducts }}</td>
             <td class="rr-num">{{ row.lineCount }}</td>
@@ -293,7 +293,7 @@
             <td class="rr-num"><strong>{{ fmtNum(totalQty) }}</strong></td>
             <td class="rr-num">
               <strong>{{ fmtKg(totalWeightKg) }}</strong>
-              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`">⚠</span>
+              <span v-if="totalMissingWeight" class="rr-warn" :title="`${totalMissingWeight} позиций без веса`"><BkIcon name="warning" size="sm" /></span>
             </td>
             <td></td>
             <td class="rr-num"><strong>{{ totalItems }}</strong></td>
@@ -340,6 +340,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';

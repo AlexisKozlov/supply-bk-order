@@ -35,7 +35,7 @@
           {{ c.created_by || '---' }} · {{ fmtDate(c.created_at) }}
         </div>
         <div v-if="c.deadline_at" class="sc-card-deadline" :class="{ late: c.status === 'active' && deadlinePassed(c.deadline_at) }">
-          ⏰ до {{ fmtDeadline(c.deadline_at) }}
+          <BkIcon name="history" size="sm" /> до {{ fmtDeadline(c.deadline_at) }}
           <span v-if="c.status === 'active' && deadlinePassed(c.deadline_at)">· срок вышел</span>
         </div>
       </div>
@@ -57,15 +57,15 @@
             title="Изменить срок сдачи"
           >
             <template v-if="activeCollection.deadline_at">
-              ⏰ до {{ fmtDeadline(activeCollection.deadline_at) }}
+              <BkIcon name="history" size="sm" /> до {{ fmtDeadline(activeCollection.deadline_at) }}
               <span v-if="activeCollection.status === 'active' && deadlinePassed(activeCollection.deadline_at)">· срок вышел</span>
             </template>
-            <template v-else>⏰ срок не задан</template>
+            <template v-else><BkIcon name="history" size="sm" /> срок не задан</template>
           </button>
         </div>
         <div class="sc-detail-actions">
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying" title="Отправит напоминание в Telegram только тем ресторанам, кто ещё не заполнил остатки">
-            {{ notifying ? 'Отправка...' : '🔔 Напомнить не заполнившим' }}
+            {{ notifying ? 'Отправка...' : '<BkIcon name="bell" size="sm" /> Напомнить не заполнившим' }}
           </button>
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="openEditProducts">
             Изменить товары
@@ -100,7 +100,7 @@
           </div>
           <div style="margin-left: auto; display: flex; gap: 6px;">
             <button v-if="activeCollection.status === 'active'" class="sc-btn sm outline" @click="openEditProducts">Изменить товары</button>
-            <button class="sc-btn sm outline" @click="openPricesEditor">💰 Цены</button>
+            <button class="sc-btn sm outline" @click="openPricesEditor"><BkIcon name="payments" size="sm" /> Цены</button>
             <button class="sc-btn sm outline" @click="exportExcel">Excel</button>
             <button class="sc-btn sm outline" @click="refreshData">Обновить</button>
           </div>

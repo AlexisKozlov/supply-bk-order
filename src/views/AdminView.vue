@@ -758,7 +758,7 @@
             <div class="fb-item-title">{{ r.title }}</div>
             <div class="fb-item-bottom">
               <span class="fb-item-entity">{{ r.legal_entity || '' }}</span>
-              <span v-if="r.reply_count" class="fb-item-replies">💬 {{ r.reply_count }}</span>
+              <span v-if="r.reply_count" class="fb-item-replies"><BkIcon name="chat" size="sm" /> {{ r.reply_count }}</span>
               <span v-if="r.screenshots?.length" class="fb-item-attach">📎 {{ r.screenshots.length }}</span>
             </div>
           </div>
@@ -870,8 +870,8 @@
           </tr>
           <tr class="adm-cron-subhead">
             <th></th><th></th>
-            <th title="portal">📰</th><th title="telegram">💬</th><th title="пропущено">⊘</th>
-            <th title="portal">📰</th><th title="telegram">💬</th><th title="пропущено">⊘</th>
+            <th title="portal">📰</th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
+            <th title="portal">📰</th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
             <th></th>
           </tr>
         </thead>
@@ -887,7 +887,7 @@
             <td class="cron-num cron-skip">{{ row.main_skip }}</td>
             <td>
               <span v-if="row.status === 'ok'" class="cron-status-ok">✓</span>
-              <span v-else class="cron-status-err" :title="row.error_text">⚠ {{ truncateError(row.error_text) }}</span>
+              <span v-else class="cron-status-err" :title="row.error_text"><BkIcon name="warning" size="sm" /> {{ truncateError(row.error_text) }}</span>
             </td>
           </tr>
         </tbody>

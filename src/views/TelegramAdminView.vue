@@ -2,7 +2,7 @@
   <div class="tga-view">
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
       <h1 class="page-title">
-        <span class="tga-tg-icon">✈</span> Telegram-бот
+        <span class="tga-tg-icon"><BkIcon name="send" size="sm" /></span> Telegram-бот
       </h1>
       <button class="btn secondary" @click="loadData" :disabled="loading">Обновить</button>
     </div>
@@ -13,19 +13,19 @@
         🤖 Бот
       </button>
       <button class="adm-tab" :class="{ active: tab === 'users' }" @click="tab = 'users'">
-        👥 Подписчики <span class="adm-tab-count" :class="{ active: tab === 'users' }">{{ linkedUsers.length }}</span>
+        <BkIcon name="user" size="sm" /> Подписчики <span class="adm-tab-count" :class="{ active: tab === 'users' }">{{ linkedUsers.length }}</span>
       </button>
       <button class="adm-tab" :class="{ active: tab === 'settings' }" @click="tab = 'settings'">
-        ⚙️ Уведомления
+        <BkIcon name="gear" size="sm" /> Уведомления
       </button>
       <button class="adm-tab" :class="{ active: tab === 'restaurants' }" @click="tab = 'restaurants'">
-        🏪 Рестораны <span class="adm-tab-count" :class="{ active: tab === 'restaurants' }">{{ restaurantActiveSubCount }}</span>
+        <BkIcon name="building" size="sm" /> Рестораны <span class="adm-tab-count" :class="{ active: tab === 'restaurants' }">{{ restaurantActiveSubCount }}</span>
       </button>
       <button class="adm-tab" :class="{ active: tab === 'questions' }" @click="tab = 'questions'; loadQuestions()">
-        💬 Вопросы AI
+        <BkIcon name="chat" size="sm" /> Вопросы AI
       </button>
       <button class="adm-tab" :class="{ active: tab === 'log' }" @click="tab = 'log'">
-        📋 Лог
+        <BkIcon name="clipboard" size="sm" /> Лог
       </button>
       <button class="adm-tab" :class="{ active: tab === 'broadcast' }" @click="tab = 'broadcast'; loadBroadcastHistory()">
         📢 Рассылка
@@ -245,16 +245,16 @@
           <thead>
             <tr>
               <th>Пользователь</th>
-              <th title="Ежедневная сводка">📊</th>
-              <th title="ПСЦ истекает">📋</th>
-              <th title="Цены изменились">💰</th>
-              <th title="Просроченная поставка">📦</th>
-              <th title="Загрузка данных">📥</th>
-              <th title="Истекающие сроки">⚠️</th>
+              <th title="Ежедневная сводка"><BkIcon name="analytics" size="sm" /></th>
+              <th title="ПСЦ истекает"><BkIcon name="clipboard" size="sm" /></th>
+              <th title="Цены изменились"><BkIcon name="payments" size="sm" /></th>
+              <th title="Просроченная поставка"><BkIcon name="package" size="sm" /></th>
+              <th title="Загрузка данных"><BkIcon name="import" size="sm" /></th>
+              <th title="Истекающие сроки"><BkIcon name="warning" size="sm" /></th>
               <th title="Реализация ресторанов">🍽</th>
-              <th title="Остатки заканчиваются">📉</th>
+              <th title="Остатки заканчиваются"><BkIcon name="chartDown" size="sm" /></th>
               <th title="Корректировки заказов">✏️</th>
-              <th title="Сообщения из ресторанов">💬</th>
+              <th title="Сообщения из ресторанов"><BkIcon name="chat" size="sm" /></th>
             </tr>
           </thead>
           <tbody>
@@ -275,16 +275,16 @@
         </table>
       </div>
       <div class="tga-legend">
-        <span>📊 Ежедневная сводка</span>
-        <span>📋 ПСЦ истекает</span>
-        <span>💰 Цены изменились</span>
-        <span>📦 Просроченная поставка</span>
-        <span>📥 Загрузка данных</span>
-        <span>⚠️ Истекающие сроки</span>
+        <span><BkIcon name="analytics" size="sm" /> Ежедневная сводка</span>
+        <span><BkIcon name="clipboard" size="sm" /> ПСЦ истекает</span>
+        <span><BkIcon name="payments" size="sm" /> Цены изменились</span>
+        <span><BkIcon name="package" size="sm" /> Просроченная поставка</span>
+        <span><BkIcon name="import" size="sm" /> Загрузка данных</span>
+        <span><BkIcon name="warning" size="sm" /> Истекающие сроки</span>
         <span>🍽 Реализация ресторанов</span>
-        <span>📉 Остатки заканчиваются</span>
+        <span><BkIcon name="chartDown" size="sm" /> Остатки заканчиваются</span>
         <span>✏️ Корректировки заказов</span>
-        <span>💬 Сообщения из ресторанов</span>
+        <span><BkIcon name="chat" size="sm" /> Сообщения из ресторанов</span>
       </div>
     </div>
 
@@ -384,11 +384,11 @@
               <tr>
                 <th style="text-align:left">Подписчик</th>
                 <th style="text-align:left">Рестораны</th>
-                <th title="Напоминания о заявках">🔔</th>
+                <th title="Напоминания о заявках"><BkIcon name="bell" size="sm" /></th>
                 <th title="Новые периоды приёма">📢</th>
-                <th title="Подтверждения заявок">✅</th>
-                <th title="Напоминания об остатках">📋</th>
-                <th title="Новые сборы остатков">📦</th>
+                <th title="Подтверждения заявок"><BkIcon name="success" size="sm" /></th>
+                <th title="Напоминания об остатках"><BkIcon name="clipboard" size="sm" /></th>
+                <th title="Новые сборы остатков"><BkIcon name="package" size="sm" /></th>
                 <th title="Возврат кег">🛢</th>
               </tr>
             </thead>
@@ -410,11 +410,11 @@
           </table>
         </div>
         <div class="tga-legend">
-          <span>🔔 Напоминания о заявках</span>
+          <span><BkIcon name="bell" size="sm" /> Напоминания о заявках</span>
           <span>📢 Новые периоды приёма</span>
-          <span>✅ Подтверждения заявок</span>
-          <span>📋 Напоминания об остатках</span>
-          <span>📦 Новые сборы остатков</span>
+          <span><BkIcon name="success" size="sm" /> Подтверждения заявок</span>
+          <span><BkIcon name="clipboard" size="sm" /> Напоминания об остатках</span>
+          <span><BkIcon name="package" size="sm" /> Новые сборы остатков</span>
           <span>🛢 Возврат кег</span>
         </div>
       </template>
@@ -567,6 +567,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'

@@ -5,14 +5,14 @@
       <div class="dist-top">
         <h1 class="page-title">Распределение новинок</h1>
         <div class="dist-top-actions">
-          <button class="dist-btn ghost" @click="showOverview = true" title="Сводка по всем активным сессиям, сгруппированная по дням доставки">📋 Вывести распределение</button>
+          <button class="dist-btn ghost" @click="showOverview = true" title="Сводка по всем активным сессиям, сгруппированная по дням доставки"><BkIcon name="clipboard" size="sm" /> Вывести распределение</button>
           <button class="dist-btn primary" @click="showCreate = true">+ Новая сессия</button>
         </div>
       </div>
 
       <div v-if="loading" class="dist-empty"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!sessions.length" class="dist-empty">
-        <div class="dist-empty-icon">📦</div>
+        <div class="dist-empty-icon"><BkIcon name="package" size="sm" /></div>
         <div class="dist-empty-text">Нет сессий</div>
         <div class="dist-empty-sub">Создайте первую сессию распределения</div>
       </div>
@@ -58,10 +58,10 @@
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Добавить товар" @click="showAddProduct = true"><span class="btn-icon">＋</span><span class="btn-text"> Товар</span></button>
           <button class="dist-btn ghost" title="История действий по сессии" @click="showHistory = true"><span class="btn-icon">🕘</span><span class="btn-text"> История</span></button>
           <button class="dist-btn ghost" title="Скачать Excel" @click="exportExcel"><span class="btn-icon">⬇</span><span class="btn-text"> Excel</span></button>
-          <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Импорт из Excel" @click="showImport = true"><span class="btn-icon">📥</span><span class="btn-text"> Импорт</span></button>
+          <button v-if="activeSession.status === 'active'" class="dist-btn ghost" title="Импорт из Excel" @click="showImport = true"><span class="btn-icon"><BkIcon name="import" size="sm" /></span><span class="btn-text"> Импорт</span></button>
           <button v-if="activeSession.status === 'active'" class="dist-btn ghost danger" title="Закрыть сессию" @click="askCloseSession"><span class="btn-icon">✕</span><span class="btn-text"> Закрыть</span></button>
           <button v-if="activeSession.status === 'closed'" class="dist-btn ghost" title="Открыть сессию" @click="reopenSession"><span class="btn-icon">↻</span><span class="btn-text"> Открыть</span></button>
-          <button class="dist-btn ghost danger" title="Удалить сессию" @click="askDeleteSession"><span class="btn-icon">🗑</span><span class="btn-text"> Удалить</span></button>
+          <button class="dist-btn ghost danger" title="Удалить сессию" @click="askDeleteSession"><span class="btn-icon"><BkIcon name="delete" size="sm" /></span><span class="btn-text"> Удалить</span></button>
         </div>
       </div>
 
@@ -318,7 +318,7 @@
             <code>✗</code> или <code>нет</code> — не нужно ресторану.
           </p>
           <div style="display:flex;gap:8px;margin-bottom:14px">
-            <button class="dist-btn ghost" @click="downloadTemplate">📥 Скачать шаблон</button>
+            <button class="dist-btn ghost" @click="downloadTemplate"><BkIcon name="import" size="sm" /> Скачать шаблон</button>
             <label class="dist-btn primary" style="cursor:pointer">
               📤 Выбрать файл
               <input type="file" accept=".xlsx,.xls" style="display:none" @change="onFileSelected"/>
@@ -382,6 +382,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import BkIcon from '@/components/ui/BkIcon.vue';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';

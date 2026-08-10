@@ -112,7 +112,7 @@
             <span v-if="!sidebarCollapsed">Админ панель</span>
           </router-link>
           <router-link v-if="userStore.hasAccess('telegram', 'view')" :to="{ name: 'telegram-admin' }" class="sidebar-item" :class="{ active: currentRoute === 'telegram-admin' }">
-            <span class="sidebar-icon" style="font-size:14px;">✈</span>
+            <span class="sidebar-icon" style="font-size:14px;"><BkIcon name="send" size="sm" /></span>
             <span v-if="!sidebarCollapsed">Telegram-бот</span>
           </router-link>
         </nav>
@@ -147,7 +147,7 @@
             <BkIcon name="import" size="sm" light/> Импорт данных
           </button>
           <a class="user-dropdown-btn telegram-btn" href="https://t.me/supplyportal_bot" target="_blank" @click="showUserMenu = false">
-            <span class="tg-icon">✈</span>
+            <span class="tg-icon"><BkIcon name="send" size="sm" /></span>
             {{ userStore.currentUser.telegram_connected ? 'Telegram-бот' : 'Подключить бота' }}
             <span v-if="userStore.currentUser.telegram_connected" class="tg-connected">✓</span>
           </a>

@@ -175,7 +175,7 @@
                   <span class="rom-status" :class="'st-' + (r.order_status || 'none')">
                     {{ statusLabel(r.order_status) }}
                   </span>
-                  <span v-if="r.order_comment" class="rom-comment-icon" :title="r.order_comment">💬</span>
+                  <span v-if="r.order_comment" class="rom-comment-icon" :title="r.order_comment"><BkIcon name="chat" size="sm" /></span>
                 </td>
                 <td class="rom-td-volume">
                   <template v-if="r.order_status">

@@ -8,9 +8,9 @@
         <div class="uset-role">{{ displayRole }}</div>
         <div class="uset-meta">
           <span v-if="userStore.currentUser?.email" class="uset-meta-item">{{ userStore.currentUser.email }}</span>
-          <span v-if="userStore.currentUser?.telegram_connected" class="uset-meta-item uset-tg-badge">✈ Telegram подключён</span>
+          <span v-if="userStore.currentUser?.telegram_connected" class="uset-meta-item uset-tg-badge"><BkIcon name="send" size="sm" /> Telegram подключён</span>
           <span v-else class="uset-meta-item uset-tg-badge uset-tg-off">
-            <a href="https://t.me/supplyportal_bot" target="_blank">✈ Подключить бот</a>
+            <a href="https://t.me/supplyportal_bot" target="_blank"><BkIcon name="send" size="sm" /> Подключить бот</a>
           </span>
         </div>
       </div>
@@ -44,7 +44,7 @@
       <!-- Правая колонка: уведомления -->
       <div class="uset-card">
         <div class="uset-card-header">
-          <div class="uset-card-icon">🔔</div>
+          <div class="uset-card-icon"><BkIcon name="bell" size="sm" /></div>
           <div>
             <div class="uset-card-title">Уведомления в Telegram</div>
             <div class="uset-card-desc" v-if="userStore.currentUser?.telegram_connected">Выберите какие уведомления получать в бот.</div>
@@ -61,7 +61,7 @@
           </div>
         </div>
         <div v-else class="uset-empty-tg">
-          <div class="uset-empty-tg-icon">✈</div>
+          <div class="uset-empty-tg-icon"><BkIcon name="send" size="sm" /></div>
           <a href="https://t.me/supplyportal_bot" target="_blank" class="uset-btn-primary">Подключить Telegram-бот</a>
         </div>
       </div>
