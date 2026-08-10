@@ -1277,7 +1277,8 @@ try {
     $suppliers = $pdo->query("
         SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
                COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time,
-               sst.weekly_deadline_dow, sst.weekly_deadline_time
+               sst.weekly_deadline_dow, sst.weekly_deadline_time,
+               COALESCE(sst.auto_submit_previous, 0) AS auto_submit_previous
         FROM suppliers s
         JOIN supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
         LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
@@ -1296,6 +1297,10 @@ try {
         // разделом кабинета, а не в общем списке поставщиков. Напоминание
         // должно вести именно туда, иначе ресторан попадает на пустой экран.
         $isWorkshop = soLsSupplierEnabled($pdo, (string)$supId);
+        // Повтор прошлой заявки после дедлайна. От него зависит, что писать
+        // ресторану в сообщении об истёкшем дедлайне: поставки не будет
+        // вовсе — или приедет то же, что в прошлый раз.
+        $autoRepeat = (int)($sup['auto_submit_previous'] ?? 0) === 1;
         $defaultDeadlineTime = $sup['default_deadline_time'];
         // Недельный режим подачи: нормализуем dow к int 1..7 (иначе null), время — строка|null
         $weeklyDow = (isset($sup['weekly_deadline_dow']) && $sup['weekly_deadline_dow'] !== null && $sup['weekly_deadline_dow'] !== '' && (int)$sup['weekly_deadline_dow'] >= 1 && (int)$sup['weekly_deadline_dow'] <= 7) ? (int)$sup['weekly_deadline_dow'] : null;
@@ -1555,8 +1560,20 @@ try {
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
                 $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n\n";
-                $msgText .= "Заявка не подана, приём закрыт — поставки {$deliveryHuman} не будет.\n\n";
-                $msgText .= "Если товар нужен, напишите в отдел закупок: они могут открыть внеплановую заявку.";
+                $msgText .= "Приём заявок на эту дату закрыт.\n\n";
+                // У поставщика может быть включён повтор: система сама подаст
+                // прошлую заявку ресторана. Тогда поставка будет — но та же,
+                // что в прошлый раз. Если повторять нечего (ресторан ни разу
+                // не подавал), поставки не будет.
+                if ($autoRepeat) {
+                    $prevChk = $pdo->prepare("SELECT 1 FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND legal_entity = ? AND status IN ('submitted','locked') AND delivery_date < ? ORDER BY delivery_date DESC LIMIT 1");
+                    $prevChk->execute([$supId, $restNum, $sup['legal_entity'], $deliveryDate]);
+                    $msgText .= $prevChk->fetchColumn()
+                        ? "Поставщику уйдёт повтор вашей прошлой заявки — приедет то же, что в прошлый раз."
+                        : "Повторять нечего: прошлых заявок нет, поставки {$deliveryHuman} не будет.";
+                } else {
+                    $msgText .= "Поставки {$deliveryHuman} не будет.";
+                }
             } elseif ($reminderType === 'evening') {
                 $msgText = "🌙 <b>Напоминание: заявка поставщику</b>\n\n";
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
@@ -1576,19 +1593,6 @@ try {
             }
 
             $restGroup = $byRest[$restNum]['group'] ?? 'BK_VM';
-            // Контакт отдела закупок — из настроек портала, не хардкодом.
-            // helpers.php в этот крон не подключается (там своя инициализация),
-            // поэтому читаем настройку сами и один раз за прогон.
-            static $supportTg = null;
-            if ($supportTg === null) {
-                $supportTg = '';
-                try {
-                    $v = $pdo->query("SELECT svalue FROM app_settings WHERE skey = 'support_telegram' LIMIT 1")->fetchColumn();
-                    $v = ltrim(trim((string)$v), '@');
-                    $v = preg_replace('#^https?://(t\\.me|telegram\\.me)/#i', '', $v);
-                    if (preg_match('/^[A-Za-z0-9_]{1,64}$/', $v)) $supportTg = $v;
-                } catch (Throwable $e) { /* нет настройки — просто без кнопки */ }
-            }
             $redirect = $isWorkshop
                 ? '/restaurant/orders/production'
                 : "/restaurant/orders/supplier/{$supId}";
@@ -1617,14 +1621,11 @@ try {
                     // страницу с автоматическим входом. Пошаговый ввод в чате
                     // убран: там не видно ни примечаний, ни минимального заказа.
                     //
-                    // После истёкшего дедлайна кнопка «Подать заявку» бессмысленна:
-                    // сервер на попытку подачи ответит «Приём заявок на эту дату
-                    // закрыт». Вместо неё — связь с закупками, они единственные,
-                    // кто может открыть внеплановую заявку.
+                    // После истёкшего дедлайна кнопок нет вовсе: подать заявку
+                    // уже нельзя — сервер ответит «Приём заявок на эту дату
+                    // закрыт». Сообщение просто говорит, чего ждать.
                     if ($reminderType === 'expired') {
-                        $rows = $supportTg
-                            ? [[['text' => 'Написать в отдел закупок', 'url' => "https://t.me/{$supportTg}"]]]
-                            : [];
+                        $rows = [];
                     } else {
                         $rows = [[[
                             'text' => $isWorkshop ? '🥖 Заказать тесто' : '📝 Подать заявку',
@@ -1652,7 +1653,9 @@ try {
                     ];
                     $pushTitle = $pushTitles[$reminderType] ?? '⏰ Напоминание: заявка поставщику';
                     if ($reminderType === 'expired') {
-                        $pushBody = "{$supName}: заявка на {$deliveryDate} не подана, приём закрыт. Нужен товар — напишите в закупки.";
+                        $pushBody = $autoRepeat
+                            ? "{$supName}: заявка не подана, приём закрыт — уйдёт повтор прошлой заявки."
+                            : "{$supName}: заявка не подана, приём закрыт — поставки {$deliveryHuman} не будет.";
                     } else {
                         $pushBody = "{$supName}: подайте заявку на {$deliveryDate}, дедлайн {$deadlineFmt}.";
                     }
