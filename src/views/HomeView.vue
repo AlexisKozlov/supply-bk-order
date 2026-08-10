@@ -37,39 +37,16 @@
 
     <!-- Body — centered content -->
     <div class="p-body">
-      <!-- ГОСТЬ. Раньше здесь стояли те же плитки разделов, что и у своих:
-           снаружи читался весь состав портала. Теперь — рассказ в двух
-           строках и два входа, без единого названия раздела. -->
-      <div v-if="!userStore.isAuthenticated" class="p-kino">
-        <div class="p-kino-text">
-          <h2 class="p-kino-title">Портал<em>закупок</em></h2>
-          <p class="p-kino-lead">
-            Здесь отдел закупок и рестораны сети ведут поставки: заявки поставщикам,
-            заказы со склада, остатки, сроки годности и графики.
-          </p>
-          <div class="p-kino-actions">
-            <button class="p-guest-btn p-guest-btn-primary" @click="openLogin">Вход для отдела закупок</button>
-            <a class="p-guest-btn" href="/restaurant/login">Вход для ресторана</a>
-          </div>
-          <p class="p-guest-note">
-            Нет доступа? Напишите
-            <a :href="`https://t.me/${support}`" target="_blank" rel="noopener">@{{ support }}</a> — заведут учётную запись.
-          </p>
-        </div>
-        <!-- Цепочка поставок: поставщик — склад — ресторан. Крутится сама и
-             беззвучно, один раз, потом замирает на последнем кадре. На
-             телефонах и при «уменьшить движение» — просто картинка.
-             ?v=2 в адресе — потому что статика отдаётся с кешем на неделю:
-             без номера версии у тех, кто уже заходил, остался бы старый
-             ролик. Меняете файл — увеличьте номер. -->
-        <div class="p-kino-art">
-          <video
-            v-if="showChain"
-            src="/home-chain.mp4?v=2"
-            poster="/home-chain.jpg?v=2"
-            autoplay muted playsinline preload="metadata"
-          ></video>
-          <img v-else src="/home-chain.jpg?v=2" alt="" />
+      <!-- ГОСТЬ. Портал открыт наружу: посторонним тут делать нечего,
+           поэтому ни состава разделов, ни рассказа о том, чем занят отдел.
+           Название и два входа — всё, что нужно человеку, который пришёл
+           работать. -->
+      <div v-if="!userStore.isAuthenticated" class="p-guest">
+        <div class="p-guest-mark"><SupplyLogo :size="84" /></div>
+        <h2 class="p-guest-title">Портал<em>закупок</em></h2>
+        <div class="p-guest-actions">
+          <button class="p-guest-btn p-guest-btn-primary" @click="openLogin">Вход для отдела закупок</button>
+          <a class="p-guest-btn" href="/restaurant/login">Вход для ресторана</a>
         </div>
       </div>
 
@@ -165,6 +142,12 @@
     <footer class="p-footer">
       <span v-if="userStore.isAuthenticated" class="p-footer-ver">Supply Department Portal v2.0.0</span>
       <span v-else class="p-footer-ver">© Supply Department</span>
+      <!-- Правила и контакт для доступа живут в подвале: на самом экране
+           они отвлекали от единственного, зачем сюда приходят, — от входа. -->
+      <nav v-if="!userStore.isAuthenticated" class="p-footer-links">
+        <router-link to="/data-rules">Правила обработки данных</router-link>
+        <a :href="`https://t.me/${support}`" target="_blank" rel="noopener">Нет доступа? @{{ support }}</a>
+      </nav>
       <button v-if="userStore.isAuthenticated" class="p-footer-btn" @click="showLogoutConfirm = true">Выйти из аккаунта</button>
     </footer>
 
@@ -778,35 +761,14 @@ function confirmLogout() {
 /* Body */
 .p-body { flex: 1; display: flex; flex-direction: column; position: relative; z-index: 1; padding: 0 36px 26px; gap: 16px; min-height: 0; }
 
-/* ─── Гость: кинокадр ─── */
-.p-kino { flex: 1; display: grid; grid-template-columns: 57fr 43fr; align-items: center; min-height: 0; margin: 0 -36px; }
-.p-kino-text { padding: 0 36px 0 56px; }
-.p-kino-title { font-family: 'Flame', 'Sora', sans-serif; font-size: clamp(38px, 5vw, 62px); line-height: .94;
-  color: #F5E6D0; text-transform: uppercase; letter-spacing: -.5px; margin: 0; }
-.p-kino-title em { font-style: normal; color: #FF8732; display: block; }
-.p-kino-lead { margin: 20px 0 0; font-size: var(--tk-fz-xl); line-height: 1.65; color: rgba(245,230,208,.62); max-width: 44ch; }
-.p-kino-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-3); margin-top: 30px; }
-/* Иллюстрация уходит за край и растворяется в фоне: рамки нет, поэтому
-   светлая картинка не читается как приклеенный прямоугольник.
-   Растворение делаем двумя слоями — по горизонтали на самой картинке, по
-   вертикали на её обёртке. Два градиента в одной маске требуют
-   mask-composite, а он поддержан не везде и молча даёт склейку. */
-.p-kino-art {
-  /* Высота по картинке, а не по колонке: иначе накладка растворения
-     растягивается на пустоту сверху и снизу, и край видео остаётся резким. */
-  position: relative; align-self: center; display: flex; justify-content: center; overflow: hidden;
-}
-.p-kino-art video, .p-kino-art img { width: 150%; max-width: none; display: block; }
-/* Края растворяем накладкой в цвет фона, а не маской: видео браузер рисует
-   отдельным слоем и CSS-маску к нему не применяет — края оставались
-   резаными. Цвета взяты с самого фона: сверху он темнее, снизу теплее.
-   Картинку не затемняем — фильтр делал её грязной. */
-.p-kino-art::after {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background:
-    linear-gradient(180deg, #140b05 0%, rgba(20,11,5,.5) 14%, rgba(20,11,5,0) 34%, rgba(42,22,10,0) 70%, rgba(42,22,10,.5) 88%, #2a160a 100%),
-    linear-gradient(90deg, #160c06 0%, rgba(22,12,6,.6) 18%, rgba(22,12,6,0) 46%);
-}
+/* ─── Гость ─── */
+.p-guest { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 26px; text-align: center; max-width: 620px; margin: 0 auto; padding-bottom: 40px; }
+.p-guest-mark { display: flex; opacity: .95; }
+.p-guest-title { font-family: 'Flame', 'Sora', sans-serif; font-size: clamp(44px, 7vw, 84px);
+  line-height: .9; color: #F5E6D0; text-transform: uppercase; letter-spacing: -1px; margin: 0; }
+.p-guest-title em { font-style: normal; color: #FF8732; display: block; }
+.p-guest-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-3); justify-content: center; margin-top: 8px; }
 
 /* Активность команды — панель справа поверх страницы. */
 .p-dash { position: fixed; right: 24px; top: 50%; transform: translateY(-50%); z-index: 50; width: 280px; background: rgba(20,12,6,.75); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,.07); border-radius: 16px; padding: 16px; box-shadow: 0 8px 40px rgba(0,0,0,.35); }
@@ -886,6 +848,9 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
 /* Footer */
 .p-footer { padding: 14px 36px; display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1; border-top: 1px solid rgba(255,255,255,.04); flex-shrink: 0; }
 .p-footer-ver { font-size: 9px; color: rgba(245,230,208,.3); }
+.p-footer-links { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+.p-footer-links a { font-size: 11px; color: rgba(245,230,208,.45); text-decoration: none; }
+.p-footer-links a:hover { color: rgba(245,230,208,.8); text-decoration: underline; }
 .p-footer-btn { background: none; border: none; color: rgba(245,230,208,.4); font-size: 11px; font-family: inherit; cursor: pointer; font-weight: 500; }
 .p-footer-btn:hover { color: rgba(245,230,208,.7); }
 
@@ -962,20 +927,6 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
 @media (max-width: 600px) { .login-left { display: none; } }
 
 /* Responsive */
-@media (max-width: 900px) {
-  /* Кинокадр складывается: сначала текст, картинка уходит вниз полосой. */
-  .p-kino { grid-template-columns: 1fr; align-content: center; gap: 22px; margin: 0; padding: 24px 0; }
-  .p-kino-text { padding: 0; text-align: center; }
-  .p-kino-lead { margin-left: auto; margin-right: auto; }
-  .p-kino-actions { justify-content: center; }
-  .p-kino-art { height: auto; }
-  .p-kino-art video, .p-kino-art img { width: 100%; }
-  .p-kino-art::after {
-    background:
-      linear-gradient(180deg, #1a0e07 0%, rgba(26,14,7,0) 20%, rgba(26,14,7,0) 80%, #1a0e07 100%),
-      linear-gradient(90deg, #1a0e07 0%, rgba(26,14,7,0) 16%, rgba(26,14,7,0) 84%, #1a0e07 100%);
-  }
-}
 @media (max-width: 760px) {
   .p-header { padding: 12px 16px; }
   .p-body { padding: 0 16px 20px; gap: 14px; }
@@ -984,6 +935,9 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
   .p-find-box { height: 54px; padding: 0 14px; }
   .p-find-input { font-size: 17px; }
   .p-find-stats { flex-direction: column; align-items: center; gap: 4px; }
+  .p-guest { gap: 20px; padding-bottom: 20px; }
+  .p-guest-mark :deep(svg) { width: 64px; height: 64px; }
+  .p-guest-actions { flex-direction: column; align-self: stretch; }
 }
 @media (max-width: 480px) {
   .p-header { padding: 10px 12px; }
@@ -992,7 +946,9 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
   .p-entity { display: none; }
   .p-uname { display: none; }
   .p-body { padding: 0 10px 16px; }
-  .p-kino-title { font-size: 32px; }
+  .p-guest-title { font-size: 46px; }
+  .p-footer { flex-direction: column; gap: 8px; text-align: center; }
+  .p-footer-links { gap: 14px; }
   .p-footer { padding: 10px 12px; }
   .login-card { flex-direction: column; }
   .login-left { display: none; }
@@ -1128,25 +1084,6 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
 @keyframes loaderFadeOut { from { opacity: 1; } to { opacity: 0; } }
 
 /* ─── Визитка для гостя ─── */
-.p-guest { max-width: 720px; margin: 0 auto; text-align: center; }
-/* Картинка и видео одного размера — при подмене ничего не прыгает.
-   Рамка и лёгкое приглушение: светлая иллюстрация на тёмной странице
-   иначе бьёт в глаза. */
-.p-guest-art {
-  width: 100%; max-width: 480px; height: auto;
-  display: block; margin: 0 auto 22px;
-  border-radius: var(--tk-r-lg);
-  border: 1px solid rgba(255,255,255,.08);
-  box-shadow: 0 14px 40px rgba(0,0,0,.35);
-  filter: brightness(.92) saturate(1.05);
-}
-.p-guest-lead {
-  font-size: var(--tk-fz-xl);
-  line-height: var(--tk-lh-loose);
-  color: rgba(245,230,208,.85);
-  margin: 0 0 26px;
-}
-.p-guest-actions { display: flex; flex-wrap: wrap; gap: var(--tk-s-3); justify-content: center; }
 .p-guest-btn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: var(--tk-touch-min);
@@ -1168,7 +1105,6 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
 .p-guest-note a:hover { text-decoration: underline; }
 
 @media (max-width: 620px) {
-  .p-guest-lead { font-size: var(--tk-fz-lg); }
   .p-guest-actions { flex-direction: column; }
 }
 
