@@ -86,7 +86,12 @@ function decline() {
 /* ── Уведомление ── */
 .cookie {
   position: fixed;
-  left: 16px; right: 16px; bottom: 16px;
+  left: 16px; right: 16px;
+  /* В кабинете ресторана снизу закреплено меню (.mob-tabbar, 51px) —
+     уведомление садилось прямо на него, и до вкладок было не дотянуться,
+     пока не нажмёшь «Принять». Поднимаем над меню; --cookie-bottom
+     задаёт кабинет, на остальных страницах отступ обычный. */
+  bottom: var(--cookie-bottom, 16px);
   z-index: 9000;
   max-width: 760px;
   margin: 0 auto;
