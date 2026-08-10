@@ -255,12 +255,34 @@ router.onError((error) => {
   }
 });
 
+// Последние открытые разделы — их показывает главная под строкой поиска.
+// Пишем здесь, а не в каждой странице: одно место, любой новый раздел
+// попадает в список сам. Храним только имена маршрутов, не данные.
+const RECENT_KEY = 'sd_recent_routes';
+const RECENT_MAX = 8;
+
+export function getRecentRoutes() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter(x => typeof x === 'string') : [];
+  } catch { return []; }
+}
+
+function rememberRoute(name) {
+  if (!name || name === 'home') return;
+  try {
+    const list = [name, ...getRecentRoutes().filter(n => n !== name)].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch { /* приватный режим браузера — просто без истории */ }
+}
+
 router.afterEach((to) => {
   const pageTitle = to.meta.title;
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
   // Кабинет ресторана и портал закупок ставятся как разные приложения —
   // подставляем нужный манифест и иконку под текущий раздел.
   syncPwaIdentity(to.path);
+  if (!to.path.startsWith('/restaurant')) rememberRoute(to.name);
 });
 
 router.beforeEach(async (to) => {

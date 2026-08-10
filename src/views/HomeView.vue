@@ -36,7 +36,7 @@
     </div>
 
     <!-- Body — centered content -->
-    <div class="p-body" :class="{ 'p-body-dash': userStore.isAuthenticated && activityItems.length }">
+    <div class="p-body">
       <!-- ГОСТЬ. Раньше здесь стояли те же плитки разделов, что и у своих:
            снаружи читался весь состав портала. Теперь — рассказ в двух
            строках и два входа, без единого названия раздела. -->
@@ -73,39 +73,71 @@
         </div>
       </div>
 
-      <!-- СОТРУДНИК. Приветствие и три цифры «что сегодня» одной строкой. -->
-      <div v-if="userStore.isAuthenticated" class="p-headline">
+      <!-- СОТРУДНИК. Главная — это строка поиска: разделов почти полсотни,
+           каждый день нужны 5-8, и меню слева уже есть. Плитки повторяли
+           меню; поле спрашивает «что открыть» и ведёт туда за два нажатия. -->
+      <div v-if="userStore.isAuthenticated" class="p-find">
         <h2 class="p-hello">Добрый день, <em>{{ firstName }}</em></h2>
-        <div v-if="statChips.length" class="p-stats">
-          <a v-for="s in statChips" :key="s.key" class="p-stat" :class="'p-stat-' + s.tone"
-             :href="'/' + s.route" @click.prevent="goTo(s.route)">
-            <span class="p-stat-n">{{ s.value }}</span>
-            <span class="p-stat-txt"><b>{{ s.title }}</b>{{ s.sub }}</span>
+
+        <div class="p-find-box" :class="{ 'p-find-open': findResults.length }">
+          <BkIcon name="search" size="md" />
+          <input
+            ref="findInput"
+            v-model="findQuery"
+            class="p-find-input"
+            type="text"
+            placeholder="Что нужно открыть?"
+            autocomplete="off"
+            spellcheck="false"
+            @keydown.down.prevent="moveFind(1)"
+            @keydown.up.prevent="moveFind(-1)"
+            @keydown.enter.prevent="openFind()"
+            @keydown.escape="findQuery = ''"
+          />
+          <button v-if="findQuery" class="p-find-clear" title="Очистить" @click="findQuery = ''; findInput?.focus()">
+            <BkIcon name="close" size="xs" />
+          </button>
+        </div>
+
+        <!-- Подсказки под полем -->
+        <div v-if="findQuery && findResults.length" class="p-find-list">
+          <a
+            v-for="(r, i) in findResults" :key="r.route"
+            class="p-find-item" :class="{ 'p-find-active': i === findIdx }"
+            :href="'/' + r.route"
+            @mouseenter="findIdx = i"
+            @click.prevent="goTo(r.route)"
+          >
+            <BkIcon :name="r.icon" size="sm" />
+            <span v-html="highlightFind(r.label)"></span>
           </a>
         </div>
-      </div>
+        <div v-else-if="findQuery" class="p-find-empty">
+          Раздела с таким названием нет.
+          <a href="/search-cards" @click.prevent="goTo('search-cards')">Поискать «{{ findQuery }}» среди товаров</a>
+        </div>
 
-      <!-- Плитки разделов — только вошедшим и только те, что им открыты. -->
-      <div v-if="userStore.isAuthenticated" class="p-bento">
-        <a
-          v-for="t in bentoTiles" :key="t.key"
-          class="p-tile" :class="['p-tile-' + t.tone, { 'p-tile-hero': t.hero }]"
-          :href="'/' + t.route"
-          @click.prevent="goTo(t.route)"
-        >
-          <span v-if="t.badge" class="p-tile-badge">{{ t.badge }}</span>
-          <span class="p-tile-ico"><BkIcon :name="t.icon" size="lg" light /></span>
-          <span class="p-tile-body">
-            <span class="p-tile-name">{{ t.name }}</span>
-            <span v-if="t.note" class="p-tile-note">{{ t.note }}</span>
-          </span>
-        </a>
-        <button class="p-tile p-tile-more" @click="showToolsFolder = true">
-          <span class="p-tile-ico"><BkIcon name="search" size="lg" light /></span>
-          <span class="p-tile-body">
-            <span class="p-tile-name">Ещё {{ restSections.length }} {{ sectionsWord }}</span>
-            <span class="p-tile-note">Поиск по «/»</span>
-          </span>
+        <!-- Пустое поле — недавние разделы -->
+        <div v-else class="p-find-recent">
+          <span class="p-find-recent-label">{{ recentSections.length ? 'Недавно' : 'Часто нужны' }}</span>
+          <a
+            v-for="r in recentSections" :key="r.route"
+            class="p-find-chip" :href="'/' + r.route" @click.prevent="goTo(r.route)"
+          >
+            <BkIcon :name="r.icon" size="xs" /> {{ r.label }}
+          </a>
+        </div>
+
+        <!-- Три цифры «что сегодня» — тихой строкой, не карточками -->
+        <div v-if="statChips.length" class="p-find-stats">
+          <a v-for="s in statChips" :key="s.key" class="p-find-stat" :class="'p-stat-' + s.tone"
+             :href="'/' + s.route" @click.prevent="goTo(s.route)">
+            <b>{{ s.value }}</b> {{ s.title }}<span>{{ s.sub }}</span>
+          </a>
+        </div>
+
+        <button class="p-find-all" @click="showToolsFolder = true">
+          Все разделы — {{ allSections.length }}
         </button>
       </div>
 
@@ -264,7 +296,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, onBeforeUnmount } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useSupportContact } from '@/lib/supportContact.js';
@@ -276,6 +308,7 @@ import { useCanvasParticles } from '@/composables/useCanvasParticles.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import { ALL_NAV_ITEMS } from '@/lib/navSections.js';
+import { getRecentRoutes } from '@/router/index.js';
 import { parseRestaurantInput } from '@/lib/legalEntities.js';
 
 
@@ -399,47 +432,93 @@ async function checkMaintenanceForHome() {
 // Плитки показываем только те, что человеку открыты: раньше список был
 // один на всех, и человек с урезанными правами тыкал в раздел, который тут
 // же отвечал «нет доступа». Гостю плитки не показываются вовсе.
-// Крупные плитки главной. Порядок — по тому, чем пользуются каждый день.
-// Первая плитка большая: заказ собирают чаще всего остального вместе взятого.
-const ALL_TILES = [
-  { key: 'order',             route: 'order',             name: 'Новый заказ',        icon: 'package',          tone: 'red',    hero: true,
-    note: 'Собрать заказ поставщику — расчёт по расходу, остаткам и буферу.' },
-  { key: 'supplier-orders',   route: 'supplier-orders',   name: 'Заявки поставщикам', icon: 'factory',          tone: 'orange', note: 'Графики, напоминания, Excel поставщику' },
-  { key: 'shelf-life',        route: 'shelf-life',        name: 'Сроки годности',     icon: 'shelfLife',        tone: 'yellow', note: 'Что горит на складе' },
-  { key: 'restaurant-orders', route: 'restaurant-orders', name: 'Заказы ресторанов',  icon: 'restaurantOrders', tone: 'cream',  note: 'Заявки со склада и приёмка' },
-  { key: 'analytics',         route: 'analytics',         name: 'Аналитика',          icon: 'analytics',        tone: 'brown',  note: 'Расход, прогноз, буфер' },
-  { key: 'truck-loading',     route: 'truck-loading',     name: 'Загрузка машин',     icon: 'truckLoad',        tone: 'plain' },
-  { key: 'plan-fact',         route: 'plan-fact',         name: 'Поставки',           icon: 'delivery',         tone: 'plain' },
-  { key: 'tasks',             route: 'tasks',             name: 'Задачи',             icon: 'clipboard',        tone: 'plain' },
-];
-
-const bentoTiles = computed(() =>
-  ALL_TILES
-    .filter(t => userStore.hasAccess(t.key, 'view'))
-    .map(t => ({ ...t, badge: tileBadge(t.key) }))
-);
-
-// Всё остальное, что человеку открыто, — во всплывающем окне «Ещё».
-// Список берётся из единого навигационного справочника, поэтому новый
-// раздел появляется здесь сам, без правок этого файла.
-const restSections = computed(() => {
-  const shown = new Set(ALL_TILES.map(t => t.route));
+// Все разделы, что человеку открыты. Список берётся из единого
+// навигационного справочника — новый раздел появляется здесь сам.
+const allSections = computed(() => {
   const seen = new Set();
   return ALL_NAV_ITEMS.filter(item => {
-    if (!item.route || shown.has(item.route) || seen.has(item.route)) return false;
+    if (!item.route || seen.has(item.route)) return false;
+    if (item.requiresAdmin && userStore.currentUser?.role !== 'admin') return false;
     if (item.module && !userStore.hasAccess(item.module, 'view')) return false;
     seen.add(item.route);
     return true;
   });
 });
+// Старое имя оставлено: окно «Все разделы» показывает тот же список.
+const restSections = allSections;
 
-const sectionsWord = computed(() => {
-  const n = restSections.value.length % 100;
-  if (n > 10 && n < 20) return 'разделов';
-  const d = n % 10;
-  if (d === 1) return 'раздел';
-  if (d >= 2 && d <= 4) return 'раздела';
-  return 'разделов';
+// ── Поиск по разделам ──
+const findQuery = ref('');
+const findIdx = ref(0);
+const findInput = ref(null);
+
+// Ищем по названию и по ключевым словам: «камако» найдёт «Заявки
+// поставщикам», «срок» — «Сроки годности». Раскладку не угадываем:
+// достаточно совпадения куска строки.
+const findResults = computed(() => {
+  const q = findQuery.value.trim().toLowerCase();
+  if (!q) return [];
+  const hit = item => {
+    const label = item.label.toLowerCase();
+    const kw = (item.keywords || '').toLowerCase();
+    if (label.startsWith(q)) return 0;
+    if (label.includes(q)) return 1;
+    if (kw.includes(q)) return 2;
+    return -1;
+  };
+  // При равном совпадении вперёд идут разделы, где человек недавно был:
+  // «заяв» у закупщика — это «Заявки поставщикам», а не «Заявка на пропуск».
+  const recent = getRecentRoutes();
+  const seenAt = r => {
+    const i = recent.indexOf(r);
+    return i < 0 ? 99 : i;
+  };
+  return allSections.value
+    .map(item => ({ item, rank: hit(item) }))
+    .filter(r => r.rank >= 0)
+    .sort((a, b) => a.rank - b.rank || seenAt(a.item.route) - seenAt(b.item.route))
+    .slice(0, 7)
+    .map(r => r.item);
+});
+
+watch(findQuery, () => { findIdx.value = 0; });
+
+function moveFind(step) {
+  const n = findResults.value.length;
+  if (!n) return;
+  findIdx.value = (findIdx.value + step + n) % n;
+}
+
+function openFind() {
+  const target = findResults.value[findIdx.value];
+  if (target) goTo(target.route);
+  else if (findQuery.value.trim()) goTo('search-cards');
+}
+
+// Подсветка совпавшего куска в подсказке.
+function highlightFind(label) {
+  const q = findQuery.value.trim();
+  if (!q) return escapeHtml(label);
+  const at = label.toLowerCase().indexOf(q.toLowerCase());
+  if (at < 0) return escapeHtml(label);
+  return escapeHtml(label.slice(0, at))
+    + '<mark>' + escapeHtml(label.slice(at, at + q.length)) + '</mark>'
+    + escapeHtml(label.slice(at + q.length));
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Недавно открытые разделы. Пока истории нет — показываем те, с которых
+// обычно начинают день.
+const FALLBACK_RECENT = ['order', 'supplier-orders', 'restaurant-orders', 'shelf-life'];
+
+const recentSections = computed(() => {
+  const byRoute = new Map(allSections.value.map(i => [i.route, i]));
+  const recent = getRecentRoutes().map(r => byRoute.get(r)).filter(Boolean);
+  const list = recent.length ? recent : FALLBACK_RECENT.map(r => byRoute.get(r)).filter(Boolean);
+  return list.slice(0, 5);
 });
 
 // Три цифры «что сегодня». Считает бэкенд (RPC home_stats): каждая цифра
@@ -481,16 +560,6 @@ function plural(n, one, few, many) {
   return many;
 }
 
-// Цифра-метка на плитке: то же число, что и в строке сверху, чтобы
-// человек видел его и там, куда собирается нажать.
-function tileBadge(key) {
-  const s = homeStats.value;
-  if (!s) return null;
-  if (key === 'supplier-orders' && s.pending?.value > 0) return `${s.pending.value} не подано`;
-  if (key === 'shelf-life' && s.expiring?.value > 0) return String(s.expiring.value);
-  return null;
-}
-
 async function loadHomeStats() {
   try {
     const { data } = await db.rpc('home_stats', {});
@@ -522,10 +591,16 @@ onMounted(async () => {
     }
   }
   document.addEventListener('click', handleOutsideClick);
+  document.addEventListener('keydown', handleSlashKey);
   startBg();
   checkMaintenanceForHome();
   loadActivity();
-  if (userStore.isAuthenticated) loadHomeStats();
+  if (userStore.isAuthenticated) {
+    loadHomeStats();
+    // Курсор сразу в поле: главная теперь и есть поиск, человек может
+    // начать печатать не целясь мышью.
+    nextTick(() => findInput.value?.focus());
+  }
 });
 onBeforeUnmount(() => {
   showLoader.value = false;
@@ -533,6 +608,7 @@ onBeforeUnmount(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
+  document.removeEventListener('keydown', handleSlashKey);
   stopBg();
   if (maintenanceTickTimer) clearInterval(maintenanceTickTimer);
   _loaderTimers.forEach(id => clearTimeout(id));
@@ -541,9 +617,19 @@ onUnmounted(() => {
 
 /* Анимация фона вынесена в useCanvasParticles */
 
+// «/» ставит курсор в поле — та же привычка, что и в остальном портале.
+function handleSlashKey(e) {
+  if (e.key !== '/' || e.ctrlKey || e.altKey || e.metaKey) return;
+  const tag = document.activeElement?.tagName;
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+  if (!userStore.isAuthenticated) return;
+  e.preventDefault();
+  findInput.value?.focus();
+}
+
 function handleOutsideClick(e) {
   if (showUserMenu.value && !e.target.closest('.p-header-right')) showUserMenu.value = false;
-  if (showToolsFolder.value && !e.target.closest('.p-tools-folder') && !e.target.closest('.p-tile-more')) showToolsFolder.value = false;
+  if (showToolsFolder.value && !e.target.closest('.p-tools-folder') && !e.target.closest('.p-find-all')) showToolsFolder.value = false;
 }
 
 function openLogin() {
@@ -694,60 +780,7 @@ function confirmLogout() {
     linear-gradient(90deg, #160c06 0%, rgba(22,12,6,.6) 18%, rgba(22,12,6,0) 46%);
 }
 
-/* ─── Сотрудник: приветствие и три цифры ─── */
-.p-headline { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; flex-shrink: 0; padding-top: 8px; }
-.p-hello { font-family: 'Flame', 'Sora', sans-serif; font-size: 27px; color: #F5E6D0; text-transform: uppercase; margin: 0; }
-.p-hello em { font-style: normal; color: #FF8732; }
-.p-stats { display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap; }
-.p-stat { display: flex; align-items: center; gap: 10px; text-decoration: none;
-  background: rgba(245,235,220,.07); border: 1px solid rgba(245,230,208,.12);
-  border-radius: var(--tk-r-pill); padding: 8px 18px 8px 12px; transition: background .15s, border-color .15s; }
-.p-stat:hover { background: rgba(245,235,220,.12); border-color: rgba(245,230,208,.28); }
-.p-stat:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
-.p-stat-n { font-family: 'Flame', 'Sora', sans-serif; font-size: 22px; line-height: 1; }
-.p-stat-txt { font-size: 11.5px; line-height: 1.25; color: rgba(245,230,208,.62); }
-.p-stat-txt b { display: block; color: rgba(245,230,208,.9); font-weight: 700; font-size: 12px; }
-.p-stat-red .p-stat-n { color: #FF4A21; }
-.p-stat-orange .p-stat-n { color: var(--brand-orange); }
-.p-stat-yellow .p-stat-n { color: var(--brand-yellow); }
-.p-stat-green .p-stat-n { color: #8FD07A; }
-
-/* ─── Сотрудник: плитки ─── */
-.p-bento { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: minmax(96px, 1fr); grid-auto-flow: row dense; gap: 13px; }
-.p-tile { position: relative; overflow: hidden; border: 0; border-radius: 22px; padding: 18px 22px;
-  display: flex; flex-direction: column; justify-content: space-between; gap: 10px;
-  text-decoration: none; text-align: left; font-family: inherit; cursor: pointer;
-  transition: transform .16s ease, box-shadow .16s ease; }
-.p-tile:hover { transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0,0,0,.35); }
-.p-tile:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
-.p-tile-ico { align-self: flex-start; opacity: .85; }
-/* Значки в наборе цветные — на фирменных плитках они рябят. Перекрашиваем
-   их в цвет подписи плитки: заливка тем же цветом, но полупрозрачная. */
-.p-tile-ico :deep(svg) [stroke]:not([stroke="none"]) { stroke: currentColor; }
-.p-tile-ico :deep(svg) [fill]:not([fill="none"]) { fill: currentColor; fill-opacity: .18; }
-.p-tile-name { font-family: 'Flame', 'Sora', sans-serif; font-size: 20px; text-transform: uppercase; line-height: 1.05; display: block; }
-.p-tile-note { font-size: 12px; line-height: 1.4; opacity: .72; display: block; margin-top: 5px; }
-.p-tile-badge { position: absolute; top: 16px; right: 18px; font-size: 11px; font-weight: 800;
-  padding: 4px 11px; border-radius: 20px; background: rgba(0,0,0,.18); }
-.p-tile-hero { grid-column: span 2; grid-row: span 2; }
-.p-tile-hero .p-tile-name { font-size: 36px; }
-.p-tile-hero .p-tile-note { font-size: 14px; max-width: 30ch; }
-.p-tile-hero .p-tile-ico :deep(svg) { width: 38px; height: 38px; }
-/* Панель активности висит справа поверх страницы — освобождаем ей место,
-   иначе она накрывает крайний столбец плиток. */
-@media (min-width: 1101px) {
-  .p-body-dash { padding-right: 336px; }
-}
-.p-tile-red { background: var(--brand-red); color: #fff; }
-.p-tile-orange { background: var(--brand-orange); color: #3A1A0C; }
-.p-tile-yellow { background: var(--brand-yellow); color: var(--brand-brown); }
-.p-tile-cream { background: var(--brand-cream); color: var(--brand-brown); }
-.p-tile-brown { background: var(--brand-brown); color: var(--brand-cream); }
-.p-tile-plain, .p-tile-more { background: rgba(245,230,208,.06); color: #F5EBDC; border: 1px solid rgba(245,230,208,.1); }
-.p-tile-more:hover { background: rgba(245,230,208,.11); }
-
-/* Activity dashboard — right center */
+/* Активность команды — панель справа поверх страницы. */
 .p-dash { position: fixed; right: 24px; top: 50%; transform: translateY(-50%); z-index: 50; width: 280px; background: rgba(20,12,6,.75); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,.07); border-radius: 16px; padding: 16px; box-shadow: 0 8px 40px rgba(0,0,0,.35); }
 .p-dash-title { font-size: 9px; font-weight: 700; color: rgba(245,230,208,.35); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,.05); }
 .p-dash-list { display: flex; flex-direction: column; gap: 10px; }
@@ -759,6 +792,65 @@ function confirmLogout() {
 .p-dash-detail { color: rgba(245,230,208,.35); }
 .p-dash-time { font-size: 9px; color: rgba(245,230,208,.25); margin-top: 1px; display: block; }
 @media (max-width: 1100px) { .p-dash { display: none; } }
+
+/* ─── Сотрудник: главная-поиск ─── */
+.p-find { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; min-height: 0; width: 100%; max-width: 640px; margin: 0 auto; padding-bottom: 40px; }
+.p-hello { font-family: 'Flame', 'Sora', sans-serif; font-size: 27px; color: #F5E6D0;
+  text-transform: uppercase; margin: 0; text-align: center; }
+.p-hello em { font-style: normal; color: #FF8732; }
+
+.p-find-box { display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 0 18px; height: 62px;
+  background: rgba(245,235,220,.07); border: 1.5px solid rgba(245,230,208,.16);
+  border-radius: var(--tk-r-pill); color: rgba(245,230,208,.5);
+  transition: border-color .15s, background .15s; }
+.p-find-box:focus-within { border-color: var(--brand-orange); background: rgba(245,235,220,.1); color: var(--brand-orange); }
+input.p-find-input { flex: 1; min-width: 0; padding: 0; border: 0; background: none; outline: none;
+  box-shadow: none; border-radius: 0; font-family: inherit; font-size: 19px; font-weight: 500; color: #F5EBDC; }
+input.p-find-input:focus { border: 0; box-shadow: none; outline: none; }
+input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
+.p-find-clear { display: flex; border: 0; background: none; cursor: pointer;
+  color: rgba(245,230,208,.5); padding: 6px; border-radius: 50%; }
+.p-find-clear:hover { color: #F5EBDC; background: rgba(255,255,255,.08); }
+
+.p-find-list { width: 100%; display: flex; flex-direction: column; gap: 2px; }
+.p-find-item { display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+  border-radius: 14px; text-decoration: none; color: rgba(245,230,208,.8);
+  font-size: var(--tk-fz-xl); font-weight: var(--tk-fw-semibold); }
+.p-find-item :deep(mark) { background: none; color: var(--brand-orange); font-weight: 800; }
+.p-find-active { background: rgba(245,235,220,.1); color: #F5EBDC; }
+.p-find-empty { width: 100%; padding: 14px 18px; font-size: var(--tk-fz-lg); color: rgba(245,230,208,.55); text-align: center; }
+.p-find-empty a { color: var(--brand-orange); font-weight: var(--tk-fw-bold); text-decoration: none; }
+.p-find-empty a:hover { text-decoration: underline; }
+
+.p-find-recent { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.p-find-recent-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+  color: rgba(245,230,208,.35); font-weight: 700; margin-right: 4px; }
+.p-find-chip { display: inline-flex; align-items: center; gap: 7px; padding: 8px 15px;
+  border-radius: var(--tk-r-pill); border: 1px solid rgba(245,230,208,.14);
+  background: rgba(245,235,220,.05); color: rgba(245,230,208,.75);
+  font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-semibold); text-decoration: none; }
+.p-find-chip:hover { background: rgba(245,235,220,.12); color: #F5EBDC; border-color: rgba(245,230,208,.3); }
+
+/* Цифры дня — строкой, а не карточками: это справка, а не главный герой. */
+.p-find-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 22px; margin-top: 6px; }
+.p-find-stat { display: inline-flex; align-items: baseline; gap: 6px; text-decoration: none;
+  font-size: var(--tk-fz-lg); color: rgba(245,230,208,.6); }
+.p-find-stat b { font-family: 'Flame', 'Sora', sans-serif; font-size: 20px; font-weight: 400; }
+.p-find-stat span { color: rgba(245,230,208,.35); }
+.p-find-stat span::before { content: ' · '; }
+.p-find-stat:hover { color: #F5EBDC; }
+.p-stat-red b { color: #FF4A21; }
+.p-stat-orange b { color: var(--brand-orange); }
+.p-stat-yellow b { color: var(--brand-yellow); }
+.p-stat-green b { color: #8FD07A; }
+
+.p-find-all { margin-top: 2px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-semibold);
+  color: rgba(245,230,208,.45); padding: 8px 14px; border-radius: var(--tk-r-pill); }
+.p-find-all:hover { color: #F5EBDC; background: rgba(255,255,255,.06); }
+.p-find-all:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); }
 
 /* Footer */
 .p-footer { padding: 14px 36px; display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1; border-top: 1px solid rgba(255,255,255,.04); flex-shrink: 0; }
@@ -839,9 +931,6 @@ function confirmLogout() {
 @media (max-width: 600px) { .login-left { display: none; } }
 
 /* Responsive */
-@media (max-width: 1100px) {
-  .p-bento { grid-template-columns: repeat(3, 1fr); }
-}
 @media (max-width: 900px) {
   /* Кинокадр складывается: сначала текст, картинка уходит вниз полосой. */
   .p-kino { grid-template-columns: 1fr; align-content: center; gap: 22px; margin: 0; padding: 24px 0; }
@@ -859,16 +948,11 @@ function confirmLogout() {
 @media (max-width: 760px) {
   .p-header { padding: 12px 16px; }
   .p-body { padding: 0 16px 20px; gap: 14px; }
-  .p-headline { flex-direction: column; align-items: flex-start; gap: 12px; }
   .p-hello { font-size: 22px; }
-  .p-stats { margin-left: 0; width: 100%; }
-  .p-stat { flex: 1 1 auto; }
-  .p-bento { grid-template-columns: repeat(2, 1fr); grid-auto-rows: minmax(84px, auto); }
-  .p-tile { padding: 14px 16px; border-radius: 18px; }
-  .p-tile-name { font-size: 16px; }
-  .p-tile-hero .p-tile-name { font-size: 24px; }
-  .p-tile-note { display: none; }
-  .p-tile-hero .p-tile-note { display: block; font-size: 12px; }
+  .p-find { gap: 14px; padding-bottom: 20px; }
+  .p-find-box { height: 54px; padding: 0 14px; }
+  .p-find-input { font-size: 17px; }
+  .p-find-stats { flex-direction: column; align-items: center; gap: 4px; }
 }
 @media (max-width: 480px) {
   .p-header { padding: 10px 12px; }
@@ -878,18 +962,10 @@ function confirmLogout() {
   .p-uname { display: none; }
   .p-body { padding: 0 10px 16px; }
   .p-kino-title { font-size: 32px; }
-  .p-tile-hero { grid-column: span 2; grid-row: span 1; }
   .p-footer { padding: 10px 12px; }
   .login-card { flex-direction: column; }
   .login-left { display: none; }
   .login-right { padding: 24px 16px; }
-}
-@media (max-height: 620px) and (min-width: 901px) {
-  /* Низкий экран: плитки не должны выдавливать подвал за край. */
-  .p-bento { grid-auto-rows: minmax(76px, 1fr); gap: 10px; }
-  .p-tile { padding: 12px 16px; }
-  .p-tile-note { display: none; }
-  .p-tile-hero .p-tile-note { display: block; }
 }
 
 /* ═══ ОКНО «ВСЕ РАЗДЕЛЫ» ═══ */
