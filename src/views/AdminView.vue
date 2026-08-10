@@ -1927,41 +1927,6 @@ async function deleteChangelog(entry) {
   } catch { toast.error('Ошибка', 'Не удалось удалить'); }
 }
 
-// immediate: true — чтобы данные загружались и при заходе на вкладку через URL `?tab=...`
-watch(activeTab, (tab) => {
-  if (tab === 'sessions') {
-    loadOnlineUsers();
-    loadOnlineRestaurants();
-    loadSessions();
-    if (onlineTimer) clearInterval(onlineTimer);
-    // Не дёргаем сервер на скрытой вкладке — экономит трафик и нагрузку.
-    onlineTimer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        loadOnlineUsers();
-        loadOnlineRestaurants();
-      }
-    }, 15000);
-  } else {
-    if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
-  }
-  if (tab === 'broadcast') {
-    loadBcHistory();
-    if (!changelogEntries.value.length) loadChangelog();
-  }
-  if (tab === 'audit') {
-    if (!auditEntries.value.length) loadAudit(true);
-    if (!auditUsers.value.length) loadAuditUsers();
-  }
-  if (tab === 'stats') {
-    if (!Object.keys(statsData.value).length) loadStats();
-  }
-  if (tab === 'feedback') {
-    loadBugReports();
-    startBugPoll();
-  } else {
-    stopBugPoll();
-  }
-}, { immediate: true });
 
 const usersWord = computed(() => {
   const n = users.value.length;
@@ -2614,6 +2579,47 @@ onMounted(() => {
 onUnmounted(() => {
   stopBugPoll();
 });
+
+// Загрузку данных вкладки вешаем ПОСЛЕ всех объявлений: watch с
+// immediate: true срабатывает прямо во время настройки компонента, и
+// если он стоит выше, вызванная функция обращается к ещё не созданным
+// переменным. Так и было: заход по прямой ссылке /admin?tab=feedback
+// падал с «Cannot access before initialization», и обращения не грузились.
+// immediate: true — чтобы данные загружались и при заходе на вкладку через URL `?tab=...`
+watch(activeTab, (tab) => {
+  if (tab === 'sessions') {
+    loadOnlineUsers();
+    loadOnlineRestaurants();
+    loadSessions();
+    if (onlineTimer) clearInterval(onlineTimer);
+    // Не дёргаем сервер на скрытой вкладке — экономит трафик и нагрузку.
+    onlineTimer = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        loadOnlineUsers();
+        loadOnlineRestaurants();
+      }
+    }, 15000);
+  } else {
+    if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
+  }
+  if (tab === 'broadcast') {
+    loadBcHistory();
+    if (!changelogEntries.value.length) loadChangelog();
+  }
+  if (tab === 'audit') {
+    if (!auditEntries.value.length) loadAudit(true);
+    if (!auditUsers.value.length) loadAuditUsers();
+  }
+  if (tab === 'stats') {
+    if (!Object.keys(statsData.value).length) loadStats();
+  }
+  if (tab === 'feedback') {
+    loadBugReports();
+    startBugPoll();
+  } else {
+    stopBugPoll();
+  }
+}, { immediate: true });
 </script>
 
 <style scoped>
