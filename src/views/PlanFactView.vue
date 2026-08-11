@@ -345,7 +345,7 @@ import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useDraftStore } from '@/stores/draftStore.js'
 import { useConfirm } from '@/composables/useConfirm.js'
-import { applyEntityGroupFilter, formatDate, formatDateShort } from '@/lib/utils.js'
+import { applyEntityGroupFilter, formatDate, formatDateShort, pluralOf, formatTimeAgo } from '@/lib/utils.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 
@@ -540,21 +540,7 @@ const receivedDiscrepancies = computed(() =>
 const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 function nf(v) { return formatter.format(v || 0) }
 
-function formatTimeAgo(date) {
-  if (!date) return ''
-  const sec = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (sec < 60) return 'только что'
-  if (sec < 3600) return Math.floor(sec / 60) + ' мин. назад'
-  if (sec < 86400) return Math.floor(sec / 3600) + ' ч. назад'
-  return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
-
-function pluralOrders(n) {
-  const mod = n % 10, mod100 = n % 100
-  if (mod === 1 && mod100 !== 11) return 'заказ'
-  if (mod >= 2 && mod <= 4 && (mod100 < 12 || mod100 > 14)) return 'заказа'
-  return 'заказов'
-}
+function pluralOrders(n) { return pluralOf(n, ['заказ', 'заказа', 'заказов']) }
 
 function toAccountingBoxes(item) {
   return Number(item.qty_boxes) || 0
@@ -654,7 +640,6 @@ async function loadCounts(requestId) {
 }
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-
 
 function getDiscrepancyCount(order) {
   if (!order.order_items) return 0

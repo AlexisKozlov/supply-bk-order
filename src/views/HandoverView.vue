@@ -361,6 +361,7 @@ import { ref, computed, onMounted, nextTick, defineAsyncComponent } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
+import { plural } from '@/lib/utils.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 
@@ -447,15 +448,6 @@ async function api(method, path, body = null) {
   if (error) throw new Error(error);
   if (data && data.error) throw new Error(data.error);
   return data;
-}
-
-function plural(n, one, few, many) {
-  const a = Math.abs(n) % 100;
-  const b = a % 10;
-  if (a > 10 && a < 20) return many;
-  if (b > 1 && b < 5) return few;
-  if (b === 1) return one;
-  return many;
 }
 
 function fmt(d) {

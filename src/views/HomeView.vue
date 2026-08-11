@@ -304,7 +304,7 @@ import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import { ALL_NAV_ITEMS } from '@/lib/navSections.js';
 import { getRecentRoutes } from '@/router/index.js';
 import { parseRestaurantInput, formatRestaurantNumber } from '@/lib/legalEntities.js';
-
+import { plural, escapeHtml } from '@/lib/utils.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -583,10 +583,6 @@ function highlightFind(label) {
     + escapeHtml(label.slice(at + q.length));
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 // Недавно открытые разделы. Пока истории нет — показываем те, с которых
 // обычно начинают день.
 const FALLBACK_RECENT = ['order', 'supplier-orders', 'restaurant-orders', 'shelf-life'];
@@ -649,15 +645,6 @@ function formatDay(iso) {
   if (isNaN(d)) return iso;
   const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   return `${d.getDate()} ${months[d.getMonth()]}`;
-}
-
-function plural(n, one, few, many) {
-  const m = n % 100;
-  if (m > 10 && m < 20) return many;
-  const d = m % 10;
-  if (d === 1) return one;
-  if (d >= 2 && d <= 4) return few;
-  return many;
 }
 
 async function loadHomeStats() {
@@ -820,8 +807,6 @@ function loginErrMsg(code) {
   };
   return map[code] || code || 'Неверный пароль';
 }
-
-
 
 function confirmLogout() {
   showLogoutConfirm.value = false;

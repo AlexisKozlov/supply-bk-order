@@ -48,6 +48,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { formatDate as fmtDate, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
+import { pluralOf } from '@/lib/utils.js';
 
 const props = defineProps({
   orders: { type: Array, default: () => [] },
@@ -60,13 +61,7 @@ const props = defineProps({
 defineEmits(['load-more', 'open']);
 
 // «1 товар», «2 товара», «5 товаров»
-function pluralGoods(n) {
-  const num = Number(n) || 0;
-  const m10 = num % 10, m100 = num % 100;
-  if (m10 === 1 && m100 !== 11) return 'товар';
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'товара';
-  return 'товаров';
-}
+function pluralGoods(n) { return pluralOf(n, ['товар', 'товара', 'товаров']); }
 
 const filter = ref('all');
 

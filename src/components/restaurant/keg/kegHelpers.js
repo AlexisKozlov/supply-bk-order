@@ -1,6 +1,8 @@
 // Утилиты и иконки для компонентов «Возврат кег».
 // Цель — не дублировать одинаковые куски между секциями формы, списком и модалками.
 
+import { pluralOf } from '@/lib/utils.js';
+
 export const iconKeg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="4.5" rx="6" ry="1.7"/><path d="M6 4.5v15c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7v-15"/><path d="M6 9c0 .9 2.7 1.7 6 1.7S18 9.9 18 9"/><path d="M6 14.5c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7"/></svg>';
 
 // Иконка «Возврат кег» — кега + дугообразная стрелка возврата сверху.
@@ -97,12 +99,7 @@ export function buildAvailableDates(weekdayMask, currentDate, opts = {}) {
   return out;
 }
 
-export function pluralKegs(n) {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return 'кега';
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'кеги';
-  return 'кег';
-}
+export function pluralKegs(n) { return pluralOf(n, ['кега', 'кеги', 'кег']); }
 
 export function pluralTypes(n) {
   const m10 = n % 10, m100 = n % 100;

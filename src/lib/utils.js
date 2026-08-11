@@ -180,6 +180,71 @@ export function formatDateTimeShort(d) {
          dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Русское склонение по числу: plural(5, 'товар', 'товара', 'товаров') → 'товаров'.
+ *
+ * Эта функция была написана в портале двадцать раз — где-то с опечатками,
+ * где-то по-своему. Теперь она одна.
+ */
+export function plural(n, one, few, many) {
+  const a = Math.abs(Number(n) || 0) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b === 1) return one;
+  if (b >= 2 && b <= 4) return few;
+  return many;
+}
+
+/** То же самое, но формы передаются массивом: pluralOf(5, ['товар','товара','товаров']). */
+export function pluralOf(n, forms) {
+  return plural(n, forms[0], forms[1], forms[2]);
+}
+
+/**
+ * Количество без лишних нулей: 3 вместо 3.00, 1.5 вместо 1.50.
+ */
+export function formatQty(value) {
+  const n = Number(value) || 0;
+  return Math.abs(n - Math.round(n)) < 0.001
+    ? String(Math.round(n))
+    : n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+/** Целое число с разделителями разрядов: 12345 → «12 345». */
+export function formatInt(n) {
+  return new Intl.NumberFormat('ru-RU').format(Number(n) || 0);
+}
+
+/** Размер файла человеческим языком: 1536 → «2 КБ». */
+export function formatFileSize(size) {
+  const n = Number(size || 0);
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} МБ`;
+  if (n >= 1024) return `${Math.round(n / 1024)} КБ`;
+  return `${n} Б`;
+}
+
+/**
+ * Сколько прошло времени: «только что», «5 мин. назад», «3 ч. назад».
+ * Старше суток — обычная дата со временем.
+ */
+export function formatTimeAgo(date) {
+  if (!date) return '';
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return '';
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60) return 'только что';
+  if (sec < 3600) return Math.floor(sec / 60) + ' мин. назад';
+  if (sec < 86400) return Math.floor(sec / 3600) + ' ч. назад';
+  return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+/** Экранирование текста перед вставкой в HTML. */
+export function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 export function debug(...args) {
   try { if (localStorage.getItem('BK_DEBUG') === 'true') console.log(...args); } catch(e) { /* noop */ }
 }

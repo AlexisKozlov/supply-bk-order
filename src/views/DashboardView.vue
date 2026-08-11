@@ -163,6 +163,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
+import { formatTimeAgo } from '@/lib/utils.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import { activityLabel } from '@/lib/auditActions.js'
 import { useUserStore } from '@/stores/userStore.js'
@@ -254,15 +255,6 @@ function formatDetails(details) {
     }
     return parts.join(' · ') || ''
   } catch { return truncateStr(String(details), 50) }
-}
-
-function formatTimeAgo(date) {
-  if (!date) return ''
-  const sec = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (sec < 60) return 'только что'
-  if (sec < 3600) return Math.floor(sec / 60) + ' мин. назад'
-  if (sec < 86400) return Math.floor(sec / 3600) + ' ч. назад'
-  return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 onMounted(() => {

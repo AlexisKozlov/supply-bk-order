@@ -220,6 +220,7 @@ const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/Conf
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
+import { pluralOf as plural } from '@/lib/utils.js';
 
 const props = defineProps({
   cards:   { type: Array, default: () => [] },
@@ -301,13 +302,6 @@ function setSort(key) {
     sortKey.value = key;
     sortDir.value = 'asc';
   }
-}
-
-function plural(n, forms) {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return forms[0];
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return forms[1];
-  return forms[2];
 }
 
 function fmtDue(s) {

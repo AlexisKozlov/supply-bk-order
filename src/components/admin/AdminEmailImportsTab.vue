@@ -166,6 +166,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import { formatInt } from '@/lib/utils.js';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -199,13 +200,6 @@ const STATUS_LABEL = {
 
 function typeLabel(t) { return TYPE_LABEL[t] || t; }
 function statusLabel(s) { return STATUS_LABEL[s] || s; }
-function formatInt(n) { return new Intl.NumberFormat('ru-RU').format(n || 0); }
-function formatDateTime(s) {
-  if (!s) return '';
-  const d = new Date((s || '').replace(' ', 'T'));
-  if (isNaN(d)) return s;
-  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
 function formatSize(b) {
   if (b < 1024) return b + ' Б';
   if (b < 1024 * 1024) return Math.round(b / 1024) + ' КБ';

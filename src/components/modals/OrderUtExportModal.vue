@@ -62,6 +62,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
+import { plural } from '@/lib/utils.js';
 
 const props = defineProps({
   // rows: { sku, name, externalCode, category, accountingBoxes }
@@ -83,15 +84,6 @@ function canonCategory(c) {
   if (s.includes('холод') || s.includes('охлажд') || s === 'хол') return 'Холод';
   if (s.includes('сух')) return 'Сухой';
   return c || 'Прочее';
-}
-
-function plural(n, one, two, many) {
-  const last = Math.abs(n) % 10;
-  const last2 = Math.abs(n) % 100;
-  if (last2 >= 11 && last2 <= 14) return many;
-  if (last === 1) return one;
-  if (last >= 2 && last <= 4) return two;
-  return many;
 }
 
 const enriched = computed(() =>

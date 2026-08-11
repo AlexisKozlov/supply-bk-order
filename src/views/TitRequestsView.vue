@@ -88,6 +88,7 @@ import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { appAlert } from '@/lib/appDialogs.js';
+import { plural as pluralize } from '@/lib/utils.js';
 
 const orderStore = useOrderStore();
 const route = useRoute();
@@ -140,12 +141,6 @@ const statusLabel = (s) => ({
 }[s] || s || '—');
 
 const formatDate = (d) => d ? d.split('-').reverse().join('.') : '';
-const pluralize = (n, one, few, many) => {
-  const mod10 = n % 10, mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
-};
 const relativeTime = (t) => {
   if (!t) return '';
   const ts = new Date(t.replace(' ', 'T')).getTime();

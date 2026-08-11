@@ -127,6 +127,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import TaskIcon from './TaskIcon.vue';
+import { pluralOf as plural } from '@/lib/utils.js';
 
 const props = defineProps({
   cards: { type: Array, required: true },
@@ -262,13 +263,6 @@ const totalCardsInPeriod = computed(() => {
   }
   return monthGrid.value.filter(d => d.inMonth).reduce((sum, d) => sum + d.cards.length, 0);
 });
-
-function plural(n, forms) {
-  const mod10 = n % 10, mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return forms[0];
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return forms[1];
-  return forms[2];
-}
 
 function navPrev() {
   if (viewMode.value === 'week') {

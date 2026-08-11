@@ -1077,7 +1077,6 @@
       </div>
     </Teleport>
 
-
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
       @confirm="onConfirmOk"
       @cancel="onConfirmCancel" />
@@ -1090,7 +1089,7 @@ import { useRouter } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { db } from '@/lib/apiClient.js';
-import { formatMoscowDateTime, formatMoscowRelative, toLocalDateStr } from '@/lib/utils.js';
+import { formatMoscowDateTime, formatMoscowRelative, toLocalDateStr, plural } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, formatRestaurantNumber } from '@/lib/legalEntities.js';
@@ -1130,14 +1129,6 @@ const lockouts = ref({});
 // { имя: { last_login, days_since, logins_total, logins_30d } }
 const loginStats = ref({});
 const loginHistory = ref(null);
-
-function plural(n, one, few, many) {
-  const a = Math.abs(n) % 100, b = a % 10;
-  if (a > 10 && a < 20) return many;
-  if (b > 1 && b < 5) return few;
-  if (b === 1) return one;
-  return many;
-}
 
 const allEntities = LEGAL_ENTITIES;
 
@@ -1926,7 +1917,6 @@ async function deleteChangelog(entry) {
     changelogEntries.value = changelogEntries.value.filter(e => e.id !== entry.id);
   } catch { toast.error('Ошибка', 'Не удалось удалить'); }
 }
-
 
 const usersWord = computed(() => {
   const n = users.value.length;

@@ -397,7 +397,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter, toPhysicalBoxes, toAccountingBoxes } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter, toPhysicalBoxes, toAccountingBoxes, plural } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { saveOrder } from '@/lib/saveOrder.js';
 import { recalculateAdu, loadAduData } from '@/lib/aduCalculator.js';
@@ -556,14 +556,6 @@ function fmtDate(d) {
   const dt = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(dt.getTime())) return '—';
   return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-function plural(n, one, few, many) {
-  const a = Math.abs(n) % 100, b = a % 10;
-  if (a > 10 && a < 20) return many;
-  if (b > 1 && b < 5) return few;
-  if (b === 1) return one;
-  return many;
 }
 
 async function loadTransitData() {
@@ -854,7 +846,6 @@ function toggleCompact() {
 }
 
 // ─── Настройки ────────────────────────────────────────────────────────────────
-
 
 async function onSupplierChange(e) {
   const newSupplier = e.target.value;
@@ -1644,7 +1635,6 @@ function onAnalogSkip() {
   }
   analogMergeModal.value.show = false;
 }
-
 
 // ─── Excel ────────────────────────────────────────────────────────────────────
 async function exportExcel() {

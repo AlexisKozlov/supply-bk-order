@@ -62,6 +62,7 @@
 import { ref, watch } from 'vue';
 import { tasksApi } from '../../lib/tasksApi';
 import TaskIcon from './TaskIcon.vue';
+import { plural } from '@/lib/utils.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -120,12 +121,6 @@ function pctCard(sec) {
 }
 function initials(name) {
   return (name || '').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
-}
-function plural(n, one, few, many) {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-  return many;
 }
 </script>
 

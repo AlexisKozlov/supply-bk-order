@@ -149,6 +149,7 @@ import { ref, computed, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import { formatInt as formatNumber } from '@/lib/utils.js';
 
 const data = ref(null);
 const loading = ref(false);
@@ -198,9 +199,6 @@ const timelineForChart = computed(() => {
   });
 });
 
-function formatNumber(n) {
-  return new Intl.NumberFormat('ru-RU').format(n || 0);
-}
 function formatTs(ts) {
   if (!ts) return '—';
   // ts формат: 'YYYY-MM-DD HH:mm:ss' (MSK)

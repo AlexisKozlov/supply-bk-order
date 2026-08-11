@@ -889,7 +889,6 @@
       @reload="loadSurveyList"
     />
 
-
     <!-- ══════ TAB: Сбор остатков ══════ -->
     <section v-if="activeTab === 'stock' && !globalError" class="cab-section sc-section">
       <div v-if="stockLoading" class="cab-empty-card">
@@ -1613,6 +1612,7 @@ import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 import OfflineIndicator from '@/components/ui/OfflineIndicator.vue';
 import InstallAppButton from '@/components/InstallAppButton.vue';
 import { useInstallPrompt } from '@/composables/useInstallPrompt.js';
+import { pluralOf, formatFileSize as formatImportantFileSize } from '@/lib/utils.js';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
 const RestaurantKegReturnsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantKegReturnsTab.vue'));
@@ -1897,7 +1897,6 @@ const stockFilteredGrouped = computed(() => {
   withoutExpiry.sort(sortFn);
   return { withExpiry, withoutExpiry };
 });
-
 
 // ═══ Telegram ═══
 const tgLinkCode = ref('');
@@ -2300,12 +2299,7 @@ function delMultSuggest(item) {
   if (lower > 0 && upper !== lower) return `${lower} или ${upper}`;
   return String(upper || m);
 }
-function pluralRu(n, forms) {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return forms[0];
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return forms[1];
-  return forms[2];
-}
+function pluralRu(n, forms) { return pluralOf(n, forms); }
 function pluralPositions(n) { return pluralRu(n, ['товар', 'товара', 'товаров']); }
 function pluralBoxes(n) { return pluralRu(n, ['коробка', 'коробки', 'коробок']); }
 function delRefreshMultiplicityErrors() { for (const item of delOrderItems.value) delCheckMultiplicity(item); }
@@ -3415,13 +3409,6 @@ function closeImportantPreview() {
   importantImagePreview.name = '';
 }
 
-function formatImportantFileSize(size) {
-  const n = Number(size || 0);
-  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} МБ`;
-  if (n >= 1024) return `${Math.round(n / 1024)} КБ`;
-  return `${n} Б`;
-}
-
 async function dismissCurrentBroadcast() {
   const current = currentBroadcast.value;
   if (!current?.id) return;
@@ -3990,7 +3977,6 @@ function markNoveltiesSeen() {
   noveltiesSeen.value = s;
   saveNoveltiesSeen();
 }
-
 
 function onBeforeUnload(e) {
   if (delHasUnsavedChanges.value || pwOld.value || pwNew.value) {
@@ -4656,7 +4642,6 @@ onUnmounted(() => {
   font-size: 12px; line-height: 1.4; text-align: center;
 }
 
-
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
 /* ═══ Заявка поставщику: шапка-обложка и список ═══
@@ -5086,7 +5071,6 @@ tr.del-err { background: #fef2f2; }
 .stock-card h2 { color: #502314; margin: 0 0 12px; }
 .stock-card p { color: #8b7355; font-size: 14px; margin: 0; }
 .stock-link { display: inline-flex; margin-top: 16px; }
-
 
 /* ═══ Сбор остатков (редизайн) ═══ */
 .sc-section { padding-bottom: 120px; }

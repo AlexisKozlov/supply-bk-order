@@ -420,6 +420,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useSupplyAssistantStore } from '@/stores/supplyAssistantStore.js';
+import { plural } from '@/lib/utils.js';
 
 const store = useSupplyAssistantStore();
 
@@ -442,14 +443,6 @@ const rootEl = ref(null);
 const showScrollTop = ref(false);
 
 // ── Утилиты ──
-function plural(n, one, few, many) {
-  const a = Math.abs(n) % 100;
-  const b = a % 10;
-  if (a > 10 && a < 20) return many;
-  if (b > 1 && b < 5) return few;
-  if (b === 1) return one;
-  return many;
-}
 function fmtShort(dateStr) {
   if (!dateStr) return '';
   const [, m, d] = dateStr.split('-');

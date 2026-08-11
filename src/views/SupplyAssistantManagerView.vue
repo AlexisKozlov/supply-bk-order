@@ -372,6 +372,7 @@ import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import { formatQty as fmtQty } from '@/lib/utils.js';
 
 const saStore = useSupplyAssistantStore();
 const userStore = useUserStore();
@@ -437,11 +438,6 @@ function shortLE(le) {
   if (le.includes('Бургер')) return 'Бургер БК';
   if (le.includes('Пицца')) return 'Пицца Стар';
   return le;
-}
-
-function fmtQty(value) {
-  const n = Number(value) || 0;
-  return Math.abs(n - Math.round(n)) < 0.001 ? String(Math.round(n)) : n.toFixed(2).replace(/\.?0+$/, '');
 }
 
 function fmtDateTime(dt) {

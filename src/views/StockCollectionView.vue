@@ -682,6 +682,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
+import { pluralOf } from '@/lib/utils.js';
 
 const orderStore = useOrderStore();
 const userStore = useUserStore();
@@ -1298,14 +1299,7 @@ function formatMoney(n) {
   return v.toLocaleString('ru-BY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function pluralizeProducts(n) {
-  const abs = Math.abs(Number(n) || 0);
-  const m10 = abs % 10;
-  const m100 = abs % 100;
-  if (m10 === 1 && m100 !== 11) return 'товар';
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'товара';
-  return 'товаров';
-}
+function pluralizeProducts(n) { return pluralOf(n, ['товар', 'товара', 'товаров']); }
 
 const filteredRows = computed(() => {
   const q = responseFilter.value.trim().toLowerCase();

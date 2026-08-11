@@ -1216,6 +1216,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { formatDate, formatTime, formatDateTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatQty as fmtQty } from '@/lib/utils.js';
 
 const store = useRestaurantOrderStore();
 const orderStore = useOrderStore();
@@ -1360,10 +1361,6 @@ function userStatusLabel(u) {
   return 'Активен';
 }
 
-function fmtQty(value) {
-  const n = Number(value) || 0;
-  return Math.abs(n - Math.round(n)) < 0.001 ? String(Math.round(n)) : n.toFixed(2).replace(/\.?0+$/, '');
-}
 function shortLegalEntity(le) {
   if (!le) return '';
   if (le.includes('Воглия')) return 'Воглия Матта';

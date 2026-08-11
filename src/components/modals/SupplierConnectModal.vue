@@ -248,6 +248,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, getEntityGroupCode, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useCloseGuard } from '@/composables/useFormDirty.js';
+import { plural } from '@/lib/utils.js';
 
 const emit = defineEmits(['close', 'connected']);
 const soStore = useSupplierOrderStore();
@@ -285,13 +286,6 @@ const savedSummary = computed(() => {
   if (s.saved_products) parts.push(`${s.saved_products} ${plural(s.saved_products, 'товар', 'товара', 'товаров')} в шаблоне`);
   return parts.join(' и ');
 });
-
-function plural(n, one, few, many) {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-  return many;
-}
 
 const restoring = ref(false);
 async function restoreSaved() {

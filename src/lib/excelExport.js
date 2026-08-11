@@ -1,4 +1,4 @@
-import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes, applyEntityGroupFilter } from './utils.js';
+import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes, applyEntityGroupFilter, escapeHtml } from './utils.js';
 import { formatRestaurantNumber, ENTITY_SHORT_NAMES } from './legalEntities.js';
 import { db } from './apiClient.js';
 
@@ -1109,10 +1109,6 @@ export async function exportSupplierOrder(settings, items, priceMap) {
 /**
  * Заявка поставщику — печать (PDF через iframe + print)
  */
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
 
 export function printSupplierOrder(settings, items, priceMap) {
   const hasPrices = priceMap && Object.keys(priceMap).length > 0;

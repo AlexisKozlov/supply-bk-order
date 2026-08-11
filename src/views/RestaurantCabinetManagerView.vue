@@ -200,6 +200,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { appConfirm, appAlert } from '@/lib/appDialogs.js';
+import { formatFileSize } from '@/lib/utils.js';
 const GuidesEditor = defineAsyncComponent(() => import('@/components/admin/GuidesEditor.vue'));
 
 const ManagerSupplierContactsTab = defineAsyncComponent(() => import('@/components/admin/ManagerSupplierContactsTab.vue'));
@@ -424,13 +425,6 @@ function formatDateTime(value) {
   const d = new Date(String(value).replace(' ', 'T'));
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function formatFileSize(size) {
-  const n = Number(size || 0);
-  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} МБ`;
-  if (n >= 1024) return `${Math.round(n / 1024)} КБ`;
-  return `${n} Б`;
 }
 
 onMounted(() => {

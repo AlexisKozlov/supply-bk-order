@@ -426,6 +426,7 @@ import TaskColumn from '@/components/tasks/TaskColumn.vue';
 import TaskIcon from '@/components/tasks/TaskIcon.vue';
 import ColorPalette from '@/components/tasks/ColorPalette.vue';
 import { h } from 'vue';
+import { escapeHtml } from '@/lib/utils.js';
 
 // Тяжёлые компоненты — lazy-чанк. Грузятся только когда реально нужны.
 // Снижает первый чанк TasksView на ~40%. При первой загрузке чанка
@@ -755,7 +756,6 @@ function formatRelativeTime(s) {
   if (days < 7) return days + ' дн.';
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
 }
-function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
 function highlightQuery(text) {
   const q = String(searchQuery.value || '').trim();
   const html = escapeHtml(text);

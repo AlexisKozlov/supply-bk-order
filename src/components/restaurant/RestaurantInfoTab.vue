@@ -100,6 +100,7 @@ function renderPostMessage(text) {
   return renderMarkdown(text || '');
 }
 import { useToastStore } from '@/stores/toastStore.js';
+import { formatFileSize } from '@/lib/utils.js';
 
 const props = defineProps({
   posts: { type: Array, default: () => [] },
@@ -139,13 +140,6 @@ function infoAvatar(authorName) {
 
 function isImportantImage(file) {
   return String(file?.mime_type || '').startsWith('image/');
-}
-
-function formatFileSize(size) {
-  const n = Number(size || 0);
-  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} МБ`;
-  if (n >= 1024) return `${Math.round(n / 1024)} КБ`;
-  return `${n} Б`;
 }
 
 async function downloadFile(file) {
