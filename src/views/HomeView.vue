@@ -672,6 +672,16 @@ function goTo(name, query) {
   }, 1400);
 }
 
+// Стартовая страница из личных настроек. Ошибку глотаем: не смогли узнать —
+// откроем «Новый заказ», как раньше.
+async function loadStartPage() {
+  try {
+    const { data } = await db.rpc('get_user_preferences', {});
+    const v = data?.preferences?.start_page;
+    return typeof v === 'string' && v ? v : null;
+  } catch { return null; }
+}
+
 async function doLogin() {
   if (!selectedUser.value) return;
   if (!acceptedDataRules.value) {
@@ -690,9 +700,14 @@ async function doLogin() {
     loaderText.value = loaderTexts[0];
     _safeTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
     _safeTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
+    // Куда попасть после входа: сначала адрес, с которого человека увели на
+    // логин, затем его стартовая страница из настроек, и только потом
+    // «Новый заказ» — прежнее поведение по умолчанию.
+    const start = await loadStartPage();
     _safeTimeout(() => {
       showLoader.value = false;
       if (redirect && redirect !== '/' && redirect !== '/login') router.push(redirect);
+      else if (start) router.push({ name: start }).catch(() => router.push({ name: 'order' }));
       else router.push({ name: 'order' });
     }, 1400);
   } catch (e) { loginError.value = loginErrMsg(e.message); }

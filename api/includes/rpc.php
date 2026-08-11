@@ -99,6 +99,9 @@ if ($endpoint === 'rpc') {
     // ═══ Цифры для главной страницы ═══
     require __DIR__ . '/rpc/home.php';
 
+    // ═══ Личные настройки сотрудника (сеансы, Telegram, своя история) ═══
+    require __DIR__ . '/rpc/user_settings.php';
+
     // ═══ ИИ-ассистент закупок (DeepSeek + инструменты бота) ═══
     require __DIR__ . '/rpc/ai_assistant.php';
     // (batch_update_received_qty ушёл в rpc/orders.php)
