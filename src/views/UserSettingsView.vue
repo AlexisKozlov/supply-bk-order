@@ -663,10 +663,10 @@ onMounted(() => {
 @media (max-width: 900px) {
   .uset { padding: 16px; }
   .uset-layout { grid-template-columns: 1fr; }
-  /* Вкладки едут строкой. flex: 0 0 auto обязателен: иначе кнопки
-     сжимаются до нуля и подписи налезают друг на друга. */
-  .uset-tabs { flex-direction: row; overflow-x: auto; position: static; padding-bottom: 6px; gap: 6px; }
-  .uset-tab { flex: 0 0 auto; white-space: nowrap; padding: 9px 14px; border: 1px solid var(--border-light); }
+  /* Вкладки — плитка 2×2: все четыре видны сразу. Строкой с прокруткой
+     последняя вкладка обрезалась краем экрана, и её не замечали. */
+  .uset-tabs { display: grid; grid-template-columns: 1fr 1fr; position: static; gap: 6px; }
+  .uset-tab { justify-content: center; white-space: nowrap; padding: 10px 8px; border: 1px solid var(--border-light); font-size: 13px; }
   .uset-tab.active { box-shadow: none; border-color: var(--bk-brown); color: var(--bk-brown); }
 
   /* Кнопка справа в шапке карточки на узком экране не помещается —
@@ -677,10 +677,12 @@ onMounted(() => {
   .uset-card-header > div:not(.uset-card-icon) { flex: 1 1 0; min-width: 0; }
   .uset-btn-text { margin-left: 0; width: 100%; text-align: left; padding-top: 4px; }
 
-  /* Длинные строки списков (сеансы, действия) не должны выдавливать кнопку. */
-  .uset-list-item { flex-wrap: wrap; row-gap: 6px; }
-  .uset-list-label { flex: 1 1 100%; }
-  .uset-list-item .uset-switch { order: -1; }
+  /* Переносим на вторую строку ТОЛЬКО строки с кнопкой справа (сеансы,
+     закреплённые разделы, история). Строки с переключателем переносить
+     нельзя: подпись уезжала под переключатель, и список превращался в
+     лесенку. */
+  .uset-list-static { flex-wrap: wrap; row-gap: 6px; }
+  .uset-list-static .uset-list-label { flex: 1 1 auto; min-width: 0; }
   .uset-unpin, .uset-badge { margin-left: auto; }
 }
 </style>
