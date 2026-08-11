@@ -66,6 +66,40 @@
         </div>
       </div>
 
+      <!-- Уведомления на телефон (push). Раньше подписку умел включать
+           только кабинет ресторана, поэтому сотрудникам портала push
+           отправлять было некому. -->
+      <div v-if="push.isSupported.value" class="uset-card uset-card-right">
+        <div class="uset-card-header">
+          <div class="uset-card-icon"><BkIcon name="bell" size="lg" /></div>
+          <div>
+            <div class="uset-card-title">Уведомления на телефон</div>
+            <div class="uset-card-desc">
+              Приходят, даже когда портал закрыт. Работают на этом устройстве —
+              на каждом телефоне и компьютере включается отдельно.
+            </div>
+          </div>
+        </div>
+
+        <div v-if="push.permission.value === 'denied'" class="uset-push-denied">
+          Уведомления запрещены в настройках браузера для этого сайта.
+          Разрешите их там — переключатель заработает.
+        </div>
+        <template v-else>
+          <div class="uset-list">
+            <div class="uset-list-item" @click="togglePush">
+              <div class="uset-switch" :class="{ on: push.isSubscribed.value }">
+                <div class="uset-switch-thumb"></div>
+              </div>
+              <span class="uset-list-label">
+                {{ push.isSubscribed.value ? 'Включены на этом устройстве' : 'Включить на этом устройстве' }}
+              </span>
+            </div>
+          </div>
+          <div v-if="push.error.value" class="uset-push-error">{{ push.error.value }}</div>
+        </template>
+      </div>
+
       <!-- Установка портала как приложения. Карточки нет, если уже
            установлено или браузер этого не умеет. -->
       <div v-if="pwaInstall.canInstall.value" class="uset-card">
@@ -90,10 +124,26 @@ import { useToastStore } from '@/stores/toastStore.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import InstallAppButton from '@/components/InstallAppButton.vue'
 import { useInstallPrompt } from '@/composables/useInstallPrompt.js'
+import { usePushNotifications } from '@/composables/usePushNotifications.js'
 
 const userStore = useUserStore()
 const toast = useToastStore()
 const pwaInstall = useInstallPrompt()
+const push = usePushNotifications()
+
+// Включение спрашивает разрешение у браузера и сразу шлёт проверочное
+// уведомление — человек видит, что оно работает, а не гадает по переключателю.
+async function togglePush() {
+  if (push.busy.value) return
+  if (push.isSubscribed.value) {
+    const ok = await push.unsubscribe()
+    if (ok) toast.info('Уведомления выключены', 'На этом устройстве больше не приходят')
+    return
+  }
+  const ok = await push.subscribe()
+  if (ok) toast.success('Уведомления включены', 'Сейчас придёт проверочное')
+  else if (push.error.value) toast.error('Не получилось', push.error.value)
+}
 
 const initials = computed(() => {
   const name = userStore.currentUser?.name || ''
@@ -195,6 +245,10 @@ onMounted(loadTgSettings)
 
 /* Grid */
 .uset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+/* Сетка раскладывает карточки по порядку, поэтому «Уведомления на телефон»
+   уезжали под «Боковое меню». Держим их во втором столбце — рядом с
+   уведомлениями в Telegram. */
+@media (min-width: 901px) { .uset-card-right { grid-column: 2; } }
 @media (max-width: 900px) { .uset-grid { grid-template-columns: 1fr; } }
 
 /* Cards */
@@ -202,6 +256,11 @@ onMounted(loadTgSettings)
 .uset-card-header { display: flex; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-light); align-items: flex-start; }
 .uset-card-icon { font-size: 24px; flex-shrink: 0; margin-top: 2px; }
 .uset-card-title { font-size: 15px; font-weight: 700; }
+.uset-push-denied {
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(255,170,0,.14); color: #7a5200; font-size: 13px; line-height: 1.45;
+}
+.uset-push-error { margin-top: 8px; color: var(--error, #C1502E); font-size: 13px; }
 .uset-card-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .uset-card-desc a { color: var(--bk-brown); }
 .uset-card-footer { padding: 10px 20px; border-top: 1px solid var(--border-light); display: flex; align-items: center; justify-content: space-between; }
