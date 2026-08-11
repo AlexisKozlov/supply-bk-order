@@ -92,6 +92,68 @@ function pushSendToRestaurant(PDO $pdo, int $restaurantNumber, string $legalEnti
 }
 
 /**
+ * Отправка push сотруднику портала (не ресторану).
+ *
+ * Подписки сотрудников лежат в той же таблице, но привязаны к user_id, а не
+ * к номеру ресторана: их ставит /api/push/subscribe, когда в сессии
+ * staff-пользователь. Отдельная функция нужна, потому что
+ * pushSendToRestaurant джойнит restaurants и такие подписки отбрасывает.
+ *
+ * @return int сколько устройств получило уведомление
+ */
+function pushSendToUser(PDO $pdo, int $userId, array $payload): int {
+    $vapidPublic  = $_ENV['VAPID_PUBLIC'] ?? '';
+    $vapidPrivate = $_ENV['VAPID_PRIVATE'] ?? '';
+    $vapidSubject = $_ENV['VAPID_SUBJECT'] ?? 'mailto:support@example.com';
+    if (!$vapidPublic || !$vapidPrivate || $userId <= 0) return 0;
+
+    $stmt = $pdo->prepare("SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?");
+    $stmt->execute([$userId]);
+    $rows = $stmt->fetchAll();
+    if (!$rows) return 0;
+
+    try {
+        $webPush = new WebPush([
+            'VAPID' => ['subject' => $vapidSubject, 'publicKey' => $vapidPublic, 'privateKey' => $vapidPrivate],
+        ]);
+    } catch (\Throwable $e) {
+        error_log('pushSendToUser: ' . $e->getMessage());
+        return 0;
+    }
+
+    $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    $byEndpoint = [];
+    foreach ($rows as $r) {
+        $sub = Subscription::create([
+            'endpoint'        => $r['endpoint'],
+            'publicKey'       => $r['p256dh'],
+            'authToken'       => $r['auth'],
+            'contentEncoding' => 'aesgcm',
+        ]);
+        $webPush->queueNotification($sub, $payloadJson);
+        $byEndpoint[$r['endpoint']] = (int)$r['id'];
+    }
+
+    $ok = 0;
+    foreach ($webPush->flush() as $report) {
+        $endpointStr = $report->getRequest()->getUri()->__toString();
+        if ($report->isSuccess()) {
+            $ok++;
+            if (isset($byEndpoint[$endpointStr])) {
+                try { $pdo->prepare("UPDATE push_subscriptions SET last_used_at = NOW() WHERE id = ?")->execute([$byEndpoint[$endpointStr]]); }
+                catch (\Throwable $e) { /* ignore */ }
+            }
+        } elseif ($report->isSubscriptionExpired()) {
+            if (isset($byEndpoint[$endpointStr])) {
+                try { $pdo->prepare("DELETE FROM push_subscriptions WHERE id = ?")->execute([$byEndpoint[$endpointStr]]); }
+                catch (\Throwable $e) { /* ignore */ }
+            }
+        }
+    }
+    return $ok;
+}
+
+/**
  * Отправка на ОДНУ подписку — используется для проверочного уведомления
  * сразу после включения: человек должен увидеть, что всё работает, а не
  * гадать по серой кнопке.

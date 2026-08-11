@@ -1319,6 +1319,75 @@ if ($krSubSlug === 'not-returned-emails' && $method === 'POST') {
     krRespond(['emails' => $joined]);
 }
 
+// ── GET/POST /keg-returns/routing-reminders ──
+// Кому напоминать, если возвраты на завтра не маршрутизированы. Список —
+// сотрудники с доступом к разделу; отмеченные хранятся в
+// keg_routing_reminder_subs. Рассылку шлёт cron_delivery_reminders.php.
+if ($krSubSlug === 'routing-reminders' && $method === 'GET') {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    krRequirePortalAccess($krPortalUser, 'view');
+
+    $marked = [];
+    foreach ($pdo->query("SELECT user_name FROM keg_routing_reminder_subs WHERE is_enabled = 1") as $r) {
+        $marked[$r['user_name']] = true;
+    }
+
+    // Кандидаты — все, кто может открыть раздел: у админа доступ всегда,
+    // у остальных смотрим их персональные права.
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+    $out = [];
+    $st = $pdo->query("SELECT name, role, permissions, telegram_chat_id FROM users WHERE disabled_at IS NULL ORDER BY name");
+    foreach ($st as $u) {
+        $perms = resolvePermissions($u['role'] ?? 'user', $u['permissions'] ?? null, $ROLE_TEMPLATES);
+        $lvl = ($ACCESS_LEVELS[$perms['keg-returns'] ?? 'none'] ?? 0);
+        if ($lvl < ($ACCESS_LEVELS['view'] ?? 1)) continue;
+        $out[] = [
+            'name'     => $u['name'],
+            'telegram' => !empty($u['telegram_chat_id']),
+            'enabled'  => isset($marked[$u['name']]),
+        ];
+    }
+    krRespond(['users' => $out]);
+}
+
+if ($krSubSlug === 'routing-reminders' && $method === 'POST') {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    krRequirePortalAccess($krPortalUser, 'full');
+
+    $names = $body['names'] ?? [];
+    if (!is_array($names)) krRespond(['error' => 'Ожидался список имён'], 422);
+
+    // Отмечать можно только тех, у кого есть доступ к разделу: иначе человек
+    // получал бы напоминание про экран, который ему не открыть.
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+    $allowed = [];
+    foreach ($pdo->query("SELECT name, role, permissions FROM users WHERE disabled_at IS NULL") as $u) {
+        $perms = resolvePermissions($u['role'] ?? 'user', $u['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['keg-returns'] ?? 'none'] ?? 0) >= ($ACCESS_LEVELS['view'] ?? 1)) {
+            $allowed[$u['name']] = true;
+        }
+    }
+    $clean = [];
+    foreach ($names as $n) {
+        $n = trim((string)$n);
+        if ($n !== '' && isset($allowed[$n])) $clean[$n] = true;
+    }
+
+    $by = $krPortalUser['name'] ?? null;
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec("UPDATE keg_routing_reminder_subs SET is_enabled = 0");
+        $ins = $pdo->prepare("INSERT INTO keg_routing_reminder_subs (user_name, is_enabled, updated_by)
+                              VALUES (?, 1, ?) ON DUPLICATE KEY UPDATE is_enabled = 1, updated_by = VALUES(updated_by)");
+        foreach (array_keys($clean) as $n) $ins->execute([$n, $by]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        krRespond(['error' => 'Не удалось сохранить: ' . $e->getMessage()], 500);
+    }
+    krRespond(['names' => array_keys($clean)]);
+}
+
 // ── POST /keg-returns/{id}/not-returned ── ресторан/закупка отмечают «Не сдана»
 // Ресторан: свою маршрутизированную заявку, начиная с дня
 // возврата. Закупка: любую маршрутизированную в своей группе. При переводе шлём

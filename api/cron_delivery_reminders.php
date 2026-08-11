@@ -867,6 +867,88 @@ if ($todayDow <= 5) {
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Проход 4: маршрутизация возвратов кег (напоминание ЗАКУПКАМ)
+// ──────────────────────────────────────────────────────────────────────────
+// Заявку подаёт ресторан, а машину и водителя проставляет отдел закупок —
+// это и есть маршрутизация (SUBMITTED → ROUTED). Если её не сделать к вечеру,
+// наутро вывоз выполнять некому.
+//
+// Слоты: 16:00 (предупреждение), 17:00 (срок вышел), дальше каждый час до
+// 20:00 — пока не маршрутизировано. Ночью не беспокоим.
+//
+// Получатели — отмеченные в разделе «Возврат кег» (keg_routing_reminder_subs),
+// а не все подряд: см. миграцию 20260810_keg_routing_reminders.sql.
+$sentRouting = 0;
+try {
+    $KR_ROUTING_HOURS = [16, 17, 18, 19, 20];
+    if (in_array($nowHour, $KR_ROUTING_HOURS, true)) {
+        $tomorrow = (clone $now)->modify('+1 day')->format('Y-m-d');
+
+        $cnt = $pdo->prepare("SELECT COUNT(*) FROM keg_returns WHERE return_date = ? AND status = 'SUBMITTED'");
+        $cnt->execute([$tomorrow]);
+        $pending = (int)$cnt->fetchColumn();
+
+        if ($pending > 0) {
+            $subs = $pdo->query("
+                SELECT u.id, u.name, u.telegram_chat_id
+                FROM keg_routing_reminder_subs k
+                JOIN users u ON u.name = k.user_name
+                WHERE k.is_enabled = 1 AND u.disabled_at IS NULL
+            ")->fetchAll();
+
+            $dLabel = $krReturnLabel($tomorrow);
+            $word = ($pending % 10 === 1 && $pending % 100 !== 11) ? 'заявка'
+                  : (in_array($pending % 10, [2, 3, 4], true) && !in_array($pending % 100, [12, 13, 14], true) ? 'заявки' : 'заявок');
+            $late = $nowHour >= 17;
+            $head = $late ? '⚠️ <b>Возврат кег: срок маршрутизации вышел</b>' : '🚚 <b>Возврат кег: нужна маршрутизация</b>';
+            $text = $head . "\n\n"
+                  . "Вывоз <b>{$dLabel}</b> — <b>{$pending}</b> {$word} без маршрутизации."
+                  . ($late ? "\n\nБыло до 17:00." : "\n\nСрок — сегодня до 17:00.");
+            $markup = ['inline_keyboard' => [[[
+                'text' => 'Открыть возврат кег',
+                'url'  => rtrim(($_ENV['SITE_URL'] ?? 'https://supply-department.online'), '/') . '/keg-returns',
+            ]]]];
+
+            foreach ($subs as $u) {
+                // Дедуп: одна отправка на человека в час. subscription_id = 0 —
+                // напоминание не привязано к ресторану, оно про весь день.
+                // run_hour в этой таблице — минутный слот (HH*60+MM), см. комментарий
+                // к колонке. Часовые напоминания кладём как HH*60.
+                $slot = $nowHour * 60;
+                $tgRunCheck->execute([0, 'keg_routing', $tomorrow, 0, $slot, (string)$u['name']]);
+                if ($tgRunCheck->fetchColumn()) continue;
+
+                $delivered = false;
+                if ($BOT_TOKEN && $u['telegram_chat_id']) {
+                    $delivered = rtgSend($BOT_TOKEN, (int)$u['telegram_chat_id'], $text, $markup);
+                }
+                if (function_exists('pushSendToUser')) {
+                    try {
+                        $n = pushSendToUser($pdo, (int)$u['id'], [
+                            'title' => $late ? 'Возврат кег: срок вышел' : 'Возврат кег: нужна маршрутизация',
+                            'body'  => "Вывоз {$dLabel} — {$pending} {$word} без маршрутизации",
+                            'url'   => '/keg-returns',
+                            'tag'   => 'keg-routing-' . $tomorrow,
+                        ]);
+                        $delivered = $delivered || $n > 0;
+                    } catch (\Throwable $e) {
+                        error_log('[keg-routing] push: ' . $e->getMessage());
+                    }
+                }
+                if ($delivered) {
+                    $tgRunIns->execute([0, 'keg_routing', $tomorrow, 0, $slot, (string)$u['name']]);
+                    $sentRouting++;
+                }
+            }
+        }
+    }
+} catch (Throwable $e) {
+    error_log('[cron_delivery_reminders] keg routing: ' . $e->getMessage());
+}
+
+echo "keg-routing-reminders: sent={$sentRouting}, hour={$nowHour}\n";
+
 echo "delivery-reminders: portal={$sentPortal}, tg={$sentTg}, skipped={$skipped}, hour={$nowHour}\n";
 echo "main-delivery-reminders: portal={$sentMainPortal}, tg={$sentMainTg}, skipped={$skippedMain}\n";
 echo "keg-return-reminders: sent={$sentKeg}, skipped={$skippedKeg}\n";

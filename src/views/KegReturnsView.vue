@@ -7,6 +7,7 @@
         <button class="btn" @click="exportExcel" :disabled="!filteredRows.length"><BkIcon name="import" size="sm" /> Экспорт в Excel</button>
         <button class="btn" @click="openImport">Импорт маршрутизации</button>
         <button class="btn" @click="openNotify" title="Адреса бухгалтерии для писем «Не сдана»"><BkIcon name="send" size="sm" /> Письма бухгалтерии</button>
+        <button class="btn" @click="openRem" title="Кому напоминать о немаршрутизированных возвратах"><BkIcon name="bell" size="sm" /> Напоминания</button>
         <button class="btn primary" @click="createOpen = true">+ Создать заявку</button>
       </div>
     </div>
@@ -111,6 +112,41 @@
             <button class="btn" @click="closeNotify" :disabled="notifySaving">Отмена</button>
             <button class="btn primary" @click="saveNotify" :disabled="notifySaving || notifyLoading">
               {{ notifySaving ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Кому напоминать о немаршрутизированных возвратах -->
+    <Teleport v-if="remOpen" to="body">
+      <div class="modal" @click.self="closeRem">
+        <div class="modal-box kr-notify-modal">
+          <div class="modal-header">
+            <h2>Напоминания о маршрутизации</h2>
+            <button class="modal-close" @click="closeRem">✕</button>
+          </div>
+          <div class="kr-notify-body">
+            <p class="kr-notify-hint">
+              Если возвраты на завтра не маршрутизированы, отмеченные получат напоминание
+              в 16:00, в 17:00 и дальше каждый час до 20:00 — пока маршрутизация не сделана.
+              В списке — сотрудники с доступом к этому разделу.
+            </p>
+            <div v-if="remLoading" class="kr-loading">Загрузка...</div>
+            <template v-else>
+              <div v-if="!remUsers.length" class="kr-notify-hint">Нет сотрудников с доступом к разделу.</div>
+              <label v-for="u in remUsers" :key="u.name" class="kr-rem-row">
+                <input type="checkbox" v-model="u.enabled" />
+                <span class="kr-rem-name">{{ u.name }}</span>
+                <span v-if="!u.telegram" class="kr-rem-warn" title="Телеграм не подключён — напоминание не дойдёт">без Telegram</span>
+              </label>
+              <div v-if="remError" class="kr-error">{{ remError }}</div>
+            </template>
+          </div>
+          <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+            <button class="btn" @click="closeRem" :disabled="remSaving">Отмена</button>
+            <button class="btn primary" @click="saveRem" :disabled="remSaving || remLoading">
+              {{ remSaving ? 'Сохранение...' : 'Сохранить' }}
             </button>
           </div>
         </div>
@@ -295,6 +331,52 @@ async function closeNotify() {
   if (notifySaving.value) return;
   if (!(await notifyGuard.confirmClose({ emails: notifyEmails.value }))) return;
   notifyOpen.value = false;
+}
+
+// ── Кому напоминать о маршрутизации ──
+const remOpen = ref(false);
+const remUsers = ref([]);
+const remLoading = ref(false);
+const remSaving = ref(false);
+const remError = ref('');
+
+async function openRem() {
+  remOpen.value = true;
+  remError.value = '';
+  remLoading.value = true;
+  try {
+    const res = await fetch('/api/keg-returns/routing-reminders', { credentials: 'include', headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    remUsers.value = (data.users || []).map(u => ({ ...u }));
+  } catch (e) {
+    remError.value = e.message;
+  } finally {
+    remLoading.value = false;
+  }
+}
+
+function closeRem() { remOpen.value = false; }
+
+async function saveRem() {
+  remSaving.value = true;
+  remError.value = '';
+  try {
+    const names = remUsers.value.filter(u => u.enabled).map(u => u.name);
+    const res = await fetch('/api/keg-returns/routing-reminders', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    remOpen.value = false;
+  } catch (e) {
+    remError.value = e.message;
+  } finally {
+    remSaving.value = false;
+  }
 }
 
 async function openNotify() {
@@ -691,6 +773,28 @@ onMounted(() => {
 .kr-notify-modal { max-width: 460px; width: 100%; }
 .kr-notify-body { padding: 4px 0 12px; }
 .kr-notify-hint { margin: 0 0 10px; font-size: 13px; color: #6b5b4a; line-height: 1.45; }
+/* text-align наследуется от модалки (старые глобальные стили центрируют
+   содержимое), поэтому имя прижималось вправо и ломалось на две строки. */
+.kr-rem-row {
+  display: flex; align-items: center; justify-content: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: 10px; cursor: pointer; text-align: left;
+}
+.kr-rem-row .kr-rem-name { flex: 1; min-width: 0; }
+.kr-rem-row:hover { background: rgba(80,35,20,.05); }
+/* Старый глобальный стиль .modal-box input задаёт width:100% !important —
+   галочка растягивалась на всю строку и выдавливала имя за край окна.
+   Перебиваем только для этих галочек. */
+.kr-rem-row input[type="checkbox"] {
+  width: 17px !important; height: 17px; min-width: 0; flex: 0 0 17px;
+  padding: 0; margin: 0; accent-color: #C1502E;
+}
+.kr-rem-name { font-weight: 600; }
+.kr-rem-warn {
+  margin-left: auto; font-size: 11px; font-weight: 700;
+  color: #9a6a00; background: rgba(255,170,0,.16);
+  padding: 3px 9px; border-radius: 20px;
+}
+
 .kr-notify-input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d9cfc0; border-radius: 6px; font: inherit; resize: vertical; }
 .kr-bso-replaced {
   display: inline-block; margin-left: 6px;
