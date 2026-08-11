@@ -1,0 +1,390 @@
+/**
+ * Общий вид экранов входа и восстановления пароля.
+ *
+ * Раньше каждый из восьми таких экранов носил свою копию одних и тех же
+ * стилей — около 1400 строк, отличавшихся парой пикселей и префиксом
+ * класса (ro-, staff-, rrp-, rve-). Из-за этого правка «поправить кнопку»
+ * означала восемь одинаковых правок, а на деле правились две-три, и
+ * экраны потихоньку расходились между собой.
+ *
+ * Теперь стиль один. Подключается один раз из AuthShell.vue, поэтому
+ * попадает в сборку в единственном экземпляре. Все имена начинаются с
+ * auth- и больше нигде в портале не встречаются, так что глобальность
+ * ничего не задевает.
+ */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #502314 0%, #7a3a1e 40%, #E76F51 100%);
+  padding: 20px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.auth-content {
+  width: 100%;
+  max-width: 440px;
+}
+
+.auth-card {
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 20px 60px rgba(80, 35, 20, 0.3), 0 4px 16px rgba(0, 0, 0, 0.1);
+  animation: authCardAppear 0.4s ease-out;
+}
+
+/* Экраны-сообщения (подтверждение почты, проверка ссылки) — текст по центру */
+.auth-card--centered { padding: 40px 32px; }
+
+@keyframes authCardAppear {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Шапка карточки ─── */
+
+.auth-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #f0ebe4;
+}
+
+.auth-header-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: #fff5f2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.auth-header-icon--error { background: #fef2f2; }
+
+.auth-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #502314;
+}
+
+.auth-header p {
+  margin: 3px 0 0;
+  color: #8b7355;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* ─── Переключатель способа восстановления ─── */
+
+.auth-tabs {
+  display: flex;
+  gap: 6px;
+  background: #faf6ef;
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 22px;
+}
+
+.auth-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #8b7355;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auth-tab:hover:not(:disabled):not(.active) { color: #502314; }
+
+.auth-tab.active {
+  background: white;
+  color: #502314;
+  box-shadow: 0 1px 4px rgba(80, 35, 20, 0.1);
+}
+
+.auth-tab:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ─── Поля ввода ─── */
+
+.auth-field { margin-bottom: 18px; }
+
+.auth-field label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #502314;
+  margin-bottom: 8px;
+}
+
+.auth-field label svg { color: #8b7355; }
+
+.auth-input-wrap { position: relative; }
+
+.auth-input-wrap input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 2px solid #e8e0d6;
+  border-radius: 12px;
+  font-size: 16px;
+  font-family: inherit;
+  transition: all 0.2s;
+  box-sizing: border-box;
+  background: #faf8f5;
+}
+
+.auth-input-wrap input:focus {
+  outline: none;
+  border-color: #E76F51;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(231, 111, 81, 0.08);
+}
+
+.auth-input-wrap input:disabled { opacity: 0.6; }
+.auth-input-wrap input::placeholder { color: #c4b8a8; }
+
+/* Значок слева (@ или #) — освобождаем под него место */
+.auth-input-wrap--icon input { padding-left: 42px; }
+
+/* Глазок справа */
+.auth-input-wrap--eye input { padding-right: 48px; }
+
+/* Поле для кода из Telegram */
+.auth-input-wrap--code input {
+  text-align: center;
+  letter-spacing: 8px;
+  font-weight: 700;
+}
+
+.auth-input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #b0a090;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.auth-eye {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 8px;
+  color: #8b7355;
+}
+
+.auth-eye:hover { background: #f0ebe4; }
+
+.pw-eye-ico { width: 20px; height: 20px; display: block; margin: 0 auto; }
+
+/* ─── Сообщения ─── */
+
+.auth-error,
+.auth-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.auth-error svg,
+.auth-success svg { flex-shrink: 0; margin-top: 2px; }
+
+.auth-error {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  animation: authShake 0.4s ease;
+}
+
+.auth-success {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+@keyframes authShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+/* ─── Кнопка ─── */
+
+.auth-btn {
+  width: 100%;
+  padding: 15px;
+  background: linear-gradient(135deg, #E76F51 0%, #e83a1a 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(231, 111, 81, 0.3);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.auth-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b81e00 0%, #E76F51 100%);
+  box-shadow: 0 6px 20px rgba(231, 111, 81, 0.4);
+  transform: translateY(-1px);
+}
+
+.auth-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(231, 111, 81, 0.3);
+}
+
+.auth-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Кнопка по ширине текста — на экранах-сообщениях */
+.auth-btn--inline {
+  width: auto;
+  margin-top: 14px;
+  padding: 12px 22px;
+  font-size: 14px;
+}
+
+/* Второстепенная кнопка */
+.auth-btn--ghost {
+  background: transparent;
+  color: #8b7355;
+  border: 1.5px solid #e8e0d6;
+  box-shadow: none;
+}
+
+.auth-btn--ghost:hover:not(:disabled) {
+  background: #f5f0e8;
+  color: #502314;
+  box-shadow: none;
+  transform: none;
+}
+
+/* ─── Ожидание ─── */
+
+.auth-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: authSpin 0.8s linear infinite;
+}
+
+.auth-spinner-big {
+  width: 44px;
+  height: 44px;
+  border: 4px solid #f0ebe4;
+  border-top-color: #E76F51;
+  border-radius: 50%;
+  animation: authSpin 0.8s linear infinite;
+}
+
+@keyframes authSpin { to { transform: rotate(360deg); } }
+
+/* ─── Экран-сообщение (проверка ссылки, подтверждение почты) ─── */
+
+.auth-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  color: #8b7355;
+}
+
+.auth-state h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #502314;
+}
+
+.auth-state p {
+  margin: 0;
+  font-size: 14px;
+  color: #8b7355;
+  line-height: 1.55;
+  max-width: 320px;
+}
+
+.auth-state-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.auth-state-icon--success { background: #f0fdf4; }
+.auth-state-icon--error   { background: #fef2f2; }
+
+/* ─── Подписи и ссылка «назад» ─── */
+
+.auth-hint {
+  margin: 14px 0 0;
+  color: #a08570;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.auth-back {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.auth-back a {
+  color: #8b7355;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.auth-back a:hover {
+  color: #502314;
+  text-decoration: underline;
+}
