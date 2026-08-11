@@ -13,7 +13,20 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' };
+// Сотрудник портала авторизован токеном в localStorage — его кладут в
+// заголовок X-Session-Token (так делает apiClient). Ресторан авторизован
+// HttpOnly-cookie ro_session, её браузер шлёт сам. Раньше здесь стоял
+// голый Content-Type, и подписка сотрудника падала с «Требуется
+// авторизация»: в кабинете ресторана всё работало на cookie, а в портале
+// токен просто не отправлялся.
+function jsonHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  try {
+    const t = localStorage.getItem('bk_session_token');
+    if (t) h['X-Session-Token'] = t;
+  } catch { /* приватный режим — останется только cookie */ }
+  return h;
+}
 
 export function usePushNotifications() {
   const isSupported = computed(() => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
@@ -62,7 +75,8 @@ export function usePushNotifications() {
       // Отправляем подписку на сервер
       const subRes = await fetch('/api/push/subscribe', {
         method: 'POST',
-        headers: JSON_HEADERS,
+        credentials: 'include',
+        headers: jsonHeaders(),
         body: JSON.stringify({
           subscription: sub.toJSON(),
           user_agent: navigator.userAgent,
@@ -80,7 +94,8 @@ export function usePushNotifications() {
       try {
         await fetch('/api/push/test', {
           method: 'POST',
-          headers: JSON_HEADERS,
+          credentials: 'include',
+          headers: jsonHeaders(),
           body: JSON.stringify({ endpoint: sub.endpoint }),
         });
       } catch (e) { /* не критично */ }
@@ -105,7 +120,8 @@ export function usePushNotifications() {
       await sub.unsubscribe();
       await fetch('/api/push/unsubscribe', {
         method: 'POST',
-        headers: JSON_HEADERS,
+        credentials: 'include',
+        headers: jsonHeaders(),
         body: JSON.stringify({ endpoint }),
       });
       isSubscribed.value = false;

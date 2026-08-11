@@ -253,7 +253,7 @@
               <div v-for="(a, i) in activity" :key="i" class="uset-list-item uset-list-static">
                 <span class="uset-list-label">
                   {{ activityLabel(a.action) }}
-                  <small class="uset-sub">{{ a.entity_type }}{{ a.legal_entity ? ' · ' + a.legal_entity : '' }} · {{ fmtDate(a.created_at) }}</small>
+                  <small class="uset-sub">{{ entityLabel(a.entity_type) }}{{ a.legal_entity ? ' · ' + a.legal_entity : '' }} · {{ fmtDate(a.created_at) }}</small>
                 </span>
               </div>
             </div>
@@ -273,7 +273,7 @@ import { useToastStore } from '@/stores/toastStore.js'
 import { useTabRoute } from '@/composables/useTabRoute.js'
 import { useInstallPrompt } from '@/composables/useInstallPrompt.js'
 import { usePushNotifications } from '@/composables/usePushNotifications.js'
-import { activityLabel } from '@/lib/auditActions.js'
+import { activityLabel, entityLabel } from '@/lib/auditActions.js'
 import { ALL_NAV_ITEMS } from '@/lib/navSections.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
@@ -663,7 +663,24 @@ onMounted(() => {
 @media (max-width: 900px) {
   .uset { padding: 16px; }
   .uset-layout { grid-template-columns: 1fr; }
-  .uset-tabs { flex-direction: row; overflow-x: auto; position: static; padding-bottom: 4px; }
-  .uset-tab { white-space: nowrap; }
+  /* Вкладки едут строкой. flex: 0 0 auto обязателен: иначе кнопки
+     сжимаются до нуля и подписи налезают друг на друга. */
+  .uset-tabs { flex-direction: row; overflow-x: auto; position: static; padding-bottom: 6px; gap: 6px; }
+  .uset-tab { flex: 0 0 auto; white-space: nowrap; padding: 9px 14px; border: 1px solid var(--border-light); }
+  .uset-tab.active { box-shadow: none; border-color: var(--bk-brown); color: var(--bk-brown); }
+
+  /* Кнопка справа в шапке карточки на узком экране не помещается —
+     переносим её на свою строку, а не выпускаем за край. Значок и заголовок
+     при этом должны остаться в одной строке, иначе значок висит сам по себе. */
+  .uset-card-header { flex-wrap: wrap; }
+  .uset-card-header > .uset-card-icon { flex: 0 0 auto; }
+  .uset-card-header > div:not(.uset-card-icon) { flex: 1 1 0; min-width: 0; }
+  .uset-btn-text { margin-left: 0; width: 100%; text-align: left; padding-top: 4px; }
+
+  /* Длинные строки списков (сеансы, действия) не должны выдавливать кнопку. */
+  .uset-list-item { flex-wrap: wrap; row-gap: 6px; }
+  .uset-list-label { flex: 1 1 100%; }
+  .uset-list-item .uset-switch { order: -1; }
+  .uset-unpin, .uset-badge { margin-left: auto; }
 }
 </style>

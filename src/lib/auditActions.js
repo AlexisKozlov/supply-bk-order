@@ -93,7 +93,74 @@ export const ACTIVITY_LABELS = {
   broadcast_sent: 'отправил рассылку',
   session_terminated: 'завершил сессию',
   maintenance_toggled: 'переключил техработы',
+
+  // Заявки поставщикам — дополнено по фактическому журналу: эти виды
+  // попадали в ленту и в «Мои действия» английскими ключами.
+  so_deadline_rules_updated: 'изменил правила дедлайнов',
+  so_adhoc_created: 'создал внеплановую заявку',
+  so_supplier_disconnected: 'отключил поставщика',
+  so_supplier_reconnected: 'вернул поставщика',
+  // Корректировки
+  correction_taken: 'взял корректировку в работу',
+  correction_approved_bot: 'согласовал корректировку в боте',
+  correction_edit_cabinet: 'изменил корректировку из кабинета',
+  correction_cancel_cabinet: 'отменил корректировку из кабинета',
+  // Напоминания и справочники
+  reminder_keg_toggled: 'переключил напоминания о кегах',
+  suppliers_deleted: 'удалил поставщиков',
+  restaurants_deleted: 'удалил рестораны',
+  collection_deleted: 'удалил сбор остатков',
+  // Овощи
+  veg_session_created: 'создал сбор по овощам',
+  veg_order_updated: 'изменил заказ овощей',
 };
+
+/**
+ * Название объекта, к которому относится действие (audit_log.entity_type).
+ * В журнале это технические имена таблиц — человеку они ничего не говорят.
+ */
+export const ENTITY_LABELS = {
+  order: 'заказ',
+  orders: 'заказы',
+  supplier_order: 'заявка поставщику',
+  product: 'товар',
+  products: 'товары',
+  product_prices: 'цены',
+  supplier: 'поставщик',
+  suppliers: 'поставщики',
+  restaurant: 'ресторан',
+  restaurants: 'рестораны',
+  import: 'импорт данных',
+  delivery_schedule: 'график доставки',
+  supplier_schedule: 'график поставок',
+  stock_collection: 'сбор остатков',
+  marketing: 'маркетинг',
+  plan: 'план',
+  plans: 'планы',
+  tender: 'тендер',
+  user: 'сотрудник',
+  users: 'сотрудники',
+  correction: 'корректировка',
+  order_corrections: 'корректировки заказов',
+  restaurant_reminder_subscriptions: 'напоминания ресторану',
+  restaurant_main_delivery_subscriptions: 'напоминания об основной поставке',
+  restaurant_keg_return_subscriptions: 'напоминания о кегах',
+  keg_return: 'возврат кег',
+  marketing_activities: 'маркетинговые активности',
+  veg: 'овощи',
+  recipe: 'рецептура',
+  protocol: 'протокол',
+  system: 'система',
+  settings: 'настройки',
+  task: 'задача',
+  handover: 'передача дел',
+};
+
+// Человеческое имя объекта. Фолбэк — ключ без подчёркиваний.
+export function entityLabel(type) {
+  if (!type) return '';
+  return ENTITY_LABELS[type] || String(type).replace(/_/g, ' ');
+}
 
 // Текст действия для ленты активности. Фолбэк — ключ без подчёркиваний.
 export function activityLabel(action) {

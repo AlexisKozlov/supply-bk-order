@@ -56,7 +56,16 @@ if ($subpoint === 'subscribe' && $method === 'POST') {
     } else {
         $sysUser = function_exists('getSessionUser') ? getSessionUser($pdo) : null;
         if ($sysUser) {
-            $userId = (int)$sysUser['id'];
+            // getSessionUser не выбирает users.id — подписка сохранялась с
+            // user_id = 0, и отправить на неё было нельзя: pushSendToUser
+            // ищет по идентификатору. Достаём его по имени.
+            $userId = (int)($sysUser['id'] ?? 0);
+            if (!$userId && !empty($sysUser['name'])) {
+                $q = $pdo->prepare("SELECT id FROM users WHERE name = ? LIMIT 1");
+                $q->execute([$sysUser['name']]);
+                $userId = (int)$q->fetchColumn();
+            }
+            if (!$userId) pushRespond(['error' => 'Не удалось определить пользователя'], 500);
         } else {
             pushRespond(['error' => 'Требуется авторизация'], 401);
         }
