@@ -73,8 +73,7 @@ CORS_ORIGIN=...
 - [api/cron_telegram.php](/var/www/bk-calc/api/cron_telegram.php);
 - [api/cron_psc_expiry.php](/var/www/bk-calc/api/cron_psc_expiry.php);
 - [api/cron_health.php](/var/www/bk-calc/api/cron_health.php);
-- [api/notify_expired_and_unlink.php](/var/www/bk-calc/api/notify_expired_and_unlink.php);
-- [api/notify_unverified_subs.php](/var/www/bk-calc/api/notify_unverified_subs.php).
+- [api/cron_housekeeping.php](/var/www/bk-calc/api/cron_housekeeping.php) — чистка служебных журналов, раз в сутки.
 
 Перед изменением cron нужно проверять логи и реальный путь файла на сервере.
 
