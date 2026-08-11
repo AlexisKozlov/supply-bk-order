@@ -76,22 +76,33 @@
           </button>
         </div>
 
-        <!-- Подсказки под полем -->
+        <!-- Подсказки под полем: разделы находятся мгновенно, остальное
+             догружается из базы и добавляется группами ниже. -->
         <div v-if="findQuery && findResults.length" class="p-find-list">
-          <a
-            v-for="(r, i) in findResults" :key="r.route"
-            class="p-find-item" :class="{ 'p-find-active': i === findIdx }"
-            :href="'/' + r.route"
-            @mouseenter="findIdx = i"
-            @click.prevent="goTo(r.route)"
-          >
-            <BkIcon :name="r.icon" size="sm" />
-            <span v-html="highlightFind(r.label)"></span>
-          </a>
+          <template v-for="(g, gi) in groupedFind" :key="g.title">
+            <div v-if="gi > 0 || g.title !== 'Разделы'" class="p-find-group">{{ g.title }}</div>
+            <a
+              v-for="r in g.items" :key="r.key"
+              class="p-find-item" :class="{ 'p-find-active': r.idx === findIdx }"
+              :href="r.href"
+              @mouseenter="findIdx = r.idx"
+              @click.prevent="openResult(r)"
+            >
+              <BkIcon :name="r.icon" size="sm" />
+              <span class="p-find-text">
+                <span v-html="highlightFind(r.label)"></span>
+                <small v-if="r.sub">{{ r.sub }}</small>
+              </span>
+            </a>
+          </template>
+          <div v-if="findLoading" class="p-find-more">Ищем в справочниках…</div>
         </div>
         <div v-else-if="findQuery" class="p-find-empty">
-          Раздела с таким названием нет.
-          <a href="/search-cards" @click.prevent="goTo('search-cards')">Поискать «{{ findQuery }}» среди товаров</a>
+          <template v-if="findLoading">Ищем…</template>
+          <template v-else>
+            Ничего не нашлось.
+            <a href="/search-cards" @click.prevent="goTo('search-cards')">Поискать «{{ findQuery }}» в карточках</a>
+          </template>
         </div>
 
         <!-- Пустое поле — недавние разделы -->
@@ -292,7 +303,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import { ALL_NAV_ITEMS } from '@/lib/navSections.js';
 import { getRecentRoutes } from '@/router/index.js';
-import { parseRestaurantInput } from '@/lib/legalEntities.js';
+import { parseRestaurantInput, formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 
 const router = useRouter();
@@ -435,10 +446,9 @@ const findQuery = ref('');
 const findIdx = ref(0);
 const findInput = ref(null);
 
-// Ищем по названию и по ключевым словам: «камако» найдёт «Заявки
-// поставщикам», «срок» — «Сроки годности». Раскладку не угадываем:
-// достаточно совпадения куска строки.
-const findResults = computed(() => {
+// Разделы ищем по названию и по ключевым словам: «камако» найдёт «Заявки
+// поставщикам», «срок» — «Сроки годности». Раскладку не угадываем.
+const sectionHits = computed(() => {
   const q = findQuery.value.trim().toLowerCase();
   if (!q) return [];
   const hit = item => {
@@ -449,22 +459,95 @@ const findResults = computed(() => {
     if (kw.includes(q)) return 2;
     return -1;
   };
-  // При равном совпадении вперёд идут разделы, где человек недавно был:
-  // «заяв» у закупщика — это «Заявки поставщикам», а не «Заявка на пропуск».
+  // При равном совпадении вперёд идут разделы, где человек недавно был.
   const recent = getRecentRoutes();
-  const seenAt = r => {
-    const i = recent.indexOf(r);
-    return i < 0 ? 99 : i;
-  };
+  const seenAt = r => { const i = recent.indexOf(r); return i < 0 ? 99 : i; };
   return allSections.value
     .map(item => ({ item, rank: hit(item) }))
     .filter(r => r.rank >= 0)
     .sort((a, b) => a.rank - b.rank || seenAt(a.item.route) - seenAt(b.item.route))
-    .slice(0, 7)
-    .map(r => r.item);
+    .slice(0, 6)
+    .map(r => ({
+      kind: 'section', key: 'sec_' + r.item.route,
+      label: r.item.label, icon: r.item.icon, sub: '',
+      href: '/' + r.item.route, route: r.item.route,
+    }));
 });
 
-watch(findQuery, () => { findIdx.value = 0; });
+// Товары, поставщики и рестораны — из базы. Поиск по «/» это умел давно,
+// а главная искала только разделы: набрать SKU или номер ресторана было
+// негде. Запрос с задержкой, чтобы не дёргать сервер на каждую букву.
+const dbHits = ref([]);
+const findLoading = ref(false);
+let findTimer = null;
+
+async function searchDb(q) {
+  const escaped = q.replace(/[*%_]/g, '');
+  if (escaped.length < 2) { dbHits.value = []; return; }
+  findLoading.value = true;
+  try {
+    const [products, suppliers, restaurants] = await Promise.allSettled([
+      db.from('products').select('sku, name, supplier, external_code')
+        .or(`sku.ilike.*${escaped}*,name.ilike.*${escaped}*,external_code.ilike.*${escaped}*`)
+        .eq('is_active', 1).limit(6),
+      db.from('suppliers').select('short_name, full_name')
+        .or(`short_name.ilike.*${escaped}*,full_name.ilike.*${escaped}*`).limit(5),
+      db.from('restaurants').select('number, city, address, legal_entity_group')
+        .or(`number.ilike.*${escaped}*,city.ilike.*${escaped}*,address.ilike.*${escaped}*`)
+        .eq('active', 1).limit(5),
+    ]);
+    const val = r => (r.status === 'fulfilled' ? (r.value?.data || []) : []);
+    const out = [];
+    for (const p of val(products)) {
+      out.push({
+        kind: 'product', key: 'prod_' + p.sku,
+        label: `${p.sku} ${p.name}`, sub: p.supplier || '', icon: 'package',
+        href: '/database?search=' + encodeURIComponent(p.sku), payload: p.sku,
+      });
+    }
+    for (const sup of val(suppliers)) {
+      out.push({
+        kind: 'supplier', key: 'sup_' + sup.short_name,
+        label: sup.short_name, sub: sup.full_name || '', icon: 'factory',
+        href: '/database?tab=suppliers&search=' + encodeURIComponent(sup.short_name), payload: sup.short_name,
+      });
+    }
+    for (const r of val(restaurants)) {
+      out.push({
+        kind: 'restaurant', key: 'rest_' + r.number,
+        label: 'Ресторан ' + formatRestaurantNumber(r.number, r.legal_entity_group),
+        sub: [r.city, r.address].filter(Boolean).join(', '), icon: 'building',
+        href: '/database?tab=restaurants&search=' + r.number, payload: String(r.number),
+      });
+    }
+    dbHits.value = out;
+  } catch { dbHits.value = []; }
+  finally { findLoading.value = false; }
+}
+
+const findResults = computed(() => [...sectionHits.value, ...dbHits.value]);
+
+const GROUP_TITLES = { section: 'Разделы', product: 'Товары', supplier: 'Поставщики', restaurant: 'Рестораны' };
+
+const groupedFind = computed(() => {
+  const groups = [];
+  let idx = 0;
+  for (const r of findResults.value) {
+    const title = GROUP_TITLES[r.kind] || 'Найдено';
+    let g = groups.find(x => x.title === title);
+    if (!g) { g = { title, items: [] }; groups.push(g); }
+    g.items.push({ ...r, idx: idx++ });
+  }
+  return groups;
+});
+
+watch(findQuery, (q) => {
+  findIdx.value = 0;
+  clearTimeout(findTimer);
+  const s = q.trim();
+  if (s.length < 2) { dbHits.value = []; findLoading.value = false; return; }
+  findTimer = setTimeout(() => searchDb(s), 250);
+});
 
 function moveFind(step) {
   const n = findResults.value.length;
@@ -474,8 +557,19 @@ function moveFind(step) {
 
 function openFind() {
   const target = findResults.value[findIdx.value];
-  if (target) goTo(target.route);
+  if (target) openResult(target);
   else if (findQuery.value.trim()) goTo('search-cards');
+}
+
+// Раздел открываем по имени маршрута, найденное в справочниках — через
+// «Базу данных» с готовым фильтром: там уже есть вкладки и поиск.
+function openResult(r) {
+  if (!r) return;
+  if (r.kind === 'section') { goTo(r.route); return; }
+  const query = r.kind === 'product' ? { search: r.payload }
+    : r.kind === 'supplier' ? { tab: 'suppliers', search: r.payload }
+    : { tab: 'restaurants', search: r.payload };
+  goTo('database', query);
 }
 
 // Подсветка совпавшего куска в подсказке.
@@ -827,6 +921,13 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
   border-radius: 14px; text-decoration: none; color: rgba(245,230,208,.8);
   font-size: var(--tk-fz-xl); font-weight: var(--tk-fw-semibold); }
 .p-find-item :deep(mark) { background: none; color: var(--brand-orange); font-weight: 800; }
+.p-find-text { display: flex; flex-direction: column; min-width: 0; }
+.p-find-text small { font-size: 12px; font-weight: 500; color: rgba(245,230,208,.45); }
+.p-find-group {
+  padding: 10px 18px 4px; font-size: 10px; letter-spacing: 2px;
+  text-transform: uppercase; color: rgba(245,230,208,.35); font-weight: 700;
+}
+.p-find-more { padding: 8px 18px 12px; font-size: 12px; color: rgba(245,230,208,.35); }
 .p-find-active { background: rgba(245,235,220,.1); color: #F5EBDC; }
 .p-find-empty { width: 100%; padding: 14px 18px; font-size: var(--tk-fz-lg); color: rgba(245,230,208,.55); text-align: center; }
 .p-find-empty a { color: var(--brand-orange); font-weight: var(--tk-fw-bold); text-decoration: none; }

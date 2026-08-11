@@ -233,7 +233,9 @@ $filterWhitelist = [
     'stock_1c'    => ['sku','legal_entity'],
     'cards'       => ['id','sku','name','supplier','legal_entity','is_active','analogs','updated_by'],
     'notifications'=> ['id','type','target_user','entity_type','entity_id','legal_entity'],
-    'restaurants' => ['id','legal_entity','legal_entity_group','number','dodo_is_number','pickup_address','pickup_weekdays','default_vehicle','default_driver'],
+    // city/address/region/active нужны поиску (главная и палитра по «/»):
+    // без них фильтр молча отбрасывался и запрос возвращал все рестораны.
+    'restaurants' => ['id','legal_entity','legal_entity_group','number','dodo_is_number','pickup_address','pickup_weekdays','default_vehicle','default_driver','city','address','region','active'],
     'delivery_schedule' => ['id','restaurant_id','legal_entity','day_of_week'],
     'order_corrections' => ['id','restaurant_number','delivery_date','status','created_at','legal_entity_group'],
     'chat_conversations' => ['id','restaurant_number','status','restaurant_chat_id'],
