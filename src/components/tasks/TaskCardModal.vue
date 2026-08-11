@@ -707,7 +707,10 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import { renderMarkdown } from '@/lib/markdown.js';
 import TaskIcon from './TaskIcon.vue';
-import MarkdownEditor from './MarkdownEditor.vue';
+// Редактор тянет за собой tiptap — это 450 КБ из 540 КБ веса окна
+// карточки. Грузим его отдельно: окно открывается сразу, поле ввода
+// появляется следом. На телефоне разница заметна.
+const MarkdownEditor = defineAsyncComponent(() => import('./MarkdownEditor.vue'));
 import DatetimePicker from './DatetimePicker.vue';
 import UiSkeleton from '@/components/ui/UiSkeleton.vue';
 const dlg = useTasksDialogs();

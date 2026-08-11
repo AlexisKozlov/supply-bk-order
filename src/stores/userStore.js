@@ -222,10 +222,18 @@ export const useUserStore = defineStore('user', () => {
   async function checkMaintenance() {
     try {
       const { data } = await db.rpc('check_maintenance');
-      maintenanceMode.value = !!data?.maintenance_mode;
-      maintenanceMessage.value = data?.maintenance_message || '';
-      maintenanceEndTime.value = data?.maintenance_end_time || null;
+      applyMaintenance(data);
     } catch (e) { /* noop */ }
+  }
+
+  // Тот же результат, но данные пришли не своим запросом, а вместе с общим
+  // «пульсом» портала. Отдельная проверка техработ раз в минуту давала
+  // 5 174 запроса в сутки — теперь она едет прицепом.
+  function applyMaintenance(data) {
+    if (!data) return;
+    maintenanceMode.value = !!data.maintenance_mode;
+    maintenanceMessage.value = data.maintenance_message || '';
+    maintenanceEndTime.value = data.maintenance_end_time || null;
   }
 
   return {
@@ -244,6 +252,7 @@ export const useUserStore = defineStore('user', () => {
     getHiddenModules,
     setHiddenModules,
     checkMaintenance,
+    applyMaintenance,
     getAccess,
     hasAccess,
   };

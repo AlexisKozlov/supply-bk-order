@@ -4,13 +4,11 @@ import { db, orVal } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 
 const POLL_INTERVAL = 60000;
-const BROADCAST_POLL_INTERVAL = 45000;
 
 export const useNotificationStore = defineStore('notification', () => {
   const notifications = ref([]);
   const loading = ref(false);
   let pollTimer = null;
-  let broadcastTimer = null;
 
   const activeBroadcasts = ref([]);
   let _savedDismissed = [];
@@ -151,13 +149,17 @@ export const useNotificationStore = defineStore('notification', () => {
     try { await markRead([id]); } catch (e) { console.error('Ошибка отметки broadcast:', e); }
   }
 
+  // Объявления приходят вместе с общим «пульсом» портала — свой запрос
+  // раз в 45 секунд давал 3 309 обращений в сутки.
+  function applyBroadcasts(list) {
+    activeBroadcasts.value = Array.isArray(list) ? list : [];
+  }
+
   function startPolling() {
     stopPolling();
     if (!sessionStartTime.value) sessionStartTime.value = Date.now();
     load();
-    checkBroadcasts();
     pollTimer = setInterval(() => load(), POLL_INTERVAL);
-    broadcastTimer = setInterval(() => checkBroadcasts(), BROADCAST_POLL_INTERVAL);
     // Восстанавливаем обработчик видимости вкладки (мог быть снят при разлогине)
     if (typeof document !== 'undefined' && !_visibilityBound) {
       _visibilityBound = true;
@@ -169,10 +171,6 @@ export const useNotificationStore = defineStore('notification', () => {
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
-    }
-    if (broadcastTimer) {
-      clearInterval(broadcastTimer);
-      broadcastTimer = null;
     }
   }
 
@@ -213,5 +211,5 @@ export const useNotificationStore = defineStore('notification', () => {
     sessionStartTime.value = null;
   }
 
-  return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling, cleanup, clearOnLogout };
+  return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, applyBroadcasts, dismissBroadcast, startPolling, stopPolling, cleanup, clearOnLogout };
 });

@@ -2560,14 +2560,29 @@ async function bugPoll() {
   } catch (e) { console.warn('[admin] bugPoll error:', e); }
 }
 
+// Частота зависит от того, читают ли переписку прямо сейчас.
+// Раньше список обращений дёргался раз в 10 секунд всё время, пока
+// открыта вкладка «Обращения» — 13 156 запросов в сутки ради счётчика.
+// Быстрый опрос нужен только когда открыта карточка и человек ждёт
+// ответа собеседника; список сам по себе меняется редко.
+const BUG_POLL_FAST = 10000;
+const BUG_POLL_IDLE = 60000;
+let bugPollRate = 0;
+
 function startBugPoll() {
+  const rate = bugDetail.value ? BUG_POLL_FAST : BUG_POLL_IDLE;
+  if (bugPollTimer && bugPollRate === rate) return;
   if (bugPollTimer) clearInterval(bugPollTimer);
-  bugPollTimer = setInterval(bugPoll, 10000);
+  bugPollRate = rate;
+  bugPollTimer = setInterval(bugPoll, rate);
 }
 
 function stopBugPoll() {
-  if (bugPollTimer) { clearInterval(bugPollTimer); bugPollTimer = null; }
+  if (bugPollTimer) { clearInterval(bugPollTimer); bugPollTimer = null; bugPollRate = 0; }
 }
+
+// Открыли или закрыли карточку обращения — переключаем частоту опроса.
+watch(bugDetail, () => { if (activeTab.value === 'feedback') startBugPoll(); });
 
 onMounted(() => {
   db.rpc('get_bug_reports_count', {}).then(({ data }) => {

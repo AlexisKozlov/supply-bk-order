@@ -102,6 +102,9 @@ if ($endpoint === 'rpc') {
     // ═══ Личные настройки сотрудника (сеансы, Telegram, своя история) ═══
     require __DIR__ . '/rpc/user_settings.php';
 
+    // ═══ Единый «пульс»: присутствие + техработы + значки + объявления ═══
+    require __DIR__ . '/rpc/pulse.php';
+
     // ═══ ИИ-ассистент закупок (DeepSeek + инструменты бота) ═══
     require __DIR__ . '/rpc/ai_assistant.php';
     // (batch_update_received_qty ушёл в rpc/orders.php)

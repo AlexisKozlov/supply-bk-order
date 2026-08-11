@@ -761,36 +761,45 @@ function markNovSeen() {
   noveltiesUnseen.value = 0
 }
 
+// Забытая открытая вкладка опрашивала сервер всю ночь: с полуночи до пяти
+// утра набегало 16 939 запросов от людей, которые давно ушли домой. Считаем
+// вкладку спящей после получаса без единого действия и молчим, пока человек
+// не вернётся.
+const IDLE_MS = 30 * 60 * 1000
+let lastActivity = Date.now()
+let idleNow = false
+
+function markActivity() {
+  lastActivity = Date.now()
+  if (idleNow) {
+    idleNow = false
+    loadBadges()
+    notificationStore.startPolling()
+  }
+}
+
 async function loadBadges() {
   if (!userStore.isAuthenticated) return
   if (isOffline.value || serverDown.value || document.hidden) return
+  if (Date.now() - lastActivity > IDLE_MS) {
+    // Уходим в сон: перестаём дёргать и «пульс», и уведомления.
+    if (!idleNow) { idleNow = true; notificationStore.stopPolling() }
+    return
+  }
   try {
-    const token = localStorage.getItem('bk_session_token') || ''
-    const scanUnknownPromise = userStore.hasAccess('restaurant-orders', 'view')
-      ? fetch('/api/ro/admin/scan-unknown-count-new', { headers: { 'X-Session-Token': token } })
-          .then(r => r.ok ? r.json() : { count: 0 })
-          .catch(() => ({ count: 0 }))
-      : Promise.resolve({ count: 0 })
-
-    // Счётчики просим только по доступным разделам. Раньше чат и корректировки
-    // дёргались у всех: у кого нет прав, каждые 30 секунд получал отказ —
-    // сотни бесполезных запросов в день и мусор в логах.
-    const chatPromise = userStore.hasAccess('chat', 'view')
-      ? db.rpc('chat_unread_total')
-      : Promise.resolve({ data: null })
-    const corrPromise = userStore.hasAccess('corrections', 'view')
-      ? db.from('order_corrections').select('id').eq('status', 'pending').limit(100)
-      : Promise.resolve({ data: null })
-
-    const [chatRes, corrRes, scanUnknownRes] = await Promise.all([
-      chatPromise,
-      corrPromise,
-      scanUnknownPromise,
-    ])
-    badgeCounts.value = {}
-    if (chatRes.data?.count > 0) badgeCounts.value['chat'] = chatRes.data.count
-    if (corrRes.data?.length > 0) badgeCounts.value['corrections'] = corrRes.data.length
-    if (scanUnknownRes?.count > 0) badgeCounts.value['scan-unknown'] = scanUnknownRes.count
+    // Значки чата, корректировок и неизвестных штрихкодов приходят одним
+    // запросом «пульса» — раньше это были три отдельных обращения каждые
+    // 30 секунд. Проверку прав делает сервер: чего нельзя видеть, того в
+    // ответе просто нет.
+    const { data } = await db.rpc('portal_pulse', pulsePayload())
+    if (data) {
+      badgeCounts.value = {}
+      if (data.badges?.chat > 0) badgeCounts.value['chat'] = data.badges.chat
+      if (data.badges?.corrections > 0) badgeCounts.value['corrections'] = data.badges.corrections
+      if (data.badges?.scan_unknown > 0) badgeCounts.value['scan-unknown'] = data.badges.scan_unknown
+      if (data.maintenance) userStore.applyMaintenance(data.maintenance)
+      notificationStore.applyBroadcasts(data.broadcasts)
+    }
   } catch {}
 
   // Новинки: считаем непросмотренные текущие для текущей группы
@@ -811,27 +820,25 @@ async function loadBadges() {
 }
 let badgeTimer = null
 
-function sendHeartbeat() {
-  if (isOffline.value || serverDown.value) return;
-  const name = userStore.currentUser?.name;
-  if (!name) return;
+// Что отправляем вместе с «пульсом»: где человек сейчас находится и не
+// редактирует ли он заказ (по этому другие видят «занято»).
+function pulsePayload() {
   // Русское название страницы: сначала из карты, иначе из meta.title маршрута
   // (он на русском у всех страниц), и только в крайнем случае — имя маршрута.
   const page = pageNames[route.name] || route.meta?.title || route.name || '';
   const editingOrderId = (route.name === 'order' && route.query.orderId && route.query.mode === 'edit') ? route.query.orderId : null;
-  db.rpc('heartbeat', { page, editing_order_id: editingOrderId }).catch(() => {});
+  return { page, editing_order_id: editingOrderId };
 }
 
-let heartbeatTimer = null;
-let maintenanceTimer = null;
 let welcomeTimers = [];
 let removeAfterEach = null;
 
 removeAfterEach = router.afterEach(() => {
   sidebarOpen.value = false;
   showToolsMenu.value = false;
-  if (!userStore.isAdmin) userStore.checkMaintenance();
-  sendHeartbeat();
+  // Один «пульс» на переход: он и присутствие отметит на новой странице,
+  // и техработы проверит, и значки обновит.
+  loadBadges();
 });
 
 const currentRoute = computed(() => route.name);
@@ -865,6 +872,8 @@ onMounted(() => {
   // Подтягиваем избранное в сайдбаре с сервера — синхронно с другими устройствами
   loadPinsFromServer();
 
+  // Единый опрос портала: значки, техработы, объявления и отметка
+  // присутствия — одним запросом раз в 30 секунд.
   loadBadges()
   badgeTimer = setInterval(loadBadges, 30000)
 
@@ -882,20 +891,12 @@ onMounted(() => {
 
   document.addEventListener('click', handleOutsideClick);
   document.addEventListener('keydown', handleHotkeys);
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(ev =>
+    window.addEventListener(ev, markActivity, { passive: true }));
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
 
   notificationStore.startPolling();
-
-  // Heartbeat — онлайн-присутствие (каждые 30 сек)
-  sendHeartbeat();
-  heartbeatTimer = setInterval(sendHeartbeat, 30000);
-
-  // Периодическая проверка тех. работ (каждые 60 сек)
-  if (!userStore.isAdmin) {
-    userStore.checkMaintenance();
-    maintenanceTimer = setInterval(() => userStore.checkMaintenance(), 60000);
-  }
 
   // Пауза таймеров когда вкладка браузера скрыта
   document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -905,34 +906,24 @@ function handleVisibilityChange() {
   if (document.hidden) {
     // Вкладка скрыта — останавливаем таймеры
     if (badgeTimer) { clearInterval(badgeTimer); badgeTimer = null; }
-    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-    if (maintenanceTimer) { clearInterval(maintenanceTimer); maintenanceTimer = null; }
   } else {
-    // Вкладка снова видна — запускаем сразу и ставим интервалы
+    // Вкладка снова видна — считаем это действием и запускаем сразу
+    lastActivity = Date.now();
+    idleNow = false;
     loadBadges();
     if (badgeTimer) clearInterval(badgeTimer);
     badgeTimer = setInterval(loadBadges, 30000);
-
-    sendHeartbeat();
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
-    heartbeatTimer = setInterval(sendHeartbeat, 30000);
-
-    if (!userStore.isAdmin) {
-      userStore.checkMaintenance();
-      if (maintenanceTimer) clearInterval(maintenanceTimer);
-      maintenanceTimer = setInterval(() => userStore.checkMaintenance(), 60000);
-    }
   }
 }
 
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
   document.removeEventListener('keydown', handleHotkeys);
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(ev =>
+    window.removeEventListener(ev, markActivity));
   window.removeEventListener('online', handleOnline);
   window.removeEventListener('offline', handleOffline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  if (maintenanceTimer) clearInterval(maintenanceTimer);
   if (badgeTimer) clearInterval(badgeTimer);
   welcomeTimers.forEach(clearTimeout);
   welcomeTimers = [];
