@@ -132,13 +132,14 @@
 
     <Teleport to="body">
       <div v-if="userModal.show" class="modal" @click.self="tryCloseUserModal">
-        <div class="modal-box" style="width:460px;">
+        <div class="modal-box usr-modal">
           <div class="modal-header">
             <h2>{{ userModal.user ? 'Редактирование' : 'Новый пользователь' }}</h2>
             <button class="modal-close" @click="tryCloseUserModal"><BkIcon name="close" size="sm"/></button>
           </div>
 
-          <div class="adm-form">
+          <div class="adm-form usr-form">
+            <div class="usr-sec-title">Кто это</div>
             <div class="modal-field">
               <span class="modal-field-label">Имя</span>
               <input v-model="form.name" placeholder="ФИО пользователя" />
@@ -170,6 +171,7 @@
               <input v-model="form.display_role" placeholder="Менеджер, Руководитель и т.д." />
             </div>
 
+            <div class="usr-sec-title">Где работает</div>
             <div class="modal-field">
               <span class="modal-field-label">Доступные юр. лица</span>
               <div class="adm-le-grid">
@@ -239,17 +241,27 @@
             </div>
 
             <!-- Доступ к модулям -->
+            <div class="usr-sec-title">
+              Что может
+              <span v-if="form.role !== 'admin'" class="usr-sec-count">открыто {{ openModulesCount }} из {{ MODULES.length }}</span>
+            </div>
             <div class="modal-field">
-              <span class="modal-field-label">Доступ к модулям</span>
               <div v-if="form.role === 'admin'" class="adm-perm-admin-note">
                 Администратор имеет полный доступ ко всем модулям
               </div>
-              <div v-else class="adm-perm-grid">
+              <template v-else>
+                <div class="usr-perm-tools">
+                  <input v-model="permQuery" class="usr-perm-search" placeholder="Найти модуль" />
+                  <button class="btn small" @click="applyToAllModules('view')" title="Всем модулям — только просмотр">Всё смотреть</button>
+                  <button class="btn small" @click="applyToAllModules('none')" title="Закрыть все модули">Закрыть всё</button>
+                  <button class="btn small" @click="resetPermissionsToTemplate" title="Вернуть права, положенные роли">Как у роли</button>
+                </div>
+                <div class="adm-perm-grid">
                 <div class="adm-perm-header">
                   <div class="adm-perm-module-col">Модуль</div>
                   <div class="adm-perm-level-col" v-for="lvl in ['full','edit','view','none']" :key="lvl">{{ ACCESS_LEVEL_LABELS[lvl] }}</div>
                 </div>
-                <div v-for="mod in MODULES" :key="mod" class="adm-perm-row">
+                <div v-for="mod in visibleModules" :key="mod" class="adm-perm-row">
                   <div class="adm-perm-module-col">{{ MODULE_LABELS[mod] || mod }}</div>
                   <div class="adm-perm-level-col" v-for="lvl in ['full','edit','view','none']" :key="lvl">
                     <label class="adm-perm-radio">
@@ -258,12 +270,13 @@
                     </label>
                   </div>
                 </div>
-                <button v-if="Object.keys(form.permissions || {}).length" class="btn small adm-perm-reset" @click="resetPermissionsToTemplate">Сбросить к шаблону роли</button>
-              </div>
+                  <div v-if="!visibleModules.length" class="usr-perm-empty">Ничего не нашлось</div>
+                </div>
+              </template>
             </div>
           </div>
 
-          <div style="display:flex;gap:8px;margin-top:20px;">
+          <div class="usr-modal-actions">
             <button class="btn primary" @click="saveUser" :disabled="saving">
               <BurgerSpinner v-if="saving" size="xs" />
               <span>{{ saving ? 'Сохранение...' : (userModal.user ? 'Сохранить' : 'Создать') }}</span>
@@ -355,6 +368,24 @@ function tryCloseUserModal() {
 }
 
 const ACCESS_LEVEL_LABELS = { full: 'Полный', edit: 'Редакт.', view: 'Просмотр', none: 'Нет' };
+
+// Поиск по модулям: их больше двадцати, листать глазами тяжело.
+const permQuery = ref('');
+const visibleModules = computed(() => {
+  const q = permQuery.value.trim().toLowerCase();
+  if (!q) return MODULES;
+  return MODULES.filter(m => String(MODULE_LABELS[m] || m).toLowerCase().includes(q));
+});
+
+// Сколько модулей человек реально видит — цифра рядом с заголовком.
+const openModulesCount = computed(() =>
+  MODULES.filter(m => getFormModuleAccess(m) !== 'none').length);
+
+// Одинаковый уровень всем модулям сразу: раньше приходилось щёлкать
+// два десятка радиокнопок.
+function applyToAllModules(level) {
+  for (const m of MODULES) setFormModuleAccess(m, level);
+}
 
 function getFormModuleAccess(module) {
   if (form.value.permissions && form.value.permissions[module] !== undefined) {
@@ -931,6 +962,46 @@ onMounted(async () => {
 .adm-scope-item.is-on { background: #FFF4E8; border-color: #E87A1E; color: #C25E12; font-weight: 700; }
 .adm-scope-empty { padding: 8px 10px; font-size: 12.5px; color: var(--text-muted); }
 .adm-scope-actions { display: flex; justify-content: space-between; gap: 8px; }
+
+
+/* ═══ Окно сотрудника ═══ */
+.usr-modal { width: min(680px, calc(100vw - 32px)); display: flex; flex-direction: column; max-height: 88vh; }
+/* flex:1 + min-height:0 — иначе прокручиваемая область схлопывается
+   и таблица прав обрезается сразу под инструментами. */
+.usr-form { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+
+.usr-sec-title {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--bk-brown, #502314); margin: 6px 0 2px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--border-light);
+}
+.usr-sec-title:not(:first-child) { margin-top: 14px; }
+.usr-sec-count { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+
+.usr-perm-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.usr-perm-search {
+  flex: 1; min-width: 140px; padding: 6px 10px; font-family: inherit; font-size: 12.5px;
+  border: 1px solid var(--border-light); border-radius: 8px; background: var(--card); color: var(--text);
+}
+.usr-perm-search:focus { outline: none; border-color: var(--bk-orange); }
+.usr-perm-empty { padding: 14px; text-align: center; font-size: 12.5px; color: var(--text-muted); }
+
+/* Шапка таблицы прав держится сверху: иначе при прокрутке видны только
+   кружки, и непонятно, где «полный», а где «просмотр». */
+.adm-perm-grid .adm-perm-header { position: sticky; top: 0; z-index: 2; }
+
+/* Кнопки всегда на виду: список прав длинный, прокручивать до них не нужно */
+.usr-modal-actions {
+  display: flex; gap: 8px; padding-top: 14px; margin-top: 4px;
+  border-top: 1px solid var(--border-light); flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .usr-modal { max-height: 92vh; }
+  .usr-perm-tools .btn { flex: 1; justify-content: center; }
+  .usr-modal-actions .btn { flex: 1; justify-content: center; }
+}
 
 /* ═══ Сводка и фильтры ═══ */
 .usr-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }

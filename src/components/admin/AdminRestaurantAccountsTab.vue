@@ -1,39 +1,27 @@
 <template>
   <div class="arat">
 
-    <!-- Сводка -->
-    <div class="arat-summary">
-      <div class="arat-summary-item">
-        <span class="arat-num">{{ usersList.length }}</span>
-        <span class="arat-label">всего</span>
+    <!-- Сводка: сразу видно, кто не сможет войти и кто пользуется приложением -->
+    <div class="arat-cards">
+      <div class="arat-card">
+        <div class="arat-card-label">Кабинетов</div>
+        <div class="arat-card-value">{{ usersList.length }}</div>
+        <div class="arat-card-sub">{{ withPasswordCount }} с паролем</div>
       </div>
-      <div class="arat-summary-item ok">
-        <span class="arat-num">{{ withPasswordCount }}</span>
-        <span class="arat-label">с паролем</span>
+      <div class="arat-card" :class="{ warn: cantLoginCount > 0 }">
+        <div class="arat-card-label">Не смогут войти</div>
+        <div class="arat-card-value">{{ cantLoginCount }}</div>
+        <div class="arat-card-sub">нет пароля или доступ закрыт</div>
       </div>
-      <div class="arat-summary-item warn">
-        <span class="arat-num">{{ withoutPasswordCount }}</span>
-        <span class="arat-label">без пароля</span>
+      <div class="arat-card">
+        <div class="arat-card-label">Почта</div>
+        <div class="arat-card-value">{{ verifiedEmailCount }}</div>
+        <div class="arat-card-sub">подтверждена · всего с почтой {{ withEmailCount }}</div>
       </div>
-      <div class="arat-summary-item off">
-        <span class="arat-num">{{ disabledCount }}</span>
-        <span class="arat-label">отключено</span>
-      </div>
-      <div class="arat-summary-item info">
-        <span class="arat-num">{{ withEmailCount }}</span>
-        <span class="arat-label">с email</span>
-      </div>
-      <div class="arat-summary-item info">
-        <span class="arat-num">{{ verifiedEmailCount }}</span>
-        <span class="arat-label">email подтверждён</span>
-      </div>
-      <div class="arat-summary-item app">
-        <span class="arat-num">{{ withPwaCount }}</span>
-        <span class="arat-label">поставили приложение</span>
-      </div>
-      <div class="arat-summary-item app">
-        <span class="arat-num">{{ withPushCount }}</span>
-        <span class="arat-label">включили уведомления</span>
+      <div class="arat-card">
+        <div class="arat-card-label">Приложение</div>
+        <div class="arat-card-value">{{ withPwaCount }}</div>
+        <div class="arat-card-sub">{{ withPushCount }} включили уведомления</div>
       </div>
     </div>
 
@@ -53,7 +41,7 @@
           <option value="missing">Только тем, у кого нет пароля</option>
           <option value="all">Всем (затереть существующие)</option>
         </select>
-        <button class="arat-btn arat-btn-primary" @click="handleBulkCreate" :disabled="!bulkPassword || busy">
+        <button class="btn primary" @click="handleBulkCreate" :disabled="!bulkPassword || busy">
           Применить
         </button>
       </div>
@@ -64,7 +52,7 @@
     <div class="arat-section">
       <div class="arat-section-title">
         Учётные записи
-        <button class="arat-btn arat-btn-sm" @click="reloadUsers" :disabled="busy">Обновить</button>
+        <button class="btn" @click="reloadUsers" :disabled="busy">Обновить</button>
       </div>
 
       <div class="arat-filters">
@@ -124,21 +112,21 @@
                 <span v-else class="arat-muted">—</span>
                 <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' устройств(а) с уведомлениями'"><BkIcon name="bell" size="sm" />{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
               </td>
-              <td class="arat-col-meta" data-label="Последний вход" :title="u.password_changed_at ? 'Пароль: ' + formatTime(u.password_changed_at) : ''">
-                <span v-if="u.last_login_at">{{ formatTime(u.last_login_at) }}</span>
-                <span v-else class="arat-muted">—</span>
+              <td class="arat-col-meta" data-label="Последний вход" :title="lastLoginTitle(u)">
+                <span v-if="u.last_login_at">{{ formatRelative(u.last_login_at) }}</span>
+                <span v-else class="arat-muted">ни разу</span>
               </td>
               <td class="arat-col-actions">
                 <div class="arat-actions">
-                  <button class="arat-btn arat-btn-sm" @click="handleSetEmail(u)" :disabled="busy" :title="u.email ? 'Изменить email' : 'Указать email'">
+                  <button class="btn" @click="handleSetEmail(u)" :disabled="busy" :title="u.email ? 'Изменить email' : 'Указать email'">
                     Email
                   </button>
-                  <button class="arat-btn arat-btn-sm" @click="handleSetPassword(u)" :disabled="busy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
+                  <button class="btn" @click="handleSetPassword(u)" :disabled="busy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
                     Пароль
                   </button>
                   <button
                     v-if="u.has_password"
-                    class="arat-btn arat-btn-sm"
+                    class="btn"
                     :class="u.is_active ? 'arat-btn-danger' : 'arat-btn-success'"
                     @click="handleToggleUser(u)"
                     :disabled="busy"
@@ -163,7 +151,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
-import { formatMoscowDateTime, plural } from '@/lib/utils.js';
+import { formatMoscowDateTime, formatMoscowRelative, plural } from '@/lib/utils.js';
 import { appConfirm, appPrompt } from '@/lib/appDialogs.js';
 
 const store = useRestaurantOrderStore();
@@ -187,6 +175,8 @@ const disabledCount = computed(() => usersList.value.filter(u => u.has_password 
 const withEmailCount = computed(() => usersList.value.filter(u => !!u.email).length);
 const verifiedEmailCount = computed(() => usersList.value.filter(u => !!u.email_verified_at).length);
 // Кабинет открывали с иконки на телефоне (установленное приложение).
+// Кабинет без пароля или с закрытым доступом — человек просто не войдёт.
+const cantLoginCount = computed(() => usersList.value.filter(u => !u.has_password || !u.is_active).length);
 const withPwaCount = computed(() => usersList.value.filter(u => u.has_pwa).length);
 const withPushCount = computed(() => usersList.value.filter(u => u.push_devices > 0).length);
 
@@ -239,6 +229,15 @@ function shortLegalEntity(le) {
 // Время с сервера — московское; formatMoscowDateTime это учитывает,
 // прежняя локальная копия читала его как время браузера.
 const formatTime = formatMoscowDateTime;
+const formatRelative = formatMoscowRelative;
+
+// Точные даты прячем в подсказку — в таблице они занимали половину ширины.
+function lastLoginTitle(u) {
+  const parts = [];
+  if (u.last_login_at) parts.push('Последний вход: ' + formatMoscowDateTime(u.last_login_at));
+  if (u.password_changed_at) parts.push('Пароль менялся: ' + formatMoscowDateTime(u.password_changed_at));
+  return parts.join('\n');
+}
 
 onMounted(() => reloadUsers());
 
@@ -358,31 +357,16 @@ async function handleToggleUser(u) {
 <style scoped>
 .arat { padding: 0; }
 
-.arat-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 20px;
+/* ═══ Сводка ═══ */
+.arat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+.arat-card {
+  background: var(--card); border: 1px solid var(--border-light);
+  border-radius: 12px; padding: 12px 14px;
 }
-
-.arat-summary-item {
-  flex: 1;
-  min-width: 110px;
-  background: white;
-  border: 1px solid #e8e0d6;
-  border-radius: 10px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.arat-summary-item.ok    { border-color: #bbf7d0; background: #f0fdf4; }
-.arat-summary-item.warn  { border-color: #fde68a; background: #fffbeb; }
-.arat-summary-item.off   { border-color: #fecaca; background: #fef2f2; }
-.arat-summary-item.info  { border-color: #c7d2fe; background: #eef2ff; }
-
-.arat-num { font-size: 22px; font-weight: 700; color: #502314; }
-.arat-label { font-size: 12px; color: #8b7355; }
+.arat-card.warn { border-color: #FFE0B2; background: linear-gradient(180deg, #FFF8EC, var(--card)); }
+.arat-card-label { font-size: 11px; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); font-weight: 600; }
+.arat-card-value { font-size: 24px; font-weight: 800; color: var(--text); line-height: 1.2; margin-top: 2px; }
+.arat-card-sub { font-size: 11.5px; color: var(--text-muted); }
 
 .arat-section {
   background: white;
@@ -493,10 +477,10 @@ async function handleToggleUser(u) {
 .arat-table tbody tr:hover { background: #fcfaf6; }
 
 .arat-col-num     { width: 80px; font-weight: 700; color: #502314; white-space: nowrap; }
-.arat-col-rest    { min-width: 200px; }
+.arat-col-rest    { min-width: 180px; }
 .arat-col-status  { width: 110px; }
-.arat-col-email   { min-width: 220px; max-width: 280px; }
-.arat-col-meta    { width: 170px; font-size: 12px; color: #6f5948; }
+.arat-col-email   { min-width: 170px; max-width: 230px; }
+.arat-col-meta    { width: 120px; font-size: 12px; color: #6f5948; }
 .arat-col-actions { width: 1%; white-space: nowrap; }
 
 .arat-rest-addr { color: #502314; }
@@ -539,55 +523,20 @@ async function handleToggleUser(u) {
   justify-content: flex-end;
 }
 
-.arat-btn {
-  padding: 7px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  border: 1.5px solid #e8e0d6;
-  background: white;
-  color: #502314;
-  border-radius: 7px;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.arat-btn:hover:not(:disabled) { background: #faf6ef; border-color: #d4c4ad; }
-.arat-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Красим только смысл: «отключить» — красным, «включить» — зелёным.
+   Форма кнопки — общая .btn портала. */
+.arat-btn-danger { color: #C62828; border-color: #E57373; }
+.arat-btn-danger:hover:not(:disabled) { background: #FFF0F0; }
+.arat-btn-ok { color: #2E7D32; border-color: #A5D6A7; }
+.arat-btn-ok:hover:not(:disabled) { background: #F1F8F2; }
 
-.arat-btn-sm { padding: 4px 9px; font-size: 12px; }
-.arat-actions { gap: 4px; }
-
-.arat-btn-primary {
-  background: #E76F51;
-  color: white;
-  border-color: #E76F51;
-}
-.arat-btn-primary:hover:not(:disabled) {
-  background: #b81e00;
-  border-color: #b81e00;
-}
-
-.arat-btn-success {
-  color: #16a34a;
-  border-color: #bbf7d0;
-}
-.arat-btn-success:hover:not(:disabled) { background: #f0fdf4; }
-
-.arat-btn-danger {
-  color: #dc2626;
-  border-color: #fecaca;
-}
-.arat-btn-danger:hover:not(:disabled) { background: #fef2f2; }
-
-.arat-summary-item.app .arat-num { color: #C1502E; }
 .arat-col-app { white-space: nowrap; }
 .arat-badge.app { background: #FDEBD9; color: #C1502E; }
 .arat-push-dot { margin-left: 6px; font-size: 12px; }
 
 /* ═══ Телефон: таблица на семь колонок читается только карточками ═══ */
 @media (max-width: 760px) {
-  .arat-summary { gap: 6px; }
+  .arat-cards { grid-template-columns: repeat(2, 1fr); }
 
   .arat-table-wrap { border: none; border-radius: 0; overflow: visible; }
   .arat-table, .arat-table tbody, .arat-table tr, .arat-table td { display: block; width: 100%; }
@@ -617,7 +566,7 @@ async function handleToggleUser(u) {
   .arat-col-num { font-size: 14px; }
   .arat-col-actions { padding-top: 8px; }
   .arat-actions { flex-wrap: wrap; }
-  .arat-actions .arat-btn { flex: 1; min-width: 92px; }
+  .arat-actions .btn { flex: 1; min-width: 92px; }
 
   .arat-row { flex-direction: column; align-items: stretch; }
   .arat-pwd { min-width: 0; }
