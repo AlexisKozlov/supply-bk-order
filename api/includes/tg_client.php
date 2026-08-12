@@ -265,6 +265,38 @@ function tgClientCall(string $method, array $params, array $opts = []): array
 }
 
 /**
+ * Telegram отвергает КЛАВИАТУРУ ЦЕЛИКОМ, если хоть у одной кнопки
+ * callback_data длиннее 64 байт — сообщение уходит без кнопок, и человек
+ * упирается в тупик. Так уже ломались кнопки по ресторанам Пицца Стар
+ * (номера с 1001 длиннее обычных).
+ *
+ * Здесь такую кнопку убираем и пишем в лог: остальные кнопки продолжат
+ * работать, а причина будет видна разработчику.
+ */
+function tgSanitizeMarkup($markup)
+{
+    if (!is_array($markup) || empty($markup['inline_keyboard'])) return $markup;
+
+    $rows = [];
+    foreach ($markup['inline_keyboard'] as $row) {
+        if (!is_array($row)) continue;
+        $keep = [];
+        foreach ($row as $btn) {
+            $data = $btn['callback_data'] ?? null;
+            if (is_string($data) && strlen($data) > 64) {
+                error_log('[tg] кнопка отброшена: callback_data ' . strlen($data) . ' байт — «'
+                    . substr($data, 0, 80) . '» (текст: ' . ($btn['text'] ?? '') . ')');
+                continue;
+            }
+            $keep[] = $btn;
+        }
+        if ($keep) $rows[] = $keep;
+    }
+    $markup['inline_keyboard'] = $rows;
+    return $markup;
+}
+
+/**
  * Предел Telegram на длину сообщения. Всё, что длиннее, API отклоняет
  * целиком — сообщение просто не доходит («text is too long»).
  */
@@ -330,7 +362,7 @@ function tgClientSend($chatId, string $text, array $opts = []): array
         ];
         $parseMode = $opts['parse_mode'] ?? 'HTML';
         if ($parseMode !== '') $params['parse_mode'] = $parseMode;
-        if (!empty($opts['reply_markup']) && $i === $last) $params['reply_markup'] = is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true);
+        if (!empty($opts['reply_markup']) && $i === $last) $params['reply_markup'] = tgSanitizeMarkup(is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true));
         if (!empty($opts['disable_preview']))      $params['disable_web_page_preview'] = true;
         if (!empty($opts['disable_notification'])) $params['disable_notification']     = true;
         if (!empty($opts['reply_to_message_id']) && $i === 0) $params['reply_to_message_id'] = (int)$opts['reply_to_message_id'];
@@ -364,7 +396,7 @@ function tgClientEdit($chatId, $messageId, string $text, array $opts = []): arra
     $parseMode = $opts['parse_mode'] ?? 'HTML';
     if ($parseMode !== '') $params['parse_mode'] = $parseMode;
     // Кнопки должны остаться под последним куском переписки.
-    if (!empty($opts['reply_markup']) && !$tail) $params['reply_markup'] = is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true);
+    if (!empty($opts['reply_markup']) && !$tail) $params['reply_markup'] = tgSanitizeMarkup(is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true));
     if (!empty($opts['disable_preview'])) $params['disable_web_page_preview'] = true;
 
     $result = tgClientCall('editMessageText', $params, $opts);
@@ -395,7 +427,7 @@ function tgClientEditReplyMarkup($chatId, $messageId, $markup = null, array $opt
     if ($markup === null || $markup === []) {
         $params['reply_markup'] = ['inline_keyboard' => []];
     } else {
-        $params['reply_markup'] = is_array($markup) ? $markup : json_decode((string)$markup, true);
+        $params['reply_markup'] = tgSanitizeMarkup(is_array($markup) ? $markup : json_decode((string)$markup, true));
     }
     return tgClientCall('editMessageReplyMarkup', $params, $opts);
 }
@@ -485,7 +517,7 @@ function tgClientSendDocument($chatId, string $filename, string $content, array 
     }
     if (!empty($opts['reply_markup'])) {
         $post['reply_markup'] = json_encode(
-            is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true),
+            tgSanitizeMarkup(is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true)),
             JSON_UNESCAPED_UNICODE
         );
     }
