@@ -235,7 +235,7 @@
 
       <h3 class="tga-subtitle">Подключённые пользователи</h3>
       <div class="tga-table-wrap">
-        <table class="tga-table">
+        <table class="tga-table tga-cards">
           <thead>
             <tr>
               <th>Имя</th>
@@ -247,13 +247,13 @@
           </thead>
           <tbody>
             <tr v-for="u in linkedUsers" :key="u.name">
-              <td>
+              <td data-label="Имя">
                 <b>{{ u.name }}</b>
                 <div v-if="u.email" class="tga-sub-text">{{ u.email }}</div>
               </td>
-              <td>{{ u.display_role || (u.role === 'admin' ? 'Администратор' : 'Сотрудник') }}</td>
-              <td class="tga-mono">{{ u.telegram_chat_id }}</td>
-              <td>{{ u.last_question_at ? formatDate(u.last_question_at) : '—' }}</td>
+              <td data-label="Роль">{{ u.display_role || (u.role === 'admin' ? 'Администратор' : 'Сотрудник') }}</td>
+              <td data-label="Chat ID" class="tga-mono">{{ u.telegram_chat_id }}</td>
+              <td data-label="Последний вопрос">{{ u.last_question_at ? formatDate(u.last_question_at) : '—' }}</td>
               <td>
                 <button class="tga-btn-sm tga-btn-danger" @click="unlinkUser(u)" title="Отвязать Telegram">✕</button>
               </td>
@@ -265,15 +265,15 @@
       <h3 class="tga-subtitle" style="margin-top:24px;">Не подключены</h3>
       <div v-if="!unlinkedUsers.length" class="tga-empty">Все пользователи подключены!</div>
       <div v-else class="tga-table-wrap">
-        <table class="tga-table">
+        <table class="tga-table tga-cards">
           <thead>
             <tr><th>Имя</th><th>Роль</th><th>E-mail</th></tr>
           </thead>
           <tbody>
             <tr v-for="u in unlinkedUsers" :key="u.name" class="tga-row-muted">
-              <td>{{ u.name }}</td>
-              <td>{{ u.display_role || (u.role === 'admin' ? 'Администратор' : 'Сотрудник') }}</td>
-              <td>{{ u.email || '—' }}</td>
+              <td data-label="Имя">{{ u.name }}</td>
+              <td data-label="Роль">{{ u.display_role || (u.role === 'admin' ? 'Администратор' : 'Сотрудник') }}</td>
+              <td data-label="E-mail">{{ u.email || '—' }}</td>
             </tr>
           </tbody>
         </table>
@@ -358,7 +358,7 @@
         </div>
 
         <div class="tga-table-wrap">
-          <table class="tga-table">
+          <table class="tga-table tga-cards">
             <thead>
               <tr>
                 <th style="width:80px">Ресторан</th>
@@ -372,13 +372,13 @@
             </thead>
             <tbody>
               <tr v-for="r in filteredVegRests" :key="r.key" :class="{ 'tga-row-muted': !r.activeSubCount }">
-                <td><b>{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</b></td>
-                <td>{{ r.address || '—' }}</td>
-                <td>{{ r.city || '—' }}</td>
-                <td>
+                <td data-label="Ресторан"><b>{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</b></td>
+                <td data-label="Адрес">{{ r.address || '—' }}</td>
+                <td data-label="Город">{{ r.city || '—' }}</td>
+                <td data-label="Статус">
                   <span class="tga-status-pill" :class="'tga-status-' + r.status">{{ restaurantStatusLabel(r) }}</span>
                 </td>
-                <td :class="r.activeSubCount ? 'tga-cell-ok' : 'tga-cell-warn'" style="text-align:center;">
+                <td data-label="Подписчики" :class="r.activeSubCount ? 'tga-cell-ok' : 'tga-cell-warn'" style="text-align:center;">
                   <template v-if="r.subscribers.length">
                     <span class="tga-sub-count-link" @click="toggleSubsList(r.key)">{{ r.activeSubCount }} / {{ r.subCount }}</span>
                     <div v-if="expandedRest === r.key" class="tga-sub-list">
@@ -391,7 +391,7 @@
                   </template>
                   <template v-else>—</template>
                 </td>
-                <td>{{ r.firstSub ? formatDate(r.firstSub) : '—' }}</td>
+                <td data-label="Дата подписки">{{ r.firstSub ? formatDate(r.firstSub) : '—' }}</td>
                 <td>
                   <button v-if="r.activeSubCount" class="tga-btn-sm" @click="sendVegReminder(r)" title="Отправить напоминание"><BkIcon name="send" size="sm" /></button>
                 </td>
@@ -477,7 +477,7 @@
         {{ reminderLog.length ? 'Под фильтр ничего не попало' : 'Записей пока нет' }}
       </div>
       <div v-else class="tga-table-wrap">
-        <table class="tga-table">
+        <table class="tga-table tga-cards">
           <thead>
             <tr>
               <th>Когда</th>
@@ -489,20 +489,20 @@
           </thead>
           <tbody>
             <tr v-for="(r, i) in filteredReminderLog" :key="i">
-              <td>{{ formatDate(r.sent_at) }}</td>
-              <td>
+              <td data-label="Когда">{{ formatDate(r.sent_at) }}</td>
+              <td data-label="Что напомнили">
                 <span class="tga-badge" :class="'tga-kind-' + r.reminder_kind">{{ reminderLabel(r.reminder_kind) }}</span>
                 <span v-if="r.supplier_name" class="tga-log-sup">{{ r.supplier_name }}</span>
               </td>
-              <td>
+              <td data-label="Кому">
                 <template v-if="r.restaurant_number">
                   <b>{{ formatRestaurantNumber(r.restaurant_number, r.legal_entity_group) }}</b>
                   <span class="tga-log-place">{{ r.city || r.address || '' }}</span>
                 </template>
                 <span v-else class="tga-log-place">всем сразу</span>
               </td>
-              <td>{{ channelLabel(r.channel) }}</td>
-              <td>{{ r.target_date ? formatDateShort(r.target_date) : '—' }}</td>
+              <td data-label="Куда">{{ channelLabel(r.channel) }}</td>
+              <td data-label="На дату">{{ r.target_date ? formatDateShort(r.target_date) : '—' }}</td>
             </tr>
           </tbody>
         </table>
@@ -526,7 +526,7 @@
         {{ questions.length ? 'Ничего не нашлось' : 'Вопросов пока нет' }}
       </div>
       <div v-else class="tga-table-wrap">
-        <table class="tga-table">
+        <table class="tga-table tga-cards">
           <thead>
             <tr>
               <th style="width:130px">Когда</th>
@@ -538,11 +538,11 @@
           </thead>
           <tbody>
             <tr v-for="(q, i) in filteredQuestions" :key="i" @click="q._expanded = !q._expanded" style="cursor:pointer;">
-              <td>{{ formatDate(q.last_question_at) }}</td>
-              <td><b>{{ askerLabel(q.user_name) }}</b></td>
-              <td class="tga-sub-text">{{ shortEntityName(q.last_entity) }}</td>
-              <td style="max-width:380px;word-break:break-word;">{{ q.last_question }}</td>
-              <td style="max-width:420px;word-break:break-word;">
+              <td data-label="Когда">{{ formatDate(q.last_question_at) }}</td>
+              <td data-label="Кто спросил"><b>{{ askerLabel(q.user_name) }}</b></td>
+              <td data-label="Юрлицо" class="tga-sub-text">{{ shortEntityName(q.last_entity) }}</td>
+              <td data-label="Вопрос" style="max-width:380px;word-break:break-word;">{{ q.last_question }}</td>
+              <td data-label="Ответ бота" style="max-width:420px;word-break:break-word;">
                 <template v-if="q.answer">
                   <span v-if="!q._expanded" class="tga-sub-text">{{ plainAnswer(q.answer).slice(0, 90) }}{{ plainAnswer(q.answer).length > 90 ? '…' : '' }}</span>
                   <span v-else class="tga-answer-full">{{ plainAnswer(q.answer) }}</span>
@@ -1455,4 +1455,38 @@ async function toggleSetting(user, field) {
 .tga-moved p { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; max-width: 640px; }
 .tga-moved .btn { margin-left: auto; flex-shrink: 0; }
 @media (max-width: 700px) { .tga-moved .btn { margin-left: 0; width: 100%; justify-content: center; } }
+
+/* ═══ Телефон: таблицы читаются только карточками ═══ */
+@media (max-width: 760px) {
+  .tga-cards, .tga-cards tbody, .tga-cards tr, .tga-cards td { display: block; width: 100%; }
+  .tga-cards thead { display: none; }
+
+  .tga-cards tbody tr {
+    border: 1px solid var(--border-light); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; background: var(--card);
+  }
+  .tga-cards tbody tr:hover { background: var(--card); }
+
+  .tga-cards td { border: none; padding: 3px 0; white-space: normal; text-align: left; }
+  /* Подпись слева, значение справа одной колонкой — иначе несколько блоков
+     в ячейке встают в строку и текст рвётся. */
+  .tga-cards td[data-label] {
+    display: grid; grid-template-columns: 104px minmax(0, 1fr);
+    gap: 4px 8px; align-items: baseline;
+  }
+  .tga-cards td[data-label]::before {
+    content: attr(data-label); grid-column: 1;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .3px;
+    color: var(--text-muted); font-weight: 600;
+  }
+  /* justify-self: start — иначе бейдж «Маршрут кег» растягивался во всю ширину */
+  .tga-cards td[data-label] > * { grid-column: 2; min-width: 0; justify-self: start; }
+  .tga-cards td[data-label] > span:only-child { justify-self: stretch; }
+  /* Ячейка без подписи — это кнопка действия, ей подпись не нужна */
+  .tga-cards td:not([data-label]) { padding-top: 6px; }
+
+  /* Фильтры и сводки */
+  .tga-stats-row { display: grid; grid-template-columns: repeat(2, 1fr); }
+  .tga-stat-card { min-width: 0; }
+}
 </style>
