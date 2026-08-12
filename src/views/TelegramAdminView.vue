@@ -403,45 +403,38 @@
 
       <!-- Уведомления подписчиков -->
       <template v-if="restaurantSubTab === 'notif'">
-        <p class="tga-hint">Настройки уведомлений ресторанных подписчиков. Нажмите, чтобы переключить.</p>
+        <p class="tga-hint">
+          Какие уведомления получают сотрудники ресторанов. Нажмите на ячейку, чтобы включить или выключить.
+        </p>
         <div class="tga-table-wrap">
-          <table class="tga-table tga-table-compact">
+          <table class="tga-table tga-table-compact tga-notif-table">
             <thead>
               <tr>
-                <th style="text-align:left">Подписчик</th>
-                <th style="text-align:left">Рестораны</th>
-                <th title="Напоминания о заявках"><BkIcon name="bell" size="sm" /></th>
-                <th title="Новые периоды приёма"><BkIcon name="bell" size="sm" /></th>
-                <th title="Подтверждения заявок"><BkIcon name="success" size="sm" /></th>
-                <th title="Напоминания об остатках"><BkIcon name="clipboard" size="sm" /></th>
-                <th title="Новые сборы остатков"><BkIcon name="package" size="sm" /></th>
-                <th title="Возврат кег"><BkIcon name="kegReturn" size="sm" /></th>
+                <th class="tga-notif-name" style="text-align:left">Подписчик</th>
+                <th class="tga-notif-name2" style="text-align:left">Рестораны</th>
+                <th v-for="n in REST_NOTIF_TYPES" :key="n.key" class="tga-notif-col">
+                  <span class="tga-notif-head as-text" :title="n.label">
+                    <BkIcon :name="n.icon" size="sm" />
+                    <span>{{ n.label }}</span>
+                    <small>{{ countRestOn(n.key) }} из {{ restaurantUniqueSubscribers.length }}</small>
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="sub in restaurantUniqueSubscribers" :key="sub.chat_id">
-                <td style="text-align:left">
+                <td class="tga-notif-name" style="text-align:left">
                   <b>{{ sub.first_name || 'Без имени' }}</b>
                   <span v-if="sub.username" class="tga-sub-username"> @{{ sub.username }}</span>
                 </td>
-                <td style="text-align:left" class="tga-sub-text">{{ sub.restaurants.join(', ') }}</td>
-                <td :class="cellClass(sub.notify_so_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_so_reminders')">{{ sub.notify_so_reminders ? '✓' : '✕' }}</td>
-                <td :class="cellClass(sub.notify_so_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_so_sessions')">{{ sub.notify_so_sessions ? '✓' : '✕' }}</td>
-                <td :class="cellClass(sub.notify_confirmations)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_confirmations')">{{ sub.notify_confirmations ? '✓' : '✕' }}</td>
-                <td :class="cellClass(sub.notify_stock_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_reminders')">{{ sub.notify_stock_reminders ? '✓' : '✕' }}</td>
-                <td :class="cellClass(sub.notify_stock_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_sessions')">{{ sub.notify_stock_sessions ? '✓' : '✕' }}</td>
-                <td :class="cellClass(sub.notify_keg_returns)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_keg_returns')">{{ sub.notify_keg_returns ? '✓' : '✕' }}</td>
+                <td class="tga-notif-name2 tga-sub-text" style="text-align:left">{{ sub.restaurants.join(', ') }}</td>
+                <td v-for="n in REST_NOTIF_TYPES" :key="n.key"
+                    :class="cellClass(sub[n.key])" class="tga-cell-toggle"
+                    :title="(sub[n.key] ? 'Выключить' : 'Включить') + ' «' + n.label + '»'"
+                    @click="toggleRestNotif(sub, n.key)">{{ sub[n.key] ? '✓' : '✕' }}</td>
               </tr>
             </tbody>
           </table>
-        </div>
-        <div class="tga-legend">
-          <span><BkIcon name="bell" size="sm" /> Напоминания о заявках</span>
-          <span><BkIcon name="bell" size="sm" /> Новые периоды приёма</span>
-          <span><BkIcon name="success" size="sm" /> Подтверждения заявок</span>
-          <span><BkIcon name="clipboard" size="sm" /> Напоминания об остатках</span>
-          <span><BkIcon name="package" size="sm" /> Новые сборы остатков</span>
-          <span><BkIcon name="kegReturn" size="sm" /> Возврат кег</span>
         </div>
       </template>
     </div>
@@ -882,6 +875,22 @@ const filteredQuestions = computed(() => {
   return questions.value.filter(item =>
     `${item.last_question || ''} ${plainAnswer(item.answer)} ${askerLabel(item.user_name)}`.toLowerCase().includes(q))
 })
+
+// Уведомления сотрудников ресторанов. Раньше колонки были обозначены
+// иконками, причём две из них одинаковым «колокольчиком», а расшифровка
+// лежала легендой под таблицей.
+const REST_NOTIF_TYPES = [
+  { key: 'notify_so_reminders',   label: 'Заявки: напомнить', icon: 'bell' },
+  { key: 'notify_so_sessions',    label: 'Новый период',      icon: 'calendar' },
+  { key: 'notify_confirmations',  label: 'Заявка принята',    icon: 'success' },
+  { key: 'notify_stock_reminders', label: 'Остатки: напомнить', icon: 'clipboard' },
+  { key: 'notify_stock_sessions', label: 'Новый сбор',        icon: 'package' },
+  { key: 'notify_keg_returns',    label: 'Возврат кег',       icon: 'kegReturn' },
+]
+
+function countRestOn(key) {
+  return restaurantUniqueSubscribers.value.filter(s => s[key]).length
+}
 
 // ─── Здоровье бота ───
 const health = ref({})
@@ -1488,5 +1497,23 @@ async function toggleSetting(user, field) {
   /* Фильтры и сводки */
   .tga-stats-row { display: grid; grid-template-columns: repeat(2, 1fr); }
   .tga-stat-card { min-width: 0; }
+}
+
+.tga-notif-head.as-text { cursor: default; }
+.tga-notif-name2 { white-space: nowrap; }
+
+/* На телефоне имя с логином и список ресторанов съедали весь экран, и
+   до самих галочек было не добраться. Ужимаем обе колонки. */
+@media (max-width: 760px) {
+  .tga-notif-name {
+    max-width: 120px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .tga-notif-name .tga-sub-username { display: none; }
+  .tga-notif-name2 {
+    max-width: 72px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .tga-notif-head span { font-size: 10px; }
 }
 </style>
