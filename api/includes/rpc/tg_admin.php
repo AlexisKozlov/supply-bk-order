@@ -100,12 +100,51 @@
             WHERE active=1 AND legal_entity_group IN ('BK_VM', 'PS')
             ORDER BY legal_entity_group, CAST(number AS UNSIGNED)")->fetchAll();
 
-        // Лог напоминаний (последние 100)
-        $reminders = $pdo->query("SELECT vrl.session_id, vrl.restaurant_number, vrl.delivery_date, vrl.reminder_type, vrl.sent_at,
-            r.address, r.city
-            FROM veg_reminder_log vrl
-            LEFT JOIN restaurants r ON r.number = vrl.restaurant_number AND r.legal_entity_group = 'BK_VM'
-            ORDER BY vrl.sent_at DESC LIMIT 100")->fetchAll();
+        // Журнал напоминаний. Раньше сюда шла veg_reminder_log — таблица
+        // старой «Планеты Ресторанов»: она не пополняется с апреля, и вкладка
+        // показывала историю четырёхмесячной давности. Живой журнал —
+        // reminder_runs: туда пишут оба крона напоминаний.
+        $reminders = $pdo->query("
+            SELECT rr.sent_at, rr.reminder_kind, rr.channel, rr.target_date, rr.recipient,
+                   r.number AS restaurant_number, r.legal_entity_group, r.city, r.address,
+                   s.short_name AS supplier_name
+            FROM reminder_runs rr
+            LEFT JOIN restaurant_reminder_subscriptions rrs
+                   ON rrs.id = rr.subscription_id AND rr.reminder_kind = 'supplier'
+            LEFT JOIN restaurant_main_delivery_subscriptions rmd
+                   ON rmd.id = rr.subscription_id AND rr.reminder_kind = 'main_delivery'
+            LEFT JOIN restaurant_keg_return_subscriptions rkr
+                   ON rkr.id = rr.subscription_id AND rr.reminder_kind IN ('keg_return', 'keg_invoice')
+            LEFT JOIN restaurants r
+                   ON r.id = COALESCE(rrs.restaurant_id, rmd.restaurant_id, rkr.restaurant_id)
+            LEFT JOIN suppliers s ON s.id = rrs.supplier_id
+            ORDER BY rr.sent_at DESC
+            LIMIT 200
+        ")->fetchAll();
+
+        // Здоровье бота за сутки: то же, что показывает бот-монитор, но рядом
+        // с остальным про бота — чтобы не ходить в два раздела.
+        $health = ['total_24h' => 0, 'fail_24h' => 0, 'last_send_at' => null, 'blocked' => 0, 'top_errors' => []];
+        try {
+            $row = $pdo->query("
+                SELECT COUNT(*) total,
+                       SUM(ok = 0 AND (error_text IS NULL OR error_text <> 'skipped_blocked')) fails,
+                       MAX(ts) last_ts
+                FROM tg_send_log WHERE ts > NOW() - INTERVAL 24 HOUR
+            ")->fetch();
+            $health['total_24h']    = (int)($row['total'] ?? 0);
+            $health['fail_24h']     = (int)($row['fails'] ?? 0);
+            $health['last_send_at'] = $row['last_ts'] ?? null;
+            $health['blocked']      = (int)$pdo->query("SELECT COUNT(*) FROM ro_telegram_subs WHERE tg_blocked_at IS NOT NULL")->fetchColumn();
+            $health['top_errors']   = $pdo->query("
+                SELECT error_code, LEFT(error_text, 90) AS error_text, COUNT(*) cnt
+                FROM tg_send_log
+                WHERE ts > NOW() - INTERVAL 24 HOUR AND ok = 0
+                  AND (error_text IS NULL OR error_text <> 'skipped_blocked')
+                GROUP BY error_code, error_text
+                ORDER BY cnt DESC LIMIT 5
+            ")->fetchAll();
+        } catch (PDOException $e) { /* журнала может не быть — не роняем страницу */ }
 
         // Корректировки (за последние 7 дней)
         $corrStats = $pdo->query("SELECT
@@ -122,6 +161,7 @@
             'restaurant_subs' => $restaurantSubs,
             'all_restaurants' => $allRests,
             'reminder_log' => $reminders,
+            'health'       => $health,
             'correction_stats' => $corrStats ?: ['pending' => 0, 'in_progress' => 0, 'approved' => 0, 'rejected' => 0],
         ]);
     }

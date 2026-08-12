@@ -51,6 +51,40 @@
           </a>
         </div>
 
+        <!-- Здоровье: главное, что нужно знать о боте прямо сейчас -->
+        <div class="tga-health" :class="healthClass">
+          <div class="tga-health-main">
+            <div class="tga-health-state">{{ healthTitle }}</div>
+            <div class="tga-health-sub">{{ healthHint }}</div>
+          </div>
+          <div class="tga-health-nums">
+            <div class="tga-health-num">
+              <b>{{ formatInt(health.total_24h || 0) }}</b>
+              <span>сообщений за сутки</span>
+            </div>
+            <div class="tga-health-num" :class="{ bad: (health.fail_24h || 0) > 0 }">
+              <b>{{ formatInt(health.fail_24h || 0) }}</b>
+              <span>с ошибкой</span>
+            </div>
+            <div class="tga-health-num" :class="{ bad: (health.blocked || 0) > 0 }">
+              <b>{{ formatInt(health.blocked || 0) }}</b>
+              <span>заблокировали бота</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Из-за чего сбои, если они есть -->
+        <div v-if="health.top_errors?.length" class="tga-section-card">
+          <h3 class="tga-subtitle">Из-за чего сбои за сутки</h3>
+          <div class="tga-err-list">
+            <div v-for="(e, i) in health.top_errors" :key="i" class="tga-err-row">
+              <span class="tga-err-count">{{ e.cnt }}×</span>
+              <span class="tga-err-text">{{ e.error_text || 'без описания' }}</span>
+              <span class="tga-err-hint">{{ errorHint(e.error_code, e.error_text) }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Вебхук -->
         <div class="tga-section-card">
           <h3 class="tga-subtitle">Вебхук</h3>
@@ -141,8 +175,8 @@
               <div class="tga-stat-label">Всего подписчиков</div>
             </div>
             <div class="tga-stat-card">
-              <div class="tga-stat-val">{{ reminderLog.length }}</div>
-              <div class="tga-stat-label">Напоминаний</div>
+              <div class="tga-stat-val">{{ formatInt(remindersToday) }}</div>
+              <div class="tga-stat-label">Напоминаний сегодня</div>
             </div>
           </div>
         </div>
@@ -420,47 +454,63 @@
       </template>
     </div>
 
-    <!-- ═══ Лог напоминаний ═══ -->
+    <!-- ═══ Журнал напоминаний ═══ -->
     <div v-else-if="tab === 'log'" class="adm-section">
-      <p class="tga-hint">Последние 100 отправленных напоминаний о заявках.</p>
+      <p class="tga-hint">
+        Последние {{ reminderLog.length }} напоминаний, которые бот и портал разослали ресторанам.
+      </p>
 
       <!-- Фильтры -->
       <div class="tga-filter-row">
-        <input type="date" v-model="logDateFrom" class="tga-input" style="min-width:140px;flex:0;" placeholder="Дата от"/>
-        <input type="date" v-model="logDateTo" class="tga-input" style="min-width:140px;flex:0;" placeholder="Дата до"/>
-        <input v-model="logRestSearch" class="tga-input" style="min-width:120px;max-width:200px;" placeholder="Номер ресторана"/>
+        <input type="date" v-model="logDateFrom" class="tga-input" style="min-width:150px;flex:0;" title="Дата с"/>
+        <input type="date" v-model="logDateTo" class="tga-input" style="min-width:150px;flex:0;" title="Дата по"/>
+        <input v-model="logRestSearch" class="tga-input" style="min-width:120px;max-width:220px;" placeholder="Номер ресторана"/>
         <select v-model="logTypeFilter" class="tga-select">
-          <option value="all">Все типы</option>
-          <option value="evening">Вечер</option>
-          <option value="3h">3 часа</option>
-          <option value="2h">2 часа</option>
-          <option value="1h">1 час</option>
-          <option value="30m">30 минут</option>
-          <option value="expired">Истёк</option>
+          <option value="all">Все напоминания</option>
+          <option value="supplier">Заявки поставщикам</option>
+          <option value="main_delivery">Основная поставка</option>
+          <option value="keg_return">Возврат кег</option>
+          <option value="keg_invoice">Накладные на кеги</option>
+          <option value="keg_routing">Маршрут кег</option>
+        </select>
+        <select v-model="logChannelFilter" class="tga-select">
+          <option value="all">Куда угодно</option>
+          <option value="telegram">В Telegram</option>
+          <option value="portal">В портал</option>
+          <option value="push">Push на телефон</option>
         </select>
       </div>
 
-      <div v-if="!filteredReminderLog.length" class="tga-empty">Нет записей</div>
+      <div v-if="!filteredReminderLog.length" class="tga-empty">
+        {{ reminderLog.length ? 'Под фильтр ничего не попало' : 'Записей пока нет' }}
+      </div>
       <div v-else class="tga-table-wrap">
         <table class="tga-table">
           <thead>
             <tr>
-              <th>Время</th>
-              <th>Ресторан</th>
-              <th>Адрес</th>
-              <th>Доставка</th>
-              <th>Тип</th>
+              <th>Когда</th>
+              <th>Что напомнили</th>
+              <th>Кому</th>
+              <th>Куда</th>
+              <th>На какую дату</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(r, i) in filteredReminderLog" :key="i">
               <td>{{ formatDate(r.sent_at) }}</td>
-              <td><b>{{ formatRestaurantNumber(r.restaurant_number, r.legal_entity_group) }}</b></td>
-              <td>{{ r.address || r.city || '—' }}</td>
-              <td>{{ formatDateShort(r.delivery_date) }}</td>
               <td>
-                <span class="tga-badge" :class="'tga-badge-' + r.reminder_type">{{ reminderLabel(r.reminder_type) }}</span>
+                <span class="tga-badge" :class="'tga-kind-' + r.reminder_kind">{{ reminderLabel(r.reminder_kind) }}</span>
+                <span v-if="r.supplier_name" class="tga-log-sup">{{ r.supplier_name }}</span>
               </td>
+              <td>
+                <template v-if="r.restaurant_number">
+                  <b>{{ formatRestaurantNumber(r.restaurant_number, r.legal_entity_group) }}</b>
+                  <span class="tga-log-place">{{ r.city || r.address || '' }}</span>
+                </template>
+                <span v-else class="tga-log-place">всем сразу</span>
+              </td>
+              <td>{{ channelLabel(r.channel) }}</td>
+              <td>{{ r.target_date ? formatDateShort(r.target_date) : '—' }}</td>
             </tr>
           </tbody>
         </table>
@@ -571,6 +621,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
+import { formatInt } from '@/lib/utils.js'
 import { useUserStore } from '@/stores/userStore.js'
 import { appConfirm, appAlert, appPrompt } from '@/lib/appDialogs.js'
 
@@ -616,6 +667,7 @@ const logDateFrom = ref('')
 const logDateTo = ref('')
 const logRestSearch = ref('')
 const logTypeFilter = ref('all')
+const logChannelFilter = ref('all')
 
 // Broadcast
 const broadcastTarget = ref('all_users')
@@ -634,6 +686,7 @@ async function loadData() {
     restaurantSubs.value = data.restaurant_subs || []
     allRestaurants.value = data.all_restaurants || []
     reminderLog.value = data.reminder_log || []
+    health.value = data.health || {}
     corrStats.value = data.correction_stats || null
   } catch (e) {
     console.error('tg_admin_stats error:', e)
@@ -808,23 +861,93 @@ const restaurantUniqueChatIds = computed(() => {
   return [...new Set(restaurantSubs.value.filter(isActiveRestaurantSub).map(s => s.chat_id))]
 })
 
+// Понятные названия вместо служебных ключей журнала.
+const REMINDER_KIND_LABELS = {
+  supplier: 'Заявка поставщику',
+  main_delivery: 'Основная поставка',
+  keg_return: 'Возврат кег',
+  keg_invoice: 'Накладные на кеги',
+  keg_routing: 'Маршрут кег',
+}
+function reminderLabel(kind) { return REMINDER_KIND_LABELS[kind] || kind || '—' }
+
+const CHANNEL_LABELS = { telegram: 'Telegram', portal: 'Портал', push: 'Push' }
+function channelLabel(ch) { return CHANNEL_LABELS[ch] || ch || '—' }
+
+// ─── Здоровье бота ───
+const health = ref({})
+
+// «Работает» определяем по последней успешной отправке: вебхук может
+// отвечать, а бот при этом молчать.
+const minutesSinceSend = computed(() => {
+  const raw = health.value.last_send_at
+  if (!raw) return null
+  const d = new Date(String(raw).replace(' ', 'T') + '+03:00')
+  if (isNaN(d)) return null
+  return Math.floor((Date.now() - d.getTime()) / 60000)
+})
+const failPct = computed(() => {
+  const t = health.value.total_24h || 0
+  return t ? Math.round((health.value.fail_24h || 0) * 100 / t) : 0
+})
+const healthClass = computed(() => {
+  const m = minutesSinceSend.value
+  if (m === null || m > 360) return 'bad'
+  if (failPct.value >= 30) return 'bad'
+  if (failPct.value >= 10) return 'warn'
+  return 'good'
+})
+const healthTitle = computed(() => {
+  if (healthClass.value === 'bad') return 'Бот сбоит'
+  if (healthClass.value === 'warn') return 'Бот работает с ошибками'
+  return 'Бот работает'
+})
+const healthHint = computed(() => {
+  const m = minutesSinceSend.value
+  if (m === null) return 'за сутки не отправлено ни одного сообщения'
+  const when = m < 60 ? `${m} мин назад` : `${Math.floor(m / 60)} ч назад`
+  return `последнее сообщение ${when} · ошибок ${failPct.value}%`
+})
+
+// Короткое объяснение кода ошибки — коды Telegram сами по себе ничего не говорят.
+function errorHint(code, text) {
+  const t = String(text || '')
+  if (t.includes('bot was blocked')) return 'человек заблокировал бота'
+  if (t.includes('chat not found')) return 'чат удалён или неверный'
+  if (t.includes('query is too old')) return 'нажали старую кнопку'
+  if (t.includes('message is not modified')) return 'экран не изменился, это не страшно'
+  if (t.includes('text is too long')) return 'сообщение длиннее предела Telegram'
+  if (t.includes('BUTTON_DATA_INVALID')) return 'слишком длинный адрес у кнопки'
+  if (Number(code) === 429) return 'Telegram просит слать реже'
+  return ''
+}
+
+// Сколько напоминаний ушло сегодня — по живому журналу.
+const remindersToday = computed(() => {
+  const today = new Date().toISOString().slice(0, 10)
+  return reminderLog.value.filter(r => String(r.sent_at || '').slice(0, 10) === today).length
+})
+
 const filteredReminderLog = computed(() => {
   let list = reminderLog.value
   if (logDateFrom.value) {
     const from = new Date(logDateFrom.value)
-    list = list.filter(r => new Date(r.sent_at) >= from)
+    list = list.filter(r => new Date(String(r.sent_at).replace(' ', 'T')) >= from)
   }
   if (logDateTo.value) {
     const to = new Date(logDateTo.value)
     to.setDate(to.getDate() + 1)
-    list = list.filter(r => new Date(r.sent_at) < to)
+    list = list.filter(r => new Date(String(r.sent_at).replace(' ', 'T')) < to)
   }
   if (logRestSearch.value.trim()) {
     const q = logRestSearch.value.trim().toLowerCase()
-    list = list.filter(r => String(r.restaurant_number).toLowerCase().includes(q))
+    list = list.filter(r => String(r.restaurant_number || '').toLowerCase().includes(q))
   }
   if (logTypeFilter.value !== 'all') {
-    list = list.filter(r => r.reminder_type === logTypeFilter.value)
+    list = list.filter(r => r.reminder_kind === logTypeFilter.value)
+  }
+  if (logChannelFilter.value !== 'all') {
+    list = list.filter(r => r.channel === logChannelFilter.value)
   }
   return list
 })
@@ -893,11 +1016,6 @@ function restaurantStatusLabel(rest) {
   if (rest.status === 'temporary') return `Активно: ${rest.activeSubCount}, ждут: ${rest.temporarySubCount}`
   if (rest.status === 'expired') return 'Срок истёк'
   return 'Нет активной'
-}
-
-function reminderLabel(type) {
-  const labels = { evening: '🌙 Вечер', '3h': '3ч', '2h': '2ч', '1h': '1ч', '30m': '30м', expired: '⚠️ Истёк', submitted: '✅ Подана' }
-  return labels[type] || type
 }
 
 async function unlinkUser(u) {
@@ -1281,7 +1399,15 @@ async function sendBroadcast() {
 /* ═══ Адаптив ═══ */
 @media (max-width: 768px) {
   .adm-tabs { gap: 0; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
-  .adm-tab { padding: 8px 14px; font-size: 12px; gap: 4px; white-space: nowrap; }
+  /* flex-shrink: 0 — иначе флекс сжимал вкладки, и названия наезжали друг
+     на друга вместо того, чтобы прокручиваться. */
+  .adm-tab { padding: 8px 14px; font-size: 12px; gap: 4px; white-space: nowrap; flex-shrink: 0; }
+
+  /* Текст ошибки рвался по одной букве: узкая колонка внутри флекса. */
+  .tga-err-row { flex-direction: column; gap: 2px; }
+  .tga-err-text { width: 100%; overflow-wrap: anywhere; }
+  .tga-bot-card { flex-wrap: wrap; }
+  .tga-bot-card .btn { margin-left: 0 !important; width: 100%; justify-content: center; }
   .adm-tab-count { font-size: 10px; padding: 1px 5px; }
   .tga-stats-row { gap: 8px; }
   .tga-stat-card { min-width: 90px; padding: 12px; }
@@ -1294,5 +1420,43 @@ async function sendBroadcast() {
   .tga-recipient-btns { flex-direction: column; }
   .tga-btn-chip { text-align: center; }
   .tga-broadcast { max-width: 100%; }
+}
+
+/* ═══ Здоровье бота ═══ */
+.tga-health {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 16px 18px; border-radius: 12px; margin-bottom: 12px;
+  border: 1px solid var(--border-light); background: var(--card);
+}
+.tga-health.good { border-color: #C8E6C9; background: linear-gradient(180deg, #F4FBF4, var(--card)); }
+.tga-health.warn { border-color: #FFE0B2; background: linear-gradient(180deg, #FFF8EC, var(--card)); }
+.tga-health.bad  { border-color: #E57373; background: linear-gradient(180deg, #FFF5F5, var(--card)); }
+.tga-health-state { font-size: 17px; font-weight: 800; color: var(--text); }
+.tga-health-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+.tga-health-nums { display: flex; gap: 22px; flex-wrap: wrap; }
+.tga-health-num { display: flex; flex-direction: column; }
+.tga-health-num b { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1.1; }
+.tga-health-num span { font-size: 11px; color: var(--text-muted); }
+.tga-health-num.bad b { color: #C62828; }
+
+.tga-err-list { display: flex; flex-direction: column; gap: 6px; }
+.tga-err-row {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: 9px; background: var(--bg); border: 1px solid var(--border-light);
+  font-size: 12.5px;
+}
+.tga-err-count { font-weight: 700; color: #C62828; flex-shrink: 0; }
+.tga-err-text { color: var(--text); flex: 1; min-width: 0; word-break: break-word; }
+.tga-err-hint { color: var(--text-muted); font-size: 11.5px; }
+
+.tga-log-sup { margin-left: 8px; font-size: 11.5px; color: var(--text-muted); }
+.tga-log-place { margin-left: 6px; font-size: 11.5px; color: var(--text-muted); }
+.tga-kind-supplier { background: #FFF3E0; color: #E65100; }
+.tga-kind-main_delivery { background: #E3F2FD; color: #1565C0; }
+.tga-kind-keg_return, .tga-kind-keg_invoice, .tga-kind-keg_routing { background: #EDE7F6; color: #5E35B1; }
+
+@media (max-width: 700px) {
+  .tga-health { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .tga-health-nums { gap: 14px; }
 }
 </style>
