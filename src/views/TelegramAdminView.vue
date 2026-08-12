@@ -273,52 +273,35 @@
 
     <!-- ═══ Настройки уведомлений ═══ -->
     <div v-else-if="tab === 'settings'" class="adm-section">
-      <p class="tga-hint">Какие уведомления получает каждый подписчик. Нажмите на галочку/крестик, чтобы переключить.</p>
+      <p class="tga-hint">
+        Кто из сотрудников какие уведомления получает. Нажмите на ячейку, чтобы включить или выключить.
+        Заголовок колонки переключает её всем сразу.
+      </p>
       <div class="tga-table-wrap">
-        <table class="tga-table tga-table-compact">
+        <table class="tga-table tga-notif-table">
           <thead>
             <tr>
-              <th>Пользователь</th>
-              <th title="Ежедневная сводка"><BkIcon name="analytics" size="sm" /></th>
-              <th title="ПСЦ истекает"><BkIcon name="clipboard" size="sm" /></th>
-              <th title="Цены изменились"><BkIcon name="payments" size="sm" /></th>
-              <th title="Просроченная поставка"><BkIcon name="package" size="sm" /></th>
-              <th title="Загрузка данных"><BkIcon name="import" size="sm" /></th>
-              <th title="Истекающие сроки"><BkIcon name="warning" size="sm" /></th>
-              <th title="Реализация ресторанов"><BkIcon name="veg" size="sm" /></th>
-              <th title="Остатки заканчиваются"><BkIcon name="chartDown" size="sm" /></th>
-              <th title="Корректировки заказов"><BkIcon name="edit" size="sm" /></th>
-              <th title="Сообщения из ресторанов"><BkIcon name="chat" size="sm" /></th>
+              <th class="tga-notif-name">Сотрудник</th>
+              <th v-for="n in NOTIF_TYPES" :key="n.key" class="tga-notif-col">
+                <button class="tga-notif-head" :title="'Включить или выключить «' + n.label + '» всем'"
+                        @click="toggleColumn(n.key)">
+                  <BkIcon :name="n.icon" size="sm" />
+                  <span>{{ n.label }}</span>
+                  <small>{{ countOn(n.key) }} из {{ linkedUsers.length }}</small>
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="u in linkedUsers" :key="u.name">
-              <td><b>{{ u.name }}</b></td>
-              <td :class="cellClass(u.daily_summary)" class="tga-cell-toggle" @click="toggleSetting(u, 'daily_summary')">{{ u.daily_summary ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.psc_expiry)" class="tga-cell-toggle" @click="toggleSetting(u, 'psc_expiry')">{{ u.psc_expiry ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.price_changed)" class="tga-cell-toggle" @click="toggleSetting(u, 'price_changed')">{{ u.price_changed ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.overdue_delivery)" class="tga-cell-toggle" @click="toggleSetting(u, 'overdue_delivery')">{{ u.overdue_delivery ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.data_updates)" class="tga-cell-toggle" @click="toggleSetting(u, 'data_updates')">{{ u.data_updates ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.expiring_items)" class="tga-cell-toggle" @click="toggleSetting(u, 'expiring_items')">{{ u.expiring_items ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.restaurant_sales)" class="tga-cell-toggle" @click="toggleSetting(u, 'restaurant_sales')">{{ u.restaurant_sales ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.low_stock)" class="tga-cell-toggle" @click="toggleSetting(u, 'low_stock')">{{ u.low_stock ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.correction_notifications)" class="tga-cell-toggle" @click="toggleSetting(u, 'correction_notifications')">{{ u.correction_notifications ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.chat_notifications)" class="tga-cell-toggle" @click="toggleSetting(u, 'chat_notifications')">{{ u.chat_notifications ? '✓' : '✕' }}</td>
+              <td class="tga-notif-name"><b>{{ u.name }}</b></td>
+              <td v-for="n in NOTIF_TYPES" :key="n.key"
+                  :class="cellClass(u[n.key])" class="tga-cell-toggle"
+                  :title="(u[n.key] ? 'Выключить' : 'Включить') + ' «' + n.label + '» для ' + u.name"
+                  @click="toggleSetting(u, n.key)">{{ u[n.key] ? '✓' : '✕' }}</td>
             </tr>
           </tbody>
         </table>
-      </div>
-      <div class="tga-legend">
-        <span><BkIcon name="analytics" size="sm" /> Ежедневная сводка</span>
-        <span><BkIcon name="clipboard" size="sm" /> ПСЦ истекает</span>
-        <span><BkIcon name="payments" size="sm" /> Цены изменились</span>
-        <span><BkIcon name="package" size="sm" /> Просроченная поставка</span>
-        <span><BkIcon name="import" size="sm" /> Загрузка данных</span>
-        <span><BkIcon name="warning" size="sm" /> Истекающие сроки</span>
-        <span><BkIcon name="veg" size="sm" /> Реализация ресторанов</span>
-        <span><BkIcon name="chartDown" size="sm" /> Остатки заканчиваются</span>
-        <span><BkIcon name="edit" size="sm" /> Корректировки заказов</span>
-        <span><BkIcon name="chat" size="sm" /> Сообщения из ресторанов</span>
       </div>
     </div>
 
@@ -873,6 +856,46 @@ function reminderLabel(kind) { return REMINDER_KIND_LABELS[kind] || kind || '—
 
 const CHANNEL_LABELS = { telegram: 'Telegram', portal: 'Портал', push: 'Push' }
 function channelLabel(ch) { return CHANNEL_LABELS[ch] || ch || '—' }
+
+// Уведомления сотрудников: раньше десять колонок были прописаны руками, а
+// подписи прятались в легенде под таблицей. Теперь список один — из него
+// строится и шапка, и строки. Заодно добавился тип «Заявки: итог», который
+// работал в боте, но в интерфейсе его не было.
+const NOTIF_TYPES = [
+  { key: 'daily_summary',            label: 'Сводка дня',      icon: 'analytics' },
+  { key: 'so_deadline_summary',      label: 'Заявки: итог',    icon: 'clipboard' },
+  { key: 'psc_expiry',               label: 'ПСЦ истекает',    icon: 'document' },
+  { key: 'price_changed',            label: 'Цены',            icon: 'payments' },
+  { key: 'overdue_delivery',         label: 'Просрочка',       icon: 'package' },
+  { key: 'data_updates',             label: 'Загрузка данных', icon: 'import' },
+  { key: 'expiring_items',           label: 'Сроки годности',  icon: 'warning' },
+  { key: 'restaurant_sales',         label: 'Реализация',      icon: 'veg' },
+  { key: 'low_stock',                label: 'Остатки',         icon: 'chartDown' },
+  { key: 'correction_notifications', label: 'Корректировки',   icon: 'edit' },
+  { key: 'chat_notifications',       label: 'Сообщения',       icon: 'chat' },
+]
+
+function countOn(key) {
+  return linkedUsers.value.filter(u => u[key]).length
+}
+
+// Включить или выключить тип уведомления сразу всем: если он стоит меньше чем
+// у половины — включаем всем, иначе выключаем.
+async function toggleColumn(key) {
+  const total = linkedUsers.value.length
+  if (!total) return
+  const turnOn = countOn(key) * 2 <= total
+  const label = NOTIF_TYPES.find(n => n.key === key)?.label || key
+  const ok = await appConfirm(
+    `${turnOn ? 'Включить' : 'Выключить'} «${label}» всем — это ${total} сотрудников?`,
+    { okText: turnOn ? 'Включить' : 'Выключить', danger: !turnOn }
+  )
+  if (!ok) return
+  for (const u of linkedUsers.value) {
+    if (!!u[key] === turnOn) continue
+    await toggleSetting(u, key)
+  }
+}
 
 // ─── Здоровье бота ───
 const health = ref({})
@@ -1459,4 +1482,27 @@ async function sendBroadcast() {
   .tga-health { flex-direction: column; align-items: flex-start; gap: 10px; }
   .tga-health-nums { gap: 14px; }
 }
+
+/* ═══ Уведомления сотрудников ═══ */
+.tga-notif-table th { vertical-align: bottom; }
+.tga-notif-name { text-align: left; white-space: nowrap; }
+.tga-notif-col { padding: 4px !important; }
+.tga-notif-head {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  width: 100%; padding: 6px 4px; border: none; background: none; cursor: pointer;
+  font-family: inherit; color: var(--text-muted); border-radius: 8px; transition: background .15s;
+}
+.tga-notif-head:hover { background: rgba(0, 0, 0, .04); color: var(--text); }
+.tga-notif-head span { font-size: 10.5px; font-weight: 600; line-height: 1.15; text-align: center; }
+.tga-notif-head small { font-size: 9.5px; opacity: .75; }
+
+/* Одиннадцать колонок в экран не помещаются — таблица прокручивается вбок,
+   а имя сотрудника остаётся на месте. Фон обязателен: без него содержимое
+   просвечивает под липкой колонкой. */
+.tga-notif-table .tga-notif-name {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--card);
+}
+.tga-notif-table thead .tga-notif-name { z-index: 2; background: var(--bg); }
+.tga-notif-table tbody tr:hover .tga-notif-name { background: #fcfaf6; }
 </style>
