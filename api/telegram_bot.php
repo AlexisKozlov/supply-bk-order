@@ -364,6 +364,7 @@ require_once __DIR__ . '/includes/bot_surveys.php';
 require_once __DIR__ . '/includes/bot_chat.php';
 require_once __DIR__ . '/includes/bot_import.php';
 require_once __DIR__ . '/includes/bot_faq.php';
+require_once __DIR__ . '/includes/reminder_defaults.php';
 // Только ради хелперов задач (tHistory / tPropagateDueChange) — кнопка
 // «+7 дней» в дайджесте. Маршруты /tasks/... файл сам пропускает: там стоит
 // выход по $endpoint, а у бота его нет.
@@ -473,6 +474,18 @@ function botEnsureRestaurantSubscription($chatId, $restNum, $from = [], $verifie
                 verified_ro_user_id = VALUES(verified_ro_user_id),
                 must_reverify_by = NULL
         ")->execute([(int)$restNum, $restGroup, (int)$chatId, $firstName, $tgUsername, $verifiedVia, $verifiedRoUserId]);
+
+        // Подключился к боту — значит напоминания ресторану включаем и дублируем
+        // в Telegram. Добавляем в получатели только этого человека, чтобы не
+        // сбрасывать список, который ресторан мог настроить руками.
+        // Выключенное отделом закупок не трогаем (см. reminder_defaults.php).
+        $subSt = $pdo->prepare("SELECT id FROM ro_telegram_subs WHERE restaurant_number = ? AND legal_entity_group = ? AND chat_id = ? LIMIT 1");
+        $subSt->execute([(int)$restNum, $restGroup, (int)$chatId]);
+        $tgSubId = (int)$subSt->fetchColumn();
+        $restId = rrRestaurantIdByNumber($pdo, (int)$restNum, $restGroup);
+        if ($restId && $tgSubId) {
+            rrEnableRemindersForRestaurant($pdo, $restId, $tgSubId);
+        }
     } else {
         $pdo->prepare("
             INSERT INTO ro_telegram_subs (restaurant_number, legal_entity_group, chat_id, first_name, username)
