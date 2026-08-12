@@ -46,6 +46,41 @@
         </div>
       </div>
 
+      <!-- Кто заблокировал бота: такой ресторан не получит ни одного
+           напоминания, и увидеть это можно только здесь -->
+      <div v-if="blockedRestaurants.length || blockedStaff.length" class="bm-section">
+        <h3>Заблокировали бота</h3>
+        <p class="bm-note">
+          Этим людям бот написать не может. Если у ресторана не осталось ни одного живого чата,
+          он не получает напоминаний вообще — стоит позвонить и попросить снова запустить бота.
+        </p>
+
+        <div class="bm-blocked">
+          <div v-for="r in blockedRestaurants" :key="r.legal_entity_group + '-' + r.restaurant_number + '-' + r.tg_blocked_at"
+               class="bm-blocked-row" :class="{ critical: !r.alive_chats }">
+            <span class="bm-blocked-num">{{ restLabel(r.restaurant_number, r.legal_entity_group) }}</span>
+            <span class="bm-blocked-place">
+              {{ placeLabel(r.city, r.address) || '—' }}
+              <span v-if="r.active === 0" class="bm-tag off">точка отключена</span>
+            </span>
+            <span class="bm-blocked-who">{{ personLabel(r) }}</span>
+            <span class="bm-blocked-state">
+              <span v-if="!r.alive_chats" class="bm-tag bad">совсем без Telegram</span>
+              <span v-else class="bm-tag ok">осталось чатов: {{ r.alive_chats }}</span>
+            </span>
+            <span class="bm-blocked-date">с {{ formatTs(r.tg_blocked_at) }}</span>
+          </div>
+
+          <div v-for="s in blockedStaff" :key="'staff-' + s.name" class="bm-blocked-row">
+            <span class="bm-blocked-num">сотрудник</span>
+            <span class="bm-blocked-place">{{ s.name }}</span>
+            <span class="bm-blocked-who">{{ s.display_role || '' }}</span>
+            <span class="bm-blocked-state"></span>
+            <span class="bm-blocked-date">с {{ formatTs(s.tg_blocked_at) }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Поминутный график за 24 ч -->
       <div v-if="data.timeline_24h?.length" class="bm-section">
         <h3>Активность по часам (за 24 ч)</h3>
@@ -153,6 +188,7 @@ import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { formatInt as formatNumber, parseMoscowDate } from '@/lib/utils.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const data = ref(null);
 const loading = ref(false);
@@ -212,6 +248,34 @@ function formatTs(ts) {
   if (sameDay) return time;
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Moscow' }) + ' ' + time;
 }
+const blockedRestaurants = computed(() => data.value?.blocked?.restaurants || []);
+const blockedStaff = computed(() => data.value?.blocked?.staff || []);
+
+// Пицца Стар в базе с 1001 — людям показываем PS01…PS52.
+function restLabel(num, group) {
+  const label = formatRestaurantNumber(num, group);
+  if (!label) return '—';
+  return (group === 'PS' || Number(num) >= 1000) ? label : '№' + label;
+}
+
+// Адрес часто уже начинается с города — не повторяем его дважды.
+function placeLabel(city, address) {
+  const c = String(city || '').trim();
+  const a = String(address || '').trim();
+  if (!a) return c;
+  if (c && a.toLowerCase().includes(c.toLowerCase())) return a;
+  return c ? c + ', ' + a : a;
+}
+
+// Кто именно заблокировал: имя из Telegram или @логин.
+function personLabel(r) {
+  const name = String(r.first_name || '').trim();
+  const login = String(r.username || '').trim();
+  if (name && login) return `${name} (@${login})`;
+  if (name) return name;
+  return login ? '@' + login : '';
+}
+
 function errorCodeHint(code) {
   const hints = {
     400: 'Битый запрос (часто — сломанная HTML-разметка)',
@@ -230,6 +294,35 @@ function errorCodeHint(code) {
 </script>
 
 <style scoped>
+.bm-note { margin: 0 0 10px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+.bm-blocked { display: flex; flex-direction: column; gap: 4px; }
+.bm-blocked-row {
+  display: grid; grid-template-columns: 74px 1fr 150px 160px 110px;
+  gap: 10px; align-items: center;
+  padding: 8px 12px; border-radius: 9px;
+  background: var(--bg); border: 1px solid var(--border-light);
+  font-size: 12.5px;
+}
+.bm-blocked-row.critical { border-color: #E57373; background: #FFF6F6; }
+.bm-blocked-num { font-weight: 700; color: var(--text); }
+.bm-blocked-place { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bm-blocked-who, .bm-blocked-date { color: var(--text-muted); font-size: 11.5px; }
+.bm-blocked-date { text-align: right; white-space: nowrap; }
+
+.bm-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 5px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+}
+.bm-tag.bad { background: #FFEBEE; color: #C62828; }
+.bm-tag.ok { background: #E8F5E9; color: #2E7D32; }
+.bm-tag.off { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border-light); }
+
+@media (max-width: 800px) {
+  .bm-blocked-row { grid-template-columns: 1fr; gap: 4px; }
+  .bm-blocked-date { text-align: left; }
+}
+
 .bm-tab { padding: 12px 4px; }
 .bm-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
 .bm-head h2 { margin: 0 0 4px; font-size: 22px; }

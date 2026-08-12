@@ -348,6 +348,40 @@
         $blockedUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE tg_blocked_at IS NOT NULL")->fetchColumn();
         $blockedRoSubs = (int)$pdo->query("SELECT COUNT(*) FROM ro_telegram_subs WHERE tg_blocked_at IS NOT NULL")->fetchColumn();
 
+        // Кто именно заблокировал бота. Такой ресторан не получает НИ ОДНОГО
+        // напоминания, и заметить это можно только по этому списку — с ним
+        // закупка хотя бы знает, кому позвонить.
+        $blockedList = $pdo->query("
+            SELECT ts.restaurant_number, ts.legal_entity_group, ts.first_name, ts.username,
+                   ts.tg_blocked_at, ts.tg_blocked_confirmed_at,
+                   r.city, r.address, r.active,
+                   (SELECT COUNT(*) FROM ro_telegram_subs o
+                     WHERE o.restaurant_number = ts.restaurant_number
+                       AND o.legal_entity_group = ts.legal_entity_group
+                       AND o.tg_blocked_at IS NULL
+                       AND o.verified_at IS NOT NULL) AS alive_chats
+            FROM ro_telegram_subs ts
+            LEFT JOIN restaurants r
+              ON r.number = ts.restaurant_number
+             AND r.legal_entity_group = ts.legal_entity_group
+            WHERE ts.tg_blocked_at IS NOT NULL
+            ORDER BY ts.tg_blocked_at DESC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($blockedList as &$b) {
+            $b['restaurant_number'] = (int)$b['restaurant_number'];
+            $b['alive_chats']       = (int)$b['alive_chats'];
+            $b['active']            = $b['active'] === null ? null : (int)$b['active'];
+        }
+        unset($b);
+
+        // То же по сотрудникам портала.
+        $blockedStaff = $pdo->query("
+            SELECT name, display_role, tg_blocked_at
+            FROM users
+            WHERE tg_blocked_at IS NOT NULL
+            ORDER BY tg_blocked_at DESC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+
         // Сколько AI-провайдеров сейчас в блокировке
         $aiBlocked = $pdo->query("
             SELECT provider, model, blocked_until, reason
@@ -366,6 +400,8 @@
             'blocked'        => [
                 'users'        => $blockedUsers,
                 'ro_telegram'  => $blockedRoSubs,
+                'restaurants'  => $blockedList,
+                'staff'        => $blockedStaff,
             ],
             'ai_blocked'     => $aiBlocked,
             'generated_at'   => date('Y-m-d H:i:s'),
