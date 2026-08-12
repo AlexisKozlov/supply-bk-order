@@ -94,7 +94,7 @@
             {{ st.image_path ? 'Заменить картинку' : 'Добавить картинку' }}
             <input type="file" accept="image/png,image/jpeg,image/webp" hidden @change="uploadImage($event, st)" />
           </label>
-          <button v-if="st.image_path" class="ge-btn ge-btn-danger" @click="st.image_path = ''">Убрать картинку</button>
+          <button v-if="st.image_path" class="ge-btn ge-btn-danger" @click="removeStepImage(st)">Убрать картинку</button>
           <span v-if="st.uploading" class="ge-uploading">Загрузка...</span>
         </div>
       </div>
@@ -117,6 +117,7 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
+import { useFormDirty, confirmDiscard } from '@/composables/useFormDirty.js';
 
 const toast = useToastStore();
 const guides = ref([]);
@@ -143,6 +144,7 @@ const emptyForm = () => ({
   target_group: null, is_published: false, sort_order: 0, steps: [],
 });
 const form = reactive(emptyForm());
+const { saveSnapshot, isDirty } = useFormDirty(form);
 
 function groupLabel(g) {
   return g === 'PS' ? 'Пицца Стар' : g === 'BK_VM' ? 'БК / ВМ' : '';
@@ -173,6 +175,7 @@ function startNew() {
   Object.assign(form, emptyForm());
   form.sort_order = guides.value.length;
   editing.value = true;
+  saveSnapshot();
 }
 
 function edit(g) {
@@ -189,12 +192,32 @@ function edit(g) {
     })),
   });
   editing.value = true;
+  saveSnapshot();
 }
 
-function cancel() { editing.value = false; }
+// Закрытие без сохранения теряет шаги и уже загруженные картинки — спрашиваем.
+async function cancel() {
+  if (isDirty() && !(await confirmDiscard())) return;
+  editing.value = false;
+}
 
 function addStep() { form.steps.push({ title: '', body: '', image_path: '', uploading: false }); }
-function removeStep(i) { form.steps.splice(i, 1); }
+async function removeStep(i) {
+  const st = form.steps[i];
+  const filled = (st?.title || '').trim() || (st?.body || '').trim() || st?.image_path;
+  if (filled) {
+    const ok = await appConfirm(`Удалить шаг ${i + 1}? Вернуть его будет нельзя.`, {
+      title: 'Удаление шага', okText: 'Удалить', danger: true,
+    });
+    if (!ok) return;
+  }
+  form.steps.splice(i, 1);
+}
+
+async function removeStepImage(st) {
+  const ok = await appConfirm('Убрать картинку из шага?', { title: 'Удаление картинки', okText: 'Убрать', danger: true });
+  if (ok) st.image_path = '';
+}
 function moveStep(i, dir) {
   const j = i + dir;
   if (j < 0 || j >= form.steps.length) return;
@@ -257,7 +280,8 @@ async function save() {
 }
 
 async function remove(g) {
-  if (!await appConfirm(`Удалить инструкцию «${g.title}»? Шаги и картинки тоже удалятся.`)) return;
+  if (!await appConfirm(`Удалить инструкцию «${g.title}»? Шаги и картинки тоже удалятся.`,
+      { title: 'Удаление инструкции', okText: 'Удалить', danger: true })) return;
   saving.value = true;
   try {
     const r = await fetch(`/api/ro/admin/guides?id=${g.id}`, { method: 'DELETE', headers: headers() });

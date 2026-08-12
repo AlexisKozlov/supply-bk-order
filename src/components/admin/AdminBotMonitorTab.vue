@@ -2,11 +2,11 @@
   <div class="bm-tab">
     <div class="bm-head">
       <div>
-        <h2>Мониторинг Telegram-бота</h2>
-        <p class="bm-sub" v-if="data?.generated_at">
-          обновлено {{ formatTs(data.generated_at) }}
+        <p class="bm-sub">
+          <span v-if="data?.generated_at">обновлено {{ formatTs(data.generated_at) }}</span>
+          <span v-else-if="loading">загружаем…</span>
           <button class="bm-refresh" @click="load" :disabled="loading">
-            <BkIcon name="refresh" size="sm"/> обновить
+            <BkIcon name="redo" size="sm"/> обновить
           </button>
         </p>
       </div>
@@ -15,7 +15,10 @@
     <div v-if="loading && !data" class="bm-loading">
       <BurgerSpinner text="Загружаем статистику…" />
     </div>
-    <div v-else-if="error" class="bm-error"><BkIcon name="warning" size="sm" /> {{ error }}</div>
+    <div v-else-if="error" class="bm-error">
+      <BkIcon name="warning" size="sm" /> {{ error }}
+      <button class="bm-refresh" @click="load" :disabled="loading">Попробовать снова</button>
+    </div>
 
     <template v-else-if="data">
       <!-- Сводные карточки -->
@@ -149,7 +152,7 @@ import { ref, computed, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
-import { formatInt as formatNumber } from '@/lib/utils.js';
+import { formatInt as formatNumber, parseMoscowDate } from '@/lib/utils.js';
 
 const data = ref(null);
 const loading = ref(false);
@@ -172,7 +175,6 @@ async function load() {
   }
 }
 
-defineExpose({ load });
 onMounted(load);
 
 const okPct = computed(() => {
@@ -199,16 +201,16 @@ const timelineForChart = computed(() => {
   });
 });
 
+// Сервер отдаёт московское время: parseMoscowDate ставит нужное смещение,
+// прежняя копия читала строку как время браузера и врала на пару часов.
 function formatTs(ts) {
   if (!ts) return '—';
-  // ts формат: 'YYYY-MM-DD HH:mm:ss' (MSK)
-  const d = new Date(ts.replace(' ', 'T'));
-  if (isNaN(d.getTime())) return ts;
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const d = parseMoscowDate(ts);
+  if (!d || isNaN(d.getTime())) return ts;
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+  const sameDay = d.toDateString() === new Date().toDateString();
   if (sameDay) return time;
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + time;
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Moscow' }) + ' ' + time;
 }
 function errorCodeHint(code) {
   const hints = {

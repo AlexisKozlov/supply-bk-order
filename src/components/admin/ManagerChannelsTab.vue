@@ -86,6 +86,7 @@
  */
 import { ref, computed, watch, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { parseMoscowDate } from '@/lib/utils.js';
 
 const group   = ref('BK_VM');
 const filter  = ref('all');
@@ -162,7 +163,11 @@ function fmt(d) {
 }
 function staleDays(r) {
   if (!r.last_login) return 9999;
-  return Math.floor((Date.now() - new Date(String(r.last_login).replace(' ', 'T')).getTime()) / 86400000);
+  // Время с сервера московское — parseMoscowDate ставит смещение,
+  // иначе «сегодня» превращалось во «вчера» у части пользователей.
+  const d = parseMoscowDate(r.last_login);
+  if (!d || isNaN(d.getTime())) return 9999;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
 }
 function lastLoginText(r) {
   if (!r.last_login) return 'ни разу';

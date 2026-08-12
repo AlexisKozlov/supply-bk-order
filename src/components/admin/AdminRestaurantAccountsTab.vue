@@ -41,7 +41,14 @@
     <div class="arat-section">
       <div class="arat-section-title">Массовая выдача пароля</div>
       <div class="arat-row">
-        <input v-model="bulkPassword" type="text" placeholder="Пароль (мин 8 символов)" class="arat-input" />
+        <div class="arat-pwd">
+          <input v-model="bulkPassword" :type="showBulkPassword ? 'text' : 'password'"
+                 placeholder="Пароль (мин 8 символов)" class="arat-input" autocomplete="new-password" />
+          <button class="arat-pwd-eye" type="button" @click="showBulkPassword = !showBulkPassword"
+                  :title="showBulkPassword ? 'Скрыть пароль' : 'Показать пароль'">
+            <BkIcon :name="showBulkPassword ? 'eyeOff' : 'eye'" size="sm"/>
+          </button>
+        </div>
         <select v-model="bulkMode" class="arat-select">
           <option value="missing">Только тем, у кого нет пароля</option>
           <option value="all">Всем (затереть существующие)</option>
@@ -155,7 +162,8 @@ import { ref, computed, onMounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { parseRestaurantInput } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatMoscowDateTime, plural } from '@/lib/utils.js';
 import { appConfirm, appPrompt } from '@/lib/appDialogs.js';
 
 const store = useRestaurantOrderStore();
@@ -168,6 +176,7 @@ const busy = ref(false);
 const bulkPassword = ref('');
 const bulkMode = ref('missing');
 const bulkResult = ref(null);
+const showBulkPassword = ref(false);
 
 const filter = ref('');
 const filterStatus = ref('');
@@ -213,29 +222,14 @@ function statusLabel(u) {
   return 'Отключён';
 }
 
-function formatRestaurantNumber(num, group) {
-  if (!num) return '';
-  const n = Number(num);
-  if (!Number.isFinite(n)) return String(num);
-  if ((group === 'PS') || n >= 1000) {
-    const last = n % 1000;
-    return 'PS' + String(last).padStart(2, '0');
-  }
-  return String(n);
-}
-
 function shortLegalEntity(le) {
   if (!le) return '';
   return le.replace(/^ООО\s*["«]?/, '').replace(/["»]?$/, '');
 }
 
-function formatTime(ts) {
-  if (!ts) return '';
-  try {
-    const d = new Date(ts.replace(' ', 'T'));
-    return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
-  } catch (e) { return ts; }
-}
+// Время с сервера — московское; formatMoscowDateTime это учитывает,
+// прежняя локальная копия читала его как время браузера.
+const formatTime = formatMoscowDateTime;
 
 onMounted(() => reloadUsers());
 
@@ -257,6 +251,15 @@ async function handleBulkCreate() {
   }
   if (bulkMode.value === 'all') {
     if (!(await appConfirm('Затереть пароли ВСЕМ ресторанам? Все активные сессии будут продолжать работать со старыми паролями (пока не выйдут), но войти заново можно будет только с новым паролем.', { title: 'Сброс паролей всем', okText: 'Затереть', danger: true }))) return;
+  } else {
+    // Режим «только без пароля» тоже задевает десятки учёток разом — спрашиваем.
+    const n = withoutPasswordCount.value;
+    if (!n) {
+      toast.error('Некому выдавать', 'У всех ресторанов уже есть пароль');
+      return;
+    }
+    const word = plural(n, 'ресторану', 'ресторанам', 'ресторанам');
+    if (!(await appConfirm(`Пароль будет выдан ${n} ${word}, у которых его сейчас нет.`, { title: 'Выдать пароль', okText: 'Выдать' }))) return;
   }
   busy.value = true;
   try {
@@ -420,6 +423,16 @@ async function handleToggleUser(u) {
   outline: none;
   border-color: #E76F51;
 }
+
+/* Поле пароля с кнопкой «показать» — пароль не должен висеть на экране. */
+.arat-pwd { position: relative; display: flex; flex: 1; min-width: 180px; }
+.arat-pwd .arat-input { flex: 1; padding-right: 38px; }
+.arat-pwd-eye {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  border: none; background: none; cursor: pointer; padding: 4px;
+  color: var(--text-muted, #8a7f75); border-radius: 6px; line-height: 0;
+}
+.arat-pwd-eye:hover { color: var(--text, #33291f); background: rgba(0, 0, 0, .05); }
 
 .arat-hint {
   margin-top: 8px;
