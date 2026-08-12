@@ -2,14 +2,16 @@
   <Transition name="upd-fade">
     <div v-if="needRefresh && !autoHealing" class="upd-banner" :class="{ 'upd-above-nav': isRestaurantArea }" role="alert">
       <div class="upd-content">
-        <div class="upd-icon"><BkIcon name="redo" size="sm" /></div>
-        <div class="upd-text">
-          <div class="upd-title">Доступна новая версия портала</div>
-          <div class="upd-sub">Нажмите «Обновить», чтобы загрузить свежие изменения.</div>
+        <div class="upd-main">
+          <div class="upd-icon" :class="{ 'is-spinning': updating }"><BkIcon name="redo" size="lg" /></div>
+          <div class="upd-text">
+            <div class="upd-title">Доступна новая версия портала</div>
+            <div class="upd-sub">Нажмите «Обновить», чтобы загрузить свежие изменения.</div>
+          </div>
         </div>
         <div class="upd-actions">
           <button class="upd-btn upd-btn-later" @click="later">Позже</button>
-          <button class="upd-btn upd-btn-primary" @click="doUpdate">
+          <button class="upd-btn upd-btn-primary" :disabled="updating" @click="doUpdate">
             {{ updating ? 'Обновление…' : 'Обновить' }}
           </button>
         </div>
@@ -161,49 +163,78 @@ onUnmounted(() => {
   bottom: max(20px, env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 10000;
-  max-width: min(540px, calc(100vw - 24px));
+  max-width: min(620px, calc(100vw - 24px));
   width: 100%;
   pointer-events: none;
 }
 .upd-content {
   pointer-events: auto;
-  background: #FFF;
-  border-radius: 14px;
-  box-shadow: 0 10px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.1);
-  border: 1px solid rgba(214,39,0,0.15);
+  background: var(--tk-bg-card, #FFF);
+  border-radius: var(--tk-r-lg, 14px);
+  box-shadow: var(--tk-shadow-popover, 0 12px 32px rgba(15, 23, 42, 0.14));
+  border: 1px solid var(--tk-border-soft, #EFEAE0);
   padding: 14px 16px;
   display: flex;
   align-items: center;
+  gap: 16px;
+}
+.upd-main {
+  display: flex;
+  align-items: center;
   gap: 12px;
+  flex: 1;
+  min-width: 0;
 }
+/* Значок в собственной плашке: сам по себе он висел в воздухе и читался как
+   чужеродный элемент, а не как часть карточки. */
 .upd-icon {
-  font-size: 24px;
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
+  border-radius: var(--tk-r-md, 10px);
+  background: var(--tk-accent-soft, rgba(232, 122, 30, 0.10));
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+.upd-icon :deep(svg) {
+  width: 22px;
+  height: 22px;
+  stroke: var(--tk-accent, #E87A1E);
+}
+.upd-icon.is-spinning :deep(svg) { animation: upd-spin 1s linear infinite; }
+@keyframes upd-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
 .upd-text { flex: 1; min-width: 0; }
-.upd-title { font-weight: 700; font-size: 14px; color: #2E1810; margin-bottom: 2px; }
-.upd-sub { font-size: 12px; color: #6B5A50; }
+.upd-title {
+  font-weight: var(--tk-fw-bold, 700);
+  font-size: var(--tk-fz-lg, 14px);
+  color: var(--tk-text, #2E1810);
+  margin-bottom: 2px;
+}
+.upd-sub { font-size: var(--tk-fz-sm, 12px); color: var(--tk-text-muted, #6B5A50); }
 .upd-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .upd-btn {
   border: none;
-  border-radius: 8px;
-  padding: 8px 14px;
+  border-radius: var(--tk-r-md, 10px);
+  padding: 9px 16px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--tk-fw-semibold, 600);
   cursor: pointer;
   font-family: inherit;
   transition: all 0.15s;
 }
 .upd-btn-later {
-  background: #F5F1EA;
-  color: #6B5A50;
+  background: var(--tk-n-100, #F5F1EA);
+  color: var(--tk-text-secondary, #6B5A50);
 }
-.upd-btn-later:hover { background: #EDE8E0; }
+.upd-btn-later:hover { background: var(--tk-n-200, #EDE8E0); }
 .upd-btn-primary {
   background: linear-gradient(135deg, #E76F51, #F4A261);
   color: white;
 }
 .upd-btn-primary:hover { box-shadow: 0 4px 12px rgba(214,39,0,0.35); transform: translateY(-1px); }
+.upd-btn-primary:disabled { opacity: 0.75; cursor: default; transform: none; box-shadow: none; }
 
 .upd-fade-enter-active, .upd-fade-leave-active { transition: all 0.25s ease; }
 .upd-fade-enter-from, .upd-fade-leave-to { opacity: 0; transform: translate(-50%, 20px); }
@@ -212,9 +243,14 @@ onUnmounted(() => {
   .upd-banner.upd-above-nav { bottom: calc(74px + env(safe-area-inset-bottom, 0px) + 10px); }
 }
 
+/* На телефоне значок раньше просто прятался, и плашка выглядела голой.
+   Теперь он остаётся в строке заголовка, а кнопки уходят вниз на всю ширину. */
 @media (max-width: 520px) {
-  .upd-content { flex-direction: column; align-items: stretch; padding: 12px; }
-  .upd-actions { justify-content: flex-end; }
-  .upd-icon { display: none; }
+  .upd-content { flex-direction: column; align-items: stretch; gap: 12px; padding: 14px; }
+  .upd-main { align-items: flex-start; }
+  .upd-icon { width: 38px; height: 38px; }
+  .upd-icon :deep(svg) { width: 20px; height: 20px; }
+  .upd-actions { gap: 10px; }
+  .upd-btn { flex: 1; padding: 11px 16px; }
 }
 </style>
