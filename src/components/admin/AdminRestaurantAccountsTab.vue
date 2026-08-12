@@ -563,6 +563,8 @@ async function handleToggleUser(u) {
     color: #a08570; font-weight: 600;
   }
   .arat-table td[data-label] > * { grid-column: 2; min-width: 0; }
+  /* Ширины колонок нужны только настоящей таблице — в карточках распирают. */
+  .arat-col-rest, .arat-col-email, .arat-col-meta, .arat-col-num { min-width: 0; width: auto; }
   .arat-col-num { font-size: 14px; }
   .arat-col-actions { padding-top: 8px; }
   .arat-actions { flex-wrap: wrap; }

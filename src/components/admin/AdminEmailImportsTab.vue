@@ -442,6 +442,11 @@ onMounted(() => {
     color: #9ca3af; font-weight: 600;
   }
   .aei-table td[data-label] > * { grid-column: 2; min-width: 0; }
+  /* Минимальные ширины колонок нужны только настоящей таблице: в карточках
+     они распирали ячейку и текст вылезал за край. */
+  .aei-table .c-from, .aei-table .c-subj, .aei-table .c-status { min-width: 0; }
+  .aei-from-name { white-space: normal; }
+
   .aei-actions { justify-content: flex-start; }
   .aei-actions .aei-btn { flex: 1; min-width: 100px; }
 

@@ -542,10 +542,24 @@ onMounted(() => {
 .adm-audit-sched-cell.has .adm-audit-sched-time { color: #1B5E20; }
 
 @media (max-width: 600px) {
-  .adm-audit-filter-row { flex-direction: column; align-items: stretch; }
-  .adm-audit-right-filters { flex-wrap: wrap; }
-  .adm-audit-date { width: 100%; flex: 1; }
-  .adm-audit-select { width: 100%; }
+  /* min-width: 0 обязателен: без него флекс-элемент раздувается по
+     содержимому, и поля уезжали на 1700 пикселей вправо. */
+  .adm-audit-filter-row { flex-direction: column; align-items: stretch; min-width: 0; }
+  .adm-audit-right-filters { flex-wrap: wrap; min-width: 0; width: 100%; }
+  .adm-audit-date { flex: 1 1 45%; min-width: 0; width: auto; }
+  .adm-audit-select { width: 100%; min-width: 0; }
+
+  /* Шестнадцать категорий занимали семь строк, и до самих записей нужно было
+     долго прокручивать. Прокручиваем ленту фильтров вбок. */
+  .adm-audit-chips {
+    flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px; margin-bottom: 4px;
+  }
+  .adm-audit-chip { flex-shrink: 0; }
+
+  /* Записи журнала: дата уходила вправо и жалась к краю */
+  .adm-audit-head { gap: 6px; }
+  .adm-audit-date-text { margin-left: 0; width: 100%; }
 }
 
 /* ═══ Audit Mode Toggle ═══ */
