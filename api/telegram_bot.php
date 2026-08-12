@@ -362,7 +362,6 @@ require_once __DIR__ . '/includes/bot_tools.php';
 require_once __DIR__ . '/includes/bot_rest.php';
 require_once __DIR__ . '/includes/bot_surveys.php';
 require_once __DIR__ . '/includes/bot_chat.php';
-require_once __DIR__ . '/includes/bot_import.php';
 require_once __DIR__ . '/includes/bot_faq.php';
 require_once __DIR__ . '/includes/reminder_defaults.php';
 // Только ради хелперов задач (tHistory / tPropagateDueChange) — кнопка
@@ -3271,15 +3270,14 @@ if ($importState !== null && isset($msg['document'])) {
             foreach ($restSubs as $subCid) {
                 if ((string)$subCid === (string)$chatId) continue; // не отправляем загрузившему
                 $notifText = "📄 <b>Новый файл заказа</b>\n\nЗагружен: " . date('d.m.Y H:i') . "\nОт: {$uploaderName}";
-                $notifPayload = json_encode([
-                    'chat_id' => $subCid,
-                    'document' => $fileId,
-                    'caption' => $notifText,
+                // Через общий клиент: попадает в журнал отправок и не идёт
+                // тем, кто заблокировал бота.
+                $nres = tgClientCall('sendDocument', [
+                    'chat_id'    => $subCid,
+                    'document'   => $fileId,
+                    'caption'    => $notifText,
                     'parse_mode' => 'HTML',
-                ]);
-                $nch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendDocument");
-                curl_setopt_array($nch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $notifPayload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                $nres = json_decode(curl_exec($nch), true); curl_close($nch);
+                ], ['pdo' => $pdo, 'timeout' => 5]);
                 if (!empty($nres['ok'])) $notifSent++;
                 // Telegram даёт ~30 msg/sec на бот, для документов ещё ниже.
                 // 50мс ≈ 20 msg/sec — безопасно для рассылок 50+ ресторанам.
