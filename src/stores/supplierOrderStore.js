@@ -31,10 +31,16 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
 
   // ═══ Для ресторанов ═══
 
+  // Цех собственного производства (тесто ПРЦ) в списке поставщиков не приходит —
+  // у него свой пункт меню. Состояние приёма заявок держим отдельно, чтобы
+  // кабинет мог показать у этого пункта значок «пауза».
+  const workshop = ref(null);
+
   async function loadSuppliers() {
     loading.value = true;
     try {
       const data = await api('suppliers');
+      workshop.value = data.workshop || null;
       return data.suppliers || [];
     } finally { loading.value = false; }
   }
@@ -325,6 +331,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
 
   return {
     loading,
+    workshop,
     // Ресторан
     loadSuppliers, loadProducts, loadMyOrder, loadMyOrders, submitOrder,
     // Отдел закупок

@@ -1665,13 +1665,29 @@ if ($soAction === 'suppliers' && $method === 'GET') {
 
     // Цех собственного производства (ПРЦ) убираем: тесто рестораны заказывают
     // в отдельном пункте «Тесто (ПРЦ)», а не среди обычных поставщиков.
+    // Но его состояние отдаём отдельным ключом: кабинету нужно показать значок
+    // «пауза» у этого пункта так же, как у обычных поставщиков.
     require_once __DIR__ . '/so_loading_sheets.php';
+    $workshop = null;
     foreach (array_keys($suppliersMap) as $sid) {
-        if (soLsSupplierEnabled($pdo, (string)$sid)) unset($suppliersMap[$sid]);
+        if (!soLsSupplierEnabled($pdo, (string)$sid)) continue;
+        if ($workshop === null) {
+            $wsAcc = $pdo->prepare("SELECT is_accepting_orders, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+            $wsAcc->execute([$sid]);
+            $wsRow = $wsAcc->fetch();
+            $wsMsg = trim((string)($wsRow['pause_message'] ?? ''));
+            $workshop = [
+                'id'                  => $sid,
+                'name'                => $suppliersMap[$sid]['name'],
+                'is_accepting_orders' => $wsRow === false ? true : ((int)$wsRow['is_accepting_orders'] === 1),
+                'pause_message'       => $wsMsg !== '' ? $wsMsg : null,
+            ];
+        }
+        unset($suppliersMap[$sid]);
     }
 
     if (empty($suppliersMap)) {
-        soRespond(['suppliers' => []]);
+        soRespond(['suppliers' => [], 'workshop' => $workshop]);
     }
 
     $supplierIds = array_keys($suppliersMap);
@@ -1900,7 +1916,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
         ];
     }
 
-    soRespond(['suppliers' => $result]);
+    soRespond(['suppliers' => $result, 'workshop' => $workshop]);
 }
 
 // --- Товары по поставщику (из шаблона) ---

@@ -39,6 +39,7 @@
         @click="switchTab('orders', 'production')">
         <span class="sb-icon" v-html="cabIconSvg.dough"></span>
         Тесто (ПРЦ)
+        <span v-if="workshopPaused" class="sb-badge pause">пауза</span>
       </button>
       <!-- Поставщики (Камако и др.) -->
       <button v-for="sup in suppliers" :key="'sb-'+sup.id" class="sb-item"
@@ -405,6 +406,7 @@
           @click="switchTab('orders', 'production')">
           <span class="ord-tab-icon" v-html="cabIconSvg.dough"></span>
           Тесто (ПРЦ)
+          <span v-if="workshopPaused" class="ord-tab-badge pause">пауза</span>
         </button>
         <button
           v-for="sup in suppliers"
@@ -1755,6 +1757,9 @@ const screenTitle = computed(() => {
 });
 
 const suppliers = ref([]);
+// Цех теста приходит отдельно от списка поставщиков (у него свой пункт меню),
+// но значок «пауза» у него должен быть такой же, как у обычного поставщика.
+const workshopPaused = computed(() => soStore.workshop && !soStore.workshop.is_accepting_orders);
 const defaultOrderSubTab = computed(() => {
   if (roStore.restaurantOrdersEnabled) return 'delivery';
   const firstSupplier = suppliers.value[0];
