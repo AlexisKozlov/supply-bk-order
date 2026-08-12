@@ -563,32 +563,41 @@
 
     <!-- ═══ Вопросы AI ═══ -->
     <div v-else-if="tab === 'questions'" class="adm-section">
-      <p class="tga-hint">Последние вопросы, которые пользователи задавали боту через AI-ассистента.</p>
+      <p class="tga-hint">
+        Что люди спрашивают у бота словами. Нажмите на строку, чтобы прочитать ответ целиком.
+      </p>
+
+      <div class="tga-filter-row">
+        <input v-model="questionSearch" class="tga-input" placeholder="Поиск по вопросу, ответу или автору" />
+      </div>
+
       <div v-if="questionsLoading" class="tga-empty"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!questions.length" class="tga-empty">Нет вопросов</div>
+      <div v-else-if="!filteredQuestions.length" class="tga-empty">
+        {{ questions.length ? 'Ничего не нашлось' : 'Вопросов пока нет' }}
+      </div>
       <div v-else class="tga-table-wrap">
         <table class="tga-table">
           <thead>
             <tr>
-              <th style="width:130px">Время</th>
-              <th style="width:120px">Пользователь</th>
-              <th style="width:100px">Юрлицо</th>
+              <th style="width:130px">Когда</th>
+              <th style="width:170px">Кто спросил</th>
+              <th style="width:110px">Юрлицо</th>
               <th>Вопрос</th>
-              <th>Ответ AI</th>
+              <th>Что ответил бот</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(q, i) in questions" :key="i" @click="q._expanded = !q._expanded" style="cursor:pointer;">
+            <tr v-for="(q, i) in filteredQuestions" :key="i" @click="q._expanded = !q._expanded" style="cursor:pointer;">
               <td>{{ formatDate(q.last_question_at) }}</td>
-              <td><b>{{ q.user_name }}</b></td>
-              <td class="tga-sub-text">{{ q.last_entity || '—' }}</td>
-              <td style="max-width:400px;word-break:break-word;">{{ q.last_question }}</td>
-              <td style="max-width:400px;word-break:break-word;">
+              <td><b>{{ askerLabel(q.user_name) }}</b></td>
+              <td class="tga-sub-text">{{ shortEntityName(q.last_entity) }}</td>
+              <td style="max-width:380px;word-break:break-word;">{{ q.last_question }}</td>
+              <td style="max-width:420px;word-break:break-word;">
                 <template v-if="q.answer">
-                  <span v-if="!q._expanded" class="tga-sub-text">{{ q.answer.slice(0, 80) }}{{ q.answer.length > 80 ? '...' : '' }}</span>
-                  <span v-else style="white-space:pre-wrap;font-size:12px;">{{ q.answer }}</span>
+                  <span v-if="!q._expanded" class="tga-sub-text">{{ plainAnswer(q.answer).slice(0, 90) }}{{ plainAnswer(q.answer).length > 90 ? '…' : '' }}</span>
+                  <span v-else class="tga-answer-full">{{ plainAnswer(q.answer) }}</span>
                 </template>
-                <span v-else class="tga-sub-text">—</span>
+                <span v-else class="tga-sub-text">бот не ответил</span>
               </td>
             </tr>
           </tbody>
@@ -896,6 +905,39 @@ async function toggleColumn(key) {
     await toggleSetting(u, key)
   }
 }
+
+// В ответах бота лежит разметка Telegram — в таблице она читалась как
+// «<b>10602 Концентрат…». Показываем текстом.
+function plainAnswer(text) {
+  return String(text || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .trim()
+}
+
+// Вопросы из групповых чатов записаны как tggroup_-4649149259 — человеку
+// такое читать незачем.
+function askerLabel(name) {
+  const s = String(name || '').trim()
+  if (!s) return '—'
+  if (s.startsWith('tggroup_')) return 'Групповой чат'
+  return s
+}
+
+function shortEntityName(le) {
+  if (!le) return '—'
+  const m = String(le).match(/«([^»]+)»|"([^"]+)"/)
+  return m ? (m[1] || m[2]).trim() : le
+}
+
+const questionSearch = ref('')
+const filteredQuestions = computed(() => {
+  const q = questionSearch.value.trim().toLowerCase()
+  if (!q) return questions.value
+  return questions.value.filter(item =>
+    `${item.last_question || ''} ${plainAnswer(item.answer)} ${askerLabel(item.user_name)}`.toLowerCase().includes(q))
+})
 
 // ─── Здоровье бота ───
 const health = ref({})
@@ -1505,4 +1547,6 @@ async function sendBroadcast() {
 }
 .tga-notif-table thead .tga-notif-name { z-index: 2; background: var(--bg); }
 .tga-notif-table tbody tr:hover .tga-notif-name { background: #fcfaf6; }
+
+.tga-answer-full { white-space: pre-wrap; font-size: 12px; line-height: 1.5; display: block; }
 </style>
