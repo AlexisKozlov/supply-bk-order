@@ -2200,10 +2200,12 @@ if (isset($input['callback_query'])) {
                 ->execute([$restaurantId, $by]);
             $subId = (int)$pdo->lastInsertId();
         } else {
+            // updated_by = 'tg:*' — настройку тронул человек, автоматика больше
+            // не досинхронизирует получателей этой подписки.
             $pdo->prepare("UPDATE restaurant_main_delivery_subscriptions
-                            SET is_enabled = 1, portal_enabled = 1, telegram_enabled = 1, updated_at = NOW()
+                            SET is_enabled = 1, portal_enabled = 1, telegram_enabled = 1, updated_at = NOW(), updated_by = ?
                             WHERE id = ?")
-                ->execute([(int)$subId]);
+                ->execute([$by, (int)$subId]);
         }
 
         $existing = $pdo->prepare("SELECT id FROM restaurant_main_delivery_tg_subscribers WHERE subscription_id = ? AND ro_tg_sub_id = ? LIMIT 1");
@@ -2257,11 +2259,13 @@ if (isset($input['callback_query'])) {
                 ->execute([$restaurantId, $supplierId, $by]);
             $subId = (int)$pdo->lastInsertId();
         } else {
-            // Убедимся что подписка включена и канал telegram активен
+            // Убедимся что подписка включена и канал telegram активен.
+            // updated_by = 'tg:*' — настройку тронул человек, автоматика больше
+            // не досинхронизирует получателей этой подписки.
             $pdo->prepare("UPDATE restaurant_reminder_subscriptions
-                            SET is_enabled = 1, portal_enabled = 1, telegram_enabled = 1, updated_at = NOW()
+                            SET is_enabled = 1, portal_enabled = 1, telegram_enabled = 1, updated_at = NOW(), updated_by = ?
                             WHERE id = ?")
-                ->execute([$subId]);
+                ->execute([$by, $subId]);
         }
 
         // Уже подписан? — отписываем. Не подписан — подписываем.
@@ -2303,9 +2307,13 @@ if (isset($input['callback_query'])) {
             answerCallback($cb['id'], 'Подписка не ваша'); exit;
         }
 
-        // Удаляем только нашего пользователя из подписчиков
+        // Удаляем только нашего пользователя из подписчиков.
+        // Помечаем подписку как настроенную человеком, иначе автоматика вернёт
+        // его в получатели на ближайшем запуске крона.
         $pdo->prepare("DELETE FROM restaurant_reminder_tg_subscribers WHERE subscription_id = ? AND ro_tg_sub_id = ?")
             ->execute([$subscriptionId, (int)$tgUser['id']]);
+        $pdo->prepare("UPDATE restaurant_reminder_subscriptions SET updated_at = NOW(), updated_by = ? WHERE id = ?")
+            ->execute(['tg:' . ($tgUser['first_name'] ?: ($tgUser['username'] ?: $chatId)), $subscriptionId]);
 
         answerCallback($cb['id'], "Отключено: " . $row['short_name']);
         rrShowMyReminders($pdo, $chatId, $msgId);

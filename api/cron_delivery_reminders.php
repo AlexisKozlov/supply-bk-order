@@ -51,6 +51,11 @@ if (!empty($_ENV['VAPID_PUBLIC']) && !empty($_ENV['VAPID_PRIVATE']) && is_file(_
 
 require_once __DIR__ . '/includes/tg_client.php';
 
+// Напоминания включены по умолчанию: создаём недостающие подписки и
+// досинхронизируем Telegram-получателей у тех, что никто не настраивал руками.
+require_once __DIR__ . '/includes/reminder_defaults.php';
+rrEnsureReminderDefaults($pdo);
+
 function rtgSend($botToken, $chatId, $text, $replyMarkup = null) {
     global $pdo;
     if (!$botToken || !$chatId) return false;

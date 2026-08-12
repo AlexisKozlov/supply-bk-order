@@ -14,6 +14,8 @@
 
 if ($endpoint !== 'restaurant-reminders') return;
 
+require_once __DIR__ . '/reminder_defaults.php';
+
 // Backward-compat: фронт по этому маркеру отличает «карточку основной поставки»
 // от поставщика. В БД больше не используется — reminder_kind ENUM сделал это явно.
 const MAIN_DELIVERY_SUPPLIER_ID = '00000000-0000-0000-0000-000000000000';
@@ -43,6 +45,10 @@ if (!$rrRestRow) rrRespond(['error' => 'Ресторан не найден'], 40
 $rrRestPk = (int)$rrRestRow['id'];
 
 if ($subpoint === 'list' && $method === 'GET') {
+    // Напоминания включены по умолчанию: недостающие подписки создаём сразу,
+    // чтобы карточки показывали то же, что реально шлёт крон.
+    rrEnsureReminderDefaults($pdo, $rrRestPk);
+
     // Список верифицированных Telegram-подписчиков ресторана
     $tgStmt = $pdo->prepare("
         SELECT id, chat_id, first_name, username, verified_at
@@ -423,6 +429,11 @@ if ($subpoint === 'set' && $method === 'POST') {
         ? ($body['reminder_days'] === null ? null : (int)$body['reminder_days'])
         : ($prevState['reminder_days'] ?? null);
 
+    // Включение напоминаний сразу включает и дублирование в Telegram: иначе
+    // человек включает напоминания и не понимает, почему в чат ничего не идёт.
+    $turnedOn = $isEnabled === 1 && (!$prevState || (int)$prevState['is_enabled'] !== 1);
+    if ($turnedOn) $telegramEnabled = 1;
+
     $pdo->prepare("
         INSERT INTO restaurant_reminder_subscriptions
             (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, reminder_days, cron_managed, updated_at, updated_by)
@@ -436,6 +447,14 @@ if ($subpoint === 'set' && $method === 'POST') {
             updated_at = NOW(),
             updated_by = VALUES(updated_by)
     ")->execute([$rrRestPk, $supplierId, $isEnabled, $portalEnabled, $telegramEnabled, $reminderDays, $updatedBy]);
+
+    // При включении отмечаем получателями всех, кто привязал бота.
+    if ($turnedOn) {
+        $sidStmt = $pdo->prepare("SELECT id FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ?");
+        $sidStmt->execute([$rrRestPk, $supplierId]);
+        $newSubId = (int)$sidStmt->fetchColumn();
+        if ($newSubId) rrSelectAllTgRecipients($pdo, 'restaurant_reminder_tg_subscribers', $newSubId, $rrRestPk);
+    }
 
     auditLog($pdo, 'reminder_sub_toggled', 'restaurant_reminder_subscriptions', $rrRestPk, $updatedBy,
         ['supplier_id' => $supplierId, 'restaurant_number' => $rrUser['restaurant_number']],
@@ -482,10 +501,16 @@ if ($subpoint === 'so-mute' && $method === 'POST') {
             ->execute([$supplierId, $rrRestPk]);
         // Своя подписка тоже могла быть выключена — включаем, чтобы состояние
         // переключателя совпадало с реальной рассылкой и с видом у закупок.
+        // Вместе с включением возвращаем и Telegram: включили напоминания —
+        // значит, ждут их и в чате.
         $pdo->prepare("UPDATE restaurant_reminder_subscriptions
-                          SET is_enabled = 1, portal_enabled = 1, updated_at = NOW(), updated_by = ?
+                          SET is_enabled = 1, portal_enabled = 1, telegram_enabled = 1, updated_at = NOW(), updated_by = ?
                         WHERE supplier_id = ? AND restaurant_id = ? AND cron_managed = 1")
             ->execute([$by, $supplierId, $rrRestPk]);
+        $sidStmt = $pdo->prepare("SELECT id FROM restaurant_reminder_subscriptions WHERE restaurant_id = ? AND supplier_id = ? AND cron_managed = 1");
+        $sidStmt->execute([$rrRestPk, $supplierId]);
+        $unmutedSubId = (int)$sidStmt->fetchColumn();
+        if ($unmutedSubId) rrSelectAllTgRecipients($pdo, 'restaurant_reminder_tg_subscribers', $unmutedSubId, $rrRestPk);
     }
     rrRespond(['success' => true, 'muted' => $muted]);
 }
@@ -526,15 +551,22 @@ if ($subpoint === 'tg-set' && $method === 'POST') {
     $sub->execute([$rrRestPk, $supplierId]);
     $subId = $sub->fetchColumn();
     if (!$subId) {
+        // cron_managed = 1: выбор получателей сделан в новом интерфейсе, крон
+        // портальных поставщиков читает только такие строки.
         $pdo->prepare("INSERT INTO restaurant_reminder_subscriptions
-                       (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, updated_by)
-                       VALUES (?, ?, 1, 1, ?, ?)")
+                       (restaurant_id, supplier_id, is_enabled, portal_enabled, telegram_enabled, cron_managed, updated_by)
+                       VALUES (?, ?, 1, 1, ?, 1, ?)")
             ->execute([$rrRestPk, $supplierId, $ids ? 1 : 0, 'ro:' . $rrUser['restaurant_number']]);
         $subId = (int)$pdo->lastInsertId();
-    } else if ($ids) {
-        // Если выбрали кого-то — автоматически включаем телеграм-канал
-        $pdo->prepare("UPDATE restaurant_reminder_subscriptions SET telegram_enabled = 1, updated_at = NOW() WHERE id = ?")
-            ->execute([$subId]);
+    } else {
+        // Список получателей задал человек — строка больше не «по умолчанию»,
+        // автодобавление новых аккаунтов для неё прекращается.
+        // Если выбрали кого-то — заодно включаем телеграм-канал.
+        $pdo->prepare("UPDATE restaurant_reminder_subscriptions
+                          SET telegram_enabled = IF(? > 0, 1, telegram_enabled),
+                              cron_managed = 1, updated_at = NOW(), updated_by = ?
+                        WHERE id = ?")
+            ->execute([count($ids), 'ro:' . $rrUser['restaurant_number'], $subId]);
     }
 
     // Полная замена списка подписчиков на пару
@@ -566,6 +598,10 @@ if ($subpoint === 'main-set' && $method === 'POST') {
     $prevMain->execute([$rrRestPk]);
     $prevMainState = $prevMain->fetch();
 
+    // Включили напоминания — включаем и дублирование в Telegram.
+    $turnedOn = $isEnabled === 1 && (!$prevMainState || (int)$prevMainState['is_enabled'] !== 1);
+    if ($turnedOn) $telegramEnabled = 1;
+
     $pdo->prepare("
         INSERT INTO restaurant_main_delivery_subscriptions
             (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_at, updated_by)
@@ -577,6 +613,13 @@ if ($subpoint === 'main-set' && $method === 'POST') {
             updated_at = NOW(),
             updated_by = VALUES(updated_by)
     ")->execute([$rrRestPk, $isEnabled, $portalEnabled, $telegramEnabled, $updatedBy]);
+
+    if ($turnedOn) {
+        $sidStmt = $pdo->prepare("SELECT id FROM restaurant_main_delivery_subscriptions WHERE restaurant_id = ?");
+        $sidStmt->execute([$rrRestPk]);
+        $newSubId = (int)$sidStmt->fetchColumn();
+        if ($newSubId) rrSelectAllTgRecipients($pdo, 'restaurant_main_delivery_tg_subscribers', $newSubId, $rrRestPk);
+    }
 
     auditLog($pdo, 'reminder_main_toggled', 'restaurant_main_delivery_subscriptions', $rrRestPk, $updatedBy,
         ['restaurant_number' => $rrUser['restaurant_number']],
@@ -623,12 +666,13 @@ if ($subpoint === 'main-tg-set' && $method === 'POST') {
             VALUES (?, 1, 1, ?, ?)
         ")->execute([$rrRestPk, $ids ? 1 : 0, 'ro:' . $rrUser['restaurant_number']]);
         $subId = (int)$pdo->lastInsertId();
-    } else if ($ids) {
+    } else {
+        // Список получателей задал человек — строка больше не «по умолчанию».
         $pdo->prepare("
             UPDATE restaurant_main_delivery_subscriptions
-            SET telegram_enabled = 1, updated_at = NOW()
+            SET telegram_enabled = IF(? > 0, 1, telegram_enabled), updated_at = NOW(), updated_by = ?
             WHERE id = ?
-        ")->execute([$subId]);
+        ")->execute([count($ids), 'ro:' . $rrUser['restaurant_number'], $subId]);
     }
 
     // Полная замена списка получателей
@@ -663,6 +707,10 @@ if ($subpoint === 'keg-set' && $method === 'POST') {
     $prevKeg->execute([$rrRestPk]);
     $prevKegState = $prevKeg->fetch();
 
+    // Включили напоминания — включаем и дублирование в Telegram.
+    $turnedOn = $isEnabled === 1 && (!$prevKegState || (int)$prevKegState['is_enabled'] !== 1);
+    if ($turnedOn) $telegramEnabled = 1;
+
     $pdo->prepare("
         INSERT INTO restaurant_keg_return_subscriptions
             (restaurant_id, is_enabled, portal_enabled, telegram_enabled, updated_at, updated_by)
@@ -674,6 +722,13 @@ if ($subpoint === 'keg-set' && $method === 'POST') {
             updated_at = NOW(),
             updated_by = VALUES(updated_by)
     ")->execute([$rrRestPk, $isEnabled, $portalEnabled, $telegramEnabled, $updatedBy]);
+
+    if ($turnedOn) {
+        $sidStmt = $pdo->prepare("SELECT id FROM restaurant_keg_return_subscriptions WHERE restaurant_id = ?");
+        $sidStmt->execute([$rrRestPk]);
+        $newSubId = (int)$sidStmt->fetchColumn();
+        if ($newSubId) rrSelectAllTgRecipients($pdo, 'restaurant_keg_return_tg_subscribers', $newSubId, $rrRestPk);
+    }
 
     auditLog($pdo, 'reminder_keg_toggled', 'restaurant_keg_return_subscriptions', $rrRestPk, $updatedBy,
         ['restaurant_number' => $rrUser['restaurant_number']],
@@ -718,12 +773,13 @@ if ($subpoint === 'keg-tg-set' && $method === 'POST') {
             VALUES (?, 1, 1, ?, ?)
         ")->execute([$rrRestPk, $ids ? 1 : 0, 'ro:' . $rrUser['restaurant_number']]);
         $subId = (int)$pdo->lastInsertId();
-    } else if ($ids) {
+    } else {
+        // Список получателей задал человек — строка больше не «по умолчанию».
         $pdo->prepare("
             UPDATE restaurant_keg_return_subscriptions
-            SET telegram_enabled = 1, updated_at = NOW()
+            SET telegram_enabled = IF(? > 0, 1, telegram_enabled), updated_at = NOW(), updated_by = ?
             WHERE id = ?
-        ")->execute([$subId]);
+        ")->execute([count($ids), 'ro:' . $rrUser['restaurant_number'], $subId]);
     }
 
     $pdo->beginTransaction();

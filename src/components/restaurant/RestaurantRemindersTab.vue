@@ -100,21 +100,21 @@
 
           <div v-if="isMainEnabled" class="rrt-body">
             <label class="rrt-checkbox" :class="{ 'is-disabled': !availableTg.length }">
-              <input type="checkbox" :checked="mainDelivery.subscription?.telegram_enabled" :disabled="!availableTg.length" @change="onMainChannelChange('telegram', $event.target.checked)" />
+              <input type="checkbox" :checked="isMainTgOn" :disabled="!availableTg.length" @change="onMainChannelChange('telegram', $event.target.checked)" />
               <span>Дублировать в Telegram</span>
             </label>
 
-            <button v-if="mainDelivery.subscription?.telegram_enabled && availableTg.length"
+            <button v-if="isMainTgOn && availableTg.length"
                     type="button"
                     class="rrt-tg-chip"
-                    :class="{ 'is-empty': !(mainDelivery.selected_tg_ids || []).length, 'is-open': mainTgOpen }"
+                    :class="{ 'is-empty': !mainTgIds.length, 'is-open': mainTgOpen }"
                     @click="mainTgOpen = !mainTgOpen">
-              <span>{{ recipientsLabel(mainDelivery.selected_tg_ids) }}</span>
+              <span>{{ recipientsLabel(mainTgIds) }}</span>
               <span class="rrt-tg-chip-arrow">▾</span>
             </button>
           </div>
 
-          <div v-if="isMainEnabled && mainDelivery.subscription?.telegram_enabled && availableTg.length && mainTgOpen" class="rrt-tg">
+          <div v-if="isMainEnabled && isMainTgOn && availableTg.length && mainTgOpen" class="rrt-tg">
             <div class="rrt-tg-list">
               <label v-for="u in availableTg" :key="'main-tg-' + u.id" class="rrt-tg-item" :class="{ 'is-selected': isMainTgSelected(u.id) }">
                 <input type="checkbox"
@@ -154,21 +154,21 @@
           <div v-if="isKegEnabled" class="rrt-body">
             <p class="rrt-keg-desc">Напомним подать заявку перед дедлайном и передать накладные бухгалтерии после вывоза.</p>
             <label class="rrt-checkbox" :class="{ 'is-disabled': !availableTg.length }">
-              <input type="checkbox" :checked="kegReturn.subscription?.telegram_enabled" :disabled="!availableTg.length" @change="onKegChannelChange('telegram', $event.target.checked)" />
+              <input type="checkbox" :checked="isKegTgOn" :disabled="!availableTg.length" @change="onKegChannelChange('telegram', $event.target.checked)" />
               <span>Дублировать в Telegram</span>
             </label>
 
-            <button v-if="kegReturn.subscription?.telegram_enabled && availableTg.length"
+            <button v-if="isKegTgOn && availableTg.length"
                     type="button"
                     class="rrt-tg-chip"
-                    :class="{ 'is-empty': !(kegReturn.selected_tg_ids || []).length, 'is-open': kegTgOpen }"
+                    :class="{ 'is-empty': !kegTgIds.length, 'is-open': kegTgOpen }"
                     @click="kegTgOpen = !kegTgOpen">
-              <span>{{ recipientsLabel(kegReturn.selected_tg_ids) }}</span>
+              <span>{{ recipientsLabel(kegTgIds) }}</span>
               <span class="rrt-tg-chip-arrow">▾</span>
             </button>
           </div>
 
-          <div v-if="isKegEnabled && kegReturn.subscription?.telegram_enabled && availableTg.length && kegTgOpen" class="rrt-tg">
+          <div v-if="isKegEnabled && isKegTgOn && availableTg.length && kegTgOpen" class="rrt-tg">
             <div class="rrt-tg-list">
               <label v-for="u in availableTg" :key="'keg-tg-' + u.id" class="rrt-tg-item" :class="{ 'is-selected': isKegTgSelected(u.id) }">
                 <input type="checkbox"
@@ -224,22 +224,22 @@
 
           <div v-if="isEnabled(g)" class="rrt-body">
             <label class="rrt-checkbox" :class="{ 'is-disabled': !availableTg.length || g.reminder_muted }">
-              <input type="checkbox" :checked="g.subscription?.telegram_enabled" :disabled="!availableTg.length || g.reminder_muted" @change="onChannelChange(g, 'telegram', $event.target.checked)" />
+              <input type="checkbox" :checked="tgOn(g)" :disabled="!availableTg.length || g.reminder_muted" @change="onChannelChange(g, 'telegram', $event.target.checked)" />
               <span>Дублировать в Telegram</span>
             </label>
 
-            <button v-if="g.subscription?.telegram_enabled && availableTg.length"
+            <button v-if="tgOn(g) && availableTg.length"
                     type="button"
                     class="rrt-tg-chip"
-                    :class="{ 'is-empty': !(g.selected_tg_ids || []).length, 'is-open': expandedTg.has(g.supplier_id) }"
+                    :class="{ 'is-empty': !effectiveTgIds(g).length, 'is-open': expandedTg.has(g.supplier_id) }"
                     :disabled="g.reminder_muted"
                     @click="toggleTgPanel(g.supplier_id)">
-              <span>{{ recipientsLabel(g.selected_tg_ids) }}</span>
+              <span>{{ recipientsLabel(effectiveTgIds(g)) }}</span>
               <span class="rrt-tg-chip-arrow">▾</span>
             </button>
           </div>
 
-          <div v-if="isEnabled(g) && g.subscription?.telegram_enabled && availableTg.length && expandedTg.has(g.supplier_id)" class="rrt-tg">
+          <div v-if="isEnabled(g) && tgOn(g) && availableTg.length && expandedTg.has(g.supplier_id)" class="rrt-tg">
             <div class="rrt-tg-list">
               <label v-for="u in availableTg" :key="'p-tg-' + u.id" class="rrt-tg-item" :class="{ 'is-selected': isSelected(g, u.id) }">
                 <input type="checkbox"
@@ -283,21 +283,21 @@
 
           <div v-if="isEnabled(g)" class="rrt-body">
             <label class="rrt-checkbox" :class="{ 'is-disabled': !availableTg.length }">
-              <input type="checkbox" :checked="g.subscription?.telegram_enabled" :disabled="!availableTg.length" @change="onChannelChange(g, 'telegram', $event.target.checked)" />
+              <input type="checkbox" :checked="tgOn(g)" :disabled="!availableTg.length" @change="onChannelChange(g, 'telegram', $event.target.checked)" />
               <span>Дублировать в Telegram</span>
             </label>
 
-            <button v-if="g.subscription?.telegram_enabled && availableTg.length"
+            <button v-if="tgOn(g) && availableTg.length"
                     type="button"
                     class="rrt-tg-chip"
-                    :class="{ 'is-empty': !(g.selected_tg_ids || []).length, 'is-open': expandedTg.has(g.supplier_id) }"
+                    :class="{ 'is-empty': !effectiveTgIds(g).length, 'is-open': expandedTg.has(g.supplier_id) }"
                     @click="toggleTgPanel(g.supplier_id)">
-              <span>{{ recipientsLabel(g.selected_tg_ids) }}</span>
+              <span>{{ recipientsLabel(effectiveTgIds(g)) }}</span>
               <span class="rrt-tg-chip-arrow">▾</span>
             </button>
           </div>
 
-          <div v-if="isEnabled(g) && g.subscription?.telegram_enabled && availableTg.length && expandedTg.has(g.supplier_id)" class="rrt-tg">
+          <div v-if="isEnabled(g) && tgOn(g) && availableTg.length && expandedTg.has(g.supplier_id)" class="rrt-tg">
             <div class="rrt-tg-list">
               <label v-for="u in availableTg" :key="u.id" class="rrt-tg-item" :class="{ 'is-selected': isSelected(g, u.id) }">
                 <input type="checkbox"
@@ -344,16 +344,37 @@ const mainDelivery = ref({ days: [], subscription: null, selected_tg_ids: [] });
 const savingMain = ref(false);
 const savingMainTg = ref(false);
 const hasMainDeliveryDays = computed(() => mainDelivery.value?.days?.length > 0);
-const isMainEnabled = computed(() => !!mainDelivery.value?.subscription?.is_enabled);
-function isMainTgSelected(tgId) { return (mainDelivery.value?.selected_tg_ids || []).includes(tgId); }
+// Нет подписки = включено по умолчанию (вместе с Telegram и всеми получателями).
+const isMainEnabled = computed(() => {
+  const sub = mainDelivery.value?.subscription;
+  return sub ? !!sub.is_enabled : true;
+});
+const isMainTgOn = computed(() => {
+  const sub = mainDelivery.value?.subscription;
+  return sub ? !!sub.telegram_enabled : true;
+});
+const mainTgIds = computed(() => (
+  mainDelivery.value?.subscription ? (mainDelivery.value.selected_tg_ids || []) : availableTg.value.map(u => u.id)
+));
+function isMainTgSelected(tgId) { return mainTgIds.value.includes(tgId); }
 
 const kegReturn = ref({ days: [], subscription: null, selected_tg_ids: [] });
 const savingKeg = ref(false);
 const savingKegTg = ref(false);
 const kegTgOpen = ref(false);
 const hasKegDays = computed(() => kegReturn.value?.days?.length > 0);
-const isKegEnabled = computed(() => !!kegReturn.value?.subscription?.is_enabled);
-function isKegTgSelected(tgId) { return (kegReturn.value?.selected_tg_ids || []).includes(tgId); }
+const isKegEnabled = computed(() => {
+  const sub = kegReturn.value?.subscription;
+  return sub ? !!sub.is_enabled : true;
+});
+const isKegTgOn = computed(() => {
+  const sub = kegReturn.value?.subscription;
+  return sub ? !!sub.telegram_enabled : true;
+});
+const kegTgIds = computed(() => (
+  kegReturn.value?.subscription ? (kegReturn.value.selected_tg_ids || []) : availableTg.value.map(u => u.id)
+));
+function isKegTgSelected(tgId) { return kegTgIds.value.includes(tgId); }
 
 const showTutorial = ref(false);
 const tutorialVideo = ref(null);
@@ -401,23 +422,30 @@ function effectiveDeadlineTime(group, day) {
   return dflt ? fmtTime(dflt.deadline_time) : '';
 }
 
-// Локальные поставщики по умолчанию выключены, пока ресторан сам не включит.
-// Портальные (so_enabled=1) по умолчанию включены — так уже работали
-// автоматические напоминания через основной модуль до этой карточки.
+// Напоминания включены по умолчанию — и у портальных, и у локальных
+// поставщиков. Нет подписки = включено, дублируется в Telegram, получатели —
+// все, кто привязал бота. Выключение хранится в подписке.
 function isEnabled(group) {
   // Портальные: состояние ОДНО и общее с отделом закупок. Выключить мог любой из
   // двух (закупки — reminder_muted, ресторан — своя подписка), включить тоже может
   // любой. Поэтому «включено» = не заглушено И подписка не выключена.
-  if (group.so_enabled) {
-    if (group.reminder_muted) return false;
-    return group.subscription ? !!group.subscription.is_enabled : true;
-  }
-  if (group.subscription) return !!group.subscription.is_enabled;
-  return false;
+  if (group.so_enabled && group.reminder_muted) return false;
+  return group.subscription ? !!group.subscription.is_enabled : true;
+}
+
+// Дублирование в Telegram: без подписки — включено (дефолт).
+function tgOn(group) {
+  return group.subscription ? !!group.subscription.telegram_enabled : true;
+}
+
+// Получатели: без подписки — все привязанные аккаунты ресторана.
+function effectiveTgIds(group) {
+  if (!group.subscription) return availableTg.value.map(u => u.id);
+  return group.selected_tg_ids || [];
 }
 
 function isSelected(group, tgId) {
-  return (group.selected_tg_ids || []).includes(tgId);
+  return effectiveTgIds(group).includes(tgId);
 }
 
 // ─── Портальные карточки: галочки по дням доставки ───
@@ -531,7 +559,9 @@ async function loadGroups() {
 async function saveMainSubscription(patch) {
   savingMain.value = true;
   try {
-    const sub = mainDelivery.value.subscription || { is_enabled: false, portal_enabled: true, telegram_enabled: false };
+    // Дефолт (подписки ещё нет) — включено и с Telegram: иначе сохранение
+    // соседней настройки молча выключило бы напоминания.
+    const sub = mainDelivery.value.subscription || { is_enabled: true, portal_enabled: true, telegram_enabled: true };
     const payload = {
       is_enabled: sub.is_enabled ? 1 : 0,
       telegram_enabled: sub.telegram_enabled ? 1 : 0,
@@ -553,8 +583,11 @@ async function saveMainSubscription(patch) {
   }
 }
 
-function onToggleMainEnabled(checked) {
-  saveMainSubscription({ is_enabled: checked ? 1 : 0 });
+async function onToggleMainEnabled(checked) {
+  const ok = await saveMainSubscription({ is_enabled: checked ? 1 : 0 });
+  // При включении сервер сам ставит галочку Telegram и отмечает всех, кто
+  // привязал бота — перечитываем, чтобы карточка показывала это сразу.
+  if (ok && checked) await loadGroups();
 }
 
 function onMainChannelChange(channel, checked) {
@@ -564,7 +597,7 @@ function onMainChannelChange(channel, checked) {
 }
 
 async function toggleMainTg(tgId, checked) {
-  const current = new Set(mainDelivery.value.selected_tg_ids || []);
+  const current = new Set(mainTgIds.value);
   if (checked) current.add(tgId); else current.delete(tgId);
   const newIds = Array.from(current);
   savingMainTg.value = true;
@@ -588,7 +621,7 @@ async function toggleMainTg(tgId, checked) {
 async function saveKegSubscription(patch) {
   savingKeg.value = true;
   try {
-    const sub = kegReturn.value.subscription || { is_enabled: false, portal_enabled: true, telegram_enabled: false };
+    const sub = kegReturn.value.subscription || { is_enabled: true, portal_enabled: true, telegram_enabled: true };
     const payload = {
       is_enabled: sub.is_enabled ? 1 : 0,
       telegram_enabled: sub.telegram_enabled ? 1 : 0,
@@ -610,8 +643,9 @@ async function saveKegSubscription(patch) {
   }
 }
 
-function onToggleKegEnabled(checked) {
-  saveKegSubscription({ is_enabled: checked ? 1 : 0 });
+async function onToggleKegEnabled(checked) {
+  const ok = await saveKegSubscription({ is_enabled: checked ? 1 : 0 });
+  if (ok && checked) await loadGroups();
 }
 
 function onKegChannelChange(channel, checked) {
@@ -621,7 +655,7 @@ function onKegChannelChange(channel, checked) {
 }
 
 async function toggleKegTg(tgId, checked) {
-  const current = new Set(kegReturn.value.selected_tg_ids || []);
+  const current = new Set(kegTgIds.value);
   if (checked) current.add(tgId); else current.delete(tgId);
   const newIds = Array.from(current);
   savingKegTg.value = true;
@@ -651,8 +685,8 @@ async function saveSubscription(group, patch) {
     const payload = {
       supplier_id: group.supplier_id,
       is_enabled: isEnabled(group) ? 1 : 0,
-      portal_enabled: group.subscription?.portal_enabled ? 1 : 0,
-      telegram_enabled: group.subscription?.telegram_enabled ? 1 : 0,
+      portal_enabled: isEnabled(group) ? 1 : 0,
+      telegram_enabled: tgOn(group) ? 1 : 0,
       ...patch,
     };
     await roFetch('/api/restaurant-reminders/set', { method: 'POST', body: payload });
@@ -704,9 +738,13 @@ async function onToggleEnabled(group, checked) {
       saving[group.supplier_id] = false;
     }
     if (group.subscription) await saveSubscription(group, { is_enabled: 1 });
+    // Сервер при включении ставит галочку Telegram и отмечает всех, кто
+    // привязал бота — перечитываем состояние карточек.
+    await loadGroups();
     return;
   }
-  saveSubscription(group, { is_enabled: checked ? 1 : 0 });
+  const ok = await saveSubscription(group, { is_enabled: checked ? 1 : 0 });
+  if (ok && checked) await loadGroups();
 }
 
 function onChannelChange(group, channel, checked) {
@@ -717,7 +755,7 @@ function onChannelChange(group, channel, checked) {
 }
 
 async function toggleTg(group, tgId, checked) {
-  const current = new Set(group.selected_tg_ids || []);
+  const current = new Set(effectiveTgIds(group));
   if (checked) current.add(tgId); else current.delete(tgId);
   const newIds = Array.from(current);
   savingTg[group.supplier_id] = true;
