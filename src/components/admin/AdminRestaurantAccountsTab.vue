@@ -100,15 +100,15 @@
           </thead>
           <tbody>
             <tr v-for="u in filteredUsers" :key="(u.legal_entity_group || 'BK_VM') + '-' + u.restaurant_number">
-              <td class="arat-col-num">№{{ formatRestaurantNumber(u.restaurant_number, u.legal_entity_group) }}</td>
+              <td class="arat-col-num" data-label="Ресторан">№{{ formatRestaurantNumber(u.restaurant_number, u.legal_entity_group) }}</td>
               <td class="arat-col-rest">
-                <span class="arat-rest-addr">{{ u.city || '—' }} {{ u.address || '' }}</span>
+                <span class="arat-rest-addr">{{ placeLabel(u.city, u.address) || '—' }}</span>
                 <span class="arat-rest-le" v-if="u.legal_entity"> · {{ shortLegalEntity(u.legal_entity) }}</span>
               </td>
-              <td class="arat-col-status">
+              <td class="arat-col-status" data-label="Статус">
                 <span class="arat-badge" :class="statusBadgeClass(u)">{{ statusLabel(u) }}</span>
               </td>
-              <td class="arat-col-email">
+              <td class="arat-col-email" data-label="Email">
                 <template v-if="u.email">
                   <span class="arat-email-addr">{{ u.email }}</span>
                   <span
@@ -119,12 +119,12 @@
                 </template>
                 <span v-else class="arat-email-empty">не указан</span>
               </td>
-              <td class="arat-col-app">
+              <td class="arat-col-app" data-label="Приложение">
                 <span v-if="u.has_pwa" class="arat-badge app" :title="'Открывали с иконки: ' + formatTime(u.pwa_last_seen_at)">на телефоне</span>
                 <span v-else class="arat-muted">—</span>
                 <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' устройств(а) с уведомлениями'"><BkIcon name="bell" size="sm" />{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
               </td>
-              <td class="arat-col-meta" :title="u.password_changed_at ? 'Пароль: ' + formatTime(u.password_changed_at) : ''">
+              <td class="arat-col-meta" data-label="Последний вход" :title="u.password_changed_at ? 'Пароль: ' + formatTime(u.password_changed_at) : ''">
                 <span v-if="u.last_login_at">{{ formatTime(u.last_login_at) }}</span>
                 <span v-else class="arat-muted">—</span>
               </td>
@@ -220,6 +220,15 @@ function statusLabel(u) {
   if (u.has_password && u.is_active) return 'Активен';
   if (!u.has_password) return 'Без пароля';
   return 'Отключён';
+}
+
+// Адрес в базе часто уже начинается с города — не повторяем его дважды.
+function placeLabel(city, address) {
+  const c = String(city || '').trim();
+  const a = String(address || '').trim();
+  if (!a) return c;
+  if (c && a.toLowerCase().includes(c.toLowerCase())) return a;
+  return c ? c + ' ' + a : a;
 }
 
 function shortLegalEntity(le) {
@@ -575,4 +584,44 @@ async function handleToggleUser(u) {
 .arat-col-app { white-space: nowrap; }
 .arat-badge.app { background: #FDEBD9; color: #C1502E; }
 .arat-push-dot { margin-left: 6px; font-size: 12px; }
+
+/* ═══ Телефон: таблица на семь колонок читается только карточками ═══ */
+@media (max-width: 760px) {
+  .arat-summary { gap: 6px; }
+
+  .arat-table-wrap { border: none; border-radius: 0; overflow: visible; }
+  .arat-table, .arat-table tbody, .arat-table tr, .arat-table td { display: block; width: 100%; }
+  .arat-table thead { display: none; }
+
+  .arat-table tbody tr {
+    border: 1px solid #e8e0d6; border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; background: #fff;
+  }
+  .arat-table tbody tr:hover { background: #fff; }
+
+  .arat-table td {
+    border: none; padding: 3px 0; white-space: normal;
+  }
+  /* Подпись слева, значение справа одной колонкой: при flex несколько
+     блоков внутри ячейки вставали в строку и текст рвался по слогам. */
+  .arat-table td[data-label] {
+    display: grid; grid-template-columns: 96px minmax(0, 1fr);
+    gap: 4px 8px; align-items: baseline;
+  }
+  .arat-table td[data-label]::before {
+    content: attr(data-label); grid-column: 1;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .3px;
+    color: #a08570; font-weight: 600;
+  }
+  .arat-table td[data-label] > * { grid-column: 2; min-width: 0; }
+  .arat-col-num { font-size: 14px; }
+  .arat-col-actions { padding-top: 8px; }
+  .arat-actions { flex-wrap: wrap; }
+  .arat-actions .arat-btn { flex: 1; min-width: 92px; }
+
+  .arat-row { flex-direction: column; align-items: stretch; }
+  .arat-pwd { min-width: 0; }
+  .arat-filters { flex-direction: column; }
+  .arat-input, .arat-select { min-width: 0; width: 100%; }
+}
 </style>

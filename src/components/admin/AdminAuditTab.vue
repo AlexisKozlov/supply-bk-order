@@ -266,13 +266,27 @@ const AUDIT_ACTION_LABELS = {
   correction_deadline_changed: 'Дедлайн изменён',
   // Система
   broadcast_sent: 'Рассылка', session_terminated: 'Сессия завершена', maintenance_toggled: 'Тех. работы',
+  // Заявки поставщикам и напоминания — появились уже после словаря.
+  so_deadline_rules_updated: 'Дедлайны', so_adhoc_created: 'Внеплановая',
+  so_supplier_disconnected: 'Поставщик отключён',
+  reminder_keg_toggled: 'Напоминание о кегах', correction_taken: 'Взята в работу',
 };
+// Здесь лежат имена таблиц из БД — без перевода они и попадали на экран
+// как «restaurant_main_delivery_subscriptions».
 const AUDIT_ENTITY_LABELS = {
   order: 'Заказ', plan: 'План', product: 'Товар', delivery_schedule: 'Расписание',
   user: 'Пользователь', price_agreement: 'Протокол цен',
   marketing: 'Маркетинг', tender: 'Тендер',
   correction: 'Корректировка', distribution: 'Распределение', stock_collection: 'Сбор остатков',
   import: 'Импорт', supplier_order: 'Заявка поставщику', system: 'Система',
+  supplier: 'Поставщик', suppliers: 'Поставщик',
+  restaurant: 'Ресторан', restaurants: 'Ресторан',
+  order_corrections: 'Корректировка', product_prices: 'Цена товара',
+  restaurant_reminder_subscriptions: 'Напоминание поставщику',
+  restaurant_main_delivery_subscriptions: 'Напоминание об основной поставке',
+  restaurant_keg_return_subscriptions: 'Напоминание о возврате кег',
+  ro_telegram_subs: 'Привязка Telegram',
+  so_orders: 'Заявка поставщику', so_templates: 'Шаблон заявки',
 };
 
 function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }
@@ -299,6 +313,10 @@ const formatAuditDate = formatMoscowDateTime;
 function authorLabel(name) {
   const s = String(name || '').trim();
   if (!s) return '—';
+  // Служебные метки из кабинета и бота: ro:1038 → «Ресторан PS38».
+  const service = s.match(/^(ro|tg):(\d{2,4})$/i);
+  if (service) return 'Ресторан ' + formatRestaurantNumber(service[2]);
+  if (/^auto:/i.test(s)) return 'Автоматически';
   return s.replace(/(Ресторан\s+)(\d{3,4})/gi, (_, prefix, num) => prefix + formatRestaurantNumber(num));
 }
 

@@ -53,14 +53,14 @@
           </thead>
           <tbody>
             <tr v-for="row in items" :key="row.id">
-              <td class="c-date">{{ formatDateTime(row.received_at) }}</td>
-              <td class="c-from">
+              <td class="c-date" data-label="Получено">{{ formatDateTime(row.received_at) }}</td>
+              <td class="c-from" data-label="От кого">
                 <div class="aei-from">
                   <span class="aei-from-name" v-if="row.from_name">{{ row.from_name }}</span>
                   <span class="aei-from-email">{{ row.from_email }}</span>
                 </div>
               </td>
-              <td class="c-subj">
+              <td class="c-subj" data-label="Тема">
                 <div class="aei-subj">{{ row.subject || '—' }}</div>
                 <div v-if="row.file_name" class="aei-file">
                   <BkIcon name="excel" size="xs" />
@@ -68,9 +68,9 @@
                   <span v-if="row.size_bytes" class="aei-size">{{ formatSize(row.size_bytes) }}</span>
                 </div>
               </td>
-              <td class="c-type">{{ typeLabel(row.type) }}</td>
-              <td class="c-le">{{ row.legal_entity || '—' }}</td>
-              <td class="c-status">
+              <td class="c-type" data-label="Тип">{{ typeLabel(row.type) }}</td>
+              <td class="c-le" data-label="Юр. лицо">{{ row.legal_entity || '—' }}</td>
+              <td class="c-status" data-label="Статус">
                 <span class="aei-badge" :class="'st-' + row.status">{{ statusLabel(row.status) }}</span>
                 <div v-if="row.notes && (row.status === 'rejected' || row.status === 'error')" class="aei-notes">{{ row.notes }}</div>
                 <div v-if="row.status === 'applied'" class="aei-notes">
@@ -78,7 +78,8 @@
                   <span v-if="row.applied_count">· {{ formatInt(row.applied_count) }}</span>
                 </div>
               </td>
-              <td class="c-actions">
+              <td class="c-actions" data-label="Действия">
+                <div class="aei-actions">
                 <template v-if="row.status === 'pending' && row.file_path">
                   <button class="aei-btn aei-btn-primary" @click="openInImport(row)">Открыть в импорте</button>
                   <button class="aei-btn aei-btn-sm" @click="downloadFile(row)">Скачать</button>
@@ -88,6 +89,7 @@
                   <button class="aei-btn aei-btn-sm" @click="downloadFile(row)">Скачать</button>
                 </template>
                 <template v-else>—</template>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -136,16 +138,16 @@
           </thead>
           <tbody>
             <tr v-for="s in senders" :key="s.id">
-              <td>{{ s.email }}</td>
-              <td>{{ typeLabel(s.type) }}</td>
-              <td>{{ s.legal_entity || '—' }}</td>
-              <td>
+              <td data-label="Email">{{ s.email }}</td>
+              <td data-label="Тип">{{ typeLabel(s.type) }}</td>
+              <td data-label="Юр. лицо">{{ s.legal_entity || '—' }}</td>
+              <td data-label="Активен">
                 <label class="aei-switch">
                   <input type="checkbox" :checked="!!s.is_active" @change="toggleSender(s, $event.target.checked)" />
                   <span>{{ s.is_active ? 'да' : 'нет' }}</span>
                 </label>
               </td>
-              <td>{{ s.note || '—' }}</td>
+              <td data-label="Заметка">{{ s.note || '—' }}</td>
               <td class="c-actions">
                 <button class="aei-btn aei-btn-sm aei-btn-warn" @click="deleteSender(s)">Удалить</button>
               </td>
@@ -384,8 +386,15 @@ onMounted(() => {
 .aei-table th, .aei-table td { padding: 5px 8px; border-bottom: 1px solid #f0f1f3; vertical-align: middle; text-align: left; }
 .aei-table thead th { background: #f7f8fa; color: #4b5563; font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.4px; }
 .aei-table tr:hover td { background: #fafbfc; }
-.aei-table .c-actions { white-space: nowrap; display: flex; gap: 4px; flex-wrap: nowrap; }
+.aei-table .c-actions { white-space: nowrap; }
+.aei-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .aei-table .c-date { white-space: nowrap; color: #6b7280; }
+/* Колонке нужен минимум места: иначе имя переносится по словам,
+   а адрес рвётся посреди домена. */
+.aei-table .c-from { min-width: 190px; }
+.aei-from-name { display: block; white-space: nowrap; }
+.aei-from-email { display: block; word-break: break-word; overflow-wrap: anywhere; }
+.aei-table .c-subj { min-width: 240px; }
 .aei-table .c-status { white-space: nowrap; }
 .aei-table .c-type, .aei-table .c-le { white-space: nowrap; color: #4b5563; }
 
@@ -408,4 +417,39 @@ onMounted(() => {
 .aei-badge.st-error    { background: #fbe1e1; color: #9c2828; }
 
 .aei-switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* ═══ Телефон: семь колонок в строку не помещаются ни при какой ширине ═══ */
+@media (max-width: 760px) {
+  .aei-table-wrap { overflow: visible; }
+  .aei-table, .aei-table tbody, .aei-table tr, .aei-table td { display: block; width: 100%; }
+  .aei-table thead { display: none; }
+
+  .aei-table tbody tr {
+    border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; background: #fff;
+  }
+  .aei-table tr:hover td { background: transparent; }
+  .aei-table td { border: none; padding: 3px 0; white-space: normal; }
+  /* Подпись слева, значение справа одной колонкой: иначе несколько блоков
+     внутри ячейки (тема + файл) вставали в строку и текст рвался по слогам. */
+  .aei-table td[data-label] {
+    display: grid; grid-template-columns: 88px minmax(0, 1fr);
+    gap: 4px 8px; align-items: baseline;
+  }
+  .aei-table td[data-label]::before {
+    content: attr(data-label); grid-column: 1;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .3px;
+    color: #9ca3af; font-weight: 600;
+  }
+  .aei-table td[data-label] > * { grid-column: 2; min-width: 0; }
+  .aei-actions { justify-content: flex-start; }
+  .aei-actions .aei-btn { flex: 1; min-width: 100px; }
+
+  /* Шапка секции: заголовок и фильтр в столбик, кнопка не вылезает за край */
+  .aei-section-title { flex-direction: column; align-items: stretch; gap: 8px; }
+  .aei-section-right { display: flex; gap: 6px; }
+  .aei-section-right .aei-select { flex: 1; min-width: 0; }
+  .aei-row-sender { flex-direction: column; }
+  .aei-row-sender .aei-input, .aei-row-sender .aei-select { width: 100%; }
+}
 </style>
