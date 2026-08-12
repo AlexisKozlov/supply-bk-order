@@ -43,7 +43,7 @@
             <div class="adm-audit-head">
               <span class="adm-audit-badge" :class="auditBadgeClass(log.action)">{{ auditBadgeLabel(log.action) }}</span>
               <span class="adm-audit-entity-badge" :class="'adm-audit-et-' + log.entity_type">{{ auditEntityLabel(log.entity_type) }}</span>
-              <span class="adm-audit-author">{{ log.user_name || '—' }}</span>
+              <span class="adm-audit-author">{{ authorLabel(log.user_name) }}</span>
               <span class="adm-audit-date-text">{{ formatAuditDate(log.created_at) }}</span>
             </div>
 
@@ -294,6 +294,14 @@ function auditBadgeClass(action) {
 
 const formatAuditDate = formatMoscowDateTime;
 
+// В журнале автор записан как «Ресторан 1038» — в БД у Пицца Стар номера с
+// 1001. Людям показываем привычное PS38, историю в базе не трогаем.
+function authorLabel(name) {
+  const s = String(name || '').trim();
+  if (!s) return '—';
+  return s.replace(/(Ресторан\s+)(\d{3,4})/gi, (_, prefix, num) => prefix + formatRestaurantNumber(num));
+}
+
 async function loadAudit(reset = true) {
   if (reset) {
     auditEntries.value = [];
@@ -356,6 +364,11 @@ const errorLevelOptions = [
   { value: 'warning', label: 'Предупреждения' },
   { value: 'info', label: 'Информация' },
 ];
+
+// Логи ошибок грузим только когда на них переключились.
+function loadErrorsIfNeeded() {
+  if (!errorEntries.value.length) loadErrors(true);
+}
 
 function errorBadgeClass(level) {
   if (level === 'error') return 'adm-audit-b-deleted';

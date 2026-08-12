@@ -275,7 +275,6 @@
     <AdminAuditTab v-if="activeTab === 'audit'" @total="auditTotal = $event" />
 
     <!-- ═══ Статистика ═══ -->
-    <!-- ═══ Статистика ═══ -->
     <AdminStatsTab v-if="activeTab === 'stats'" />
 
     <!-- ═══ Бэкап ═══ -->
@@ -779,6 +778,11 @@ const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: 
 
 // Счётчик записей журнала — его присылает сама вкладка.
 const auditTotal = ref(0);
+
+// Список обновлений грузим только когда на него переключились.
+function loadChangelogIfNeeded() {
+  if (!changelogEntries.value.length) loadChangelog();
+}
 
 // Точка «идут техработы» у вкладки: состояние присылает сама вкладка,
 // а до её открытия — loadSettings ниже.
