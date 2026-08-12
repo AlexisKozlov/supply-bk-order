@@ -20,7 +20,7 @@
           <div class="hist-card-left"></div>
           <div class="hist-card-body">
             <div class="hist-card-top">
-              <span class="hist-card-date">{{ fmtDate(order.delivery_date) }}</span>
+              <span class="hist-card-date">{{ fmtDate(order.restaurant_delivery_date || order.delivery_date) }}</span>
               <span class="hist-badge" :class="'src-' + order.source">{{ order.source_name }}</span>
               <span class="hist-badge status-badge" :class="'st-' + order.status">{{ statusLabel(order.status) }}</span>
             </div>

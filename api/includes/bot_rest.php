@@ -1310,7 +1310,12 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $text = "📦 <b>" . soEsc($supName) . "</b>\n";
     $text .= "🏢 " . soEsc($le) . "\n";
     $text .= "Ресторан: <b>" . formatRestaurantNumber($restNum) . "</b>\n";
-    $text .= "Доставка: <b>{$dateLabel}</b>\n\n";
+    $text .= "Доставка: <b>{$dateLabel}</b>\n";
+    // Поставка через склад: ресторану называем его дату получения.
+    require_once __DIR__ . '/warehouse_handoff.php';
+    $whReceipt = whReceiptForRestaurantNumber($pdo, (string)$supplierId, (int)$restNum, null, $deliveryDate);
+    if ($whReceipt) $text .= "Получите со склада: <b>" . date('d.m.Y', strtotime($whReceipt)) . "</b>\n";
+    $text .= "\n";
 
     // Показываем текущую заявку, если есть
     if ($hasExisting) {
@@ -1397,6 +1402,10 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $le = $rest['legal_entity'];
 
     // Сохраняем заявку-отказ (без позиций)
+    // Поставка через склад: фиксируем, когда ресторан реально получит товар.
+    require_once __DIR__ . '/warehouse_handoff.php';
+    $whReceipt = whReceiptForRestaurantNumber($pdo, (string)$supplierId, (int)$restNum, null, $deliveryDate);
+
     try {
         $pdo->beginTransaction();
         $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
@@ -1409,8 +1418,8 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
                 ->execute([$oldOrder['id']]);
             $isUpdate = true;
         } else {
-            $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-                ->execute([$supplierId, $restNum, $deliveryDate, $le]);
+            $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, restaurant_delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                ->execute([$supplierId, $restNum, $deliveryDate, $whReceipt, $le]);
         }
         $pdo->commit();
     } catch (Exception $e) {
@@ -1425,7 +1434,9 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         $title = $isUpdate ? '🚫 <b>Поставка отменена</b>' : '🚫 <b>Поставка не нужна</b>';
         $msg = $title . "\n\n";
         $msg .= "🏪 <b>Поставщик:</b> " . soEsc($supName) . "\n";
-        $msg .= "📅 <b>Доставка:</b> " . $deliveryFmt . "\n\n";
+        $msg .= "📅 <b>Доставка:</b> " . $deliveryFmt . "\n";
+        if (!empty($whReceipt)) $msg .= "🏪 <b>Получите:</b> " . date('d.m.Y', strtotime($whReceipt)) . "\n";
+        $msg .= "\n";
         $msg .= "<i>Ресторан отметил, что поставка на эту дату не требуется.</i>";
 
         restNotifySubscribers($pdo, $GLOBALS['BOT_TOKEN'] ?? '', $restNum, $msg);
@@ -1542,6 +1553,10 @@ function soOrderProcessInput($chatId, $text) {
     $minErr = soBotMinOrderError($pdo, $settings, $items, $rest);
     if ($minErr !== null) { sendMessage($chatId, "❌ {$minErr}"); return; }
 
+    // Поставка через склад: фиксируем, когда ресторан реально получит товар.
+    require_once __DIR__ . '/warehouse_handoff.php';
+    $whReceipt = whReceiptForRestaurantNumber($pdo, (string)$supplierId, (int)$restNum, null, $deliveryDate);
+
     // Сохраняем заказ
     try {
         $pdo->beginTransaction();
@@ -1555,8 +1570,8 @@ function soOrderProcessInput($chatId, $text) {
             $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
                 ->execute([$orderId]);
         } else {
-            $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-                ->execute([$supplierId, $restNum, $deliveryDate, $le]);
+            $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, restaurant_delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                ->execute([$supplierId, $restNum, $deliveryDate, $whReceipt, $le]);
             $orderId = $pdo->lastInsertId();
         }
         $ins = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
@@ -1572,6 +1587,7 @@ function soOrderProcessInput($chatId, $text) {
     $confirmText = "✅ <b>Заявка " . soEsc($supName) . " отправлена!</b>\n\n";
     $confirmText .= "Ресторан: <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $confirmText .= "Доставка: <b>{$deliveryDate}</b>\n";
+    if (!empty($whReceipt)) $confirmText .= "Получите со склада: <b>" . date('d.m.Y', strtotime($whReceipt)) . "</b>\n";
     $confirmText .= "Позиций: <b>{$matched}</b>, всего: <b>{$totalQty}</b>\n\n";
     foreach ($items as $it) { $confirmText .= "• " . soEsc($it['product_name']) . ": <b>{$it['quantity']}</b>\n"; }
 

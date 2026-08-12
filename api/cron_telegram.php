@@ -1577,11 +1577,16 @@ try {
             // «Доставка в вторник (2026-08-11)» читается плохо: и предлог не тот,
             // и дата машинная. Пишем «вторник, 11.08».
             $deliveryHuman = date('d.m', strtotime($deliveryDate));
+            // Поставка через склад: ресторану важна дата, когда он получит товар,
+            // а не когда машина поставщика приедет на склад. Дописываем её строкой.
+            require_once __DIR__ . '/includes/warehouse_handoff.php';
+            $whReceipt = whReceiptForRestaurantNumber($pdo, (string)$supId, (int)$restNum, $info['group'] ?? null, $deliveryDate);
+            $whLine = $whReceipt ? ("🏪 Получите: " . date('d.m', strtotime($whReceipt)) . " (со склада)\n") : '';
             if ($reminderType === 'expired') {
                 $msgText = "⚠️ <b>Дедлайн заявки истёк!</b>\n\n";
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n\n";
+                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n" . $whLine . "\n";
                 $msgText .= "Приём заявок на эту дату закрыт.\n\n";
                 // У поставщика может быть включён повтор: система сама подаст
                 // прошлую заявку ресторана. Тогда поставка будет — но та же,
@@ -1633,7 +1638,7 @@ try {
                 $msgText = "🌙 <b>Напоминание: заявка поставщику</b>\n\n";
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n";
+                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n" . $whLine;
                 $msgText .= "⏳ Дедлайн завтра: <b>{$deadlineFmt}</b>\n\n";
                 $msgText .= "Не забудьте подать заявку!";
             } else {
@@ -1642,7 +1647,7 @@ try {
                 $msgText = "⏰ <b>Напоминание: заявка поставщику</b>\n\n";
                 $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
-                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n";
+                $msgText .= "📅 Доставка: {$dayName}, {$deliveryHuman}\n" . $whLine;
                 $msgText .= "⏳ До дедлайна: <b>{$timeLabel}</b> (до {$deadlineFmt})\n\n";
                 $msgText .= "Заявка ещё не подана!";
             }
@@ -1863,10 +1868,13 @@ try {
                     $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$existingId]);
                     $newOrderId = $existingId;
                 } else {
+                    // Поставка через склад: сразу фиксируем дату получения рестораном.
+                    require_once __DIR__ . '/includes/warehouse_handoff.php';
+                    $whReceipt = whReceiptForRestaurantNumber($pdo, (string)$supId, (int)$rn, null, $dd);
                     $pdo->prepare("
-                        INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
-                        VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)
-                    ")->execute([$rn, $supId, $dd, $now->format('Y-m-d'), $le]);
+                        INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, restaurant_delivery_date, order_date, status, submitted_at, legal_entity)
+                        VALUES (?, ?, ?, ?, ?, 'submitted', NOW(), ?)
+                    ")->execute([$rn, $supId, $dd, $whReceipt, $now->format('Y-m-d'), $le]);
                     $newOrderId = (int)$pdo->lastInsertId();
                 }
 

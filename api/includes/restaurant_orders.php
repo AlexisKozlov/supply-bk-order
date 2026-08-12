@@ -4230,7 +4230,7 @@ if ($roAction === 'all-history' && $method === 'GET') {
 
     // 2. Заявки поставщикам (so_orders)
     $sql2 = "
-        SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.supplier_id,
+        SELECT o.id, o.delivery_date, o.restaurant_delivery_date, o.status, o.submitted_at, o.supplier_id,
                s.short_name as supplier_name,
                (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id) as item_count,
                (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
@@ -4310,7 +4310,7 @@ if ($roAction === 'history-order' && $method === 'GET') {
 
     if ($source === 'supplier') {
         $s = $pdo->prepare("
-            SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.updated_at, o.supplier_id,
+            SELECT o.id, o.delivery_date, o.restaurant_delivery_date, o.status, o.submitted_at, o.updated_at, o.supplier_id,
                    s.short_name AS supplier_name
             FROM so_orders o
             LEFT JOIN suppliers s ON s.id = o.supplier_id

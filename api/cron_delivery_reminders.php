@@ -53,6 +53,7 @@ require_once __DIR__ . '/includes/tg_client.php';
 
 // Напоминания включены по умолчанию: создаём недостающие подписки и
 // досинхронизируем Telegram-получателей у тех, что никто не настраивал руками.
+require_once __DIR__ . '/includes/warehouse_handoff.php';
 require_once __DIR__ . '/includes/reminder_defaults.php';
 rrEnsureReminderDefaults($pdo);
 
@@ -122,13 +123,20 @@ const DAY_NAMES_SHORT_RU = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 
  * delivery_dow может быть как до, так и после order_dow (на той же или следующей неделе).
  */
 function rrFormatDeliveryDate($orderDateStr, $orderDow, $deliveryDow, $tz) {
-    if ($deliveryDow < 1 || $deliveryDow > 7) return '';
+    $iso = rrDeliveryDateIso($orderDateStr, $orderDow, $deliveryDow, $tz);
+    if (!$iso) return '';
+    return (DAY_NAMES_SHORT_RU[$deliveryDow] ?? '') . ' ' . date('d.m', strtotime($iso));
+}
+
+/** Та же дата, но машинная (Y-m-d) — нужна для расчёта поставки через склад. */
+function rrDeliveryDateIso($orderDateStr, $orderDow, $deliveryDow, $tz) {
+    if ($deliveryDow < 1 || $deliveryDow > 7) return null;
     $diff = ($deliveryDow - $orderDow + 7) % 7;
     if ($diff === 0) $diff = 7; // доставка на следующей неделе, если совпадает с днём подачи
     $dt = DateTime::createFromFormat('Y-m-d', $orderDateStr, $tz);
-    if (!$dt) return '';
+    if (!$dt) return null;
     $dt->modify("+{$diff} days");
-    return (DAY_NAMES_SHORT_RU[$deliveryDow] ?? '') . ' ' . $dt->format('d.m');
+    return $dt->format('Y-m-d');
 }
 
 /**
@@ -424,13 +432,22 @@ foreach ($rowsToProcess as $row) {
         // TELEGRAM
         if ((int)$row['telegram_enabled'] === 1 && $BOT_TOKEN) {
             $deliveryLabel = rrFormatDeliveryDate($slot['order_date'], $orderDay, $deliveryDay, $tz);
+            // Поставка через склад: дописываем, когда ресторан получит товар.
+            $whLine = '';
+            $whIso = rrDeliveryDateIso($slot['order_date'], $orderDay, $deliveryDay, $tz);
+            if ($whIso) {
+                $whReceipt = whReceiptForPair($pdo, (string)$supplierId, $restPk, $whIso);
+                if ($whReceipt) {
+                    $whLine = 'Получите со склада: <b>' . date('d.m', strtotime($whReceipt)) . "</b>.\n";
+                }
+            }
             if ($slot['is_final']) {
                 if (!empty($slot['is_expired'])) {
                     $text = "🚨 <b>Дедлайн истёк</b>\n"
                           . "Сегодня заявка поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>"
                           . " так и не была отмечена как поданная.\n"
                           . "Крайний срок: <b>{$deadlineShort}</b>.\n"
-                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
+                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '') . $whLine
                           . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".\n\n"
                           . "Если заявка всё же была подана — нажмите «Сделал заказ», чтобы зафиксировать.";
                 } else {
@@ -438,13 +455,13 @@ foreach ($rowsToProcess as $row) {
                     $text = "🔔 <b>Последнее напоминание</b>\n"
                           . "До дедлайна осталось <b>{$minLeft} мин</b> — подайте заявку поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>.\n"
                           . "Крайний срок: <b>{$deadlineShort}</b>.\n"
-                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
+                          . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '') . $whLine
                           . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
                 }
             } else {
                 $text = "⏰ <b>Напоминание</b>\n"
                       . ucfirst($whenLabel) . " до <b>{$deadlineShort}</b> подайте заявку поставщику <b>" . htmlspecialchars($row['supplier_name'], ENT_QUOTES, 'UTF-8') . "</b>.\n"
-                      . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '')
+                      . ($deliveryLabel ? "Доставка: <b>{$deliveryLabel}</b>.\n" : '') . $whLine
                       . "Ресторан №" . htmlspecialchars((string)$row['restaurant_number'], ENT_QUOTES, 'UTF-8') . ".";
             }
             // Кнопка перехода к заявке. Раньше её не было: ресторан читал

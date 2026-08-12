@@ -1668,6 +1668,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     // Но его состояние отдаём отдельным ключом: кабинету нужно показать значок
     // «пауза» у этого пункта так же, как у обычных поставщиков.
     require_once __DIR__ . '/so_loading_sheets.php';
+    require_once __DIR__ . '/warehouse_handoff.php';
     $workshop = null;
     foreach (array_keys($suppliersMap) as $sid) {
         if (!soLsSupplierEnabled($pdo, (string)$sid)) continue;
@@ -1739,7 +1740,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     // 5. Существующие заявки ресторана по всем поставщикам — один запрос
     $ordParams = array_merge($supplierIds, [$rest['restaurant_number'], $rangeStart]);
     $ordRows = $pdo->prepare("
-        SELECT o.supplier_id, o.delivery_date, o.id, o.status, o.submitted_at, o.is_adhoc, o.adhoc_deadline,
+        SELECT o.supplier_id, o.delivery_date, o.restaurant_delivery_date, o.id, o.status, o.submitted_at, o.is_adhoc, o.adhoc_deadline,
                (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
         FROM so_orders o
         WHERE o.supplier_id IN ({$ph}) AND o.restaurant_number = ? AND o.delivery_date >= ?
@@ -1898,8 +1899,25 @@ if ($soAction === 'suppliers' && $method === 'GET') {
         }
         usort($availableDates, fn($a, $b) => strcmp($a['delivery_date'], $b['delivery_date']));
 
+        // Поставка через склад: в заявке дата — это приход НА СКЛАД, а ресторан
+        // получит товар позже, с ближайшей основной поставкой. Считаем и отдаём
+        // обе даты, чтобы кабинет показывал ресторану его собственную.
+        $viaWarehouse = whIsViaWarehouse($pdo, (string)$sid, (int)$rest['restaurant_id']);
+        if ($viaWarehouse) {
+            foreach ($availableDates as &$adRow) {
+                // У уже поданной заявки дата получения зафиксирована при подаче —
+                // график мог измениться, а обещание ресторану менять нельзя.
+                $stored = $ordersMap[$sid][$adRow['delivery_date']]['restaurant_delivery_date'] ?? null;
+                $rd = $stored ?: whReceiptDate($pdo, (int)$rest['restaurant_id'], $adRow['delivery_date']);
+                $adRow['receipt_date'] = $rd;
+                $adRow['receipt_day_name'] = $rd ? ($dayNamesFull[(int)(new DateTime($rd))->format('N')] ?? '') : '';
+            }
+            unset($adRow);
+        }
+
         $result[] = [
             'id'                 => $sid,
+            'via_warehouse'      => $viaWarehouse,
             'name'               => $sup['name'],
             'full_name'          => $sup['full_name'],
             'schedule'           => $scheduleFormatted,
@@ -2051,7 +2069,7 @@ if ($soAction === 'my-orders' && $method === 'GET') {
     }
 
     $s = $pdo->prepare("
-        SELECT o.id, o.delivery_date, o.order_date, o.status, o.submitted_at, o.supplier_id,
+        SELECT o.id, o.delivery_date, o.restaurant_delivery_date, o.order_date, o.status, o.submitted_at, o.supplier_id,
                s.short_name as supplier_name,
                (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
                (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
@@ -2258,6 +2276,12 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         soRespond(['error' => 'Приём закрыт, заявка заблокирована'], 403);
     }
 
+    // Поставка через склад: фиксируем в заявке, когда ресторан получит товар.
+    // Считаем в момент подачи и больше не пересчитываем — если график основной
+    // поставки потом поменяют, обещанная ресторану дата не «уедет».
+    require_once __DIR__ . '/warehouse_handoff.php';
+    $receiptDate = whReceiptForPair($pdo, (string)$supplierId, (int)$rest['restaurant_id'], $deliveryDate);
+
     $pdo->beginTransaction();
     try {
         // Сохраняем правки отдела закупок по SKU, чтобы повторная подача рестораном их не затёрла.
@@ -2274,11 +2298,11 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             // Если заявка ранее была отредактирована закупщиком (status='edited'),
             // оставляем этот статус: факт правки не должен теряться при повторной подаче рестораном.
             $newStatus = ($prevStatus === 'edited') ? 'edited' : 'submitted';
-            $pdo->prepare("UPDATE so_orders SET status = ?, submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
-                ->execute([$newStatus, $orderId]);
+            $pdo->prepare("UPDATE so_orders SET status = ?, restaurant_delivery_date = ?, submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
+                ->execute([$newStatus, $receiptDate, $orderId]);
         } else {
-            $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
-                ->execute([$rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
+            $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, restaurant_delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, ?, 'submitted', NOW(), ?)")
+                ->execute([$rest['restaurant_number'], $supplierId, $deliveryDate, $receiptDate, $orderDate ?: date('Y-m-d'), $le]);
             $orderId = $pdo->lastInsertId();
         }
 
@@ -2391,7 +2415,15 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     );
     $lines[] = "🏪 <b>Ресторан:</b> " . $esc($restaurantLabel);
     $lines[] = "🏪 <b>Поставщик:</b> " . $esc($supplierName);
-    $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
+    // Поставка через склад: ресторану называем ЕГО дату получения, складскую —
+    // отдельной строкой, чтобы не путал с днём, когда придёт машина поставщика.
+    if (!empty($receiptDate)) {
+        $receiptFmt = date('d.m.Y', strtotime($receiptDate));
+        $lines[] = "📅 <b>Получите:</b> {$receiptFmt}";
+        $lines[] = "🏭 <b>На склад:</b> {$deliveryDateFmt}";
+    } else {
+        $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
+    }
     if (!$isSkip) {
         $lines[] = "📋 <b>Позиций:</b> {$totalItems}";
         $lines[] = '';
@@ -3859,9 +3891,11 @@ if ($soAction === 'admin') {
                         soRespond(['error' => 'Не определено юрлицо ресторана'], 400);
                     }
                     soRequireAdminEntityGroupAccess($sessionUser, $le);
-                    $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
-                        VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-                        ->execute([$restNum, $suppId, $deliveryDate, $le]);
+                    require_once __DIR__ . '/warehouse_handoff.php';
+                    $whReceipt = whReceiptForRestaurantNumber($pdo, (string)$suppId, (int)$restNum, null, $deliveryDate);
+                    $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, restaurant_delivery_date, order_date, status, submitted_at, legal_entity)
+                        VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                        ->execute([$restNum, $suppId, $deliveryDate, $whReceipt, $le]);
                     $orderId = $pdo->lastInsertId();
                 } else {
                     $le = $order['legal_entity'] ?: roGetLegalEntity($pdo, $restNum);
@@ -4042,9 +4076,11 @@ if ($soAction === 'admin') {
                 $pdo->prepare("UPDATE so_orders SET status = ?, is_adhoc = 1, adhoc_deadline = ?, submitted_at = COALESCE(submitted_at, NOW()), updated_at = NOW() WHERE id = ?")
                     ->execute([$status, $adhocDeadline, $orderId]);
             } else {
-                $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, is_adhoc, adhoc_deadline, submitted_at, legal_entity, legal_entity_group)
-                    VALUES (?, ?, ?, CURDATE(), ?, 1, ?, NOW(), ?, ?)")
-                    ->execute([$restNum, $suppId, $deliveryDate, $status, $adhocDeadline, $le, $group]);
+                require_once __DIR__ . '/warehouse_handoff.php';
+                $whReceipt = whReceiptForRestaurantNumber($pdo, (string)$suppId, (int)$restNum, $group, $deliveryDate);
+                $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, restaurant_delivery_date, order_date, status, is_adhoc, adhoc_deadline, submitted_at, legal_entity, legal_entity_group)
+                    VALUES (?, ?, ?, ?, CURDATE(), ?, 1, ?, NOW(), ?, ?)")
+                    ->execute([$restNum, $suppId, $deliveryDate, $whReceipt, $status, $adhocDeadline, $le, $group]);
                 $orderId = (int)$pdo->lastInsertId();
             }
             $findItem = $pdo->prepare("SELECT id FROM so_order_items WHERE order_id = ? AND sku = ?");

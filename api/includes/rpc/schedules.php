@@ -30,7 +30,7 @@
 
         $rows = $pdo->prepare("
             SELECT ss.id AS schedule_id, ss.supplier_id, ss.restaurant_id,
-                   ss.order_day, ss.delivery_day, ss.is_active,
+                   ss.order_day, ss.delivery_day, ss.is_active, ss.via_warehouse,
                    s.short_name AS supplier_name, s.so_enabled,
                    s.legal_entity_group AS supplier_group,
                    r.number AS restaurant_number, r.city AS restaurant_city, r.address AS restaurant_address,
@@ -333,15 +333,22 @@
 
         $updatedBy = resolveActorName($pdo, $caller);
 
+        // Признак «через склад» живёт на паре поставщик+ресторан. Новый день
+        // графика должен унаследовать его от соседних строк, иначе добавление
+        // ещё одного дня молча вернуло бы ресторану складскую дату.
+        $whStmt = $pdo->prepare("SELECT MAX(via_warehouse) FROM supplier_schedules WHERE supplier_id = ? AND restaurant_id = ?");
+        $whStmt->execute([$supplierId, $restaurantId]);
+        $pairViaWarehouse = (int)$whStmt->fetchColumn();
+
         $pdo->prepare("
-            INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
-            VALUES (?, ?, ?, ?, ?, NOW(), ?)
+            INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, via_warehouse, updated_at, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)
             ON DUPLICATE KEY UPDATE
                 delivery_day = VALUES(delivery_day),
                 is_active = VALUES(is_active),
                 updated_at = NOW(),
                 updated_by = VALUES(updated_by)
-        ")->execute([$supplierId, $restaurantId, $orderDay, $deliveryDay, $isActive, $updatedBy]);
+        ")->execute([$supplierId, $restaurantId, $orderDay, $deliveryDay, $isActive, $pairViaWarehouse, $updatedBy]);
 
         if ($deadlineTime !== null || $reminderTimesJson !== null) {
             $pdo->prepare("
@@ -359,6 +366,35 @@
         }
 
         respond(['success' => true]);
+    }
+
+    // Поставка через склад: поставщик привозит на склад, ресторан получает
+    // позже, с основной поставкой. Признак на ПАРЕ (поставщик+ресторан), а не
+    // на конкретном дне — ставим сразу на все строки графика этой пары.
+    if ($fn === 'set_supplier_schedule_warehouse') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'supplier-schedule', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $supplierId = trim((string)($body['supplier_id'] ?? ''));
+        $restaurantId = (int)($body['restaurant_id'] ?? 0);
+        $viaWarehouse = !empty($body['via_warehouse']) ? 1 : 0;
+        if (!$supplierId || !$restaurantId) respond(['error' => 'Некорректные данные'], 400);
+
+        $restStmt = $pdo->prepare("SELECT legal_entity FROM restaurants WHERE id = ?");
+        $restStmt->execute([$restaurantId]);
+        $rest = $restStmt->fetch();
+        if (!$rest) respond(['error' => 'Ресторан не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $rest['legal_entity'])) {
+            respond(['error' => 'Нет доступа к юр.лицу ресторана'], 403);
+        }
+
+        $updatedBy = resolveActorName($pdo, $caller);
+        $st = $pdo->prepare("UPDATE supplier_schedules SET via_warehouse = ?, updated_at = NOW(), updated_by = ?
+                              WHERE supplier_id = ? AND restaurant_id = ?");
+        $st->execute([$viaWarehouse, $updatedBy, $supplierId, $restaurantId]);
+
+        respond(['success' => true, 'via_warehouse' => $viaWarehouse, 'rows' => $st->rowCount()]);
     }
 
     if ($fn === 'save_supplier_default_deadline') {

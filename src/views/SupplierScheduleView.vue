@@ -60,6 +60,10 @@
               <div class="ssv-th-name">{{ weekdayShort(wd) }}</div>
               <div class="ssv-th-sub">поставка</div>
             </th>
+            <th class="ssv-th-wh" title="Поставщик привозит на склад, ресторан получает с ближайшей основной поставкой">
+              <div class="ssv-th-name">Через склад</div>
+              <div class="ssv-th-sub">дата ресторану</div>
+            </th>
             <th class="ssv-th-trash"></th>
           </tr>
         </thead>
@@ -130,6 +134,13 @@
                   </button>
                 </div>
               </div>
+            </td>
+            <td class="ssv-td-wh">
+              <label v-if="hasAnyDay(rest)" class="ssv-wh-check" :title="rest.via_warehouse ? 'Ресторан получит товар с ближайшей основной поставкой после прихода на склад' : 'Поставщик везёт прямо в ресторан'">
+                <input type="checkbox" :checked="rest.via_warehouse" :disabled="!canEdit || whSaving[rest.restaurant_id]"
+                       @change="onToggleWarehouse(rest, $event.target.checked)" />
+                <span v-if="rest.via_warehouse" class="ssv-wh-on">через склад</span>
+              </label>
             </td>
             <td class="ssv-td-trash">
               <button v-if="canDelete && hasAnyDay(rest)" class="ssv-icon-btn ssv-icon-danger"
@@ -213,7 +224,7 @@
 </template>
 
 <script setup>
-import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { useDirtySnapshot } from '@/composables/useFormDirty.js';
 import { db } from '@/lib/apiClient.js';
@@ -247,6 +258,9 @@ const restaurants = ref([]);
 
 const searchQuery = ref('');
 const selectedSupplierId = ref('');
+
+// Идёт ли сохранение галочки «через склад» по этому ресторану
+const whSaving = reactive({});
 
 const canEdit = computed(() => userStore.hasAccess('supplier-schedule', 'edit'));
 const canDelete = computed(() => userStore.hasAccess('supplier-schedule', 'full'));
@@ -373,6 +387,8 @@ const allRestaurants = computed(() => {
       legal_entity: r.legal_entity,
       legal_entity_group: r.legal_entity_group,
       days: {},
+      // Поставка через склад — признак пары, а не отдельного дня.
+      via_warehouse: false,
     }));
 
   // Прикрепляем строки расписания (по выбранному поставщику)
@@ -380,7 +396,10 @@ const allRestaurants = computed(() => {
   for (const row of rows.value) {
     if (row.supplier_id !== activeSupplier.value.id) continue;
     const rest = byRid.get(row.restaurant_id);
-    if (rest) rest.days[row.delivery_day] = row;
+    if (rest) {
+      rest.days[row.delivery_day] = row;
+      if (Number(row.via_warehouse) === 1) rest.via_warehouse = true;
+    }
   }
 
   list.sort((a, b) => (a.restaurant_number || 0) - (b.restaurant_number || 0));
@@ -706,6 +725,27 @@ async function saveDefaults() {
   await loadData();
 }
 
+// Галочка «через склад»: ставится сразу на все дни этой пары поставщик+ресторан.
+async function onToggleWarehouse(rest, checked) {
+  if (whSaving[rest.restaurant_id]) return;
+  whSaving[rest.restaurant_id] = true;
+  const { error } = await db.rpc('set_supplier_schedule_warehouse', {
+    supplier_id: activeSupplier.value.id,
+    restaurant_id: rest.restaurant_id,
+    via_warehouse: checked ? 1 : 0,
+  });
+  whSaving[rest.restaurant_id] = false;
+  if (error) { toast.error(error); return; }
+  rest.via_warehouse = checked;
+  // Строки расписания в rows тоже помечаем, иначе после перерисовки галочка слетит.
+  for (const row of rows.value) {
+    if (row.supplier_id === activeSupplier.value.id && row.restaurant_id === rest.restaurant_id) {
+      row.via_warehouse = checked ? 1 : 0;
+    }
+  }
+  toast.success(checked ? 'Ресторан снабжается через склад' : 'Прямая поставка в ресторан');
+}
+
 async function loadData() {
   loading.value = true;
   const group = currentGroup.value;
@@ -790,6 +830,12 @@ onMounted(loadData);
 .ssv-th-name { font-size: 14px; font-weight: 700; color: #2b2b2b; line-height: 1.1; display: block; }
 .ssv-th-sub { font-size: 10px; color: #888; font-weight: 500; line-height: 1; margin-top: 2px; display: block; text-transform: uppercase; letter-spacing: 0.04em; }
 .ssv-th-trash { width: 44px; }
+.ssv-th-wh { width: 96px; }
+.ssv-td-wh { text-align: center; }
+.ssv-wh-check { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; }
+.ssv-wh-check input { cursor: pointer; }
+.ssv-wh-check input:disabled { cursor: default; }
+.ssv-wh-on { font-size: 10px; font-weight: 600; color: #b35900; text-transform: uppercase; letter-spacing: 0.03em; }
 .ssv-table td { padding: 8px 6px; border-bottom: 1px solid #ebebeb; vertical-align: middle; font-size: 12px; color: #2b2b2b; text-align: center; }
 .ssv-table td + td { border-left: 1px solid #f3f3f3; }
 .ssv-table tbody tr td { background: #fff; }

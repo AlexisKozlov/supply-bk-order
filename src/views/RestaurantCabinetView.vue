@@ -338,7 +338,7 @@
             <div v-for="order in historyOrders.slice(0, 5)" :key="order.id" class="dash-order" @click="openHistoryOrder(order)">
               <div class="dash-order-left">
                 <span class="dash-order-source" :class="'src-' + order.source">{{ order.source_name }}</span>
-                <span class="dash-order-date">{{ fmtDate(order.delivery_date) }}</span>
+                <span class="dash-order-date">{{ fmtDate(order.restaurant_delivery_date || order.delivery_date) }}</span>
               </div>
               <div class="dash-order-right">
                 <span>{{ order.item_count }} {{ pluralPositions(order.item_count) }}</span>
@@ -664,9 +664,14 @@
               <button v-for="d in sup.available_dates" :key="d.delivery_date" class="day-tab"
                 :class="{ active: supSelectedDates[sup.id] === d.delivery_date, done: !!d.order && !d.order?.is_skip, skipped: !!d.order?.is_skip, closed: d.deadline_status === 'closed' && !d.order }"
                 @click="supSelectDate(sup, d)">
+                <!-- Поставка через склад: на вкладке — день, когда ресторан
+                     реально получит товар. Складскую дату показываем в шапке. -->
                 <span class="day-tab-label">
-                  <span class="day-tab-name">{{ d.delivery_day_name }}</span>
-                  <span class="day-tab-date">{{ fmtDateShort(d.delivery_date) }}</span>
+                  <span class="day-tab-name">{{ d.receipt_date ? d.receipt_day_name : d.delivery_day_name }}</span>
+                  <span class="day-tab-date">{{ fmtDateShort(d.receipt_date || d.delivery_date) }}</span>
+                  <!-- Два прихода на склад могут дать один день получения —
+                       тогда подписываем, из какой поставки эта вкладка. -->
+                  <span v-if="supTabWarehouseHint(sup, d)" class="day-tab-wh">склад {{ fmtDateShort(d.delivery_date) }}</span>
                 </span>
                 <span v-if="d.order?.is_skip" class="day-tab-mark skipped" title="Поставка не нужна" v-html="cabIconSvg.skip"></span>
                 <span v-else-if="d.order" class="day-tab-mark done" v-html="cabIconSvg.check"></span>
@@ -680,7 +685,15 @@
               <div class="sof-hero" :class="'sof-' + supCurrentDateInfo(sup)?.deadline_status">
                 <div class="sof-hero-main">
                   <h2 class="sof-hero-title">{{ sup.name }}</h2>
-                  <div class="sof-hero-sub">Поставка {{ fmtDate(supSelectedDates[sup.id]) }}</div>
+                  <div class="sof-hero-sub">
+                    <template v-if="supReceiptDate(sup)">Получите {{ fmtDate(supReceiptDate(sup)) }}</template>
+                    <template v-else>Поставка {{ fmtDate(supSelectedDates[sup.id]) }}</template>
+                  </div>
+                  <!-- Через склад: у поставщика своя дата — когда он привезёт на
+                       склад. Ресторан получает позже, с основной поставкой. -->
+                  <div v-if="sup.via_warehouse" class="sof-hero-wh">
+                    Поставщик привозит на склад {{ fmtDate(supSelectedDates[sup.id]) }}<template v-if="!supReceiptDate(sup)">, в ресторан — с ближайшей основной поставкой</template>
+                  </div>
                   <div class="sof-hero-cond">
                     <span v-if="supMinOrderValue(sup)">Минимум {{ supFmtNum(supMinOrderValue(sup)) }} {{ supMinOrderUnitLabel(sup) }}</span>
                     <span v-if="supCurrentDateInfo(sup)?.deadline_status !== 'open'" class="sof-closed-mark">Приём закрыт</span>
@@ -845,7 +858,7 @@
         <div class="cab-modal-head">
           <div class="hist-modal-title-block">
             <span class="hist-badge" :class="'src-' + historyOrderModal.order?.source">{{ historyOrderModal.order?.source_name || 'Заказ' }}</span>
-            <span class="hist-modal-date">{{ historyOrderModal.order ? fmtDate(historyOrderModal.order.delivery_date) : '' }}</span>
+            <span class="hist-modal-date">{{ historyOrderModal.order ? fmtDate(historyOrderModal.order.restaurant_delivery_date || historyOrderModal.order.delivery_date) : '' }}</span>
           </div>
           <button class="cab-modal-close" @click="closeHistoryOrderModal">&times;</button>
         </div>
@@ -1539,7 +1552,12 @@
           v-html="supSuccessInfo.skipped ? cabIconSvg.x : cabIconSvg.check"
         ></div>
         <h2>{{ supSuccessInfo.skipped ? 'Поставка отмечена как ненужная' : 'Заявка отправлена' }}</h2>
-        <div class="cab-success-date">{{ supSuccessInfo.supplier_name }} — {{ fmtDate(supSuccessInfo.delivery_date) }}</div>
+        <div class="cab-success-date">
+          {{ supSuccessInfo.supplier_name }} — {{ fmtDate(supSuccessInfo.receipt_date || supSuccessInfo.delivery_date) }}
+        </div>
+        <div v-if="supSuccessInfo.receipt_date" class="cab-success-wh">
+          на склад {{ fmtDate(supSuccessInfo.delivery_date) }}
+        </div>
         <div v-if="!supSuccessInfo.skipped" class="cab-success-stats">
           <div class="cab-success-stat-item">
             <div class="cab-success-stat-num">{{ supSuccessInfo.total_items }}</div>
@@ -2682,6 +2700,15 @@ function supUpdateDeadlineTimers() {
 
 function supplierBadge(sup) { if (!sup.is_accepting_orders) return { text: 'пауза', type: 'pause' }; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
 function supCurrentDateInfo(sup) { if (!supSelectedDates[sup.id]) return null; return sup.available_dates?.find(d => d.delivery_date === supSelectedDates[sup.id]); }
+// Дата, когда ресторан реально получит товар (поставка через склад). Пусто —
+// поставка прямая, дата в заявке и есть дата получения.
+function supReceiptDate(sup) { return supCurrentDateInfo(sup)?.receipt_date || null; }
+// Нужна ли на вкладке подпись со складской датой: да, если у поставщика
+// несколько приходов дают один и тот же день получения.
+function supTabWarehouseHint(sup, d) {
+  if (!d?.receipt_date) return false;
+  return (sup.available_dates || []).filter(x => x.receipt_date === d.receipt_date).length > 1;
+}
 function formatDeadline(dl) { if (!dl) return ''; const [date, time] = dl.split(' '); const d = new Date(date + 'T00:00:00'); const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' }); return (time || '') + ', ' + label; }
 
 // Срок сдачи сбора остатков: '2026-07-21 09:00:00' → '21 июл, 09:00'.
@@ -2871,7 +2898,7 @@ async function supHandleSubmit(sup) {
     const dateInfo = supCurrentDateInfo(sup);
     const result = await soStore.submitOrder(sup.id, supSelectedDates[sup.id], dateInfo?.order_date || '', items);
     if (result.success) {
-      supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: items.length, total_qty: items.reduce((s, i) => s + i.quantity, 0) };
+      supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], receipt_date: supReceiptDate(sup), total_items: items.length, total_qty: items.reduce((s, i) => s + i.quantity, 0) };
       supShowSuccess.value = true;
       try { suppliers.value = await soStore.loadSuppliers(); } catch {}
       try { await loadHistory(); } catch {}
@@ -2900,7 +2927,7 @@ async function supSkipDelivery(sup) {
       { skipDelivery: true }
     );
     if (result.success) {
-      supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: 0, total_qty: 0, skipped: true };
+      supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], receipt_date: supReceiptDate(sup), total_items: 0, total_qty: 0, skipped: true };
       supShowSuccess.value = true;
       try { suppliers.value = await soStore.loadSuppliers(); } catch {}
       try { await loadHistory(); } catch {}
@@ -4618,6 +4645,8 @@ onUnmounted(() => {
 .day-tab-label { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .day-tab-name { display: block; font-size: 14px; font-weight: 800; color: #3A2418; letter-spacing: -.2px; }
 .day-tab-date { display: block; font-size: 11.5px; color: #9A8F80; font-weight: 600; }
+.day-tab-wh { display: block; font-size: 10px; color: #B0A090; font-weight: 600; margin-top: 1px; }
+.day-tab.active .day-tab-wh { color: rgba(255,255,255,.75); }
 .day-tab.active .day-tab-date { color: rgba(255,255,255,.85); }
 .day-tab-mark { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #F5F0EB; }
 .day-tab-mark svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
@@ -4662,6 +4691,9 @@ onUnmounted(() => {
 .sof-hero-main { min-width: 0; }
 .sof-hero-title { margin: 0; font-size: 19px; font-weight: 800; line-height: 1.2; }
 .sof-hero-sub { font-size: 12.5px; opacity: .78; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Поставка через склад: складская дата — вторым планом, чтобы ресторан не путал
+   её со своей датой получения. */
+.sof-hero-wh { font-size: 11.5px; opacity: .62; margin-top: 3px; line-height: 1.35; }
 .sof-hero-cond { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 12px; opacity: .86; }
 .sof-closed-mark { font-weight: 700; opacity: 1; }
 .sof-timer { flex: 0 0 auto; text-align: center; background: rgba(255,255,255,.15); border-radius: 12px; padding: 8px 12px; min-width: 92px; }
@@ -4952,7 +4984,8 @@ tr.del-err { background: #fef2f2; }
 }
 .cab-success-inner h2 { color: #502314; margin: 0 0 6px; font-size: 24px; font-weight: 800; letter-spacing: -0.3px; }
 .cab-success-inner p { font-size: 14px; color: #8b7355; margin: 0 0 4px; }
-.cab-success-date { font-size: 14px; color: #8b7355; margin-bottom: 22px; }
+.cab-success-date { font-size: 14px; color: #8b7355; margin-bottom: 6px; }
+.cab-success-wh { font-size: 12px; color: #B0A090; margin-bottom: 22px; }
 .cab-success-stat { font-size: 14px; font-weight: 600; color: #502314 !important; margin-top: 4px !important; }
 
 .cab-success-stats {
