@@ -265,6 +265,44 @@ function tgClientCall(string $method, array $params, array $opts = []): array
 }
 
 /**
+ * Предел Telegram на длину сообщения. Всё, что длиннее, API отклоняет
+ * целиком — сообщение просто не доходит («text is too long»).
+ */
+const TG_MAX_TEXT = 4096;
+
+/**
+ * Режет длинный текст на части, стараясь рвать по абзацам, затем по строкам,
+ * в последнюю очередь — по словам. HTML-разметку не ломаем грубо: если в
+ * куске остался незакрытый тег, отдаём кусок как есть — Telegram переварит
+ * простые случаи, а сложные всё равно приходят из наших же шаблонов.
+ *
+ * @return string[] Список кусков, каждый не длиннее $limit.
+ */
+function tgSplitText(string $text, int $limit = TG_MAX_TEXT): array
+{
+    if (mb_strlen($text) <= $limit) return [$text];
+
+    $parts = [];
+    $rest = $text;
+    // Оставляем запас под пометку «продолжение».
+    $room = $limit - 20;
+
+    while (mb_strlen($rest) > $limit) {
+        $chunk = mb_substr($rest, 0, $room);
+        $cut = mb_strrpos($chunk, "\n\n");
+        if ($cut === false || $cut < $room * 0.5) $cut = mb_strrpos($chunk, "\n");
+        if ($cut === false || $cut < $room * 0.5) $cut = mb_strrpos($chunk, ' ');
+        if ($cut === false || $cut < 1) $cut = $room;
+
+        $parts[] = rtrim(mb_substr($rest, 0, $cut));
+        $rest = ltrim(mb_substr($rest, $cut));
+    }
+    if ($rest !== '') $parts[] = $rest;
+
+    return $parts;
+}
+
+/**
  * Послать текстовое сообщение.
  *
  * $opts:
@@ -280,18 +318,29 @@ function tgClientSend($chatId, string $text, array $opts = []): array
     if (!$chatId) {
         return ['ok' => false, 'http_code' => 0, 'error_code' => null, 'description' => 'no_chat_id', 'result' => null, 'curl_error' => null];
     }
-    $params = [
-        'chat_id' => $chatId,
-        'text'    => $text,
-    ];
-    $parseMode = $opts['parse_mode'] ?? 'HTML';
-    if ($parseMode !== '') $params['parse_mode'] = $parseMode;
-    if (!empty($opts['reply_markup']))         $params['reply_markup']            = is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true);
-    if (!empty($opts['disable_preview']))      $params['disable_web_page_preview'] = true;
-    if (!empty($opts['disable_notification'])) $params['disable_notification']     = true;
-    if (!empty($opts['reply_to_message_id']))  $params['reply_to_message_id']      = (int)$opts['reply_to_message_id'];
+    // Длинный текст Telegram не принимает вовсе — режем на части и шлём
+    // подряд. Кнопки вешаем на последнюю, чтобы они были внизу переписки.
+    $chunks = tgSplitText($text);
+    $last = count($chunks) - 1;
+    $result = null;
+    foreach ($chunks as $i => $chunk) {
+        $params = [
+            'chat_id' => $chatId,
+            'text'    => $chunk,
+        ];
+        $parseMode = $opts['parse_mode'] ?? 'HTML';
+        if ($parseMode !== '') $params['parse_mode'] = $parseMode;
+        if (!empty($opts['reply_markup']) && $i === $last) $params['reply_markup'] = is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true);
+        if (!empty($opts['disable_preview']))      $params['disable_web_page_preview'] = true;
+        if (!empty($opts['disable_notification'])) $params['disable_notification']     = true;
+        if (!empty($opts['reply_to_message_id']) && $i === 0) $params['reply_to_message_id'] = (int)$opts['reply_to_message_id'];
 
-    return tgClientCall('sendMessage', $params, $opts);
+        $result = tgClientCall('sendMessage', $params, $opts);
+        // Дальше слать нет смысла: чат недоступен или бот заблокирован.
+        if (!$result['ok'] && in_array((int)($result['error_code'] ?? 0), [403, 400], true)) break;
+    }
+
+    return $result;
 }
 
 /**
@@ -302,17 +351,32 @@ function tgClientEdit($chatId, $messageId, string $text, array $opts = []): arra
     if (!$chatId || !$messageId) {
         return ['ok' => false, 'http_code' => 0, 'error_code' => null, 'description' => 'no_chat_id_or_message_id', 'result' => null, 'curl_error' => null];
     }
+    // Редактировать можно только одно сообщение: в него кладём первый кусок,
+    // остальное досылаем следом. Иначе длинный ответ не доходил совсем.
+    $chunks = tgSplitText($text);
+    $tail = array_slice($chunks, 1);
+
     $params = [
         'chat_id'    => $chatId,
         'message_id' => (int)$messageId,
-        'text'       => $text,
+        'text'       => $chunks[0],
     ];
     $parseMode = $opts['parse_mode'] ?? 'HTML';
     if ($parseMode !== '') $params['parse_mode'] = $parseMode;
-    if (!empty($opts['reply_markup']))    $params['reply_markup']             = is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true);
+    // Кнопки должны остаться под последним куском переписки.
+    if (!empty($opts['reply_markup']) && !$tail) $params['reply_markup'] = is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true);
     if (!empty($opts['disable_preview'])) $params['disable_web_page_preview'] = true;
 
-    return tgClientCall('editMessageText', $params, $opts);
+    $result = tgClientCall('editMessageText', $params, $opts);
+
+    foreach ($tail as $i => $chunk) {
+        $sendOpts = $opts;
+        // Кнопки — только на самом последнем сообщении.
+        if ($i !== count($tail) - 1) unset($sendOpts['reply_markup']);
+        tgClientSend($chatId, $chunk, $sendOpts);
+    }
+
+    return $result;
 }
 
 /**
