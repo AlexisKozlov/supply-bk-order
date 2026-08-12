@@ -351,9 +351,11 @@ onMounted(() => {
 .bct-target-check {
   width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  border: 1.5px solid var(--border-light); background: var(--card); color: transparent;
+  border: 1.5px solid var(--border-light); background: var(--card);
 }
-.bct-target.on .bct-target-check { background: var(--bk-orange); border-color: var(--bk-orange); color: #fff; }
+.bct-target-check :deep(svg) { opacity: 0; transition: opacity .15s; }
+.bct-target.on .bct-target-check { background: var(--bk-orange); border-color: var(--bk-orange); }
+.bct-target.on .bct-target-check :deep(svg) { opacity: 1; color: #fff; stroke: #fff; }
 .bct-target-body { display: flex; flex-direction: column; min-width: 0; }
 .bct-target-name { font-size: 13px; color: var(--text); }
 .bct-target-count { font-size: 11px; color: var(--text-muted); }

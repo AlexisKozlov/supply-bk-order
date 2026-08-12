@@ -273,9 +273,10 @@ async function exportBackup() {
   width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   border: 1.5px solid var(--border-light); background: var(--card);
-  color: transparent;
 }
-.bkp-table.on .bkp-check { background: var(--bk-orange); border-color: var(--bk-orange); color: #fff; }
+.bkp-check :deep(svg) { opacity: 0; transition: opacity .15s; }
+.bkp-table.on .bkp-check { background: var(--bk-orange); border-color: var(--bk-orange); }
+.bkp-table.on .bkp-check :deep(svg) { opacity: 1; color: #fff; stroke: #fff; }
 .bkp-table-name {
   flex: 1; min-width: 0; font-size: 13px; color: var(--text);
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

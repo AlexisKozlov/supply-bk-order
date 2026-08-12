@@ -147,129 +147,8 @@
     <AdminMaintenanceTab v-if="activeTab === 'maintenance'" @state="maintenanceOn = $event" />
 
     <!-- ═══ Рассылка ═══ -->
-    <div v-if="activeTab === 'broadcast'" class="adm-section">
-      <!-- Переключатель: Уведомления / Обновления -->
-      <div class="adm-audit-mode">
-        <button class="adm-audit-mode-btn" :class="{ active: broadcastMode === 'broadcast' }" @click="broadcastMode = 'broadcast'">
-          <BkIcon name="bell" size="sm"/> Уведомления
-        </button>
-        <button class="adm-audit-mode-btn" :class="{ active: broadcastMode === 'changelog' }" @click="broadcastMode = 'changelog'; loadChangelogIfNeeded()">
-          <BkIcon name="bulb" size="sm"/> Обновления
-        </button>
-      </div>
-
-      <!-- Уведомления -->
-      <template v-if="broadcastMode === 'broadcast'">
-        <div class="adm-maint-card">
-          <div class="adm-maint-icon">
-            <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
-              <circle cx="24" cy="24" r="22" fill="rgba(253,189,16,0.08)" stroke="#FDBD10" stroke-width="2"/>
-              <path d="M24 12C24 12 12 18 12 28c0 3 0 5 1.5 6.5h21c1.5-1.5 1.5-3.5 1.5-6.5 0-10-12-16-12-16z" stroke="#FDBD10" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-              <rect x="20" y="34.5" width="8" height="3" rx="1.5" fill="#FDBD10" opacity=".5"/>
-              <path d="M21 37.5a3 3 0 006 0" stroke="#FDBD10" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <div class="adm-maint-body">
-            <h3 class="adm-maint-title">Рассылка уведомлений</h3>
-            <p class="adm-maint-desc">
-              Отправьте важное сообщение всем сотрудникам. Оно появится как всплывающее окно, которое нельзя пропустить.
-            </p>
-          </div>
-        </div>
-
-        <div class="adm-maint-msg-card" style="margin-top:16px;">
-          <h4 class="adm-maint-msg-title">Новое сообщение</h4>
-          <p class="adm-maint-msg-hint">Один и тот же текст уйдёт во все выбранные направления.</p>
-          <div style="display:flex;flex-direction:column;gap:10px;">
-            <input v-model="bcTitle" class="adm-maint-textarea" style="resize:none;height:auto;padding:10px 14px;" placeholder="Заголовок (необязательно)" />
-            <textarea v-model="bcMessage" class="adm-maint-textarea" rows="4" placeholder="Текст сообщения..."></textarea>
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-top:12px;">
-            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
-              <input type="checkbox" v-model="bcTargets.staffCabinet" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
-              <span>В кабинет отдела закупок</span>
-            </label>
-            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
-              <input type="checkbox" v-model="bcTargets.restaurantCabinet" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
-              <span>В кабинет ресторанам</span>
-            </label>
-            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
-              <input type="checkbox" v-model="bcTargets.staffTelegram" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
-              <span>В Telegram отдела закупок</span>
-            </label>
-            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
-              <input type="checkbox" v-model="bcTargets.restaurantTelegram" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
-              <span>В Telegram ресторанам</span>
-            </label>
-          </div>
-          <button class="btn primary" style="margin-top:10px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim() || !bcHasAnyTarget">
-            {{ bcSending ? 'Отправка...' : 'Отправить' }}
-          </button>
-        </div>
-
-        <div class="adm-maint-msg-card" style="margin-top:16px;">
-          <h4 class="adm-maint-msg-title">История рассылок</h4>
-          <div v-if="bcHistoryLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
-          <div v-else-if="!bcHistory.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Ещё не было рассылок</div>
-          <div v-else style="display:flex;flex-direction:column;gap:8px;">
-            <div v-for="b in bcHistory" :key="b.broadcast_group || b.id" class="bc-history-item">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                <div style="flex:1;min-width:0;">
-                  <div class="bc-history-title">{{ b.title || 'Важное сообщение' }}</div>
-                  <div class="bc-history-msg">{{ b.message }}</div>
-                  <div class="bc-history-meta">
-                    {{ b.sender || b.created_by }} &middot; {{ formatBcDate(b.created_at) }}
-                    <span v-if="formatBroadcastTargets(b)"> &middot; {{ formatBroadcastTargets(b) }}</span>
-                    <span v-if="broadcastTelegramStats(b)"> &middot; {{ broadcastTelegramStats(b) }}</span>
-                  </div>
-                </div>
-                <button class="bc-delete-btn" @click="deleteBroadcast(b)" :disabled="b._deleting" title="Удалить рассылку">
-                  <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M6 2a1 1 0 00-1 1v1H3a1 1 0 000 2h1v10a2 2 0 002 2h8a2 2 0 002-2V6h1a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 2h4v1H8V4zm-2 4a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"/></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- Обновления (Что нового) -->
-      <template v-if="broadcastMode === 'changelog'">
-        <div class="adm-maint-msg-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            <h4 class="adm-maint-msg-title" style="margin:0;">Что нового</h4>
-            <button class="btn primary" style="font-size:12px;padding:5px 14px;" @click="openChangelogModal(null)">
-              <BkIcon name="add" size="sm"/> Добавить
-            </button>
-          </div>
-          <p class="adm-maint-msg-hint">Записи об обновлениях системы. Все пользователи видят их в разделе «Уведомления».</p>
-
-          <div v-if="changelogLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
-          <div v-else-if="!changelogEntries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей об обновлениях</div>
-          <div v-else style="display:flex;flex-direction:column;gap:6px;">
-            <div v-for="entry in changelogEntries" :key="entry.id" class="bc-history-item">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                <div style="flex:1;min-width:0;">
-                  <div class="bc-history-title">
-                    <span class="adm-changelog-version">v{{ entry.version }}</span>
-                    {{ entry.title }}
-                  </div>
-                  <div v-if="entry.description" class="bc-history-msg">{{ entry.description }}</div>
-                  <div class="bc-history-meta">{{ entry.created_by }} &middot; {{ formatBcDate(entry.created_at) }}</div>
-                </div>
-                <div style="display:flex;gap:2px;flex-shrink:0;">
-                  <button class="bc-delete-btn" @click="openChangelogModal(entry)" title="Редактировать">
-                    <BkIcon name="edit" size="sm"/>
-                  </button>
-                  <button class="bc-delete-btn" @click="deleteChangelog(entry)" title="Удалить">
-                    <BkIcon name="delete" size="sm"/>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-    </div>
+    <!-- ═══ Рассылка ═══ -->
+    <AdminBroadcastTab v-if="activeTab === 'broadcast'" ref="broadcastTab" @open-changelog="openChangelogModal" />
 
     <!-- ═══ Журнал ═══ -->
     <AdminAuditTab v-if="activeTab === 'audit'" @total="auditTotal = $event" />
@@ -616,6 +495,7 @@ import AdminBackupTab from '@/components/admin/AdminBackupTab.vue';
 import AdminCronRemindersTab from '@/components/admin/AdminCronRemindersTab.vue';
 import AdminMaintenanceTab from '@/components/admin/AdminMaintenanceTab.vue';
 import AdminStatsTab from '@/components/admin/AdminStatsTab.vue';
+import AdminBroadcastTab from '@/components/admin/AdminBroadcastTab.vue';
 import AdminAuditTab from '@/components/admin/AdminAuditTab.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 
@@ -779,114 +659,9 @@ const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: 
 // Счётчик записей журнала — его присылает сама вкладка.
 const auditTotal = ref(0);
 
-// Список обновлений грузим только когда на него переключились.
-function loadChangelogIfNeeded() {
-  if (!changelogEntries.value.length) loadChangelog();
-}
-
 // Точка «идут техработы» у вкладки: состояние присылает сама вкладка,
 // а до её открытия — loadSettings ниже.
 const maintenanceOn = ref(false);
-
-// ═══ Broadcast ═══
-const broadcastMode = ref('broadcast');
-const bcTitle = ref('');
-const bcMessage = ref('');
-const bcSending = ref(false);
-const bcHistory = ref([]);
-const bcHistoryLoading = ref(false);
-const bcTargets = ref({
-  staffCabinet: true,
-  restaurantCabinet: false,
-  staffTelegram: false,
-  restaurantTelegram: false,
-});
-const bcHasAnyTarget = computed(() => Object.values(bcTargets.value).some(Boolean));
-
-// Счётчики на вкладках присылают сами вкладки.
-const onlineCount = ref(0);
-const cronErrCount = ref(0);
-// bugPollTimer объявлен здесь, а не рядом с bugPoll/startBugPoll,
-// потому что immediate watch на activeTab может сработать с tab='feedback'
-// до того, как setup дойдёт до конца файла. let-переменные имеют TDZ —
-// startBugPoll() при чтении bugPollTimer падал «Cannot access X before initialization».
-let bugPollTimer = null;
-
-async function sendBroadcast() {
-  if (!bcMessage.value.trim()) return;
-  if (!bcHasAnyTarget.value) { toast.error('Получатели не выбраны', ''); return; }
-  bcSending.value = true;
-  try {
-    const { data } = await db.rpc('send_broadcast', {
-      user_name: userStore.currentUser.name,
-      title: bcTitle.value.trim() || 'Важное сообщение',
-      message: bcMessage.value.trim(),
-      to_staff_cabinet: bcTargets.value.staffCabinet,
-      to_restaurants_cabinet: bcTargets.value.restaurantCabinet,
-      to_staff_telegram: bcTargets.value.staffTelegram,
-      to_restaurants_telegram: bcTargets.value.restaurantTelegram,
-    });
-    if (data?.success) {
-      const tgParts = [];
-      if (data.staff_telegram_sent > 0) tgParts.push(`отдел закупок Telegram: ${data.staff_telegram_sent}`);
-      if (data.restaurant_telegram_sent > 0) tgParts.push(`рестораны Telegram: ${data.restaurant_telegram_sent}`);
-      toast.success('Отправлено', tgParts.length ? tgParts.join(', ') : 'Рассылка отправлена');
-      bcTitle.value = '';
-      bcMessage.value = '';
-      loadBcHistory();
-    } else {
-      toast.error('Ошибка', data?.error || 'Не удалось отправить');
-    }
-  } catch {
-    toast.error('Ошибка', 'Не удалось отправить сообщение');
-  } finally {
-    bcSending.value = false;
-  }
-}
-
-async function loadBcHistory() {
-  bcHistoryLoading.value = true;
-  try {
-    const { data } = await db.rpc('get_broadcast_history', { limit: 20 });
-    bcHistory.value = data || [];
-  } catch (e) { console.warn('[admin] loadBcHistory:', e); }
-  finally { bcHistoryLoading.value = false; }
-}
-
-async function deleteBroadcast(b) {
-  const ok = await confirmAction('Удалить рассылку?', `Сообщение «${b.title || 'Важное сообщение'}» будет удалено для всех пользователей.`);
-  if (!ok) return;
-  b._deleting = true;
-  try {
-    const payload = b.is_legacy ? { id: b.id } : { broadcast_group: b.broadcast_group };
-    const { data, error } = await db.rpc('delete_broadcast', payload);
-    if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
-    toast.success('Удалено', 'Рассылка удалена');
-    bcHistory.value = bcHistory.value.filter(x => (x.broadcast_group || x.id) !== (b.broadcast_group || b.id));
-  } catch {
-    toast.error('Ошибка', 'Не удалось удалить');
-  } finally {
-    b._deleting = false;
-  }
-}
-
-const formatBcDate = formatMoscowDateTime;
-
-function formatBroadcastTargets(b) {
-  const parts = [];
-  if (b.target_staff_cabinet) parts.push('кабинет отдела закупок');
-  if (b.target_restaurant_cabinet) parts.push('кабинет ресторанов');
-  if (b.target_staff_telegram) parts.push('Telegram отдела закупок');
-  if (b.target_restaurant_telegram) parts.push('Telegram ресторанов');
-  return parts.join(', ');
-}
-
-function broadcastTelegramStats(b) {
-  const parts = [];
-  if (Number(b.staff_telegram_sent || 0) > 0) parts.push(`отдел закупок TG: ${b.staff_telegram_sent}`);
-  if (Number(b.restaurant_telegram_sent || 0) > 0) parts.push(`рестораны TG: ${b.restaurant_telegram_sent}`);
-  return parts.join(', ');
-}
 
 // ═══ Настройки системы ═══
 const sysSettings = ref([]);
@@ -1548,10 +1323,6 @@ onUnmounted(() => {
 // падал с «Cannot access before initialization», и обращения не грузились.
 // immediate: true — чтобы данные загружались и при заходе на вкладку через URL `?tab=...`
 watch(activeTab, (tab) => {
-  if (tab === 'broadcast') {
-    loadBcHistory();
-    if (!changelogEntries.value.length) loadChangelog();
-  }
   if (tab === 'feedback') {
     loadBugReports();
     startBugPoll();
@@ -1562,18 +1333,6 @@ watch(activeTab, (tab) => {
 </script>
 
 <style scoped>
-.adm-cron-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-.adm-cron-table th, .adm-cron-table td { padding: 6px 8px; text-align: center; border-bottom: 1px solid #eee; }
-.adm-cron-table th { background: #fafafa; font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
-.adm-cron-table .adm-cron-subhead th { font-size: 14px; font-weight: 400; padding: 2px 4px; background: #fff; border-bottom: 1px solid #eee; }
-.adm-cron-ts { text-align: left; font-family: monospace; font-size: 11px; color: #666; }
-.cron-num { font-family: monospace; }
-.cron-skip { color: #888; }
-.cron-err { background: #fff0f0; }
-.cron-err td { color: #b71c1c; }
-.cron-status-ok { color: #2e7d32; font-weight: 700; }
-.cron-status-err { color: #c62828; font-weight: 600; font-size: 11px; }
-.adm-cron-err { color: #c62828; font-weight: 500; margin-left: 6px; }
 
 /* ═══ Layout ═══ */
 .admin-view { padding: 0; }
@@ -1768,21 +1527,6 @@ watch(activeTab, (tab) => {
 .adm-online-time {
   font-size: 12px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap;
 }
-
-/* ═══ Broadcast History ═══ */
-.bc-history-item {
-  padding: 12px 14px; border-radius: 10px;
-  background: var(--bg); border: 1px solid var(--border-light);
-}
-.bc-history-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
-.bc-history-msg { font-size: 13px; color: var(--text-secondary); line-height: 1.5; white-space: pre-line; }
-.bc-history-meta { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
-.bc-delete-btn {
-  flex-shrink: 0; background: none; border: none; cursor: pointer;
-  color: var(--text-muted); padding: 4px; border-radius: 6px; transition: all .15s;
-}
-.bc-delete-btn:hover { color: #e53e3e; background: rgba(229,62,62,.08); }
-.bc-delete-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ═══ Responsive ═══ */
 @media (max-width: 600px) {
