@@ -737,7 +737,11 @@ async function onToggleEnabled(group, checked) {
     } finally {
       saving[group.supplier_id] = false;
     }
-    if (group.subscription) await saveSubscription(group, { is_enabled: 1 });
+    // telegram_enabled: 1 передаём явно. Снятие «глушилки» выше уже включило
+    // подписку, поэтому сервер не видит перехода «выкл → вкл» и сам галочку
+    // Telegram не поставит — а сохранение со старым (нулевым) значением
+    // затёрло бы то, что только что включил so-mute.
+    if (group.subscription) await saveSubscription(group, { is_enabled: 1, telegram_enabled: 1 });
     // Сервер при включении ставит галочку Telegram и отмечает всех, кто
     // привязал бота — перечитываем состояние карточек.
     await loadGroups();
