@@ -101,7 +101,7 @@
       <!-- AI-блокировки -->
       <div v-if="data.ai_blocked?.length" class="bm-section">
         <h3>AI-провайдеры в блокировке</h3>
-        <table class="bm-table">
+        <div class="bm-table-wrap"><table class="bm-table">
           <thead><tr><th>Провайдер</th><th>Модель</th><th>До</th><th>Причина</th></tr></thead>
           <tbody>
             <tr v-for="(a, i) in data.ai_blocked" :key="i">
@@ -111,14 +111,14 @@
               <td>{{ a.reason || '—' }}</td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <div class="bm-row">
         <!-- По методу -->
         <div class="bm-section bm-half">
           <h3>По типам вызова (за 24 ч)</h3>
-          <table class="bm-table">
+          <div class="bm-table-wrap"><table class="bm-table">
             <thead><tr><th>Метод</th><th>Всего</th><th>Ошибок</th></tr></thead>
             <tbody>
               <tr v-for="(m, i) in (data.by_method || [])" :key="i" :class="{ 'bm-row-bad': m.fail_count > 0 }">
@@ -127,14 +127,14 @@
                 <td>{{ m.fail_count > 0 ? formatNumber(m.fail_count) : '—' }}</td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </div>
 
         <!-- По error_code -->
         <div class="bm-section bm-half">
           <h3>Коды ошибок (за 24 ч)</h3>
           <div v-if="!data.by_error_code?.length" class="bm-empty">✓ Ошибок не было</div>
-          <table v-else class="bm-table">
+          <div v-else class="bm-table-wrap"><table class="bm-table">
             <thead><tr><th>Код</th><th>Сколько раз</th><th>Что значит</th></tr></thead>
             <tbody>
               <tr v-for="(e, i) in (data.by_error_code || [])" :key="i">
@@ -143,14 +143,14 @@
                 <td class="bm-error-hint">{{ errorCodeHint(e.error_code) }}</td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </div>
       </div>
 
       <!-- Топ заблокированных -->
       <div v-if="data.top_failing?.length" class="bm-section">
         <h3>Чаще всего ошибки (за 24 ч)</h3>
-        <table class="bm-table">
+        <div class="bm-table-wrap"><table class="bm-table">
           <thead><tr><th>Chat ID</th><th>Кол-во ошибок</th></tr></thead>
           <tbody>
             <tr v-for="(t, i) in data.top_failing" :key="i">
@@ -158,13 +158,13 @@
               <td>{{ formatNumber(t.cnt) }}</td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <!-- Последние ошибки -->
       <div v-if="data.last_failures?.length" class="bm-section">
         <h3>Последние ошибки</h3>
-        <table class="bm-table">
+        <div class="bm-table-wrap"><table class="bm-table">
           <thead><tr><th>Время</th><th>Метод</th><th>Chat ID</th><th>HTTP</th><th>Код</th><th>Описание</th></tr></thead>
           <tbody>
             <tr v-for="(f, i) in data.last_failures" :key="i">
@@ -176,7 +176,7 @@
               <td class="bm-err-text">{{ f.error_text || '—' }}</td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
     </template>
   </div>
@@ -384,4 +384,13 @@ function errorCodeHint(code) {
 }
 .bm-legend-ok { background: #3aa540; }
 .bm-legend-fail { background: #d44a4a; }
+
+/* Таблицы монитора узкий экран не вмещает — прокручиваем их внутри блока,
+   а не всю страницу. Длинный текст ошибки переносим. */
+.bm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.bm-err-text { max-width: 420px; white-space: normal; overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .bm-err-text { max-width: 220px; }
+}
 </style>

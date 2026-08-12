@@ -293,6 +293,9 @@ async function exportBackup() {
 @media (max-width: 600px) {
   .bkp-head { flex-direction: column; text-align: center; gap: 12px; }
   .bkp-tables { grid-template-columns: 1fr; }
-  .bkp-actions .btn { flex: 1; justify-content: center; }
+  /* Три кнопки в ряд на телефоне не помещаются — «Выгрузить» на свою строку. */
+  .bkp-actions { flex-wrap: wrap; }
+  .bkp-actions .btn { flex: 1 1 40%; justify-content: center; min-width: 0; }
+  .bkp-actions .btn.primary { flex-basis: 100%; }
 }
 </style>
