@@ -4684,8 +4684,14 @@ if (strpos($roAction, 'admin') === 0) {
     // т.к. она нужна именно для модалки привязки и без неё.
     $isSensitiveBarcodes = ($adminAction === 'barcodes' && in_array($method, ['POST', 'PATCH', 'DELETE'], true))
         || ($adminAction === 'products-search');
+    // Контакт поддержки — один на весь портал: его видят все рестораны в кабинете,
+    // на входе и в письмах. Менять такое вправе только администратор, читать — все.
+    $isSensitiveAppSettings = ($adminAction === 'app-settings' && $method !== 'GET');
     if ($isSensitiveUsers && $userRoleForSensitive !== 'admin') {
         roRespond(['error' => 'Управление учётками ресторанов доступно только администраторам'], 403);
+    }
+    if ($isSensitiveAppSettings && $userRoleForSensitive !== 'admin') {
+        roRespond(['error' => 'Настройки портала доступны только администраторам'], 403);
     }
     if ($isSensitiveCabinetPosts && !in_array($userRoleForSensitive, ['admin', 'manager'], true)) {
         roRespond(['error' => 'Публикация сообщений в кабинеты ресторанов доступна только администраторам и менеджерам'], 403);

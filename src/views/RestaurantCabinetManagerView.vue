@@ -33,7 +33,7 @@
           <span>Telegram для связи</span>
           <div class="rcm-tg-input">
             <span class="rcm-tg-at">@</span>
-            <input v-model="appSettings.supportTelegram" type="text" placeholder="username" @input="appSettings.supportTelegram = appSettings.supportTelegram.replace(/^@+/, '')" />
+            <input v-model="appSettings.supportTelegram" type="text" placeholder="username" :readonly="!userStore.isAdmin" @input="appSettings.supportTelegram = appSettings.supportTelegram.replace(/^@+/, '')" />
           </div>
           <small class="rcm-hint">Только латиница, цифры и «_». Без @ и без ссылки — просто логин.</small>
         </label>
@@ -44,9 +44,10 @@
         </div>
 
         <div class="rcm-actions">
-          <button class="rcm-btn rcm-btn-primary" @click="saveAppSettings" :disabled="settingsSaving || !appSettings.supportTelegram">
+          <button v-if="userStore.isAdmin" class="rcm-btn rcm-btn-primary" @click="saveAppSettings" :disabled="settingsSaving || !appSettings.supportTelegram">
             {{ settingsSaving ? 'Сохранение...' : 'Сохранить' }}
           </button>
+          <small v-else class="rcm-hint">Изменить контакт может только администратор.</small>
         </div>
       </section>
     </div>
@@ -199,6 +200,7 @@ import { onBeforeUnmount, onMounted, reactive, ref, watch, defineAsyncComponent 
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { appConfirm, appAlert } from '@/lib/appDialogs.js';
 import { formatFileSize } from '@/lib/utils.js';
 const GuidesEditor = defineAsyncComponent(() => import('@/components/admin/GuidesEditor.vue'));
@@ -228,6 +230,9 @@ watch(() => route.query.tab, (val) => {
 });
 
 const store = useRestaurantOrderStore();
+// Контакт поддержки общий для всего портала, поэтому правит его только админ —
+// остальные видят значение, но поля закрыты (сервер такую запись тоже отклонит).
+const userStore = useUserStore();
 const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
@@ -458,6 +463,7 @@ onBeforeUnmount(() => {
 .rcm-tg-input { display: flex; align-items: center; border: 1px solid #ddd2c8; border-radius: 6px; background: #fff; overflow: hidden; }
 .rcm-tg-input .rcm-tg-at { padding: 0 4px 0 11px; color: #8a7a70; font-weight: 700; }
 .rcm-tg-input input { border: 0 !important; border-radius: 0 !important; flex: 1; padding-left: 2px !important; }
+.rcm-tg-input input[readonly] { background: #f7f1eb; color: #6f5f55; cursor: default; }
 .rcm-tg-preview { font-weight: 400; color: #2563eb; word-break: break-all; }
 .rcm-actions { margin-top: 4px; }
 .rcm-hint code { background: #f6efe8; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #502314; }

@@ -36,11 +36,13 @@
       </template>
 
       <template v-for="section in sidebarSections" :key="section.title">
-        <template v-if="section.items.some(i => i.public || (userStore.hasAccess(i.module, 'view') && isModuleVisible(i.module)))">
+        <!-- route передаём обязательно: настройки «Мои разделы» хранят имя
+             маршрута, и без него скрытие раздела здесь бы не сработало. -->
+        <template v-if="section.items.some(i => i.public || (userStore.hasAccess(i.module, 'view') && isModuleVisible(i.module, i.route)))">
           <div class="sidebar-section" v-if="!sidebarCollapsed">{{ section.title }}</div>
           <nav class="sidebar-nav">
             <template v-for="item in section.items" :key="item.route">
-              <router-link v-if="item.public || (userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module))" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }" @contextmenu.prevent="togglePin(item.route)">
+              <router-link v-if="item.public || (userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module, item.route))" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }" @contextmenu.prevent="togglePin(item.route)">
                 <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
                 <span v-if="!sidebarCollapsed">{{ item.label }}</span>
                 <span v-if="!sidebarCollapsed && item.newBadge && noveltiesUnseen > 0" class="sidebar-new">NEW</span>
@@ -402,7 +404,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useNotificationStore } from '@/stores/notificationStore.js';
 import { db, serverDown } from '@/lib/apiClient.js';
 import { LEGAL_ENTITIES, getEntityGroupCode } from '@/lib/legalEntities.js';
-import { SIDEBAR_SECTIONS, TOOLS_GROUPS, PAGE_NAMES } from '@/lib/navSections.js';
+import { SIDEBAR_SECTIONS, TOOLS_GROUPS, PAGE_NAMES, expandHiddenToRoutes } from '@/lib/navSections.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import BroadcastPopup from '@/components/BroadcastPopup.vue';
@@ -449,7 +451,12 @@ function handleOffline() { isOffline.value = true; }
 
 const sidebarCollapsed = ref(localStorage.getItem('bk_sidebar_collapsed') === 'true');
 const sidebarOpen = ref(false);
-const hiddenModules = computed(() => userStore.getHiddenModules());
+// «Мои разделы» хранят имена маршрутов: один ключ модуля бывает у нескольких
+// разделов, и раньше, спрятав «Оплаты поставщиков», человек терял из меню ещё
+// и «Поставки». Старые сохранённые ключи модулей разворачиваются в маршруты
+// (expandHiddenToRoutes), поэтому у тех, кто настраивал меню раньше, ничего
+// не изменится.
+const hiddenModules = computed(() => expandHiddenToRoutes(userStore.getHiddenModules()));
 
 // Модули, завязанные на 1С УТ и пивные кеги — только для БК+ВМ.
 // У Пиццы Стар нет 1С (у них Додо) и нет кег, поэтому на ПС их прячем.
@@ -461,7 +468,7 @@ const currentGroup = computed(() => getEntityGroupCode(orderStore.settings.legal
 function isModuleVisible(module, route = null) {
   if (currentGroup.value === 'PS' && BK_VM_ONLY_MODULES.includes(module)) return false;
   if (currentGroup.value !== 'PS' && PS_ONLY_MODULES.includes(module)) return false;
-  return !hiddenModules.value.includes(route || module) && !hiddenModules.value.includes(module);
+  return !hiddenModules.value.includes(route || module);
 }
 
 // Списки разделов живут в lib/navSections.js — оттуда же их берут поиск

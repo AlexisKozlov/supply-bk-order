@@ -43,7 +43,11 @@
                 <span class="uset-field-label">Стартовая страница</span>
                 <select v-model="startPage" @change="saveStartPage">
                   <option value="">Главная</option>
-                  <option v-for="m in allModules" :key="m.route" :value="m.route">{{ m.label }}</option>
+                  <!-- Группы те же, что в боковом меню: искать раздел глазами
+                       привычнее там же, где он лежит в меню. -->
+                  <optgroup v-for="g in moduleGroups" :key="g.title" :label="g.title">
+                    <option v-for="m in g.items" :key="m.route" :value="m.route">{{ m.label }}</option>
+                  </optgroup>
                 </select>
               </label>
               <label v-if="myEntities.length > 1" class="uset-field">
@@ -169,13 +173,16 @@
               <button v-if="hiddenModules.length" class="uset-btn-text" @click="resetModules">Показать все</button>
             </div>
             <div class="uset-list">
-              <div v-for="m in allModules" :key="m.label" class="uset-list-item" @click="toggleModule(m.module)">
-                <div class="uset-switch" :class="{ on: !hiddenModules.includes(m.module) }">
-                  <div class="uset-switch-thumb"></div>
+              <template v-for="g in moduleGroups" :key="g.title">
+                <div class="uset-list-group">{{ g.title }}</div>
+                <div v-for="m in g.items" :key="m.route" class="uset-list-item" @click="toggleSection(m)">
+                  <div class="uset-switch" :class="{ on: !isSectionHidden(m) }">
+                    <div class="uset-switch-thumb"></div>
+                  </div>
+                  <BkIcon :name="m.icon" size="sm" />
+                  <span class="uset-list-label">{{ m.label }}</span>
                 </div>
-                <BkIcon :name="m.icon" size="sm" />
-                <span class="uset-list-label">{{ m.label }}</span>
-              </div>
+              </template>
             </div>
           </div>
 
@@ -274,7 +281,7 @@ import { useTabRoute } from '@/composables/useTabRoute.js'
 import { useInstallPrompt } from '@/composables/useInstallPrompt.js'
 import { usePushNotifications } from '@/composables/usePushNotifications.js'
 import { activityLabel, entityLabel } from '@/lib/auditActions.js'
-import { ALL_NAV_ITEMS } from '@/lib/navSections.js'
+import { ALL_NAV_ITEMS, SIDEBAR_SECTIONS, TOOLS_GROUPS, expandHiddenToRoutes, packHiddenRoutes } from '@/lib/navSections.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 import UiPasswordInput from '@/components/ui/UiPasswordInput.vue'
@@ -364,38 +371,43 @@ async function changePassword() {
 }
 
 // ─────────────────────── Модули и закрепления ───────────────────────
-const allModulesRaw = [
-  { module: 'analytics', icon: 'home', label: 'Дашборд', route: 'dashboard' },
-  { module: 'order', icon: 'package', label: 'Новый заказ', route: 'order' },
-  { module: 'planning', icon: 'planning', label: 'Планирование', route: 'planning' },
-  { module: 'plan-fact', icon: 'delivery', label: 'Поставки', route: 'plan-fact' },
-  { module: 'history', icon: 'history', label: 'История', route: 'history' },
-  { module: 'database', icon: 'database', label: 'База данных', route: 'database' },
-  { module: 'pricing', icon: 'pricing', label: 'Цены и ПСЦ', route: 'pricing' },
-  { module: 'calendar', icon: 'calendar', label: 'Календарь', route: 'calendar' },
-  { module: 'analytics', icon: 'analytics', label: 'Аналитика', route: 'analytics' },
-  { module: 'analysis', icon: 'ruler', label: 'Анализ запасов', route: 'analysis' },
-  { module: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности', route: 'shelf-life' },
-  { module: 'delivery-schedule', icon: 'schedule', label: 'График доставки', route: 'delivery-schedule' },
-  { module: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков', route: 'stock-collection' },
-  { module: 'deficit', icon: 'deficit', label: 'Распределение дефицита', route: 'deficit' },
-  { module: 'distribution', icon: 'distribute', label: 'Распределение', route: 'distribution' },
-  { module: 'tenders', icon: 'tender', label: 'Тендеры', route: 'tenders' },
-  { module: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет', route: 'pallet-calc' },
-  { module: 'plan-fact', icon: 'payments', label: 'Оплаты поставщиков', route: 'payments' },
-  { module: 'corrections', icon: 'edit', label: 'Корректировки', route: 'corrections' },
-  { module: 'chat', icon: 'chat', label: 'Чат с ресторанами', route: 'chat' },
-]
-const allModules = allModulesRaw.filter(m => userStore.hasAccess(m.module, 'view'))
+// Раньше здесь лежала своя копия списка разделов из 20 строк. Она отстала от
+// меню: «Задачи», «Заявки поставщикам», «Возврат кег», «Опросы», «Аналоги» и
+// ещё десяток разделов в настройках просто отсутствовали — ни спрятать, ни
+// сделать стартовой страницей. Берём единый список из lib/navSections.js,
+// как это делают меню, поиск по «/» и статус «кто где».
+//
+// EXTRA_PAGES сюда не берём намеренно: это страницы вне меню (админка, эти
+// самые настройки, поиск карточек, телеграм-админка). Прятать из меню то,
+// чего в меню нет, нечего, а у части из них вообще нет ключа модуля —
+// hasAccess(undefined) вернул бы «нет доступа» всем, кроме админа.
+const NAV_GROUPS = [...SIDEBAR_SECTIONS, ...TOOLS_GROUPS]
 
-const hiddenModules = computed(() => userStore.getHiddenModules())
+// Порядок и разбивка по группам — как в боковом меню, иначе список из 40+
+// строк не читается. Разделы без доступа не показываем.
+const moduleGroups = NAV_GROUPS
+  .map(g => ({ title: g.title, items: g.items.filter(i => userStore.hasAccess(i.module, 'view')) }))
+  .filter(g => g.items.length)
 
-function toggleModule(module) {
-  const current = [...hiddenModules.value]
-  const idx = current.indexOf(module)
-  if (idx >= 0) current.splice(idx, 1)
-  else current.push(module)
-  userStore.setHiddenModules(current)
+// Спрятанные разделы храним по имени маршрута: один ключ модуля бывает у
+// нескольких разделов (plan-fact — это и «Поставки», и «Оплаты поставщиков»),
+// и раньше выключение одного гасило соседний. Старые сохранённые ключи
+// модулей разворачиваются в маршруты — что было спрятано, остаётся
+// спрятанным. Разворот общий с меню, лежит в lib/navSections.js.
+const hiddenModules = computed(() => expandHiddenToRoutes(userStore.getHiddenModules()))
+
+function isSectionHidden(item) {
+  return hiddenModules.value.includes(item.route)
+}
+
+function toggleSection(item) {
+  const list = [...hiddenModules.value]
+  const idx = list.indexOf(item.route)
+  if (idx >= 0) list.splice(idx, 1)
+  else list.push(item.route)
+  // packHiddenRoutes ставит метку формата: с ней меню знает, что в списке
+  // маршруты, и не гасит соседний раздел с тем же ключом модуля.
+  userStore.setHiddenModules(packHiddenRoutes(list))
 }
 
 function resetModules() { userStore.setHiddenModules([]) }
@@ -622,6 +634,13 @@ onMounted(() => {
 .uset-list-label { font-size: 14px; flex: 1; min-width: 0; }
 .uset-list-static { cursor: default; }
 .uset-list-static:hover { background: none; }
+/* Заголовок группы — те же группы, что в боковом меню. Без них список
+   из 40+ разделов читается как сплошная простыня. */
+.uset-list-group {
+  padding: 12px 20px 4px; font-size: 11px; font-weight: 700;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em;
+}
+.uset-list-group:first-child { padding-top: 6px; }
 
 /* Переключатель */
 .uset-switch { width: 36px; height: 20px; border-radius: 10px; background: #ccc; position: relative; transition: background 0.2s; flex-shrink: 0; }

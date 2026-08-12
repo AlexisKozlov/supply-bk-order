@@ -119,6 +119,34 @@ function soNormalizeReminderCsv($input, array $whitelist) {
     return implode(',', $out);
 }
 
+/**
+ * Нормализует времена напоминаний в JSON для колонки reminder_times
+ * (supplier_default_deadlines / supplier_schedule_deadlines).
+ *
+ * Формат хранения — JSON-массив [{"days_before":0..7,"time":"HH:MM"}, ...],
+ * тот же, что пишет раздел «График поставок» (api/includes/rpc/schedules.php)
+ * и читает крон напоминаний (api/cron_delivery_reminders.php).
+ *
+ * Возвращает JSON-строку, либо null, если валидных слотов не осталось.
+ * Некорректные элементы просто отбрасываются: эта функция вызывается из
+ * сохранения дедлайнов, и валить всё сохранение из-за кривого слота нельзя.
+ */
+function soNormalizeReminderTimesJson($input) {
+    if (is_string($input)) $input = json_decode($input, true);
+    if (!is_array($input)) return null;
+    $cleaned = [];
+    foreach ($input as $rt) {
+        if (!is_array($rt)) continue;
+        $db = (int)($rt['days_before'] ?? -1);
+        $t = (string)($rt['time'] ?? '');
+        if ($db < 0 || $db > 7) continue;
+        if (!preg_match('/^(\d{1,2}):(\d{2})$/', $t, $m)) continue;
+        if ((int)$m[1] > 23 || (int)$m[2] > 59) continue;
+        $cleaned[] = ['days_before' => $db, 'time' => sprintf('%02d:%02d', (int)$m[1], (int)$m[2])];
+    }
+    return $cleaned ? json_encode($cleaned, JSON_UNESCAPED_UNICODE) : null;
+}
+
 // Белый список ключей иконок (поставщики + ссылки кабинета).
 // ВАЖНО: держать в синхроне с supplierIconKeys в src/lib/cabinetIcons.js.
 function soIconKeyWhitelist() {
@@ -4609,11 +4637,26 @@ if ($soAction === 'admin') {
         $rules = $body['rules'] ?? [];
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $by = resolveActorName($pdo, $sessionUser);
+
+        // Снимок времён напоминаний по дням доставки. Эта вкладка правит только
+        // дедлайны и про reminder_times ничего не знает, а сохранение работает
+        // по схеме «удалить всё → вставить заново». Без снимка время напоминаний,
+        // настроенное в разделе «График поставок», обнулялось бы при каждом
+        // сохранении дедлайнов, и крон уходил бы в старый фолбэк «каждый час
+        // с 8:00» — человек ничего не удалял, а напоминания ехали.
+        $rtSnapshot = [];
+        $rtSnapQ = $pdo->prepare("SELECT delivery_dow, reminder_times FROM supplier_default_deadlines WHERE supplier_id = ?");
+        $rtSnapQ->execute([$supplierId]);
+        foreach ($rtSnapQ->fetchAll() as $rtRow) {
+            if ($rtRow['reminder_times'] === null) continue;
+            $rtSnapshot[(int)$rtRow['delivery_dow']] = $rtRow['reminder_times'];
+        }
+
         // Очищаем и перезаписываем в транзакции
         $pdo->beginTransaction();
         try {
             $pdo->prepare("DELETE FROM supplier_default_deadlines WHERE supplier_id = ?")->execute([$supplierId]);
-            $ins = $pdo->prepare("INSERT INTO supplier_default_deadlines (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
+            $ins = $pdo->prepare("INSERT INTO supplier_default_deadlines (supplier_id, delivery_dow, deadline_dow, deadline_time, reminder_times) VALUES (?, ?, ?, ?, ?)");
             $inserted = 0;
             foreach ($rules as $r) {
                 $dow = (int)($r['delivery_dow'] ?? 0);
@@ -4626,7 +4669,12 @@ if ($soAction === 'admin') {
                 } elseif (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $dt)) {
                     $dt = '14:00:00';
                 }
-                $ins->execute([$supplierId, $dow, $ddow, $dt]);
+                // Времена напоминаний берём из запроса, только если клиент их
+                // прислал явно; иначе возвращаем то, что было (см. снимок выше).
+                $rt = (is_array($r) && array_key_exists('reminder_times', $r))
+                    ? soNormalizeReminderTimesJson($r['reminder_times'])
+                    : ($rtSnapshot[$dow] ?? null);
+                $ins->execute([$supplierId, $dow, $ddow, $dt, $rt]);
                 $inserted++;
             }
             $pdo->commit();

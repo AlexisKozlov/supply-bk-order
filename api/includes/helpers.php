@@ -829,7 +829,11 @@ $ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','not
 
 // Таблицы с колонкой legal_entity_group — фильтруются по группе юрлиц (BK_VM или PS).
 // Используются для общих между BK+VM сущностей: чаты, корректировки, рецепты, распределение.
-$GROUP_TABLES = ['chat_conversations','order_corrections','dist_sessions','recipes','recipe_groups'];
+// supplier_payments — оплаты ведутся по группе (финансы смотрят БК+ВМ вместе, экран
+// /payments так и запрашивает). Без этой строки таблица не попадала ни в один список
+// и чтение через REST уходило вообще без фильтра: сотрудник «Пицца Стар» обычным
+// запросом получал платежи «Бургер БК» и наоборот. Запись закрыта отдельно (read-only + RPC).
+$GROUP_TABLES = ['chat_conversations','order_corrections','dist_sessions','recipes','recipe_groups','supplier_payments'];
 
 // Дочерние таблицы без собственного legal_entity — проверка доступа идёт через родителя.
 // mode: 'entity' — родитель имеет legal_entity; 'group' — родитель имеет legal_entity_group.

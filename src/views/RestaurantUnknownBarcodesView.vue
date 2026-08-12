@@ -370,7 +370,10 @@
 
         <div class="ub-bind-actions">
           <button class="ub-btn ub-btn-outline" @click="closeBindModal" :disabled="bindModal.saving">Отмена</button>
-          <button class="ub-btn ub-btn-primary" :disabled="!bindModal.selectedSku || !bindModal.barcode || bindModal.saving" @click="submitBindModal">
+          <!-- force передаём явно: без скобок во @click в функцию улетает объект
+               события, он «истинный», и сервер каждый раз получает force=true —
+               то есть проверку «код уже у другого товара» просто пропускает. -->
+          <button class="ub-btn ub-btn-primary" :disabled="!bindModal.selectedSku || !bindModal.barcode || bindModal.saving" @click="submitBindModal(false)">
             {{ bindModal.saving ? 'Сохраняю…' : 'Сохранить' }}
           </button>
         </div>
@@ -568,7 +571,9 @@ async function submitBindModal(force = false) {
         barcode: bindModal.value.barcode.trim(),
         barcode_type: bindModal.value.type,
         is_primary: !!bindModal.value.isPrimary,
-        force: !!force,
+        // Строго true, а не «что-то истинное»: случайно переданный объект
+        // события не должен превращаться в «привязывай без вопросов».
+        force: force === true,
       }),
     });
     const data = await res.json();
@@ -588,15 +593,22 @@ async function submitBindModal(force = false) {
     }
     if (!res.ok) throw new Error(data.error || 'Ошибка');
 
-    // Если этот штрихкод был в «Ненайденных» — отметим как resolved.
+    // Если этот штрихкод пришёл из «Ненайденных» — закрываем ВСЕ строки очереди
+    // с этим кодом, а не первую найденную: один и тот же неизвестный код от пяти
+    // ресторанов лежит пятью отдельными записями (ключ — «код + номер ресторана»).
+    let queueClosed = 0;
     if (bindModal.value.barcodeLocked && tab.value === 'unknown') {
-      const row = items.value.find(i => i.gtin === bindModal.value.barcode.trim() && i.status === 'new');
-      if (row) await setStatus(row, 'resolved');
+      queueClosed = await resolveQueueRowsFor(bindModal.value.barcode.trim(), bindModal.value.selectedLE);
     }
 
     toast.success('Штрихкод сохранён');
+    // Снимаем «сохраняю» до закрытия: closeBindModal защищается от закрытия
+    // во время сохранения и иначе оставил бы окно висеть на экране.
+    if (bindModal.value) bindModal.value.saving = false;
     closeBindModal();
     if (tab.value === 'all') loadAll();
+    // Одна перезагрузка очереди в конце — вместо перезагрузки на каждую строку.
+    if (queueClosed > 0) load();
     loadHealth();
   } catch (e) {
     bindModal.value.error = e.message || 'неизвестная ошибка';
@@ -751,15 +763,71 @@ async function saveSubscribers() {
   }
 }
 
+// Один запрос смены статуса. Вынесен отдельно, чтобы массовое закрытие очереди
+// не тащило за собой тосты и правку видимого списка по каждой строке.
+async function postStatus(id, newStatus) {
+  const res = await fetch(`/api/ro/admin/scan-unknown/${id}/status`, {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify({ status: newStatus }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Ошибка');
+  return data;
+}
+
+// Закрывает («разобрано») все записи очереди с этим штрихкодом.
+// Строки ищем отдельным запросом, а не в items: на экране может стоять фильтр
+// по статусу/группе/поиску, и записи других ресторанов в списке просто не
+// загружены — иначе очередь так и остаётся забитой тем же кодом.
+// Возвращает, сколько записей закрыли.
+async function resolveQueueRowsFor(barcode, legalEntity) {
+  const code = (barcode || '').trim();
+  if (!code) return 0;
+  // Привязка сделана внутри юрлица товара: у другой группы тот же код может
+  // означать совсем другой товар, её записи не трогаем.
+  const group = legalEntity ? getEntityGroupCode(legalEntity) : filterGroup.value;
+
+  let rows = [];
+  try {
+    const params = new URLSearchParams();
+    // Только 'new': «игнор» поставили руками осознанно, не переигрываем за человека.
+    params.set('status', 'new');
+    if (group) params.set('group', group);
+    params.set('search', code);
+    const res = await fetch(`/api/ro/admin/scan-unknown?${params}`, { headers: apiHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка загрузки');
+    // Поиск на сервере идёт по LIKE «%код%» — оставляем только точные совпадения.
+    rows = (data.items || []).filter(i => i.gtin === code);
+  } catch (e) {
+    console.error(e);
+    toast.error('Не удалось найти другие записи с этим кодом', e.message || '');
+    return 0;
+  }
+
+  // Закрыть пачкой сервер не умеет — шлём по запросу на строку, но список
+  // перезагружаем один раз, уже после всех.
+  let done = 0;
+  let failed = 0;
+  for (const r of rows) {
+    try {
+      await postStatus(r.id, 'resolved');
+      done++;
+    } catch (e) {
+      console.error(e);
+      failed++;
+    }
+  }
+  if (failed > 0) {
+    toast.error('Часть записей очереди не закрылась', `Не удалось: ${failed} из ${rows.length}`);
+  }
+  return done;
+}
+
 async function setStatus(row, newStatus) {
   try {
-    const res = await fetch(`/api/ro/admin/scan-unknown/${row.id}/status`, {
-      method: 'POST',
-      headers: apiHeaders(),
-      body: JSON.stringify({ status: newStatus }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    const data = await postStatus(row.id, newStatus);
     row.status = newStatus;
     if (data.notified) {
       toast.success('Статус обновлён', 'Ресторану отправлено уведомление в Telegram');

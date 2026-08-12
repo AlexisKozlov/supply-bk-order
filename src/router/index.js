@@ -29,7 +29,9 @@ const routes = [
       { path: 'calendar', name: 'calendar', component: () => import('@/views/CalendarView.vue'), meta: { title: 'Календарь', module: 'calendar' } },
       { path: 'analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue'), meta: { title: 'Анализ', module: 'analysis' } },
       { path: 'reconciliation', name: 'reconciliation', component: () => import('@/views/ReconciliationView.vue'), meta: { title: 'Сверка 1С/УТ', module: 'reconciliation' } },
-      { path: 'assistant', name: 'assistant', component: () => import('@/views/AssistantView.vue'), meta: { title: 'ИИ-помощник' } },
+      // Помощник читает данные раздела «Анализ» — и меню, и сервер требуют модуль
+      // analysis. Без module тут страница открывалась по прямой ссылке любому.
+      { path: 'assistant', name: 'assistant', component: () => import('@/views/AssistantView.vue'), meta: { title: 'ИИ-помощник', module: 'analysis' } },
       { path: 'restaurant-sales', name: 'restaurant-sales', component: () => import('@/views/RestaurantSalesView.vue'), meta: { title: 'Реализация', module: 'restaurant-sales' } },
       { path: 'database', name: 'database', component: () => import('@/views/DatabaseView.vue'), meta: { title: 'База товаров', module: 'database' } },
       { path: 'delivery-schedule', name: 'delivery-schedule', component: () => import('@/views/DeliveryScheduleView.vue'), meta: { title: 'График доставки', module: 'delivery-schedule' } },

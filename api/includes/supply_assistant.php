@@ -744,8 +744,21 @@ if ($saAction === 'admin') {
         $params = [];
 
         if ($le) {
+            // Заказы ресторанов — рабочие данные одного юрлица. Без этой проверки
+            // хватало прав на модуль, чтобы подставить чужое юрлицо в фильтр
+            // и прочитать заказы другой группы.
+            roEnsureGroupAccess($sessionUser, getEntityGroup($le));
             $where[]  = 'o.legal_entity = ?';
             $params[] = $le;
+        } elseif ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+            // Юрлицо не выбрано (например, после «Сбросить фильтры») — раньше в
+            // ответ попадали заказы ВСЕХ юрлиц. Сужаем выборку до юрлиц тех групп,
+            // к которым у сотрудника есть доступ. Админ видит всё, как и раньше.
+            $allowedEntities = roGetAllowedLegalEntities($sessionUser);
+            if (!$allowedEntities) saRespond(['orders' => []]);
+            $entPh   = implode(',', array_fill(0, count($allowedEntities), '?'));
+            $where[] = "o.legal_entity IN ($entPh)";
+            foreach ($allowedEntities as $allowedEntity) $params[] = $allowedEntity;
         }
         if ($restaurant) {
             $where[]  = 'o.restaurant_number = ?';
@@ -816,6 +829,11 @@ if ($saAction === 'admin') {
 
         if (!$order) saRespond(['error' => 'Заказ не найден'], 404);
 
+        // Юрлицо в запрос не приходит — берём его у самого заказа и проверяем
+        // доступ ДО отдачи данных. Иначе по прямой ссылке /sa/admin/order/123
+        // сотрудник одной группы юрлиц читал заказ чужой.
+        roEnsureGroupAccess($sessionUser, $order['legal_entity_group'] ?: getEntityGroup($order['legal_entity'] ?? ''));
+
         $is = $pdo->prepare("
             SELECT * FROM sa_order_items
             WHERE order_id = ?
@@ -836,10 +854,14 @@ if ($saAction === 'admin') {
         $items   = $body['items'] ?? [];
         $updatedBy = $sessionUser['name'] ?? ($sessionUser['username'] ?? null);
 
-        // Проверяем, что заказ существует
-        $checkStmt = $pdo->prepare("SELECT id FROM sa_orders WHERE id = ? LIMIT 1");
+        // Проверяем, что заказ существует, и заодно берём его юрлицо:
+        // правка чужого юрлица опаснее чтения, поэтому проверяем доступ
+        // сразу после загрузки заказа и до любых изменений.
+        $checkStmt = $pdo->prepare("SELECT id, legal_entity, legal_entity_group FROM sa_orders WHERE id = ? LIMIT 1");
         $checkStmt->execute([$orderId]);
-        if (!$checkStmt->fetch()) saRespond(['error' => 'Заказ не найден'], 404);
+        $targetOrder = $checkStmt->fetch();
+        if (!$targetOrder) saRespond(['error' => 'Заказ не найден'], 404);
+        roEnsureGroupAccess($sessionUser, $targetOrder['legal_entity_group'] ?: getEntityGroup($targetOrder['legal_entity'] ?? ''));
 
         // Фильтруем и валидируем позиции
         $validItems = [];
@@ -925,9 +947,13 @@ if ($saAction === 'admin') {
     if ($adminAction === 'order' && $adminParam !== null && $method === 'DELETE') {
         $orderId = (int)$adminParam;
 
-        $checkStmt = $pdo->prepare("SELECT id FROM sa_orders WHERE id = ? LIMIT 1");
+        // Удаление необратимо, поэтому доступ к юрлицу заказа проверяем
+        // сразу после его загрузки — до первого DELETE.
+        $checkStmt = $pdo->prepare("SELECT id, legal_entity, legal_entity_group FROM sa_orders WHERE id = ? LIMIT 1");
         $checkStmt->execute([$orderId]);
-        if (!$checkStmt->fetch()) saRespond(['error' => 'Заказ не найден'], 404);
+        $targetOrder = $checkStmt->fetch();
+        if (!$targetOrder) saRespond(['error' => 'Заказ не найден'], 404);
+        roEnsureGroupAccess($sessionUser, $targetOrder['legal_entity_group'] ?: getEntityGroup($targetOrder['legal_entity'] ?? ''));
 
         $pdo->prepare("DELETE FROM sa_order_items WHERE order_id = ?")->execute([$orderId]);
         $pdo->prepare("DELETE FROM sa_orders WHERE id = ?")->execute([$orderId]);
@@ -942,6 +968,11 @@ if ($saAction === 'admin') {
         $category = $_GET['category'] ?? null;
 
         if (!$le) saRespond(['error' => 'Не указан legal_entity'], 400);
+        // Шаблон лежит в общей с «Заказами ресторанов» таблице ro_templates,
+        // поэтому и доступ к юрлицу проверяем той же функцией, что и там
+        // (ro/admin/templates). Раньше здесь хватало прав на модуль, и закупщик
+        // одной группы юрлиц мог читать шаблон чужой.
+        roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
         // is_active по products намеренно не фильтруем — справочные параметры
         // нужны и для скрытых товаров (вкл. в шаблоне).
@@ -977,6 +1008,9 @@ if ($saAction === 'admin') {
     if ($adminAction === 'stock-products' && $method === 'GET') {
         $le = $_GET['legal_entity'] ?? null;
         if (!$le) saRespond(['error' => 'Не указан legal_entity'], 400);
+        // Данные «Сроков годности» — рабочие данные конкретного юрлица,
+        // отдаём только тому, у кого есть доступ к его группе.
+        roEnsureGroupAccess($sessionUser, getEntityGroup($le));
         saRespond(['products' => saStockProductsForEntity($pdo, $le)]);
     }
 
@@ -990,6 +1024,9 @@ if ($saAction === 'admin') {
 
         if (!$le)       saRespond(['error' => 'Не указан legal_entity'], 400);
         if (!$category) saRespond(['error' => 'Не указана категория'], 400);
+        // Тот же общий шаблон, что и в «Заказах ресторанов»: без этой проверки
+        // прав на модуль хватало, чтобы переписать шаблон чужого юрлица.
+        roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
         if ($action === 'save') {
             // Дедупликация по SKU в пределах категории/юрлица. Без неё две одинаковые
@@ -998,40 +1035,64 @@ if ($saAction === 'admin') {
             $deduped = [];
             $skipped = 0;
             $seenSku = [];
-            $seenName = [];
+            $seenBlankSku = false;
             foreach ($items as $item) {
                 $sku = trim((string)($item['sku'] ?? ''));
-                $name = trim((string)($item['product_name'] ?? ''));
                 if ($sku !== '') {
                     if (isset($seenSku[$sku])) { $skipped++; continue; }
                     $seenSku[$sku] = true;
                 } else {
-                    // Без SKU дедуплицируем по имени, чтобы не плодить копий.
-                    $nameKey = mb_strtolower($name);
-                    if ($nameKey !== '' && isset($seenName[$nameKey])) { $skipped++; continue; }
-                    if ($nameKey !== '') $seenName[$nameKey] = true;
+                    // Пустой SKU для ключа uq_ro_tpl — обычное значение, поэтому строка
+                    // без SKU в категории может быть только одна. Первую оставляем,
+                    // остальные считаем дублями: иначе они молча перетирали бы друг друга.
+                    if ($seenBlankSku) { $skipped++; continue; }
+                    $seenBlankSku = true;
                 }
                 $deduped[] = $item;
             }
 
-            // Удаляем старые позиции категории
-            $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
+            $pdo->beginTransaction();
+            try {
+                // Таблица ro_templates общая с «Заказами ресторанов». Там в списке
+                // видны и отключённые позиции (is_active = 0), а сюда они не приходят —
+                // экран «Сбор заказа» читает только активные. Поэтому удаляем ТОЛЬКО
+                // активные строки: раньше сносилась вся категория и отключённые позиции
+                // исчезали навсегда при любом сохранении отсюда.
+                $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ? AND is_active = 1")
+                    ->execute([$le, $category]);
 
-            $insert = $pdo->prepare("
-                INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
-            ");
-            foreach ($deduped as $i => $item) {
-                $mult = intval($item['multiplicity'] ?? 0);
-                $insert->execute([
-                    $le,
-                    $category,
-                    $item['sku'] ?? '',
-                    $item['product_name'] ?? '',
-                    $mult > 0 ? $mult : 1,
-                    $i,
-                ]);
+                // Если присланный SKU совпал с уцелевшей отключённой строкой, обычный
+                // INSERT упал бы на уникальном ключе uq_ro_tpl. Вместо этого поднимаем
+                // такую строку обратно в активные — дубля не появляется.
+                $insert = $pdo->prepare("
+                    INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    ON DUPLICATE KEY UPDATE
+                        product_name = VALUES(product_name),
+                        multiplicity = VALUES(multiplicity),
+                        sort_order   = VALUES(sort_order),
+                        is_active    = 1
+                ");
+                foreach ($deduped as $i => $item) {
+                    $mult = intval($item['multiplicity'] ?? 0);
+                    $insert->execute([
+                        $le,
+                        $category,
+                        $item['sku'] ?? '',
+                        $item['product_name'] ?? '',
+                        $mult > 0 ? $mult : 1,
+                        $i,
+                    ]);
+                }
+
+                $pdo->commit();
+            } catch (Exception $e) {
+                // Без транзакции сбой на середине оставлял бы категорию наполовину пустой.
+                $pdo->rollBack();
+                error_log('sa/admin/templates POST error: ' . $e->getMessage());
+                saRespond(['error' => 'Ошибка сохранения шаблона'], 500);
             }
+
             saRespond(['success' => true, 'count' => count($deduped), 'skipped_duplicates' => $skipped]);
         }
 

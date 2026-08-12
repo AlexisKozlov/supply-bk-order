@@ -98,6 +98,61 @@ export const ALL_NAV_ITEMS = [
   ...EXTRA_PAGES,
 ];
 
+// Только пункты меню (без EXTRA_PAGES): их и прячет настройка «Мои разделы».
+const MENU_ITEMS = [
+  ...SIDEBAR_SECTIONS.flatMap(s => s.items),
+  ...TOOLS_GROUPS.flatMap(g => g.items),
+];
+
+// ═══════════════════ Спрятанные разделы («Мои разделы») ═══════════════════
+//
+// Раньше настройки сохраняли КЛЮЧ МОДУЛЯ, а один ключ бывает у нескольких
+// разделов: 'plan-fact' — это и «Поставки», и «Оплаты поставщиков»;
+// 'restaurant-orders' — «Заказы ресторанов», «Кабинеты ресторанов» и
+// «Штрихкоды». Спрятав один раздел, человек терял из меню и соседние.
+// Теперь сохраняем имя маршрута — оно у каждого раздела своё.
+//
+// Метка формата нужна потому, что часть маршрутов совпадает по написанию с
+// ключами модулей ('plan-fact' — и маршрут «Поставок», и ключ модуля
+// «Оплат»). Без метки нельзя понять, что имел в виду сохранивший: спрятать
+// один раздел или весь модуль. Есть метка — в списке маршруты; нет метки —
+// старая запись, её разворачиваем.
+export const HIDDEN_FORMAT_ROUTES = '@routes';
+
+/**
+ * Хранимый список → список имён маршрутов (что реально прячем из меню).
+ *
+ * Старые записи разворачиваем: ключ модуля превращается в маршруты всех
+ * разделов этого модуля. Что человек когда-то спрятал — остаётся спрятанным,
+ * а дальше он может вернуть любой раздел по отдельности.
+ *
+ * Незнакомые значения (раздел переименовали или убрали) переносим как есть —
+ * иначе спрятанное могло бы само собой появиться обратно. Их же по ключу
+ * модуля читает Telegram-бот, когда решает, показывать ли кнопку.
+ */
+export function expandHiddenToRoutes(hidden) {
+  if (!Array.isArray(hidden) || !hidden.length) return [];
+  if (hidden.includes(HIDDEN_FORMAT_ROUTES)) {
+    return hidden.filter(v => v !== HIDDEN_FORMAT_ROUTES);
+  }
+  const known = new Set();
+  const result = [];
+  for (const item of MENU_ITEMS) {
+    known.add(item.route);
+    if (item.module) known.add(item.module);
+    const isHidden = hidden.includes(item.route) || (item.module && hidden.includes(item.module));
+    if (isHidden && !result.includes(item.route)) result.push(item.route);
+  }
+  for (const value of hidden) if (!known.has(value)) result.push(value);
+  return result;
+}
+
+/** Список маршрутов → хранимый вид (с меткой формата). */
+export function packHiddenRoutes(routes) {
+  const list = Array.isArray(routes) ? routes.filter(v => v !== HIDDEN_FORMAT_ROUTES) : [];
+  return list.length ? [HIDDEN_FORMAT_ROUTES, ...list] : [];
+}
+
 // route → подпись. Используется для статуса «кто на какой странице».
 export const PAGE_NAMES = ALL_NAV_ITEMS.reduce((acc, item) => {
   acc[item.route] = item.label;
