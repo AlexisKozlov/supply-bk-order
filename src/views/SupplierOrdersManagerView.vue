@@ -530,6 +530,7 @@
                 <tr>
                   <th class="so-grid-rest">Ресторан</th>
                   <th v-for="d in 7" :key="d" class="so-grid-day">{{ daysShort[d] }}</th>
+                  <th class="so-grid-day" title="Поставщик привозит на склад, а ресторан получает с ближайшей основной поставкой. Ресторану показывается его дата получения, поставщику — складская.">Через склад</th>
                   <th class="so-grid-day" title="Напоминания о подаче заявки этому ресторану. Выкл — крон не шлёт напоминания «заявка не подана» по этому поставщику.">Напом.</th>
                   <th class="so-grid-day" title="Кто из привязанных Telegram-аккаунтов ресторана получает напоминания о подаче заявки этому поставщику.">Аккаунты</th>
                 </tr>
@@ -543,6 +544,10 @@
                     </td>
                     <td v-for="d in 7" :key="d" class="so-grid-check" @click="toggleScheduleDay(r, d)">
                       <input type="checkbox" :checked="!!scheduleGrid[r.id]?.[d]" @click.stop="toggleScheduleDay(r, d)" />
+                    </td>
+                    <td class="so-grid-check" @click="toggleScheduleWarehouse(r)">
+                      <input type="checkbox" :checked="scheduleWarehouse.has(r.id)" @click.stop="toggleScheduleWarehouse(r)"
+                             title="Ресторан получает этот товар со склада — сохраните расписание после изменения" />
                     </td>
                     <td class="so-grid-check">
                       <button
@@ -560,7 +565,7 @@
                     </td>
                   </tr>
                   <tr v-if="expandedRecipients.has(r.id)" class="so-recipients-row">
-                    <td colspan="10" class="so-recipients-cell">
+                    <td colspan="11" class="so-recipients-cell">
                       <div v-if="recipientsLoading.has(r.id)" class="so-recipients-loading">
                         <BurgerSpinner size="xs" text="Загрузка..." />
                       </div>
@@ -2477,6 +2482,8 @@ const scheduleRestaurants = ref([]);
 const scheduleGrid = reactive({});
 // id ресторанов с выключенными напоминаниями по текущему поставщику
 const scheduleMuted = reactive(new Set());
+// id ресторанов, которые снабжаются через склад (галочка в колонке «Через склад»)
+const scheduleWarehouse = reactive(new Set());
 const remMuteSaving = reactive(new Set());
 const temporaryScheduleGrid = reactive({});
 const savingScheduleGrid = ref(false);
@@ -2530,6 +2537,22 @@ function fillGridFromItems(grid, restaurants, items = []) {
   }
 }
 
+// «Через склад» — признак пары поставщик+ресторан: поставщик привозит на склад,
+// ресторан получает с ближайшей основной поставкой и видит свою дату.
+function fillWarehouseFromItems(restaurants, items = []) {
+  scheduleWarehouse.clear();
+  for (const s of items || []) {
+    if (Number(s.via_warehouse) !== 1) continue;
+    const rest = restaurants.find(r => r.number == s.restaurant_number);
+    if (rest) scheduleWarehouse.add(rest.id);
+  }
+}
+
+function toggleScheduleWarehouse(r) {
+  if (scheduleWarehouse.has(r.id)) scheduleWarehouse.delete(r.id);
+  else scheduleWarehouse.add(r.id);
+}
+
 function buildSchedulesFromGrid(grid) {
   const items = [];
   for (const r of scheduleRestaurants.value) {
@@ -2537,7 +2560,7 @@ function buildSchedulesFromGrid(grid) {
       if (grid[r.id]?.[d]) {
         const rule = deadlineRulesMap[d];
         const orderDay = rule?.active ? rule.deadline_dow : (d > 1 ? d - 1 : 7);
-        items.push({ restaurant_id: r.id, order_day: orderDay, delivery_day: d, is_active: 1 });
+        items.push({ restaurant_id: r.id, order_day: orderDay, delivery_day: d, is_active: 1, via_warehouse: scheduleWarehouse.has(r.id) ? 1 : 0 });
       }
     }
   }
@@ -2570,6 +2593,7 @@ async function loadRestaurantsForSchedule() {
     const allRests = (data.data || data || []).sort((a, b) => parseInt(a.number) - parseInt(b.number));
     scheduleRestaurants.value = allRests;
     fillGridFromItems(scheduleGrid, scheduleRestaurants.value, schedules.value);
+    fillWarehouseFromItems(scheduleRestaurants.value, schedules.value);
     fillGridFromItems(temporaryScheduleGrid, scheduleRestaurants.value, temporarySchedule.value?.items || []);
   } catch (e) { console.error(e); }
   finally { scheduleGridLoading.value = false; }

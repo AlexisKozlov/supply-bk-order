@@ -4196,8 +4196,8 @@ if ($soAction === 'admin') {
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         $s = $pdo->prepare("
-            SELECT ss.id, ss.order_day, ss.delivery_day, ss.is_active,
-                   r.number as restaurant_number, r.region, r.city, r.address
+            SELECT ss.id, ss.order_day, ss.delivery_day, ss.is_active, ss.via_warehouse,
+                   r.id AS restaurant_id, r.number as restaurant_number, r.region, r.city, r.address
             FROM supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             WHERE ss.supplier_id = ?
@@ -4404,6 +4404,14 @@ if ($soAction === 'admin') {
 
         $updatedBy = resolveActorName($pdo, $sessionUser);
 
+        // Снимок галочек «через склад» по ресторанам: сетка сохраняется через
+        // «погасить всё → перезаписать → удалить погасшие», и без снимка признак
+        // терялся бы при любой правке дней.
+        $whSnapshot = [];
+        $whSnapQ = $pdo->prepare("SELECT restaurant_id, MAX(via_warehouse) AS v FROM supplier_schedules WHERE supplier_id = ? GROUP BY restaurant_id");
+        $whSnapQ->execute([$supplierId]);
+        foreach ($whSnapQ->fetchAll() as $whRow) $whSnapshot[(int)$whRow['restaurant_id']] = (int)$whRow['v'];
+
         $pdo->beginTransaction();
         try {
             // Сначала деактивируем все расписания поставщика, потом активируем присланные
@@ -4411,12 +4419,13 @@ if ($soAction === 'admin') {
 
             // Upsert
             $upsert = $pdo->prepare("
-                INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
-                VALUES (?, ?, ?, ?, ?, NOW(), ?)
+                INSERT INTO supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, via_warehouse, updated_at, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)
                 ON DUPLICATE KEY UPDATE
                     order_day = VALUES(order_day),
                     delivery_day = VALUES(delivery_day),
                     is_active = VALUES(is_active),
+                    via_warehouse = VALUES(via_warehouse),
                     updated_at = NOW(),
                     updated_by = VALUES(updated_by)
             ");
@@ -4425,12 +4434,16 @@ if ($soAction === 'admin') {
             foreach ($schedules as $sch) {
                 $restId = $sch['restaurant_id'] ?? null;
                 if (!$restId) continue;
+                $viaWh = array_key_exists('via_warehouse', $sch)
+                    ? (!empty($sch['via_warehouse']) ? 1 : 0)
+                    : ($whSnapshot[(int)$restId] ?? 0);
                 $upsert->execute([
                     $supplierId,
                     $restId,
                     (int)($sch['order_day'] ?? 1),
                     (int)($sch['delivery_day'] ?? 2),
                     (int)($sch['is_active'] ?? 1),
+                    $viaWh,
                     $updatedBy,
                 ]);
                 $count++;
