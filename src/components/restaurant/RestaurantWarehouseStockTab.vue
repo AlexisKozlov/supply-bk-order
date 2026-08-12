@@ -347,7 +347,11 @@ async function exportToExcel() {
     text-overflow: ellipsis;
     flex-wrap: nowrap;
   }
+  /* Группа аналогов — единственное, что бывает длинным: пусть сжимается с
+     многоточием. Раньше не сжимался никто, и строка просто уезжала за край
+     без всякого признака, что текст обрезан. */
   .whs-meta > span { flex-shrink: 0; }
+  .whs-meta > span:nth-child(2) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
   /* Остаток слева, срок+партии справа — на одной строке */
   .whs-row > .whs-qty {
