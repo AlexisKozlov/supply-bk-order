@@ -34,7 +34,7 @@
       </button>
       <button class="adm-tab" :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'">
         <BkIcon name="key" size="sm"/> Сессии
-        <span class="adm-tab-count" :class="{ active: activeTab === 'sessions' }">{{ onlineUsers.length }}</span>
+        <span class="adm-tab-count" :class="{ active: activeTab === 'sessions' }">{{ onlineCount }}</span>
       </button>
       <button class="adm-tab" :class="{ active: activeTab === 'feedback' }" @click="activeTab = 'feedback'; loadBugReports()">
         <BkIcon name="feedback" size="sm"/> Обращения
@@ -631,102 +631,7 @@
     </div>
 
     <!-- ═══ Сессии ═══ -->
-    <div v-if="activeTab === 'sessions'" class="adm-section">
-      <!-- Онлайн -->
-      <div class="adm-maint-msg-card" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <h4 class="adm-maint-msg-title" style="margin:0;">Сейчас онлайн — {{ onlineUsers.length }} {{ onlineWord }}</h4>
-          <button class="btn" style="font-size:12px;padding:4px 10px;" @click="loadOnlineUsers" :disabled="onlineLoading">
-            <BkIcon name="redo" size="sm"/>
-          </button>
-        </div>
-        <div v-if="onlineLoading && !onlineUsers.length" style="text-align:center;padding:16px;"><BurgerSpinner text="Загрузка..." /></div>
-        <div v-else-if="!onlineUsers.length" style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px;">Нет пользователей онлайн</div>
-        <div v-else class="adm-user-list">
-          <div v-for="u in onlineUsers" :key="u.user_name" class="adm-user-row" style="cursor:default;">
-            <div class="adm-user-avatar adm-avatar-online">
-              {{ initials(u.user_name) }}
-              <span class="adm-online-dot"></span>
-            </div>
-            <div class="adm-user-info">
-              <div class="adm-user-name">
-                {{ u.user_name }}
-                <span v-if="u.user_name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
-              </div>
-              <div class="adm-user-meta">{{ pageLabel(u.page) }}</div>
-            </div>
-            <div class="adm-online-time">{{ formatOnlineTime(u.last_seen) }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Рестораны онлайн -->
-      <div class="adm-maint-msg-card" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <h4 class="adm-maint-msg-title" style="margin:0;">Рестораны онлайн — {{ onlineRestaurants.length }} {{ onlineRestaurantsWord }}</h4>
-          <button class="btn" style="font-size:12px;padding:4px 10px;" @click="loadOnlineRestaurants" :disabled="onlineRestaurantsLoading">
-            <BkIcon name="redo" size="sm"/>
-          </button>
-        </div>
-        <div v-if="onlineRestaurantsLoading && !onlineRestaurants.length" style="text-align:center;padding:16px;"><BurgerSpinner text="Загрузка..." /></div>
-        <div v-else-if="!onlineRestaurants.length" style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px;">Нет ресторанов онлайн</div>
-        <div v-else class="adm-user-list">
-          <div v-for="r in onlineRestaurants" :key="(r.legal_entity_group || 'BK_VM') + '-' + r.restaurant_number" class="adm-user-row" style="cursor:default;">
-            <div class="adm-user-avatar adm-avatar-online">
-              {{ formatRestaurantNumberShort(r.restaurant_number, r.legal_entity_group) }}
-              <span class="adm-online-dot"></span>
-            </div>
-            <div class="adm-user-info">
-              <div class="adm-user-name">
-                {{ r.city || '—' }}<span v-if="r.address"> · {{ r.address }}</span>
-              </div>
-              <div class="adm-user-meta">
-                {{ pageLabel(r.last_page) }}
-                <span style="opacity:.6;"> · {{ shortLegalEntityAdm(r.legal_entity) }}</span>
-              </div>
-            </div>
-            <div class="adm-online-time">{{ formatOnlineTime(r.last_activity) }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Активные сессии -->
-      <div class="adm-toolbar">
-        <div class="adm-toolbar-info">{{ sessionsList.length }} активных сессий</div>
-        <button class="btn" @click="loadSessions" :disabled="sessionsLoading">
-          <BkIcon name="redo" size="sm"/> Обновить
-        </button>
-      </div>
-
-      <div v-if="sessionsLoading && !sessionsList.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!sessionsList.length" class="adm-empty">Нет активных сессий</div>
-
-      <div v-else class="adm-user-list">
-        <div v-for="s in sessionsList" :key="s.id" class="adm-user-row" style="cursor:default;">
-          <div class="adm-user-avatar" :class="{ 'adm-avatar-online': isCurrentSession(s) }">
-            {{ initials(s.user_name) }}
-            <span v-if="isCurrentSession(s)" class="adm-online-dot"></span>
-          </div>
-          <div class="adm-user-info">
-            <div class="adm-user-name">
-              {{ s.user_name }}
-              <span v-if="isCurrentSession(s)" class="adm-badge adm-badge-you">текущая</span>
-            </div>
-            <div class="adm-user-meta">{{ parseUserAgent(s.user_agent) }}</div>
-            <div class="adm-user-email">IP: {{ s.ip_address || '—' }}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0;">
-            <div style="font-size:11px;color:var(--text-muted);">Вход: {{ formatSessionDate(s.created_at) }}</div>
-            <div style="font-size:11px;color:var(--text-muted);">Истекает: {{ formatSessionDate(s.expires_at) }}</div>
-          </div>
-          <div class="adm-user-actions" style="opacity:1;">
-            <button class="adm-act-btn adm-act-del" @click="terminateSession(s)" :disabled="isCurrentSession(s)" title="Завершить сессию">
-              <BkIcon name="close" size="sm"/>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <AdminSessionsTab v-if="activeTab === 'sessions'" @online-count="onlineCount = $event" />
 
     <!-- ═══ Обращения — мессенджер ═══ -->
     <div v-if="activeTab === 'feedback'" class="adm-section fb-messenger">
@@ -1089,7 +994,7 @@ import { useRouter } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { db } from '@/lib/apiClient.js';
-import { formatMoscowDateTime, formatMoscowRelative, toLocalDateStr, plural } from '@/lib/utils.js';
+import { formatMoscowDateTime, toLocalDateStr, plural } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, formatRestaurantNumber } from '@/lib/legalEntities.js';
@@ -1099,21 +1004,11 @@ import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 
 const router = useRouter();
 
-// Перевод названия страницы в онлайне на русский. Старые бандлы клиентов шлют
-// английское имя маршрута (reconciliation, assistant…), пока не обновятся —
-// переводим на стороне отображения по meta.title маршрута. Русские значения
-// (из новых бандлов) остаются как есть.
-const _routeTitles = {};
-router.getRoutes().forEach(r => { if (r.name && r.meta?.title) _routeTitles[r.name] = r.meta.title; });
-function pageLabel(page) {
-  if (!page) return '—';
-  return _routeTitles[page] || page;
-}
-
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import AdminRestaurantAccountsTab from '@/components/admin/AdminRestaurantAccountsTab.vue';
 import AdminEmailImportsTab from '@/components/admin/AdminEmailImportsTab.vue';
 import AdminBotMonitorTab from '@/components/admin/AdminBotMonitorTab.vue';
+import AdminSessionsTab from '@/components/admin/AdminSessionsTab.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
@@ -1474,65 +1369,13 @@ const bcTargets = ref({
 });
 const bcHasAnyTarget = computed(() => Object.values(bcTargets.value).some(Boolean));
 
-// ═══ Онлайн-пользователи ═══
-const onlineUsers = ref([]);
-const onlineLoading = ref(false);
-let onlineTimer = null;
+// Счётчик на вкладке «Сессии» — его присылает сам компонент вкладки.
+const onlineCount = ref(0);
 // bugPollTimer объявлен здесь, а не рядом с bugPoll/startBugPoll,
 // потому что immediate watch на activeTab может сработать с tab='feedback'
 // до того, как setup дойдёт до конца файла. let-переменные имеют TDZ —
 // startBugPoll() при чтении bugPollTimer падал «Cannot access X before initialization».
 let bugPollTimer = null;
-
-const onlineWord = computed(() => {
-  const n = onlineUsers.value.length;
-  if (n % 10 === 1 && n % 100 !== 11) return 'пользователь';
-  if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'пользователя';
-  return 'пользователей';
-});
-
-async function loadOnlineUsers() {
-  onlineLoading.value = true;
-  try {
-    const { data } = await db.rpc('get_online_users');
-    onlineUsers.value = data || [];
-  } catch (e) { console.warn('[admin] loadOnlineUsers:', e); }
-  finally { onlineLoading.value = false; }
-}
-
-const onlineRestaurants = ref([]);
-const onlineRestaurantsLoading = ref(false);
-
-const onlineRestaurantsWord = computed(() => {
-  const n = onlineRestaurants.value.length;
-  if (n % 10 === 1 && n % 100 !== 11) return 'ресторан';
-  if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'ресторана';
-  return 'ресторанов';
-});
-
-async function loadOnlineRestaurants() {
-  onlineRestaurantsLoading.value = true;
-  try {
-    const { data } = await db.rpc('get_online_restaurants');
-    onlineRestaurants.value = data || [];
-  } catch (e) { console.warn('[admin] loadOnlineRestaurants:', e); }
-  finally { onlineRestaurantsLoading.value = false; }
-}
-
-function formatRestaurantNumberShort(num, group) {
-  if (group === 'PS') return 'PS' + String(num).padStart(2, '0');
-  return '№' + num;
-}
-
-const LE_SHORT = { 'ООО "Бургер БК"': 'БК', 'ООО "Воглия Матта"': 'ВМ', 'ООО "Пицца Стар"': 'ПС' };
-function shortLegalEntityAdm(le) {
-  if (!le) return '';
-  if (LE_SHORT[le]) return LE_SHORT[le];
-  const m = le.match(/«([^»]+)»|"([^"]+)"/);
-  return m ? (m[1] || m[2]).trim() : (le.length > 16 ? le.slice(0, 14) + '…' : le);
-}
-
-const formatOnlineTime = formatMoscowRelative;
 
 async function sendBroadcast() {
   if (!bcMessage.value.trim()) return;
@@ -1730,55 +1573,6 @@ async function exportBackup() {
   } finally {
     backupExporting.value = false;
   }
-}
-
-// ═══ Сессии ═══
-const sessionsList = ref([]);
-const sessionsLoading = ref(false);
-
-function isCurrentSession(s) {
-  const currentToken = localStorage.getItem('bk_session_token') || '';
-  return s.token === currentToken;
-}
-
-function parseUserAgent(ua) {
-  if (!ua) return '—';
-  if (ua.includes('Chrome') && !ua.includes('Edge')) return 'Chrome';
-  if (ua.includes('Firefox')) return 'Firefox';
-  if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari';
-  if (ua.includes('Edge')) return 'Edge';
-  return ua.slice(0, 50);
-}
-
-function formatSessionDate(str) {
-  if (!str) return '—';
-  const d = new Date(str);
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
-         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
-
-async function loadSessions() {
-  sessionsLoading.value = true;
-  try {
-    const { data } = await db.rpc('get_sessions');
-    sessionsList.value = data || [];
-  } catch (e) { toast.error('Ошибка', 'Не удалось загрузить сессии'); }
-  finally { sessionsLoading.value = false; }
-}
-
-async function terminateSession(s) {
-  if (isCurrentSession(s)) return;
-  const ok = await confirmAction('Завершить сессию?', `Сессия пользователя «${s.user_name}» будет завершена.`);
-  if (!ok) return;
-  try {
-    const { data } = await db.rpc('terminate_session', { session_id: s.id });
-    if (data?.success) {
-      toast.success('Сессия завершена', s.user_name);
-      sessionsList.value = sessionsList.value.filter(x => x.id !== s.id);
-    } else {
-      toast.error('Ошибка', data?.error || '');
-    }
-  } catch { toast.error('Ошибка', 'Не удалось завершить сессию'); }
 }
 
 // ═══ Логи ошибок ═══
@@ -2219,7 +2013,6 @@ onMounted(() => {
   loadRbacConfig(); // загрузить актуальные роли с сервера
   loadUsers(); loadSettings();
 });
-onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 
 // Если сервер подтвердит другую роль — перенаправить
 watch(() => userStore.currentUser?.role, (role) => {
@@ -2525,7 +2318,7 @@ function formatBugDate(str) {
     d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
-// bugPollTimer объявлен выше (рядом с onlineTimer) — иначе TDZ при
+// bugPollTimer объявлен выше — иначе TDZ при
 // immediate watch на activeTab, если таб 'feedback' открывается сразу.
 
 async function bugPoll() {
@@ -2592,21 +2385,6 @@ onUnmounted(() => {
 // падал с «Cannot access before initialization», и обращения не грузились.
 // immediate: true — чтобы данные загружались и при заходе на вкладку через URL `?tab=...`
 watch(activeTab, (tab) => {
-  if (tab === 'sessions') {
-    loadOnlineUsers();
-    loadOnlineRestaurants();
-    loadSessions();
-    if (onlineTimer) clearInterval(onlineTimer);
-    // Не дёргаем сервер на скрытой вкладке — экономит трафик и нагрузку.
-    onlineTimer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        loadOnlineUsers();
-        loadOnlineRestaurants();
-      }
-    }, 15000);
-  } else {
-    if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
-  }
   if (tab === 'broadcast') {
     loadBcHistory();
     if (!changelogEntries.value.length) loadChangelog();

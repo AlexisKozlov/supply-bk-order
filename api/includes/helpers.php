@@ -1095,7 +1095,8 @@ function getSessionUser($pdo) {
         SELECT u.name, u.email, u.role, u.display_role, u.legal_entities, u.supplier_scope, u.permissions,
                u.created_at, u.telegram_chat_id, u.hidden_modules,
                s.created_at AS session_created_at,
-               s.expires_at AS session_expires_at
+               s.expires_at AS session_expires_at,
+               s.last_seen_at AS session_last_seen_at
         FROM user_sessions s
         JOIN users u ON u.name = s.user_name
         WHERE s.token = ?
@@ -1122,10 +1123,19 @@ function getSessionUser($pdo) {
                 WHERE s.token = ?
             ")->execute([$token]);
         }
+        // Последняя активность — чтобы в админке было видно живое устройство,
+        // а не забытую вкладку. Пишем не чаще раза в минуту: на каждый запрос
+        // это была бы лишняя запись в таблицу.
+        $seen = $row['session_last_seen_at'] ?? null;
+        if (!$seen || strtotime($seen) < time() - 60) {
+            try {
+                $pdo->prepare("UPDATE user_sessions SET last_seen_at = NOW() WHERE token = ?")->execute([$token]);
+            } catch (PDOException $e) { /* колонки может не быть на старой БД */ }
+        }
         $sessionUpdated = true;
     }
-    // Не возвращаем session_expires_at в caller — это деталь внутренней логики.
-    unset($row['session_expires_at']);
+    // Не возвращаем служебные поля сессии в caller — это детали внутренней логики.
+    unset($row['session_expires_at'], $row['session_last_seen_at']);
     $_sessionUserCache['result'] = $row;
     return $row;
 }

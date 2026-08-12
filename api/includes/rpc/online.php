@@ -103,7 +103,49 @@ if ($fn === 'get_admin_stats') {
 if ($fn === 'get_sessions') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
-    $s = $pdo->query("SELECT id, user_name, CONCAT(LEFT(token, 8), '…') AS token_prefix, created_at, expires_at, ip_address, user_agent FROM user_sessions WHERE expires_at > NOW() ORDER BY created_at DESC");
+    // Токен наружу не отдаём: свою сессию помечаем здесь, на сервере.
+    $myToken = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
+    $s = $pdo->prepare("
+        SELECT s.id, s.user_name, s.created_at, s.last_seen_at, s.expires_at,
+               s.ip_address, s.user_agent,
+               u.role, u.display_role,
+               (s.token = ?) AS is_current,
+               p.last_seen AS presence_last_seen,
+               p.page      AS presence_page
+        FROM user_sessions s
+        LEFT JOIN users u ON u.name = s.user_name
+        LEFT JOIN user_presence p ON p.user_name = s.user_name
+        WHERE s.expires_at > NOW()
+        ORDER BY COALESCE(s.last_seen_at, s.created_at) DESC
+    ");
+    $s->execute([$myToken]);
+    $rows = $s->fetchAll();
+    foreach ($rows as &$r) {
+        $r['is_current']   = (int)$r['is_current'] === 1;
+        $r['device_label'] = roMakeDeviceLabel($r['user_agent']);
+        unset($r['user_agent']);
+    }
+    respond($rows);
+}
+
+if ($fn === 'get_ro_sessions') {
+    // Сессии кабинетов ресторанов: одно устройство = одна строка.
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    $s = $pdo->query("
+        SELECT s.id, s.created_at, s.last_seen_at, s.expires_at, s.remember,
+               s.is_pwa, s.ip_address, s.device_label,
+               ru.restaurant_number, ru.legal_entity, ru.legal_entity_group,
+               ru.last_page, ru.is_active,
+               r.city, r.address
+        FROM ro_user_sessions s
+        JOIN ro_users ru ON ru.id = s.ro_user_id
+        LEFT JOIN restaurants r
+          ON r.number = ru.restaurant_number
+         AND r.legal_entity_group = ru.legal_entity_group
+        WHERE s.expires_at > NOW()
+        ORDER BY s.last_seen_at DESC
+    ");
     respond($s->fetchAll());
 }
 
@@ -112,9 +154,56 @@ if ($fn === 'terminate_session') {
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
     $sessionId = $body['session_id'] ?? '';
     if (!$sessionId) respond(['success' => false, 'error' => 'Не указан ID сессии'], 400);
+    // Свою сессию не рубим — иначе админ выкидывает сам себя одним кликом.
+    $myToken = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
+    $own = $pdo->prepare("SELECT 1 FROM user_sessions WHERE id = ? AND token = ?");
+    $own->execute([$sessionId, $myToken]);
+    if ($own->fetchColumn()) respond(['success' => false, 'error' => 'Это ваша текущая сессия'], 400);
     $pdo->prepare("DELETE FROM user_sessions WHERE id = ?")->execute([$sessionId]);
     auditLog($pdo, 'session_terminated', 'system', $sessionId, $caller['name']);
     respond(['success' => true]);
+}
+
+if ($fn === 'terminate_user_sessions') {
+    // Завершить все сессии одного человека (свою текущую не трогаем).
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    $userName = trim((string)($body['user_name'] ?? ''));
+    if ($userName === '') respond(['success' => false, 'error' => 'Не указан пользователь'], 400);
+    $myToken = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
+    $st = $pdo->prepare("DELETE FROM user_sessions WHERE user_name = ? AND token <> ?");
+    $st->execute([$userName, $myToken]);
+    $n = $st->rowCount();
+    auditLog($pdo, 'session_terminated', 'system', $userName . ' (' . $n . ')', $caller['name']);
+    respond(['success' => true, 'count' => $n]);
+}
+
+if ($fn === 'terminate_ro_session') {
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    $sessionId = (int)($body['session_id'] ?? 0);
+    if ($sessionId <= 0) respond(['success' => false, 'error' => 'Не указан ID сессии'], 400);
+    $pdo->prepare("DELETE FROM ro_user_sessions WHERE id = ?")->execute([$sessionId]);
+    auditLog($pdo, 'session_terminated', 'restaurant', (string)$sessionId, $caller['name']);
+    respond(['success' => true]);
+}
+
+if ($fn === 'terminate_ro_restaurant_sessions') {
+    // Все устройства одного ресторана.
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    $number = (int)($body['restaurant_number'] ?? 0);
+    $group  = ($body['legal_entity_group'] ?? '') === 'PS' ? 'PS' : 'BK_VM';
+    if ($number <= 0) respond(['success' => false, 'error' => 'Не указан ресторан'], 400);
+    $st = $pdo->prepare("
+        DELETE s FROM ro_user_sessions s
+        JOIN ro_users ru ON ru.id = s.ro_user_id
+        WHERE ru.restaurant_number = ? AND ru.legal_entity_group = ?
+    ");
+    $st->execute([$number, $group]);
+    $n = $st->rowCount();
+    auditLog($pdo, 'session_terminated', 'restaurant', '№' . $number . ' (' . $n . ')', $caller['name']);
+    respond(['success' => true, 'count' => $n]);
 }
 
 if ($fn === 'clear_error_logs') {

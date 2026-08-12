@@ -166,7 +166,8 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
-import { formatInt } from '@/lib/utils.js';
+// formatMoscowDateTime — вместо локальной копии, которая теряла часовой пояс.
+import { formatInt, formatMoscowDateTime as formatDateTime } from '@/lib/utils.js';
 
 const router = useRouter();
 const userStore = useUserStore();
