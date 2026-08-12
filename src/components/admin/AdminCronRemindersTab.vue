@@ -83,6 +83,9 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { formatInt, parseMoscowDate, formatMoscowRelative } from '@/lib/utils.js';
 
+// Красную точку у вкладки рисует админка — отдаём ей свежее число ошибок.
+const emit = defineEmits(['err-count']);
+
 const rows = ref([]);
 const loading = ref(false);
 const onlyProblems = ref(false);
@@ -163,6 +166,7 @@ async function load() {
       .order('started_at', { ascending: false })
       .limit(100);
     rows.value = res.error ? [] : (res.data || []);
+    emit('err-count', dayErrors.value);
   } catch {
     rows.value = [];
   } finally {

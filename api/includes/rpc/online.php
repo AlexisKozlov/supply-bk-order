@@ -84,10 +84,12 @@ if ($fn === 'get_admin_stats') {
     $s = $pdo->query("SELECT COUNT(*) as cnt FROM products"); $stats['products_count'] = (int)$s->fetch()['cnt'];
     $s = $pdo->query("SELECT COUNT(*) as cnt FROM suppliers"); $stats['suppliers_count'] = (int)$s->fetch()['cnt'];
     $s = $pdo->query("SELECT COUNT(*) as cnt FROM users"); $stats['users_count'] = (int)$s->fetch()['cnt'];
-    // Заказы ресторанов
-    try { $s = $pdo->query("SELECT COUNT(*) as cnt FROM ro_orders WHERE 1=1" . $dateFilter); $stats['ro_orders_total'] = (int)$s->fetch()['cnt']; } catch (Exception $e) { $stats['ro_orders_total'] = 0; }
-    // Заявки поставщикам
-    try { $s = $pdo->query("SELECT COUNT(*) as cnt FROM so_orders WHERE 1=1" . $dateFilter); $stats['so_orders_total'] = (int)$s->fetch()['cnt']; } catch (Exception $e) { $stats['so_orders_total'] = 0; }
+    // Заказы ресторанов и заявки поставщикам: в этих таблицах нет created_at,
+    // дата подачи лежит в submitted_at. Раньше фильтр по периоду падал молча,
+    // и обе цифры всегда показывали 0 для «недели» и «месяца».
+    $submittedFilter = str_replace('created_at', 'submitted_at', $dateFilter);
+    try { $s = $pdo->query("SELECT COUNT(*) as cnt FROM ro_orders WHERE 1=1" . $submittedFilter); $stats['ro_orders_total'] = (int)$s->fetch()['cnt']; } catch (Exception $e) { $stats['ro_orders_total'] = 0; }
+    try { $s = $pdo->query("SELECT COUNT(*) as cnt FROM so_orders WHERE 1=1" . $submittedFilter); $stats['so_orders_total'] = (int)$s->fetch()['cnt']; } catch (Exception $e) { $stats['so_orders_total'] = 0; }
     // Протоколы цен
     try { $s = $pdo->query("SELECT COUNT(*) as cnt FROM price_agreements WHERE 1=1" . $dateFilter); $stats['price_agreements_total'] = (int)$s->fetch()['cnt']; } catch (Exception $e) { $stats['price_agreements_total'] = 0; }
     // Заказы по юрлицам
@@ -96,6 +98,36 @@ if ($fn === 'get_admin_stats') {
     // Топ пользователей
     $s = $pdo->query("SELECT created_by as user_name, COUNT(*) as cnt FROM orders WHERE 1=1" . $dateFilter . " GROUP BY created_by ORDER BY cnt DESC LIMIT 10");
     $stats['top_users'] = $s->fetchAll();
+
+    // Активность по дням за 30 дней: три потока заказов рядом — видно, что
+    // портал живёт, и когда были провалы.
+    $byDay = [];
+    // У каждой таблицы своя колонка «когда появилось».
+    $sources = [
+        'orders' => ['orders', 'created_at'],
+        'ro'     => ['ro_orders', 'submitted_at'],
+        'so'     => ['so_orders', 'submitted_at'],
+    ];
+    foreach ($sources as $key => [$table, $col]) {
+        try {
+            $q = $pdo->query("SELECT DATE(`$col`) d, COUNT(*) c FROM `$table`
+                              WHERE `$col` > NOW() - INTERVAL 30 DAY
+                              GROUP BY DATE(`$col`)");
+            foreach ($q as $row) {
+                $d = $row['d'];
+                if (!isset($byDay[$d])) $byDay[$d] = ['date' => $d, 'orders' => 0, 'ro' => 0, 'so' => 0];
+                $byDay[$d][$key] = (int)$row['c'];
+            }
+        } catch (Exception $e) { /* таблицы может не быть — пропускаем поток */ }
+    }
+    ksort($byDay);
+    $stats['by_day'] = array_values($byDay);
+
+    // Сколько людей реально работало за период — по журналу действий.
+    try {
+        $s = $pdo->query("SELECT COUNT(DISTINCT user_name) c FROM audit_log WHERE 1=1" . $dateFilter);
+        $stats['active_users'] = (int)$s->fetch()['c'];
+    } catch (Exception $e) { $stats['active_users'] = 0; }
 
     respond($stats);
 }
