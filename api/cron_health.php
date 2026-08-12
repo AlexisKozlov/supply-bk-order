@@ -117,7 +117,83 @@ if ($band > $prevBand) {
 }
 if ($band !== $prevBand) file_put_contents($diskStateFile, json_encode(['band' => $band]));
 
-echo "[{$now}] " . ($isDown ? "ПРОБЛЕМЫ: " . implode('; ', $problems) : "OK") . " | диск {$diskUsedPct}%\n";
+
+// ─── Здоровье Telegram-бота ───────────────────────────────────────────────
+// Отдельно от «сервер упал»: бот может молчать при живом сервере — протух
+// токен, отвалился вебхук, Telegram режет запросы. Заметить это иначе можно
+// только случайно, когда люди перестанут получать напоминания.
+$botStateFile = __DIR__ . '/bot_health_state.json';
+$botPrev = file_exists($botStateFile) ? json_decode(file_get_contents($botStateFile), true) : [];
+$botWasDown = $botPrev['down'] ?? false;
+$botDownSince = $botPrev['down_since'] ?? null;
+$botProblems = [];
+
+if ($pdo) {
+    try {
+        // 1. Всплеск ошибок за час. «skipped_blocked» — это не сбой, а наша
+        //    же защита от отправки тем, кто заблокировал бота.
+        $row = $pdo->query("
+            SELECT COUNT(*) total,
+                   SUM(ok = 0 AND (error_text IS NULL OR error_text <> 'skipped_blocked')) fails
+            FROM tg_send_log
+            WHERE ts > NOW() - INTERVAL 1 HOUR
+        ")->fetch(PDO::FETCH_ASSOC);
+        $total = (int)($row['total'] ?? 0);
+        $fails = (int)($row['fails'] ?? 0);
+        if ($total >= 15 && $fails * 100 >= $total * 30) {
+            $pct = (int)round($fails * 100 / $total);
+            $botProblems[] = "❌ Бот часто ошибается: {$fails} из {$total} отправок за час ({$pct}%)";
+        }
+
+        // 2. Полная тишина днём. Ночью и в выходные тихо — это норма.
+        $hour = (int)date('G');
+        $isWorkday = (int)date('N') <= 5;
+        if ($isWorkday && $hour >= 11 && $hour <= 20) {
+            $recent = (int)$pdo->query("SELECT COUNT(*) FROM tg_send_log WHERE ts > NOW() - INTERVAL 6 HOUR")->fetchColumn();
+            if ($recent === 0) {
+                $botProblems[] = "❌ Бот молчит: за 6 часов ни одной отправки";
+            }
+        }
+    } catch (Exception $e) {
+        // Журнал отправок недоступен — это уже проблема БД, её ловит блок выше.
+    }
+}
+
+// 3. Отвечает ли сам Telegram на наш токен. Проверяем раз в 10 минут:
+//    крон ходит каждые 2 минуты, чаще незачем.
+if ($BOT_TOKEN && (int)date('i') % 10 === 0) {
+    $ch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/getMe");
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8, CURLOPT_CONNECTTIMEOUT => 3]);
+    $resp = curl_exec($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $me = $resp ? json_decode($resp, true) : null;
+    if (!$me || empty($me['ok'])) {
+        $why = $me['description'] ?? ($httpCode ? "код ответа {$httpCode}" : 'нет ответа');
+        $botProblems[] = "❌ Telegram не принимает наш токен: {$why}";
+    }
+}
+
+$botIsDown = !empty($botProblems);
+
+if ($botIsDown && !$botWasDown) {
+    sendAlert($BOT_TOKEN, $pdo,
+        "🤖 <b>ПРОБЛЕМЫ С БОТОМ</b>\n─────────────────────\n"
+        . implode("\n", $botProblems)
+        . "\n\nПодробности: Администрирование → Бот-монитор.\n🕐 {$now}");
+    file_put_contents($botStateFile, json_encode(['down' => true, 'down_since' => $now, 'problems' => $botProblems]));
+} elseif (!$botIsDown && $botWasDown) {
+    $mins = $botDownSince ? round((time() - strtotime($botDownSince)) / 60) : '?';
+    sendAlert($BOT_TOKEN, $pdo,
+        "✅ <b>Бот снова работает</b>\n─────────────────────\nПроблема держалась ~{$mins} мин.\n🕐 {$now}");
+    file_put_contents($botStateFile, json_encode(['down' => false]));
+} elseif ($botIsDown) {
+    file_put_contents($botStateFile, json_encode(['down' => true, 'down_since' => $botDownSince ?: $now, 'problems' => $botProblems]));
+} else {
+    file_put_contents($botStateFile, json_encode(['down' => false]));
+}
+
+echo "[{$now}] " . ($isDown ? "ПРОБЛЕМЫ: " . implode('; ', $problems) : "OK") . " | диск {$diskUsedPct}% | бот: " . ($botIsDown ? implode("; ", $botProblems) : "ок") . "\n";
 
 function sendAlert($botToken, $pdo, $text) {
     if (!$botToken) return;
