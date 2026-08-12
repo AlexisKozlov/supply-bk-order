@@ -5697,42 +5697,92 @@ if (strpos($roAction, 'admin') === 0) {
 
             if (!$category) roRespond(['error' => 'Не указана категория'], 400);
 
-            // Дедупликация по SKU (или по имени, если SKU нет) внутри категории.
+            // Дедупликация по SKU внутри категории.
             // uq_ro_tpl уникален по (legal_entity, category, sku) — дубли в payload
             // ронят весь INSERT и шаблон не сохраняется. Молча отбрасываем повторы.
             $deduped = [];
             $skipped = 0;
             $seenSku = [];
-            $seenName = [];
+            $seenBlankSku = false;
             foreach ($items as $item) {
                 $sku = trim((string)($item['sku'] ?? ''));
-                $name = trim((string)($item['product_name'] ?? ''));
                 if ($sku !== '') {
                     if (isset($seenSku[$sku])) { $skipped++; continue; }
                     $seenSku[$sku] = true;
                 } else {
-                    $nameKey = mb_strtolower($name);
-                    if ($nameKey !== '' && isset($seenName[$nameKey])) { $skipped++; continue; }
-                    if ($nameKey !== '') $seenName[$nameKey] = true;
+                    // Пустой SKU для ключа uq_ro_tpl — обычное значение, поэтому строка
+                    // без SKU в категории может быть только одна. Первую оставляем,
+                    // остальные считаем дублями: раньше они расходились по названиям,
+                    // проходили дедупликацию и молча перетирали друг друга.
+                    if ($seenBlankSku) { $skipped++; continue; }
+                    $seenBlankSku = true;
                 }
+                // Храним уже обрезанный SKU: по нему же строится список «что оставить»,
+                // и он должен совпадать с тем, что реально уходит в таблицу.
+                $item['sku'] = $sku;
                 $deduped[] = $item;
             }
 
-            // Удаляем старые для этой категории + юрлица
-            $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
+            $pdo->beginTransaction();
+            try {
+                // Раньше сносилась вся категория и вставлялась заново. Из-за этого
+                // отключённая позиция (is_active = 0) либо исчезала навсегда, либо
+                // возвращалась уже активной и снова показывалась ресторанам.
+                // Теперь удаляем только АКТИВНЫЕ строки категории, которых нет в
+                // присланном списке, — то есть те, что закупщик убрал крестиком.
+                // Отключённые строки не трогаем: скрытая позиция переживает сохранение.
+                $keepSkus = array_column($deduped, 'sku');
+                if ($keepSkus) {
+                    $skuPh = implode(',', array_fill(0, count($keepSkus), '?'));
+                    $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ? AND is_active = 1 AND sku NOT IN ($skuPh)")
+                        ->execute(array_merge([$le, $category], $keepSkus));
+                } else {
+                    $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ? AND is_active = 1")
+                        ->execute([$le, $category]);
+                }
 
-            $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?, ?)");
-            foreach ($deduped as $i => $item) {
-                $mult = intval($item['multiplicity'] ?? 0);
-                $insert->execute([
-                    $le,
-                    $category,
-                    $item['sku'] ?? '',
-                    $item['product_name'] ?? '',
-                    $mult > 0 ? $mult : 1,
-                    $i,
-                ]);
+                // ON DUPLICATE KEY UPDATE: строка с таким SKU могла уцелеть (отключённая
+                // или просто не удалённая) — обычный INSERT упал бы на uq_ro_tpl.
+                // is_active берём из присланной строки: экран «Шаблон заказа» показывает
+                // и отключённые позиции и возвращает их обратно, а жёсткая единица
+                // здесь означала бы, что скрытая позиция сама всплывёт ресторанам.
+                $insert = $pdo->prepare("
+                    INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                        product_name = VALUES(product_name),
+                        multiplicity = VALUES(multiplicity),
+                        sort_order   = VALUES(sort_order),
+                        is_active    = VALUES(is_active)
+                ");
+                foreach ($deduped as $i => $item) {
+                    $mult = intval($item['multiplicity'] ?? 0);
+                    // Признака в payload нет — значит позиция новая, она активна.
+                    // Если признак есть, приводим его к 0/1 явно: из базы он приходит
+                    // строкой, и в JSON легко прилетает "0", которое иначе истинно.
+                    $rawActive = $item['is_active'] ?? null;
+                    $isActive = ($rawActive === null || $rawActive === '')
+                        ? 1
+                        : (filter_var($rawActive, FILTER_VALIDATE_BOOLEAN) ? 1 : 0);
+                    $insert->execute([
+                        $le,
+                        $category,
+                        $item['sku'] ?? '',
+                        $item['product_name'] ?? '',
+                        $mult > 0 ? $mult : 1,
+                        $i,
+                        $isActive,
+                    ]);
+                }
+
+                $pdo->commit();
+            } catch (Exception $e) {
+                // Без транзакции сбой на середине оставлял бы категорию наполовину пустой.
+                $pdo->rollBack();
+                error_log('ro/admin/templates save error: ' . $e->getMessage());
+                roRespond(['error' => 'Ошибка сохранения шаблона'], 500);
             }
+
             roRespond(['success' => true, 'count' => count($deduped), 'skipped_duplicates' => $skipped]);
         }
 
@@ -5744,6 +5794,10 @@ if (strpos($roAction, 'admin') === 0) {
             $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
             $category = $body['category'] ?? '';
             roEnsureGroupAccess($sessionUser, getEntityGroup($le));
+
+            // Без категории запрос ниже ничего не найдёт, а чистка задела бы
+            // строки с пустой категорией — отвечаем ошибкой, как и при сохранении.
+            if (!$category) roRespond(['error' => 'Не указана категория'], 400);
 
             // Последняя дата остатков для юрлица
             $dateStmt = $pdo->prepare("SELECT MAX(balance_date) FROM ro_stock_balances WHERE legal_entity = ?");
@@ -5766,19 +5820,59 @@ if (strpos($roAction, 'admin') === 0) {
             $s->execute([$le, $latestDate, $category]);
             $products = $s->fetchAll();
 
-            // Сохраняем как шаблон
-            $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
-            $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?, ?)");
-            foreach ($products as $i => $p) {
-                $mult = intval($p['multiplicity'] ?? 0);
-                $insert->execute([
-                    $le,
-                    $category,
-                    $p['sku'],
-                    $p['product_name'],
-                    $mult > 0 ? $mult : 1,
-                    $i,
-                ]);
+            // DISTINCT снимает только полные повторы строк: если в справочнике на один
+            // SKU заведены две карточки с разными названиями, сюда придут обе. В шаблоне
+            // такой SKU может быть только один (uq_ro_tpl), поэтому оставляем первую —
+            // иначе и ответ фронту содержал бы две одинаковые позиции.
+            $uniqueProducts = [];
+            foreach ($products as $p) {
+                $sku = trim((string)($p['sku'] ?? ''));
+                if (isset($uniqueProducts[$sku])) continue;
+                $p['sku'] = $sku;
+                $uniqueProducts[$sku] = $p;
+            }
+            $products = array_values($uniqueProducts);
+
+            $pdo->beginTransaction();
+            try {
+                // «Заменить шаблон» относится к тому, что видят рестораны, поэтому
+                // удаляем только активные позиции категории. Раньше сносилось всё
+                // подряд, и отключённые позиции исчезали навсегда при каждом импорте.
+                $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ? AND is_active = 1")
+                    ->execute([$le, $category]);
+
+                // ON DUPLICATE KEY UPDATE: импортируемый SKU может совпасть с уцелевшей
+                // отключённой строкой — обычный INSERT упал бы на uq_ro_tpl. Товар попал
+                // в импорт осознанно (закупщик подтвердил замену), поэтому такая строка
+                // возвращается в активные.
+                $insert = $pdo->prepare("
+                    INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    ON DUPLICATE KEY UPDATE
+                        product_name = VALUES(product_name),
+                        multiplicity = VALUES(multiplicity),
+                        sort_order   = VALUES(sort_order),
+                        is_active    = 1
+                ");
+                foreach ($products as $i => $p) {
+                    $mult = intval($p['multiplicity'] ?? 0);
+                    $insert->execute([
+                        $le,
+                        $category,
+                        $p['sku'],
+                        $p['product_name'],
+                        $mult > 0 ? $mult : 1,
+                        $i,
+                    ]);
+                }
+
+                $pdo->commit();
+            } catch (Exception $e) {
+                // Импорт заменяет весь список: сбой на середине без транзакции оставил бы
+                // ресторанам обрезанный шаблон.
+                $pdo->rollBack();
+                error_log('ro/admin/templates import-from-stock error: ' . $e->getMessage());
+                roRespond(['error' => 'Ошибка импорта шаблона из остатков'], 500);
             }
 
             roRespond(['success' => true, 'count' => count($products), 'items' => $products, 'balance_date' => $latestDate]);

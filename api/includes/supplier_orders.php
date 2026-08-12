@@ -1429,6 +1429,19 @@ function soNotifyTempScheduleChanged($pdo, $supplierId, $dateFrom, $dateTo, $tem
 // soGetTempSchedulePeriod / soGetEffectiveScheduleRows перенесены в so_deadline.php
 // (общий файл, загружаемый всеми точками входа, включая telegram-бота).
 
+/**
+ * Кусок SQL «эта строка есть в сетке на экране» — по ресторану.
+ * Обе сетки графиков (постоянная и временная) грузятся только по активным
+ * ресторанам (restaurants.active = 1), а сохраняются по схеме «стереть старое →
+ * записать присланное». Строку отключённого ресторана сотрудник не видит и
+ * убрать не мог, поэтому стирать её нельзя: иначе при включении ресторана
+ * обратно графика у него уже не будет — молча, без единого следа.
+ * Условие живёт в одном месте, чтобы запросы сохранения не разошлись.
+ */
+function soGridRestaurantsSql() {
+    return " AND restaurant_id IN (SELECT id FROM restaurants WHERE active = 1)";
+}
+
 function soGetScheduleDatesInRange($pdo, $supplierId, $dateFrom, $dateTo, $restaurantId = null) {
     if (!$supplierId || !$dateFrom || !$dateTo) return [];
 
@@ -4440,10 +4453,27 @@ if ($soAction === 'admin') {
         $whSnapQ->execute([$supplierId]);
         foreach ($whSnapQ->fetchAll() as $whRow) $whSnapshot[(int)$whRow['restaurant_id']] = (int)$whRow['v'];
 
+        // Какие строки вообще принадлежат сетке на экране. Сохранение работает по
+        // схеме «погасить всё → перезаписать присланное → удалить погасшее», а
+        // сетка показывает не всё, что лежит в таблице. Две группы строк сотрудник
+        // не видит и убрать не мог — значит, трогать их нельзя:
+        //   • строки временно отключённого ресторана (в сетку грузятся только
+        //     restaurants.active = 1). Раньше уборка стирала их насовсем, и при
+        //     включении ресторана обратно графика уже не было — молча. Теперь
+        //     такая строка лежит нетронутой (день заказа, день доставки, «через
+        //     склад», активность) и сама заработает вместе с рестораном;
+        //   • строки с пометкой disabled_by_disconnect — их погасило отключение
+        //     поставщика от модуля, и именно их поднимает кнопка «Вернуть
+        //     настройки». Удалив их, восстанавливать было бы нечего.
+        // Условие одно на оба шага (гашение и уборка), чтобы они не разошлись.
+        // Часть про активные рестораны вынесена в soGridRestaurantsSql(): её же
+        // использует временный график ниже, у которого та же беда.
+        $gridRowsSql = " AND disabled_by_disconnect = 0" . soGridRestaurantsSql();
+
         $pdo->beginTransaction();
         try {
             // Сначала деактивируем все расписания поставщика, потом активируем присланные
-            $pdo->prepare("UPDATE supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")->execute([$updatedBy, $supplierId]);
+            $pdo->prepare("UPDATE supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?" . $gridRowsSql)->execute([$updatedBy, $supplierId]);
 
             // Upsert
             $upsert = $pdo->prepare("
@@ -4478,8 +4508,10 @@ if ($soAction === 'admin') {
             }
 
             // Физически удаляем записи, не вошедшие в новый набор,
-            // чтобы таблица не распухала от soft-off мусора.
-            $pdo->prepare("DELETE FROM supplier_schedules WHERE supplier_id = ? AND is_active = 0")
+            // чтобы таблица не распухала от soft-off мусора. Настоящий мусор —
+            // только строки активных ресторанов без пометки об отключении
+            // поставщика: их сотрудник видел в сетке и сам убрал (см. $gridRowsSql).
+            $pdo->prepare("DELETE FROM supplier_schedules WHERE supplier_id = ? AND is_active = 0" . $gridRowsSql)
                 ->execute([$supplierId]);
 
             $tempDateFrom = trim((string)($temporarySchedule['date_from'] ?? ''));
@@ -4510,10 +4542,25 @@ if ($soAction === 'admin') {
                     throw new RuntimeException('Не удалось сохранить временный график');
                 }
 
-                $pdo->prepare("DELETE FROM so_supplier_temp_schedule_items WHERE period_id = ?")->execute([$periodId]);
+                // Временный график перезаписываем по той же схеме, но чистим только
+                // строки активных ресторанов (soGridRestaurantsSql): позиции
+                // отключённого ресторана в сетку не грузятся, сотрудник их не видел
+                // и не убирал — они переживают сохранение с прежними значениями и
+                // сами заработают, когда ресторан включат обратно.
+                $pdo->prepare("DELETE FROM so_supplier_temp_schedule_items WHERE period_id = ?" . soGridRestaurantsSql())
+                    ->execute([$periodId]);
+                // ON DUPLICATE KEY — на случай, когда ресторан отключили уже после
+                // того, как сотрудник открыл страницу: его старая строка осталась
+                // (мы её больше не стираем), а с экрана прилетела такая же. Без
+                // этого сохранение падало бы на дубле ключа и откатывало всё.
                 $tempItemIns = $pdo->prepare("
                     INSERT INTO so_supplier_temp_schedule_items (period_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
                     VALUES (?, ?, ?, ?, ?, NOW(), ?)
+                    ON DUPLICATE KEY UPDATE
+                        order_day = VALUES(order_day),
+                        is_active = VALUES(is_active),
+                        updated_at = NOW(),
+                        updated_by = VALUES(updated_by)
                 ");
                 foreach ($tempItems as $sch) {
                     $restId = $sch['restaurant_id'] ?? null;
@@ -4528,6 +4575,12 @@ if ($soAction === 'admin') {
                     ]);
                 }
             } else {
+                // Полная очистка: сотрудник убрал даты/все дни — временного графика
+                // у поставщика больше нет. Здесь период сносим целиком вместе со
+                // строками отключённых ресторанов (каскад по FK) — и это правильно:
+                // пока период жив, он перебивает основной график ВСЕМ ресторанам,
+                // так что оставить его ради невидимых строк значило бы отменить
+                // поставки активным ресторанам на весь период.
                 $existingTemp = soGetTempSchedulePeriod($pdo, $supplierId);
                 if ($existingTemp) {
                     $pdo->prepare("DELETE FROM so_supplier_temp_schedule_periods WHERE id = ?")
@@ -4579,10 +4632,22 @@ if ($soAction === 'admin') {
                 $periodId = (int)($period['id'] ?? 0);
                 if ($periodId <= 0) throw new RuntimeException('Не удалось сохранить период');
 
-                $pdo->prepare("DELETE FROM so_supplier_temp_schedule_items WHERE period_id = ?")->execute([$periodId]);
+                // Чистим только строки активных ресторанов — окно временного графика
+                // показывает те же рестораны, что и сетка (soGridRestaurantsSql).
+                // Позиции отключённого ресторана сотрудник не видел и не убирал,
+                // поэтому они остаются нетронутыми до включения ресторана обратно.
+                $pdo->prepare("DELETE FROM so_supplier_temp_schedule_items WHERE period_id = ?" . soGridRestaurantsSql())
+                    ->execute([$periodId]);
+                // ON DUPLICATE KEY — если ресторан отключили уже после открытия окна:
+                // его прежняя строка сохранилась, а с экрана прилетела такая же.
                 $ins = $pdo->prepare("
                     INSERT INTO so_supplier_temp_schedule_items (period_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
                     VALUES (?, ?, ?, ?, ?, NOW(), ?)
+                    ON DUPLICATE KEY UPDATE
+                        order_day = VALUES(order_day),
+                        is_active = VALUES(is_active),
+                        updated_at = NOW(),
+                        updated_by = VALUES(updated_by)
                 ");
                 foreach ($tempItems as $sch) {
                     $restId = $sch['restaurant_id'] ?? null;
@@ -4598,6 +4663,9 @@ if ($soAction === 'admin') {
                 }
             } else {
                 // Если даты не указаны — удаляем существующий период (если есть)
+                // целиком, вместе со строками отключённых ресторанов: живой период
+                // перебивает основной график всем, поэтому держать его ради
+                // невидимых строк нельзя (см. такой же случай в сохранении сетки).
                 $existing = soGetTempSchedulePeriod($pdo, $supplierId);
                 if ($existing) {
                     $pdo->prepare("DELETE FROM so_supplier_temp_schedule_periods WHERE id = ?")
@@ -5094,7 +5162,10 @@ if ($soAction === 'admin') {
 
             // Физически удаляем SKU, выпавшие из шаблона.
             // Их visibility уходит каскадом (FK ON DELETE CASCADE).
-            $pdo->prepare("DELETE FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 0")
+            // Строки с пометкой disabled_by_disconnect не трогаем: их погасило
+            // отключение поставщика от модуля, и именно их поднимает кнопка
+            // «Вернуть настройки» — удалив, восстанавливать было бы нечего.
+            $pdo->prepare("DELETE FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 0 AND disabled_by_disconnect = 0")
                 ->execute([$supplierId, $le]);
 
             // Доступность: перезаписываем по каждому SKU. Узнаём id строк шаблона
