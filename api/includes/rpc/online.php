@@ -100,6 +100,29 @@ if ($fn === 'get_admin_stats') {
     respond($stats);
 }
 
+if ($fn === 'get_table_counts') {
+    // Сколько строк в таблицах — для вкладки «Бэкап», чтобы объём выгрузки был
+    // виден до нажатия. Имена таблиц берём ТОЛЬКО из белого списка.
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    $allowed = [
+        'products', 'suppliers', 'orders', 'order_items', 'plans', 'settings',
+        'audit_log', 'stock_1c', 'analysis_data', 'cards', 'restaurants', 'delivery_schedule',
+    ];
+    $want = $body['tables'] ?? $allowed;
+    if (!is_array($want)) $want = $allowed;
+    $out = [];
+    foreach ($want as $name) {
+        if (!in_array($name, $allowed, true)) continue;
+        try {
+            $out[$name] = (int)$pdo->query("SELECT COUNT(*) FROM `$name`")->fetchColumn();
+        } catch (PDOException $e) {
+            $out[$name] = null;
+        }
+    }
+    respond($out);
+}
+
 if ($fn === 'get_sessions') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);

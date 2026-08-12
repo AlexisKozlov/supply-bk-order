@@ -41,7 +41,7 @@
         <span v-if="bugNewCount" class="adm-tab-dot"></span>
         <span class="adm-tab-count" :class="{ active: activeTab === 'feedback' }">{{ bugReports.length || '' }}</span>
       </button>
-      <button class="adm-tab" :class="{ active: activeTab === 'cron-reminders' }" @click="activeTab = 'cron-reminders'; loadCronReminders()">
+      <button class="adm-tab" :class="{ active: activeTab === 'cron-reminders' }" @click="activeTab = 'cron-reminders'">
         <BkIcon name="bell" size="sm"/> Крон напоминаний
         <span v-if="cronErrCount" class="adm-tab-dot"></span>
       </button>
@@ -143,76 +143,8 @@
     </div>
 
     <!-- ═══ Тех. работы ═══ -->
-    <div v-if="activeTab === 'maintenance'" class="adm-section">
-      <div class="adm-maint-card" :class="{ on: maintenanceOn }">
-        <div class="adm-maint-icon">
-          <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
-            <circle cx="24" cy="24" r="22" :fill="maintenanceOn ? 'rgba(211,47,47,0.08)' : 'rgba(0,0,0,0.03)'" :stroke="maintenanceOn ? '#D32F2F' : 'var(--border)'" stroke-width="2"/>
-            <path d="M24 14v12" :stroke="maintenanceOn ? '#D32F2F' : 'var(--text-muted)'" stroke-width="3.5" stroke-linecap="round"/>
-            <circle cx="24" cy="32" r="2.5" :fill="maintenanceOn ? '#D32F2F' : 'var(--text-muted)'"/>
-          </svg>
-        </div>
-
-        <div class="adm-maint-body">
-          <h3 class="adm-maint-title">Режим технических работ</h3>
-          <p class="adm-maint-desc">
-            Когда режим включён, все пользователи кроме администраторов видят заглушку и не могут работать в системе.
-          </p>
-        </div>
-
-        <button class="adm-maint-toggle" :class="{ on: maintenanceOn }" @click="toggleMaintenance" :disabled="maintenanceSaving">
-          <span class="adm-maint-track"><span class="adm-maint-thumb"></span></span>
-          <span class="adm-maint-label">{{ maintenanceOn ? 'Включён' : 'Выключен' }}</span>
-        </button>
-      </div>
-
-      <div v-if="maintenanceOn" class="adm-maint-warning">
-        <BkIcon name="warning" size="sm"/>
-        <span>Сайт <b>недоступен</b> для обычных пользователей прямо сейчас</span>
-      </div>
-
-      <!-- Таймер -->
-      <div class="adm-maint-msg-card">
-        <h4 class="adm-maint-msg-title">Автовыключение</h4>
-        <p class="adm-maint-msg-hint">Тех. работы автоматически выключатся в указанное время. Пользователи увидят обратный отсчёт.</p>
-
-        <div class="adm-timer-row">
-          <button v-for="opt in quickTimerOptions" :key="opt.min" class="adm-timer-btn"
-            @click="setQuickTimer(opt.min)">
-            {{ opt.label }}
-          </button>
-        </div>
-
-        <div class="adm-timer-custom">
-          <label class="adm-timer-custom-label">Или укажите конкретное время:</label>
-          <div class="adm-timer-input-row">
-            <input type="time" v-model="maintenanceTimeInput" class="adm-timer-input" />
-            <button class="btn primary" style="font-size:13px;padding:7px 16px;" @click="saveExactTime" :disabled="maintenanceTimerSaving || !maintenanceTimeInput">
-              <BurgerSpinner v-if="maintenanceTimerSaving" size="xs" />
-              <span>{{ maintenanceTimerSaving ? 'Сохранение...' : 'Установить' }}</span>
-            </button>
-          </div>
-        </div>
-
-        <div v-if="maintenanceEndTimeDisplay" class="adm-timer-info">
-          <span>Выключится в: <b>{{ maintenanceEndTimeDisplay }}</b></span>
-          <button class="adm-timer-clear" @click="clearTimer">Сбросить</button>
-        </div>
-        <div v-else class="adm-timer-info adm-timer-info-off">
-          Таймер не установлен — техработы нужно будет выключить вручную
-        </div>
-      </div>
-
-      <div class="adm-maint-msg-card">
-        <h4 class="adm-maint-msg-title">Сообщение для пользователей</h4>
-        <p class="adm-maint-msg-hint">Отображается на экране технических работ. Если пусто — показывается стандартный текст.</p>
-        <textarea v-model="maintenanceMsg" class="adm-maint-textarea" rows="3" placeholder="Например: Обновление системы до 18:00. Приносим извинения за неудобства."></textarea>
-        <button class="btn primary" style="margin-top:8px;font-size:13px;padding:7px 16px;" @click="saveMaintenanceMsg" :disabled="maintenanceMsgSaving">
-          <BurgerSpinner v-if="maintenanceMsgSaving" size="xs" />
-          <span>{{ maintenanceMsgSaving ? 'Сохранение...' : 'Сохранить сообщение' }}</span>
-        </button>
-      </div>
-    </div>
+    <!-- ═══ Тех. работы ═══ -->
+    <AdminMaintenanceTab v-if="activeTab === 'maintenance'" @state="maintenanceOn = $event" />
 
     <!-- ═══ Рассылка ═══ -->
     <div v-if="activeTab === 'broadcast'" class="adm-section">
@@ -587,48 +519,8 @@
     </div>
 
     <!-- ═══ Резервное копирование ═══ -->
-    <div v-if="activeTab === 'backup'" class="adm-section">
-      <div class="adm-maint-card">
-        <div class="adm-maint-icon">
-          <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
-            <circle cx="24" cy="24" r="22" fill="rgba(33,150,243,0.08)" stroke="#2196F3" stroke-width="2"/>
-            <rect x="14" y="18" width="20" height="14" rx="3" stroke="#2196F3" stroke-width="2.5" fill="none"/>
-            <path d="M18 18v-4a6 6 0 0112 0v4" stroke="#2196F3" stroke-width="2.5" stroke-linecap="round"/>
-            <circle cx="24" cy="25" r="2" fill="#2196F3"/>
-          </svg>
-        </div>
-        <div class="adm-maint-body">
-          <h3 class="adm-maint-title">Резервное копирование</h3>
-          <p class="adm-maint-desc">Выберите таблицы и юрлицо для выгрузки данных в Excel-файл. Каждая таблица станет отдельным листом.</p>
-        </div>
-      </div>
-
-      <div class="adm-maint-msg-card" style="margin-top:16px;">
-        <h4 class="adm-maint-msg-title">Юридическое лицо</h4>
-        <select v-model="backupEntity" class="adm-audit-select" style="width:100%;margin-top:6px;padding:8px 12px;">
-          <option value="">Все юрлица</option>
-          <option v-for="le in allEntities" :key="le" :value="le">{{ le }}</option>
-        </select>
-      </div>
-
-      <div class="adm-maint-msg-card" style="margin-top:12px;">
-        <h4 class="adm-maint-msg-title">Таблицы для выгрузки</h4>
-        <div class="adm-backup-tables">
-          <label v-for="t in backupTables" :key="t.name" class="adm-le-option">
-            <input type="checkbox" :value="t.name" v-model="backupSelected" />
-            <span class="adm-le-box"><BkIcon name="success" size="sm"/></span>
-            <span>{{ t.label }}</span>
-          </label>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
-          <button class="btn" @click="backupSelected = backupTables.map(t => t.name)">Выбрать все</button>
-          <button class="btn" @click="backupSelected = []">Снять все</button>
-          <button class="btn primary" @click="exportBackup" :disabled="!backupSelected.length || backupExporting">
-            <BkIcon name="excel" size="sm"/> {{ backupExporting ? 'Выгрузка...' : 'Выгрузить в Excel' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- ═══ Бэкап ═══ -->
+    <AdminBackupTab v-if="activeTab === 'backup'" />
 
     <!-- ═══ Сессии ═══ -->
     <AdminSessionsTab v-if="activeTab === 'sessions'" @online-count="onlineCount = $event" />
@@ -750,56 +642,9 @@
       </div>
     </div>
 
-    <!-- ═══ Крон напоминаний — журнал запусков ═══ -->
-    <div v-if="activeTab === 'cron-reminders'" class="adm-section">
-      <div class="adm-toolbar">
-        <div class="adm-toolbar-info">
-          Последние {{ cronReminders.length }} запусков, обновляется каждые 5 минут
-          <span v-if="cronErrCount" class="adm-cron-err">· ошибок за сутки: {{ cronErrCount }}</span>
-        </div>
-        <button class="btn" @click="loadCronReminders" style="font-size:12px;">
-          <BkIcon name="redo" size="sm"/> Обновить
-        </button>
-      </div>
+    <!-- ═══ Крон напоминаний ═══ -->
+    <AdminCronRemindersTab v-if="activeTab === 'cron-reminders'" @err-count="cronErrCount = $event" />
 
-      <div v-if="cronLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!cronReminders.length" class="adm-empty">Журнал пуст. Крон ещё не запускался?</div>
-      <table v-else class="adm-cron-table">
-        <thead>
-          <tr>
-            <th>Запуск</th>
-            <th>Длит.</th>
-            <th colspan="3">Поставщики</th>
-            <th colspan="3">Осн. поставка</th>
-            <th>Статус</th>
-          </tr>
-          <tr class="adm-cron-subhead">
-            <th></th><th></th>
-            <th title="portal"><BkIcon name="document" size="sm" /></th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
-            <th title="portal"><BkIcon name="document" size="sm" /></th><th title="telegram"><BkIcon name="chat" size="sm" /></th><th title="пропущено">⊘</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in cronReminders" :key="row.id" :class="{ 'cron-err': row.status === 'error' }">
-            <td class="adm-cron-ts">{{ fmtCronTime(row.started_at) }}</td>
-            <td>{{ cronDuration(row) }}</td>
-            <td class="cron-num">{{ row.sup_portal }}</td>
-            <td class="cron-num">{{ row.sup_tg }}</td>
-            <td class="cron-num cron-skip">{{ row.sup_skip }}</td>
-            <td class="cron-num">{{ row.main_portal }}</td>
-            <td class="cron-num">{{ row.main_tg }}</td>
-            <td class="cron-num cron-skip">{{ row.main_skip }}</td>
-            <td>
-              <span v-if="row.status === 'ok'" class="cron-status-ok">✓</span>
-              <span v-else class="cron-status-err" :title="row.error_text"><BkIcon name="warning" size="sm" /> {{ truncateError(row.error_text) }}</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- ═══ Бот-монитор ═══ -->
     <div v-if="activeTab === 'bot-monitor'" class="adm-section">
       <AdminBotMonitorTab />
     </div>
@@ -994,7 +839,7 @@ import { useRouter } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { db } from '@/lib/apiClient.js';
-import { formatMoscowDateTime, toLocalDateStr, plural } from '@/lib/utils.js';
+import { formatMoscowDateTime, parseMoscowDate, plural } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, formatRestaurantNumber } from '@/lib/legalEntities.js';
@@ -1009,6 +854,9 @@ import AdminRestaurantAccountsTab from '@/components/admin/AdminRestaurantAccoun
 import AdminEmailImportsTab from '@/components/admin/AdminEmailImportsTab.vue';
 import AdminBotMonitorTab from '@/components/admin/AdminBotMonitorTab.vue';
 import AdminSessionsTab from '@/components/admin/AdminSessionsTab.vue';
+import AdminBackupTab from '@/components/admin/AdminBackupTab.vue';
+import AdminCronRemindersTab from '@/components/admin/AdminCronRemindersTab.vue';
+import AdminMaintenanceTab from '@/components/admin/AdminMaintenanceTab.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
@@ -1332,27 +1180,9 @@ async function loadAuditUsers() {
   } catch { /* ok */ }
 }
 
+// Точка «идут техработы» у вкладки: состояние присылает сама вкладка,
+// а до её открытия — loadSettings ниже.
 const maintenanceOn = ref(false);
-const maintenanceSaving = ref(false);
-const maintenanceMsg = ref('');
-const maintenanceMsgSaving = ref(false);
-const maintenanceTimerSaving = ref(false);
-const maintenanceEndTimeCurrent = ref(null);
-const maintenanceTimeInput = ref('');
-
-const quickTimerOptions = [
-  { min: 15, label: '15 мин' },
-  { min: 30, label: '30 мин' },
-  { min: 60, label: '1 час' },
-  { min: 120, label: '2 часа' },
-];
-
-const maintenanceEndTimeDisplay = computed(() => {
-  if (!maintenanceEndTimeCurrent.value) return '';
-  const d = new Date(maintenanceEndTimeCurrent.value);
-  if (isNaN(d.getTime()) || d.getTime() <= Date.now()) return '';
-  return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-});
 
 // ═══ Broadcast ═══
 const broadcastMode = ref('broadcast');
@@ -1369,8 +1199,9 @@ const bcTargets = ref({
 });
 const bcHasAnyTarget = computed(() => Object.values(bcTargets.value).some(Boolean));
 
-// Счётчик на вкладке «Сессии» — его присылает сам компонент вкладки.
+// Счётчики на вкладках присылают сами вкладки.
 const onlineCount = ref(0);
+const cronErrCount = ref(0);
 // bugPollTimer объявлен здесь, а не рядом с bugPoll/startBugPoll,
 // потому что immediate watch на activeTab может сработать с tab='feedback'
 // до того, как setup дойдёт до конца файла. let-переменные имеют TDZ —
@@ -1515,64 +1346,6 @@ async function saveSysSetting(s) {
     toast.success('Сохранено', s.key);
   } catch { toast.error('Ошибка', 'Не удалось сохранить'); }
   finally { s._saving = false; }
-}
-
-// ═══ Резервное копирование ═══
-const backupEntity = ref('');
-const backupSelected = ref([]);
-const backupExporting = ref(false);
-
-const backupTables = [
-  { name: 'products', label: 'Товары' },
-  { name: 'suppliers', label: 'Поставщики' },
-  { name: 'orders', label: 'Заказы' },
-  { name: 'order_items', label: 'Позиции заказов' },
-  { name: 'plans', label: 'Планы' },
-  { name: 'settings', label: 'Настройки' },
-  { name: 'audit_log', label: 'Аудит-лог' },
-  { name: 'stock_1c', label: 'Остатки 1С' },
-  { name: 'analysis_data', label: 'Данные анализа' },
-  { name: 'cards', label: 'Карточки' },
-  { name: 'restaurants', label: 'Рестораны' },
-  { name: 'delivery_schedule', label: 'График доставки' },
-];
-
-async function exportBackup() {
-  backupExporting.value = true;
-  try {
-    const XLSX = await import('xlsx-js-style');
-    const wb = XLSX.utils.book_new();
-
-    for (const tableName of backupSelected.value) {
-      let query = db.from(tableName).select('*');
-      // Фильтр по юрлицу для таблиц с полем legal_entity
-      if (backupEntity.value) {
-        const tablesWithEntity = ['products', 'orders', 'plans', 'stock_1c', 'analysis_data', 'cards', 'suppliers', 'item_order'];
-        if (tablesWithEntity.includes(tableName)) {
-          query = query.eq('legal_entity', backupEntity.value);
-        }
-      }
-      try {
-        const { data } = await query;
-        const rows = data || [];
-        const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ info: 'Нет данных' }]);
-        const label = backupTables.find(t => t.name === tableName)?.label || tableName;
-        XLSX.utils.book_append_sheet(wb, ws, label.slice(0, 31));
-      } catch (e) {
-        const ws = XLSX.utils.json_to_sheet([{ error: 'Не удалось загрузить' }]);
-        XLSX.utils.book_append_sheet(wb, ws, tableName.slice(0, 31));
-      }
-    }
-
-    const date = toLocalDateStr(new Date());
-    const suffix = backupEntity.value ? '_' + backupEntity.value.replace(/[^\wа-яА-Я]/g, '') : '';
-    XLSX.writeFile(wb, `backup_${date}${suffix}.xlsx`);
-    toast.success('Готово', 'Файл скачан');
-  } catch (e) {
-    toast.error('Ошибка', 'Не удалось создать файл');
-  } finally {
-    backupExporting.value = false;
-  }
 }
 
 // ═══ Логи ошибок ═══
@@ -1840,23 +1613,10 @@ function isLocked(u) { return (lockouts.value[u.name] || 0) >= 5; }
 
 async function loadSettings() {
   try {
-    const { data } = await db.from('settings').select('*').or('key.eq.maintenance_mode,key.eq.maintenance_message,key.eq.maintenance_end_time');
-    if (!data) return;
-    for (const s of data) {
-      if (s.key === 'maintenance_mode') maintenanceOn.value = s.value === 'true';
-      if (s.key === 'maintenance_message') maintenanceMsg.value = s.value || '';
-      if (s.key === 'maintenance_end_time') maintenanceEndTimeCurrent.value = s.value || null;
-    }
+    const { data } = await db.from('settings').select('*').eq('key', 'maintenance_mode');
+    const row = (data || [])[0];
+    if (row) maintenanceOn.value = row.value === 'true';
   } catch (e) { console.warn('[admin] loadSettings:', e); }
-}
-
-async function saveMaintenanceMsg() {
-  maintenanceMsgSaving.value = true;
-  try {
-    const { error } = await db.from('settings').update({ value: maintenanceMsg.value }).eq('key', 'maintenance_message');
-    if (error) { toast.error('Ошибка', ''); return; }
-    toast.success('Сообщение сохранено', '');
-  } finally { maintenanceMsgSaving.value = false; }
 }
 
 function openUserModal(user) {
@@ -1943,70 +1703,6 @@ async function resetLoginAttempts(u) {
   loadLockouts();
 }
 
-async function toggleMaintenance() {
-  maintenanceSaving.value = true;
-  const newVal = !maintenanceOn.value;
-  try {
-    const { error } = await db.from('settings').update({ value: String(newVal) }).eq('key', 'maintenance_mode');
-    if (error) { toast.error('Ошибка', ''); return; }
-    maintenanceOn.value = newVal;
-    userStore.maintenanceMode = newVal;
-    // При выключении очищаем таймер
-    if (!newVal) {
-      await updateSetting('maintenance_end_time', '');
-      maintenanceEndTimeCurrent.value = null;
-      userStore.maintenanceEndTime = null;
-    }
-    toast.success(newVal ? 'Тех. работы включены' : 'Тех. работы выключены', '');
-  } finally { maintenanceSaving.value = false; }
-}
-
-async function updateSetting(key, value) {
-  const { error } = await db.from('settings').update({ value }).eq('key', key);
-  if (error) toast.error('Ошибка', 'Не удалось сохранить настройку');
-}
-
-function setQuickTimer(minutes) {
-  const endDate = new Date(Date.now() + minutes * 60 * 1000);
-  maintenanceTimeInput.value = endDate.getHours().toString().padStart(2, '0') + ':' + endDate.getMinutes().toString().padStart(2, '0');
-  saveExactTime();
-}
-
-async function saveExactTime() {
-  if (!maintenanceTimeInput.value) return;
-  maintenanceTimerSaving.value = true;
-  try {
-    const parts = maintenanceTimeInput.value.split(':');
-    if (parts.length < 2) { toast.error('Неверный формат', 'Используйте ЧЧ:ММ'); maintenanceTimerSaving.value = false; return; }
-    const [hh, mm] = parts.map(Number);
-    if (isNaN(hh) || isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) { toast.error('Неверное время', ''); maintenanceTimerSaving.value = false; return; }
-    const target = new Date();
-    target.setHours(hh, mm, 0, 0);
-    // Если время уже прошло — считаем, что это завтра
-    if (target.getTime() <= Date.now()) {
-      target.setDate(target.getDate() + 1);
-    }
-    const endTimeVal = target.toISOString();
-    await updateSetting('maintenance_end_time', endTimeVal);
-    maintenanceEndTimeCurrent.value = endTimeVal;
-    userStore.maintenanceEndTime = endTimeVal;
-    toast.success('Таймер установлен', `Выключится в ${maintenanceTimeInput.value}`);
-  } catch (e) { toast.error('Ошибка', ''); }
-  finally { maintenanceTimerSaving.value = false; }
-}
-
-async function clearTimer() {
-  maintenanceTimerSaving.value = true;
-  try {
-    await updateSetting('maintenance_end_time', '');
-    maintenanceEndTimeCurrent.value = null;
-    userStore.maintenanceEndTime = null;
-    maintenanceTimeInput.value = '';
-    toast.success('Таймер сброшен', '');
-  } catch (e) { toast.error('Ошибка', ''); }
-  finally { maintenanceTimerSaving.value = false; }
-}
-
 onMounted(() => {
   // Повторная проверка роли (защита от подмены в localStorage до ответа сервера)
   if (userStore.currentUser?.role !== 'admin') return;
@@ -2019,33 +1715,6 @@ watch(() => userStore.currentUser?.role, (role) => {
   if (role && role !== 'admin') router.replace({ name: 'order' });
 });
 
-// ═══ Крон напоминаний (журнал запусков) ═══
-const cronReminders = ref([]);
-const cronLoading = ref(false);
-const cronErrCount = ref(0);
-
-async function loadCronReminders() {
-  cronLoading.value = true;
-  try {
-    const res = await db.from('reminder_cron_log')
-      .select('*')
-      .order('started_at', { ascending: false })
-      .limit(100);
-    if (res.error) {
-      cronReminders.value = [];
-      return;
-    }
-    cronReminders.value = res.data || [];
-    // Подсчёт ошибок за сутки
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    cronErrCount.value = cronReminders.value.filter(r => r.status === 'error' && new Date(r.started_at.replace(' ', 'T')).getTime() > dayAgo).length;
-  } catch (e) {
-    cronReminders.value = [];
-  } finally {
-    cronLoading.value = false;
-  }
-}
-
 // Дата и время входа — всегда полностью, включая год: журнал ведётся с марта,
 // и «12.03 09:40» без года читается неоднозначно.
 function fmtDateTime(ts) {
@@ -2057,36 +1726,10 @@ function fmtDateTime(ts) {
   } catch { return ts; }
 }
 
-function fmtCronTime(ts) {
-  if (!ts) return '';
-  try {
-    const dt = new Date(ts.replace(' ', 'T'));
-    const today = new Date();
-    const sameDay = dt.toDateString() === today.toDateString();
-    if (sameDay) return dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' +
-           dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  } catch { return ts; }
-}
 
-function cronDuration(row) {
-  if (!row.started_at || !row.finished_at) return '—';
-  try {
-    const s = new Date(row.started_at.replace(' ', 'T')).getTime();
-    const e = new Date(row.finished_at.replace(' ', 'T')).getTime();
-    const ms = e - s;
-    if (ms < 1000) return ms + ' мс';
-    return (ms / 1000).toFixed(1) + ' с';
-  } catch { return '—'; }
-}
-
-function truncateError(text) {
-  if (!text) return 'Ошибка';
-  return text.length > 50 ? text.slice(0, 47) + '…' : text;
-}
-
-// Загружаем сразу при первом открытии вкладки (см. v-on:click в шаблоне).
-// Дополнительно — стартовая проверка ошибок при монтировании для бейджа.
+// Красная точка у вкладки «Крон напоминаний» должна гореть ещё до того, как
+// её откроют, поэтому ошибки за сутки считаем сразу. Дальше счётчик присылает
+// сама вкладка.
 onMounted(async () => {
   try {
     const res = await db.from('reminder_cron_log')
@@ -2095,9 +1738,12 @@ onMounted(async () => {
       .limit(50);
     if (res.data) {
       const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-      cronErrCount.value = res.data.filter(r => r.status === 'error' && new Date(r.started_at.replace(' ', 'T')).getTime() > dayAgo).length;
+      cronErrCount.value = res.data.filter(r => {
+        const d = parseMoscowDate(r.started_at);
+        return r.status === 'error' && d && d.getTime() > dayAgo;
+      }).length;
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) { /* молча: это только подсветка вкладки */ }
 });
 
 // ═══ Обращения (баг-репорты) ═══
@@ -2556,36 +2202,7 @@ watch(activeTab, (tab) => {
 .adm-maint-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--text); }
 .adm-maint-desc { margin: 0; font-size: 13px; color: var(--text-muted); line-height: 1.5; }
 
-.adm-maint-toggle {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  background: none; border: none; cursor: pointer; padding: 8px; flex-shrink: 0;
-  font-family: inherit;
-}
-.adm-maint-track {
-  position: relative; width: 52px; height: 28px; border-radius: 14px;
-  background: var(--border); transition: background .25s;
-}
-.adm-maint-toggle.on .adm-maint-track { background: #D32F2F; }
-.adm-maint-thumb {
-  position: absolute; top: 3px; left: 3px;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.18);
-  transition: left .25s;
-}
-.adm-maint-toggle.on .adm-maint-thumb { left: 27px; }
-.adm-maint-label {
-  font-size: 11px; font-weight: 600;
-  color: var(--text-muted); transition: color .2s;
-}
-.adm-maint-toggle.on .adm-maint-label { color: #D32F2F; }
 
-.adm-maint-warning {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 12px; padding: 12px 16px; border-radius: 10px;
-  background: #FFF3F3; border: 1.5px solid #FFCDD2;
-  font-size: 13px; color: #C62828; font-weight: 500;
-  animation: admFade .3s ease;
-}
 
 /* ═══ Form (modal) ═══ */
 .adm-form { display: flex; flex-direction: column; gap: 10px; }
@@ -2628,35 +2245,6 @@ watch(activeTab, (tab) => {
 .adm-maint-textarea:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(244,162,97,.1); }
 
 /* Timer */
-.adm-timer-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-.adm-timer-btn {
-  padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
-  font-family: inherit; cursor: pointer; transition: all .15s;
-  border: 1.5px solid var(--border); background: var(--bg); color: var(--text-muted);
-}
-.adm-timer-btn:hover { border-color: var(--bk-orange); color: var(--text); }
-.adm-timer-btn.active { border-color: var(--bk-orange); background: #FFFBF5; color: var(--bk-brown); }
-.adm-timer-custom { margin-top: 12px; }
-.adm-timer-custom-label { font-size: 12px; color: var(--text-muted); font-weight: 500; display: block; margin-bottom: 6px; }
-.adm-timer-input-row { display: flex; gap: 8px; align-items: center; }
-.adm-timer-input {
-  padding: 7px 12px; border: 1.5px solid var(--border); border-radius: 8px;
-  font-size: 15px; font-family: inherit; font-weight: 600;
-  background: var(--bg); color: var(--text); width: 120px;
-}
-.adm-timer-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(244,162,97,.1); }
-.adm-timer-info {
-  margin-top: 12px; font-size: 13px; color: var(--text-secondary);
-  padding: 10px 14px; border-radius: 8px; background: #FFF8E1; border: 1px solid #FFE0B2;
-  display: flex; align-items: center; justify-content: space-between;
-}
-.adm-timer-info-off { background: var(--bg); border-color: var(--border-light); color: var(--text-muted); }
-.adm-timer-clear {
-  background: none; border: 1px solid #E57373; color: #D32F2F;
-  padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
-  font-family: inherit; cursor: pointer; transition: all .15s;
-}
-.adm-timer-clear:hover { background: #FFF0F0; }
 
 /* ═══ Online ═══ */
 .adm-avatar-online {
@@ -2904,12 +2492,6 @@ watch(activeTab, (tab) => {
 }
 .adm-setting-input:focus { border-color: var(--bk-orange); outline: none; }
 .adm-setting-save-btn { font-size: 12px !important; padding: 5px 12px !important; flex-shrink: 0; }
-
-/* ═══ Backup ═══ */
-.adm-backup-tables {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 6px; margin-top: 8px;
-}
 
 /* ═══ Audit Mode Toggle ═══ */
 .adm-audit-mode {
