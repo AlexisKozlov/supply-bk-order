@@ -2,7 +2,7 @@
   <div class="sl-view">
     <!-- Header -->
     <div class="sl-header">
-      <div style="display:flex;align-items:center;gap:16px;">
+      <div class="sl-header-title" style="display:flex;align-items:center;gap:16px;">
         <h1 class="page-title" style="margin:0;">{{ slTab === 'shelf' ? 'Сроки годности' : 'Загрузка склада' }}</h1>
         <!-- freshness badge removed: confusing (shows page open time, not data import time) -->
         <div class="sl-mode-tabs">
@@ -1229,6 +1229,13 @@ watch(() => orderStore.settings.legalEntity, (v) => {
   .sl-td-block { display: none; }
 }
 @media (max-width: 480px) {
+  /* Заголовок ломался на две строки и упирался в переключатель
+     «Сроки/Ячейки/Аналитика». Ставим их друг под друга. */
+  .sl-header-title { flex-direction: column; align-items: flex-start; gap: 10px; width: 100%; }
+  /* Старый глобальный стиль центрирует текст — заголовок уезжал в середину. */
+  .sl-header-title .page-title { text-align: left; width: 100%; }
+  .sl-mode-tabs { width: 100%; }
+  .sl-mode-tab { flex: 1; text-align: center; justify-content: center; }
   .sl-tabs { font-size: 11px; }
   .sl-tab { padding: 5px 10px; }
   .sl-kpi-val { font-size: 18px; }

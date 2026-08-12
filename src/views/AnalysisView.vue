@@ -1631,6 +1631,15 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 }
 
 @media (max-width: 768px) {
+  /* Четыре режима («Запасы / Реализация / Отчёт / Прогноз») в строку не
+     влезают — переключатель прокручивается вбок. */
+  .anv-header-left { flex-wrap: wrap; max-width: 100%; min-width: 0; }
+  .anv-mode-toggle {
+    display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    max-width: 100%; min-width: 0;
+  }
+  .anv-mode-toggle > * { flex-shrink: 0; }
+
   .anv-header { flex-direction: column; align-items: flex-start; gap: 8px; }
   .anv-header-controls { width: 100%; justify-content: flex-end; }
   .anv-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }

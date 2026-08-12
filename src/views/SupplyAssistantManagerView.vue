@@ -1064,6 +1064,13 @@ onMounted(() => {
      растягивается по самой широкой таблице — и вбок едет весь экран вместе
      с заголовком. Ограничиваем страницу шириной окна, таблица скроллится сама. */
   .sam-page { padding: 14px; width: 100%; max-width: 100%; box-sizing: border-box; }
+  /* Вкладки страницы прокручиваются вбок, а не сжимаются до наложения. */
+  .rom-page-tabs {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rom-page-tabs::-webkit-scrollbar { display: none; }
+  .rom-page-tab { flex: 0 0 auto; white-space: nowrap; padding: 9px 12px; font-size: 13px; }
   .rom-tpl-toolbar { flex-direction: column; align-items: stretch; }
   /* overflow:hidden не давал широкой таблице скроллиться внутри карточки —
      вбок ехала вся страница вместе с заголовком. */

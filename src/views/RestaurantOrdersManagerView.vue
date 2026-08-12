@@ -3957,6 +3957,16 @@ a.rom-menu-item { box-sizing: border-box; }
 .rom-audit-more-hint { font-size: 11px; color: #9ca3af; }
 
 @media (max-width: 700px) {
+  /* Вкладки страницы не влезали в 390px: «Остатки» обрезалась краем экрана,
+     а добраться до неё было нельзя — ряд не прокручивался. */
+  .rom-page-tabs {
+    flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rom-page-tabs::-webkit-scrollbar { display: none; }
+  .rom-page-tab { flex: 0 0 auto; white-space: nowrap; padding: 10px 14px; font-size: 14px; }
+  .rom-page-tab-link { margin-left: 8px; }
+
   .rom-audit-row { grid-template-columns: 48px 26px 1fr; }
   .rom-audit-goto { grid-column: 3; justify-self: end; margin-top: 4px; }
 

@@ -283,7 +283,15 @@ onMounted(() => {
 /* KPIs */
 .dash-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px; }
 @media (max-width: 1200px) { .dash-kpis { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 700px) { .dash-kpis { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 700px) {
+  .dash-kpis { grid-template-columns: repeat(2, 1fr); }
+  /* Кнопка обновления и выбор юрлица не помещались в строку с заголовком —
+     список юрлиц уезжал за край экрана. */
+  .dash-controls { flex-wrap: wrap; width: 100%; }
+  .dash-select { flex: 1 1 100%; min-width: 0; width: 100%; }
+  .dash-att-actions { flex-wrap: wrap; }
+  .dash-att-actions .btn, .dash-att-actions button { flex: 1 1 auto; min-width: 0; }
+}
 
 .dash-kpi { background: var(--card); border: 1px solid var(--border-light); border-radius: 12px; padding: 16px; text-decoration: none; color: inherit; display: block; }
 .dash-kpi-link { cursor: pointer; transition: border-color 0.15s, transform 0.1s; }

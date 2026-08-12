@@ -663,6 +663,9 @@ onMounted(loadShops);
 .op-total-row td { font-weight: 700; }
 
 @media (max-width: 760px) {
+  /* Заголовок в 32px занимал на телефоне три строки — четверть экрана
+     до первой кнопки. */
+  .op h1 { font-size: 22px; line-height: 1.2; }
   .op-panel-right { margin-left: 0; width: 100%; }
   .op-tiles .op-tile { flex: 1 1 calc(50% - 8px); }
   .op-seg-setup { flex-wrap: nowrap; }

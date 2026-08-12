@@ -143,8 +143,10 @@ const filtered = computed(() => {
 const decisionStats = computed(() => {
   let total = 0, done = 0, pending = 0, overdue = 0;
   for (const p of protocols.value) {
-    total += p.decisions_count || 0;
-    done += p.decisions_done || 0;
+    // База отдаёт счётчики строками: без Number плюс склеивал их в «01511»,
+    // а «в работе» уходило в минус.
+    total += Number(p.decisions_count) || 0;
+    done += Number(p.decisions_done) || 0;
   }
   pending = total - done;
   // overdue подсчитаем позже на детальной странице

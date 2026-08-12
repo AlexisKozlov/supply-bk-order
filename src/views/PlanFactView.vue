@@ -1214,6 +1214,15 @@ async function revertToTransit() {
 
 /* ═══ Mobile ═══ */
 @media (max-width: 768px) {
+  /* Четыре вкладки в строку не помещаются: последняя обрезалась краем
+     карточки, и переключиться на «Накладные» было нельзя. */
+  /* Обёртке вкладок нужен min-width: 0, иначе она раздувается по содержимому
+     и вылезает за карточку вместе с прокруткой. */
+  .page-header > div { min-width: 0; max-width: 100%; }
+  .pf-tabs { display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; min-width: 0; }
+  .pf-tab { flex-shrink: 0; }
+  .pf-filter, .pf-filter select { width: 100%; }
+
   .pf-mth-boxes, .pf-mtd-boxes { display: none; }
   .pf-mth-author, .pf-mtd-author { display: none; }
   .pf-drawer { width: 100%; }

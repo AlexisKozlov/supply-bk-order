@@ -513,6 +513,8 @@ onBeforeUnmount(() => {
   /* Та же ловушка, что на «Сборе заказа»: без ширины страница растягивается
      по длинному тексту сообщения и уезжает вбок целиком. */
   .rcm-page { width: 100%; max-width: 100%; box-sizing: border-box; }
+  /* Заголовок в 28px занимал две строки — экран начинался с пустоты. */
+  .rcm-page h1 { font-size: 22px; line-height: 1.2; }
   .rcm-post, .rcm-post p, .rcm-posts { overflow-wrap: anywhere; min-width: 0; }
   /* Четыре вкладки в строку налезали друг на друга — прокручиваем вбок. */
   .rcm-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }

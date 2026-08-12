@@ -441,7 +441,13 @@ onMounted(load);
 .alg-edit:hover { color: #502314; background: var(--bg); }
 @media (max-width: 700px) {
   .alg-input { min-width: 0; width: 100%; }
-  .alg-actions { width: 100%; }
+  /* Поиск на свою строку, кнопки под ним: втроём в ряд они не помещались и
+     «Импорт» уезжал за край экрана. */
+  .alg-top { flex-direction: column; align-items: stretch; gap: 8px; }
+  .alg-search-wrap { width: 100%; }
+  .alg-search-input { min-width: 0; width: 100%; }
+  .alg-actions { width: 100%; flex-wrap: wrap; }
+  .alg-actions .btn, .alg-actions button { flex: 1 1 30%; justify-content: center; min-width: 0; }
   .alg-name { white-space: normal; }
   .alg-gsel { max-width: 140px; }
 }

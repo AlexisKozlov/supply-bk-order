@@ -1201,16 +1201,18 @@ const sumRows = computed(() => {
     rows.push({
       date, dateStr: `${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}`,
       dayName: DAYS_RU[dow], isWeekend, isToday: date === today,
-      coldStock: coldRow?.cell_count ?? null,
-      frozenStock: frozenRow?.cell_count ?? null,
+      // База отдаёт число строкой — без Number итоги и Excel складывали бы
+      // значения как текст («12» + «7» = «127»).
+      coldStock: coldRow?.cell_count != null ? Number(coldRow.cell_count) : null,
+      frozenStock: frozenRow?.cell_count != null ? Number(frozenRow.cell_count) : null,
       coldManual: !!coldRow?.is_manual,
       frozenManual: !!frozenRow?.is_manual,
       coldFromMonday: isWeekend && !coldOwn && !!coldRow,
       frozenFromMonday: isWeekend && !frozenOwn && !!frozenRow,
       coldEntries: dayEntries.filter(e => e.cold_pallets > 0),
       frozenEntries: dayEntries.filter(e => e.frozen_pallets > 0),
-      totalCold: dayEntries.reduce((s, e) => s + (e.cold_pallets || 0), 0),
-      totalFrozen: dayEntries.reduce((s, e) => s + (e.frozen_pallets || 0), 0),
+      totalCold: dayEntries.reduce((s, e) => s + (Number(e.cold_pallets) || 0), 0),
+      totalFrozen: dayEntries.reduce((s, e) => s + (Number(e.frozen_pallets) || 0), 0),
     });
   }
   return rows;
@@ -1343,11 +1345,12 @@ function buildSummaryRows(stockData, entriesData) {
     rows.push({
       date, dateStr: `${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}`,
       dayName: DAYS_RU[dow], isWeekend, isToday: date === today,
-      coldStock: coldRow?.cell_count ?? null, frozenStock: frozenRow?.cell_count ?? null,
+      coldStock: coldRow?.cell_count != null ? Number(coldRow.cell_count) : null,
+      frozenStock: frozenRow?.cell_count != null ? Number(frozenRow.cell_count) : null,
       coldEntries: dayEntries.filter(e => e.cold_pallets > 0),
       frozenEntries: dayEntries.filter(e => e.frozen_pallets > 0),
-      totalCold: dayEntries.reduce((s, e) => s + (e.cold_pallets || 0), 0),
-      totalFrozen: dayEntries.reduce((s, e) => s + (e.frozen_pallets || 0), 0),
+      totalCold: dayEntries.reduce((s, e) => s + (Number(e.cold_pallets) || 0), 0),
+      totalFrozen: dayEntries.reduce((s, e) => s + (Number(e.frozen_pallets) || 0), 0),
     });
   }
   return rows;

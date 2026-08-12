@@ -1155,8 +1155,20 @@ function onColDrop(i) {
   border-bottom-color: var(--tk-accent, #E87A1E);
 }
 @media (max-width: 600px) {
-  .tasks-tab span { display: none; }
+  /* Прятать надо подпись, а не значок: обёртка иконки — тоже <span>,
+     и правило .tasks-tab span гасило её вместе с текстом. Вкладки
+     «Канбан/Календарь/Список» оставались пустыми квадратами. */
+  .tasks-tab span:not(.task-icon) { display: none; }
   .tasks-tab { padding: 8px 10px 10px; }
+
+  /* Ряд кнопок не влезал в 390px: «Новая доска» уезжала за правый край
+     наполовину. На телефоне у поиска и новой доски прячем подписи —
+     остаются лупа и плюс, весь ряд помещается. */
+  .tasks-header-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .search-btn-label, .search-btn-kbd { display: none; }
+  .search-btn { padding: 0 var(--tk-s-2) !important; }
+  .tasks-new-board-btn span:not(.task-icon) { display: none; }
+  .tasks-new-board-btn { padding: 0 var(--tk-s-3); }
 }
 
 /* Кнопка поиска — широкая, как в Linear / Notion */

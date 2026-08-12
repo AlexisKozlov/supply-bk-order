@@ -2139,6 +2139,10 @@ async function loadDynamics() {
 
 /* ═══ MOBILE: 768px ═══ */
 @media (max-width: 768px) {
+  /* Вкладки прокручиваются: «Динамика цен» иначе обрезалась краем экрана. */
+  .db-tabs { display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+  .db-tab { flex-shrink: 0; }
+
   .pricing-header { flex-direction:column; align-items:stretch; }
   .pricing-header .page-title { font-size:18px; margin-bottom:4px; }
   .pricing-header-actions { justify-content:space-between; }

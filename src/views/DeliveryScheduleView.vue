@@ -1710,10 +1710,15 @@ function formatLastUpdate(upd) {
 
 /* Совсем маленькие экраны */
 @media (max-width: 480px) {
+  /* В один столбец панель занимала шесть строк — половину экрана до таблицы.
+     Короткие кнопки («Excel», «Печать», «История») встают по две в ряд,
+     во всю ширину остаются только переключатель вида и поиск. */
   .ds-view .page-header > div:last-child {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
-  .ds-mode-toggle { order: -1; }
+  .ds-mode-toggle { order: -1; grid-column: 1 / -1; }
+  .pf-filter { grid-column: 1 / -1; }
+  .pf-filter select { width: 100%; }
   .pf-main-table { min-width: 500px; }
   .ds-columns { grid-template-columns: 1fr !important; }
 }
