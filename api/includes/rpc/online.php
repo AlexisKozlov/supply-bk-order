@@ -132,6 +132,40 @@ if ($fn === 'get_admin_stats') {
     respond($stats);
 }
 
+if ($fn === 'get_broadcast_audience') {
+    // Сколько человек получит рассылку — показываем до отправки, чтобы
+    // «отправить всем» не было прыжком в темноту.
+    $caller = getSessionUser($pdo);
+    if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
+    $out = ['staff_cabinet' => 0, 'restaurant_cabinet' => 0, 'staff_telegram' => 0, 'restaurant_telegram' => 0];
+    try {
+        $out['staff_cabinet'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE disabled_at IS NULL")->fetchColumn();
+    } catch (PDOException $e) {}
+    try {
+        $out['staff_telegram'] = (int)$pdo->query("
+            SELECT COUNT(*) FROM users
+            WHERE disabled_at IS NULL AND telegram_chat_id IS NOT NULL AND telegram_chat_id <> ''
+        ")->fetchColumn();
+    } catch (PDOException $e) {}
+    try {
+        $out['restaurant_cabinet'] = (int)$pdo->query("
+            SELECT COUNT(*) FROM ro_users ru
+            JOIN restaurants r ON r.number = ru.restaurant_number AND r.legal_entity_group = ru.legal_entity_group
+            WHERE ru.is_active = 1 AND r.active = 1
+        ")->fetchColumn();
+    } catch (PDOException $e) {}
+    try {
+        // Заблокировавших бота не считаем — им сообщение не дойдёт.
+        $out['restaurant_telegram'] = (int)$pdo->query("
+            SELECT COUNT(DISTINCT chat_id) FROM ro_telegram_subs
+            WHERE chat_id IS NOT NULL
+              AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+              AND (tg_blocked_at IS NULL OR tg_blocked_at < NOW() - INTERVAL 30 DAY)
+        ")->fetchColumn();
+    } catch (PDOException $e) {}
+    respond($out);
+}
+
 if ($fn === 'get_table_counts') {
     // Сколько строк в таблицах — для вкладки «Бэкап», чтобы объём выгрузки был
     // виден до нажатия. Имена таблиц берём ТОЛЬКО из белого списка.
