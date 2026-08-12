@@ -59,8 +59,9 @@
             <button class="fb-del-btn" @click="deleteBugReport(bugDetail)" title="Удалить"><BkIcon name="delete" size="sm"/></button>
           </div>
 
-          <!-- Описание (сворачиваемое) -->
-          <details class="fb-chat-info">
+          <!-- Описание. Открыто сразу: суть жалобы — главное в обращении,
+               прятать её за стрелку смысла нет. -->
+          <details class="fb-chat-info" open>
             <summary>
               {{ bugDetail.created_by }} · {{ formatBugDate(bugDetail.created_at) }}
               <span v-if="bugDetail.screenshots?.length"> · <BkIcon name="link" size="sm" /> {{ bugDetail.screenshots.length }}</span>
@@ -85,7 +86,12 @@
             <div v-if="!bugReplies.length" style="text-align:center;padding:40px;color:var(--text-muted);font-size:12px;">Нет сообщений — напишите ответ</div>
             <div v-for="r in bugReplies" :key="r.id" class="fb-msg" :class="{ admin: r.is_admin }">
               <div class="fb-msg-meta">
-                <span :style="r.is_admin ? 'color:#2E7D32' : ''">{{ r.created_by }}{{ r.is_admin ? ' (вы)' : '' }}</span>
+                <!-- «(вы)» — только своё сообщение. Раньше так помечался любой
+                     ответ отдела закупок, и было непонятно, кто из коллег писал. -->
+                <span :style="r.is_admin ? 'color:#2E7D32' : ''">
+                  {{ r.created_by }}<template v-if="isMine(r)"> (вы)</template>
+                  <template v-else-if="r.is_admin"> · отдел закупок</template>
+                </span>
                 <span>{{ formatBugDate(r.created_at) }}</span>
               </div>
               <div class="fb-msg-text" v-html="renderMsgContent(r.message, bugImageUrls)" @click="onBugMsgClick" :data-img-rev="Object.keys(bugImageUrls).length"></div>
@@ -129,10 +135,16 @@ import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { parseMoscowDate } from '@/lib/utils.js';
 
 const emit = defineEmits(['count']);
+
+const userStore = useUserStore();
+function isMine(r) {
+  return String(r.created_by || '') === String(userStore.currentUser?.name || '');
+}
 const toast = useToastStore();
 
 // ═══ Обращения (баг-репорты) ═══
@@ -580,7 +592,29 @@ onBeforeUnmount(stopBugPoll);
   align-items: flex-end;
 }
 .fb-chat-input textarea { flex: 1; resize: none; min-height: 36px; max-height: 100px; }
+
+/* На узком экране список и переписка идут друг под другом.
+   Без @media эти правила ломали раскладку на компьютере. */
+/* Поиск и пустые состояния списка: классы были в разметке, но без стилей —
+   поле выглядело как голый input браузера. */
+.fb-search {
+  display: flex; align-items: center; gap: 6px;
+  margin: 8px 12px; padding: 0 10px;
+  background: var(--card); border: 1px solid var(--border-light);
+  border-radius: 8px; color: var(--text-muted); flex-shrink: 0;
+}
+.fb-search input {
+  flex: 1; min-width: 0; border: none; background: none; outline: none;
+  font-family: inherit; font-size: 12.5px; color: var(--text); padding: 7px 0;
+}
+.fb-search input::-webkit-search-cancel-button { display: none; }
+.fb-search-clear { border: none; background: none; cursor: pointer; color: var(--text-muted); padding: 2px; line-height: 0; }
+
+.fb-state { padding: 24px 16px; text-align: center; font-size: 12.5px; color: var(--text-muted); }
+
+@media (max-width: 768px) {
   .fb-messenger { flex-direction: column; height: auto; min-height: unset; }
   .fb-sidebar { width: 100%; max-height: 300px; border-right: none; border-bottom: 1px solid var(--border-light); }
   .fb-chat { min-height: 400px; }
+}
 </style>
