@@ -63,7 +63,9 @@
         </div>
         <div class="sts-chart">
           <div v-for="d in days" :key="d.date" class="sts-bar-col"
-               :title="`${d.label}: закупка ${d.orders}, рестораны ${d.ro}, поставщикам ${d.so}`">
+               :class="{ picked: pickedDay?.date === d.date }"
+               :title="`${d.label}: закупка ${d.orders}, рестораны ${d.ro}, поставщикам ${d.so}`"
+               @click="pickedDay = pickedDay?.date === d.date ? null : d">
             <div class="sts-bar-stack">
               <div class="sts-bar so" :style="{ height: barHeight(d.so) }"></div>
               <div class="sts-bar ro" :style="{ height: barHeight(d.ro) }"></div>
@@ -72,7 +74,13 @@
             <div class="sts-bar-label">{{ d.short }}</div>
           </div>
         </div>
-        <p class="sts-chart-note">Последние 30 дней. Наведите на столбец, чтобы увидеть числа.</p>
+        <!-- Числа по нажатию: на телефоне наводить нечем, и подсказка-title
+             там не показывается вовсе. -->
+        <p v-if="pickedDay" class="sts-chart-note sts-picked">
+          <b>{{ pickedDay.label }}</b> — закупка {{ pickedDay.orders }},
+          рестораны {{ pickedDay.ro }}, поставщикам {{ pickedDay.so }}
+        </p>
+        <p v-else class="sts-chart-note">Последние 30 дней. Нажмите на столбец, чтобы увидеть числа.</p>
       </div>
 
       <!-- Всего в системе -->
@@ -143,6 +151,8 @@ import { formatInt } from '@/lib/utils.js';
 const data = ref({});
 const loading = ref(false);
 const period = ref('month');
+// Выбранный столбец графика: на телефоне числа иначе не посмотреть.
+const pickedDay = ref(null);
 
 const periods = [
   { value: 'week', label: 'Неделя' },
@@ -321,4 +331,9 @@ onMounted(load);
   .sts-card-value { font-size: 21px; }
   .sts-chart { height: 120px; }
 }
+
+.sts-bar-col { cursor: pointer; border-radius: 6px; transition: background .15s; }
+.sts-bar-col:hover { background: rgba(0, 0, 0, .04); }
+.sts-bar-col.picked { background: rgba(244, 162, 97, .18); }
+.sts-picked { color: var(--text); }
 </style>
