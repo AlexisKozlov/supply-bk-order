@@ -193,7 +193,12 @@
               <div class="login-brand-title">Supply Department</div>
               <div class="login-brand-sub">Портал закупок</div>
             </div>
-            <img class="login-burger" src="/login-burger.png" alt="" />
+            <!-- Ролик сборки бургера: играет один раз при открытии окна и
+                 замирает на готовом кадре. Сотрудники закупок работают со
+                 всеми юрлицами, поэтому здесь всегда бургер. -->
+            <video class="login-burger" src="/burger-build.mp4"
+                   autoplay muted playsinline preload="metadata"
+                   poster="/login-burger.png" aria-hidden="true"></video>
           </div>
           <div class="login-right">
             <button class="login-close" @click="showLoginModal = false"><BkIcon name="close" size="xs"/></button>
@@ -966,7 +971,15 @@ input.p-find-input::placeholder { color: rgba(245,230,208,.4); }
 }
 /* Бургер подпирает нижний край панели и слегка выходит за него — так он
    читается как часть фона, а не как приклеенная картинка. */
-.login-burger { width: 210px; margin: auto -14px 0; display: block; }
+/* Ролик светлый, панель тёмная — оформлен карточкой, иначе выглядел бы
+   белой заплаткой на коричневом. */
+.login-burger {
+  width: calc(100% - 32px); max-width: 230px;
+  aspect-ratio: 16 / 9;
+  margin: auto auto 22px; display: block;
+  border-radius: 14px; object-fit: cover;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .3);
+}
 .login-brand { text-align: center; }
 .login-brand-icon { font-size: 36px; display: block; margin-bottom: 10px; }
 .login-brand-title { font-size: 20px; font-weight: 400; color: var(--brand-cream); font-family: 'Flame', 'Sora', sans-serif; }

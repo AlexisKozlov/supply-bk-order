@@ -48,12 +48,20 @@
             <div class="ro-side-title">{{ loginBrand.title }}</div>
             <div class="ro-side-sub">{{ loginBrand.subtitle }}</div>
           </div>
-          <!-- У каждого юрлица своя картинка: бургер для Бургер Кинга,
-               пицца для Пицца Стар (это Додо). Пицца лежит в кремовом круге —
-               «на тарелке»: вырезать у неё фон нельзя, сыр по цвету почти
-               совпадает с фоном и исчезал вместе с ним. -->
-          <img v-if="loginBrand.themeClass !== 'ro-theme-ps'" class="ro-side-burger" src="/login-burger.png" alt="" />
-          <img v-else class="ro-side-pizza" src="/login-pizza.jpg" alt="" />
+          <!-- У каждого юрлица своё: бургер для Бургер Кинга, пицца для Пицца
+               Стар (это Додо). Ролик показывает, как еда собирается, и играет
+               один раз — не мигает и не отвлекает от формы входа.
+               Пицца лежит в кремовом круге, «на тарелке»: вырезать у неё фон
+               нельзя, сыр по цвету почти совпадает с фоном и исчезает вместе
+               с ним. -->
+          <video v-if="loginBrand.themeClass !== 'ro-theme-ps'"
+                 class="ro-side-burger" src="/burger-build.mp4"
+                 autoplay muted playsinline preload="metadata"
+                 poster="/login-burger.png" aria-hidden="true"></video>
+          <video v-else
+                 class="ro-side-pizza" src="/pizza-build.mp4"
+                 autoplay muted playsinline preload="metadata"
+                 poster="/login-pizza.jpg" aria-hidden="true"></video>
         </aside>
 
         <div class="ro-main">
@@ -516,12 +524,21 @@ async function handleLogin() {
 }
 .ro-side-sub { font-size: 12px; opacity: .65; margin-top: 4px; }
 /* Бургер подпирает нижний край панели — так он часть фона, а не наклейка. */
-.ro-side-burger { width: 200px; margin: auto -12px 0; display: block; }
+/* Ролик светлый, а панель тёмная — поэтому он оформлен карточкой с тенью,
+   иначе выглядел бы случайной белой заплаткой на коричневом. */
+.ro-side-burger {
+  width: calc(100% - 36px); max-width: 240px;
+  aspect-ratio: 16 / 9;
+  margin: auto auto 26px; display: block;
+  border-radius: 14px; object-fit: cover;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
+}
 .ro-side-pizza {
   width: 176px; height: 176px;
   margin: auto auto 26px;
   display: block;
   border-radius: 50%;
+  object-fit: cover;
   box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
 }
 /* Пицца Стар — своя тема: тёмно-фиолетовая, как боковое меню ПС в портале.
