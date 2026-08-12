@@ -62,9 +62,16 @@ function tgLogSend(string $method, $chatId, array $result, array $opts = []): vo
         $pdo = $opts['pdo'] ?? ($GLOBALS['pdo'] ?? null);
         if (!($pdo instanceof PDO)) return;
         $errText = $result['description'] ?? $result['curl_error'] ?? null;
+        // Начало сообщения: при разборе жалоб «пришла ерунда / ничего не
+        // пришло» по одному методу и коду ошибки не понять, о каком экране речь.
+        $preview = $opts['log_text'] ?? null;
+        if ($preview !== null) {
+            $preview = trim(preg_replace('/\s+/u', ' ', strip_tags((string)$preview)));
+            $preview = mb_substr($preview, 0, 200);
+        }
         $pdo->prepare("
-            INSERT INTO tg_send_log (method, chat_id, ok, http_code, error_code, error_text)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tg_send_log (method, chat_id, ok, http_code, error_code, error_text, text_preview)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ")->execute([
             $method,
             $chatId ? (int)$chatId : null,
@@ -72,6 +79,7 @@ function tgLogSend(string $method, $chatId, array $result, array $opts = []): vo
             (int)($result['http_code'] ?? 0),
             isset($result['error_code']) ? (int)$result['error_code'] : null,
             $errText !== null ? mb_substr((string)$errText, 0, 255) : null,
+            $preview,
         ]);
     } catch (Throwable $e) {
         // молча — иначе попытка логирования сломает клиент
@@ -310,7 +318,9 @@ const TG_MAX_TEXT = 4096;
  *
  * @return string[] Список кусков, каждый не длиннее $limit.
  */
-function tgSplitText(string $text, int $limit = TG_MAX_TEXT): array
+const TG_MAX_PARTS = 3;
+
+function tgSplitText(string $text, int $limit = TG_MAX_TEXT, int $maxParts = TG_MAX_PARTS): array
 {
     if (mb_strlen($text) <= $limit) return [$text];
 
@@ -330,6 +340,14 @@ function tgSplitText(string $text, int $limit = TG_MAX_TEXT): array
         $rest = ltrim(mb_substr($rest, $cut));
     }
     if ($rest !== '') $parts[] = $rest;
+
+    // Больше трёх сообщений подряд — это уже не ответ, а лавина. Обрезаем и
+    // честно говорим, что показано не всё.
+    if (count($parts) > $maxParts) {
+        $parts = array_slice($parts, 0, $maxParts);
+        $parts[$maxParts - 1] = rtrim($parts[$maxParts - 1])
+            . "\n\n<i>…показано не всё — полный список в портале.</i>";
+    }
 
     return $parts;
 }
@@ -367,7 +385,7 @@ function tgClientSend($chatId, string $text, array $opts = []): array
         if (!empty($opts['disable_notification'])) $params['disable_notification']     = true;
         if (!empty($opts['reply_to_message_id']) && $i === 0) $params['reply_to_message_id'] = (int)$opts['reply_to_message_id'];
 
-        $result = tgClientCall('sendMessage', $params, $opts);
+        $result = tgClientCall('sendMessage', $params, ['log_text' => $chunk] + $opts);
         // Дальше слать нет смысла: чат недоступен или бот заблокирован.
         if (!$result['ok'] && in_array((int)($result['error_code'] ?? 0), [403, 400], true)) break;
     }
@@ -399,7 +417,7 @@ function tgClientEdit($chatId, $messageId, string $text, array $opts = []): arra
     if (!empty($opts['reply_markup']) && !$tail) $params['reply_markup'] = tgSanitizeMarkup(is_array($opts['reply_markup']) ? $opts['reply_markup'] : json_decode((string)$opts['reply_markup'], true));
     if (!empty($opts['disable_preview'])) $params['disable_web_page_preview'] = true;
 
-    $result = tgClientCall('editMessageText', $params, $opts);
+    $result = tgClientCall('editMessageText', $params, ['log_text' => $chunks[0]] + $opts);
 
     foreach ($tail as $i => $chunk) {
         $sendOpts = $opts;

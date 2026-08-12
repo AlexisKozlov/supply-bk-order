@@ -3320,6 +3320,17 @@ function restRoOrders($chatId, $msgId) {
     $orders->execute($params);
     $orderRows = $orders->fetchAll();
 
+    // Сессия может идти месяцами: показываем окно вокруг сегодняшнего дня,
+    // иначе экран превращался в простыню на весь год.
+    $windowFrom = (new DateTime('today'))->modify('-3 days')->format('Y-m-d');
+    $windowTo   = (new DateTime('today'))->modify('+10 days')->format('Y-m-d');
+    $totalRows  = count($orderRows);
+    $orderRows  = array_values(array_filter(
+        $orderRows,
+        fn($o) => $o['delivery_date'] >= $windowFrom && $o['delivery_date'] <= $windowTo
+    ));
+    $hiddenRows = $totalRows - count($orderRows);
+
     // Группируем по ресторану
     $byRest = [];
     foreach ($orderRows as $o) {
@@ -3342,9 +3353,13 @@ function restRoOrders($chatId, $msgId) {
                 $text .= "  {$icon} {$dayName} {$dateStr} — {$o['item_count']} поз., {$qty} кор.\n";
             }
         } else {
-            $text .= "  ⚪ Заявок нет\n";
+            $text .= "  ⚪ Заявок на ближайшие дни нет\n";
         }
         $text .= "\n";
+    }
+
+    if ($hiddenRows > 0) {
+        $text .= "<i>Показаны ближайшие дни. Остальные заявки сессии — в портале.</i>\n";
     }
 
     $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
@@ -3376,32 +3391,54 @@ function cmdRoStatus($chatId, $user, $msgId) {
 
     $text .= "📅 Сессия: " . date('d.m', strtotime($session['week_start'])) . " — " . date('d.m', strtotime($session['week_end'])) . "\n\n";
 
-    // Статистика по дням
-    $tz = new DateTimeZone('Europe/Minsk');
-    $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
-
+    // Показываем окно вокруг сегодняшнего дня, а не всю сессию: сессия может
+    // длиться месяцами, и раньше бот вываливал сотни строк и делал по два
+    // запроса к базе на каждый день.
+    $dayNames = [1 => 'Пн', 2 => 'Вт', 3 => 'Ср', 4 => 'Чт', 5 => 'Пт', 6 => 'Сб'];
     $weekStart = new DateTime($session['week_start']);
-    $weekEnd = new DateTime($session['week_end']);
+    $weekEnd   = new DateTime($session['week_end']);
 
-    for ($d = clone $weekStart; $d <= $weekEnd; $d->modify('+1 day')) {
+    $from = (new DateTime('today'))->modify('-3 days');
+    if ($from < $weekStart) $from = clone $weekStart;
+    $to = (clone $from)->modify('+13 days');
+    if ($to > $weekEnd) $to = clone $weekEnd;
+
+    // Сколько ресторанов ждут поставку в каждый день недели — одним запросом.
+    $perDow = [];
+    foreach ($pdo->query("
+        SELECT ds.day_of_week dow, COUNT(DISTINCT r.id) c
+        FROM restaurants r
+        JOIN delivery_schedule ds ON ds.restaurant_id = r.id
+        WHERE r.active = 1
+        GROUP BY ds.day_of_week
+    ") as $row) $perDow[(int)$row['dow']] = (int)$row['c'];
+
+    // Сколько заявок подано по дням — тоже одним запросом.
+    $submittedByDate = [];
+    $st = $pdo->prepare("
+        SELECT delivery_date, COUNT(*) c
+        FROM ro_orders
+        WHERE session_id = ? AND status <> 'draft' AND delivery_date BETWEEN ? AND ?
+        GROUP BY delivery_date
+    ");
+    $st->execute([$session['id'], $from->format('Y-m-d'), $to->format('Y-m-d')]);
+    foreach ($st->fetchAll() as $row) $submittedByDate[$row['delivery_date']] = (int)$row['c'];
+
+    $today = (new DateTime('today'))->format('Y-m-d');
+    for ($d = clone $from; $d <= $to; $d->modify('+1 day')) {
         $dow = (int)$d->format('N');
         if ($dow > 6) continue;
         $dateStr = $d->format('Y-m-d');
-        $dayName = $dayNames[$dow] ?? '';
-        $dateFmt = $d->format('d.m');
-
-        // Сколько ресторанов с доставкой в этот день
-        $totalRests = $pdo->prepare("SELECT COUNT(DISTINCT r.id) FROM restaurants r JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ? WHERE r.active = 1");
-        $totalRests->execute([$dow]);
-        $total = (int)$totalRests->fetchColumn();
-
-        // Сколько подали
-        $submitted = $pdo->prepare("SELECT COUNT(*) FROM ro_orders WHERE session_id = ? AND delivery_date = ? AND status != 'draft'");
-        $submitted->execute([$session['id'], $dateStr]);
-        $sub = (int)$submitted->fetchColumn();
+        $total = $perDow[$dow] ?? 0;
+        $sub = $submittedByDate[$dateStr] ?? 0;
 
         $icon = $sub === $total && $total > 0 ? '✅' : ($sub > 0 ? '🟡' : '⚪');
-        $text .= "{$icon} {$dayName} {$dateFmt}: <b>{$sub}/{$total}</b>\n";
+        $mark = $dateStr === $today ? ' ← сегодня' : '';
+        $text .= "{$icon} {$dayNames[$dow]} {$d->format('d.m')}: <b>{$sub}/{$total}</b>{$mark}\n";
+    }
+
+    if ($weekEnd > $to) {
+        $text .= "\n<i>Показаны ближайшие дни. Вся сессия — в портале.</i>\n";
     }
 
     $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
