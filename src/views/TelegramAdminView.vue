@@ -27,9 +27,6 @@
       <button class="adm-tab" :class="{ active: tab === 'log' }" @click="tab = 'log'">
         <BkIcon name="clipboard" size="sm" /> Лог
       </button>
-      <button class="adm-tab" :class="{ active: tab === 'broadcast' }" @click="tab = 'broadcast'; loadBroadcastHistory()">
-        <BkIcon name="bell" size="sm" /> Рассылка
-      </button>
     </div>
 
     <div v-if="loading" style="text-align:center;padding:48px;color:var(--text-muted);"><BurgerSpinner text="Загрузка..." /></div>
@@ -140,6 +137,18 @@
               <div v-if="webhookMsg" class="tga-msg" :class="webhookMsgOk ? 'tga-msg-ok' : 'tga-msg-err'" style="margin-top:8px;">{{ webhookMsg }}</div>
             </div>
           </details>
+        </div>
+
+        <!-- Рассылка переехала: раньше она была здесь отдельной вкладкой -->
+        <div class="tga-section-card tga-moved">
+          <div>
+            <b>Рассылка переехала</b>
+            <p>Сообщения сотрудникам и ресторанам отправляются в админ-панели: там же выбор
+              получателей с их числом, подтверждение перед отправкой и история.</p>
+          </div>
+          <router-link class="btn" :to="{ name: 'admin', query: { tab: 'broadcast' } }">
+            Открыть рассылку
+          </router-link>
         </div>
 
         <!-- Быстрые действия -->
@@ -501,65 +510,6 @@
     </div>
 
     <!-- ═══ Рассылка ═══ -->
-    <div v-else-if="tab === 'broadcast'" class="adm-section">
-      <div class="tga-broadcast">
-        <h3 class="tga-subtitle">Отправить сообщение</h3>
-
-        <div class="tga-form-group">
-          <label>Получатели:</label>
-          <div class="tga-recipient-btns">
-            <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'all_users' }" @click="broadcastTarget = 'all_users'">
-              Все сотрудники ({{ linkedUsers.length }})
-            </button>
-            <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'all_restaurants' }" @click="broadcastTarget = 'all_restaurants'">
-              Все рестораны ({{ restaurantUniqueChatIds.length }})
-            </button>
-            <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'everyone' }" @click="broadcastTarget = 'everyone'">
-              Все ({{ allUniqueChatIds.length }})
-            </button>
-          </div>
-        </div>
-
-        <div class="tga-form-group">
-          <label>Сообщение (HTML):</label>
-          <textarea v-model="broadcastText" class="tga-textarea" rows="5" placeholder="Текст сообщения... Поддерживается <b>жирный</b>, <i>курсив</i>"></textarea>
-        </div>
-
-        <div class="tga-form-group" style="display:flex;align-items:center;gap:12px;">
-          <button class="btn primary" @click="sendBroadcast" :disabled="!broadcastText.trim() || broadcastSending">
-            {{ broadcastSending ? 'Отправка...' : 'Отправить' }}
-          </button>
-          <span v-if="broadcastResult" class="tga-broadcast-result">{{ broadcastResult }}</span>
-        </div>
-      </div>
-
-      <!-- История рассылок -->
-      <div style="margin-top:32px;">
-        <h3 class="tga-subtitle">История рассылок</h3>
-        <div v-if="broadcastHistoryLoading" class="tga-empty"><BurgerSpinner text="Загрузка..." /></div>
-        <div v-else-if="!broadcastHistory.length" class="tga-empty">Нет рассылок</div>
-        <div v-else class="tga-table-wrap">
-          <table class="tga-table">
-            <thead>
-              <tr>
-                <th>Время</th>
-                <th>Отправитель</th>
-                <th>Сообщение</th>
-                <th>Получателей</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="b in broadcastHistory" :key="b.id">
-                <td>{{ formatDate(b.sent_at) }}</td>
-                <td><b>{{ b.sender }}</b></td>
-                <td style="max-width:400px;word-break:break-word;">{{ b.message }}</td>
-                <td class="tga-cell-ok">{{ b.recipient_count }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
 
     <!-- ═══ Вопросы AI ═══ -->
     <div v-else-if="tab === 'questions'" class="adm-section">
@@ -619,7 +569,7 @@ import { appConfirm, appAlert, appPrompt } from '@/lib/appDialogs.js'
 
 const userStore = useUserStore()
 
-const tab = useTabRoute('bot', ['bot', 'restaurants', 'users', 'questions', 'broadcast', 'log', 'settings'])
+const tab = useTabRoute('bot', ['bot', 'restaurants', 'users', 'questions', 'log', 'settings'])
 const loading = ref(true)
 
 const linkedUsers = ref([])
@@ -662,12 +612,6 @@ const logTypeFilter = ref('all')
 const logChannelFilter = ref('all')
 
 // Broadcast
-const broadcastTarget = ref('all_users')
-const broadcastText = ref('')
-const broadcastSending = ref(false)
-const broadcastResult = ref('')
-const broadcastHistory = ref([])
-const broadcastHistoryLoading = ref(false)
 
 async function loadData() {
   loading.value = true
@@ -1163,46 +1107,6 @@ async function toggleSetting(user, field) {
   }
 }
 
-async function loadBroadcastHistory() {
-  broadcastHistoryLoading.value = true
-  try {
-    const { data } = await db.rpc('tg_admin_broadcast_history')
-    broadcastHistory.value = data.broadcasts || []
-  } catch (e) {
-    console.error('broadcast history error:', e)
-  } finally {
-    broadcastHistoryLoading.value = false
-  }
-}
-
-async function sendBroadcast() {
-  if (!broadcastText.value.trim()) return
-
-  let chatIds = []
-  if (broadcastTarget.value === 'all_users') {
-    chatIds = linkedUsers.value.map(u => String(u.telegram_chat_id))
-  } else if (broadcastTarget.value === 'all_restaurants') {
-    chatIds = restaurantUniqueChatIds.value.map(String)
-  } else {
-    chatIds = allUniqueChatIds.value
-  }
-
-  if (!chatIds.length) { broadcastResult.value = 'Нет получателей'; return }
-  if (!(await appConfirm(`Отправить сообщение ${chatIds.length} получателям?`, { title: 'Рассылка', okText: 'Отправить' }))) return
-
-  broadcastSending.value = true
-  broadcastResult.value = ''
-  try {
-    const { data } = await db.rpc('tg_admin_send_message', { chat_ids: chatIds, message: broadcastText.value, sender: userStore.currentUser?.name || 'admin' })
-    broadcastResult.value = `Отправлено: ${data.sent} из ${data.total}`
-    broadcastText.value = ''
-    loadBroadcastHistory()
-  } catch (e) {
-    broadcastResult.value = 'Ошибка: ' + (e.message || e)
-  } finally {
-    broadcastSending.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -1354,7 +1258,6 @@ async function sendBroadcast() {
 .tga-badge-submitted { background: #e8f5e9; color: #2e7d32; }
 
 /* ═══ Рассылка ═══ */
-.tga-broadcast { max-width: 600px; }
 .tga-form-group { margin-bottom: 16px; }
 .tga-form-group label {
   display: block; font-size: 13px; font-weight: 600;
@@ -1378,7 +1281,6 @@ async function sendBroadcast() {
 .tga-btn-chip:hover { border-color: #2AABEE; color: #2AABEE; }
 .tga-btn-chip.active { background: #2AABEE; color: white; border-color: #2AABEE; }
 
-.tga-broadcast-result { font-size: 13px; color: #2e7d32; font-weight: 500; }
 
 /* ═══ Подтабы ═══ */
 .tga-subtabs { display: flex; gap: 0; margin-bottom: 16px; }
@@ -1484,7 +1386,6 @@ async function sendBroadcast() {
   .tga-table th, .tga-table td { padding: 6px 8px; }
   .tga-recipient-btns { flex-direction: column; }
   .tga-btn-chip { text-align: center; }
-  .tga-broadcast { max-width: 100%; }
 }
 
 /* ═══ Здоровье бота ═══ */
@@ -1549,4 +1450,9 @@ async function sendBroadcast() {
 .tga-notif-table tbody tr:hover .tga-notif-name { background: #fcfaf6; }
 
 .tga-answer-full { white-space: pre-wrap; font-size: 12px; line-height: 1.5; display: block; }
+
+.tga-moved { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.tga-moved p { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; max-width: 640px; }
+.tga-moved .btn { margin-left: auto; flex-shrink: 0; }
+@media (max-width: 700px) { .tga-moved .btn { margin-left: 0; width: 100%; justify-content: center; } }
 </style>
