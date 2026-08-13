@@ -73,7 +73,7 @@
 
       <!-- Перенесённые задачи из предыдущих протоколов -->
       <div v-if="carryoverTasks.length" class="mpd-section mpd-section-carryover">
-        <h3 class="mpd-carryover-title">Задачи из прошлого протокола этого формата <span class="mpd-count">({{ carryoverTasks.length }})</span></h3>
+        <h3 class="mpd-carryover-title">Задачи с прошлых совещаний этого формата <span class="mpd-count">({{ carryoverTasks.length }})</span></h3>
         <!-- Обёртка нужна, чтобы на телефоне таблицу можно было прокрутить вбок -->
         <div class="mpd-table-scroll" :class="{ 'is-picker-open': pickerOpen }">
         <table class="mpd-tasks-table">

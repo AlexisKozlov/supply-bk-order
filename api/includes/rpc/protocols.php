@@ -549,29 +549,35 @@
         if ($sLe === false) respond([]);
         if ($sLe && !checkLegalEntityAccess($caller, $sLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        // Берём ровно один предыдущий протокол этого формата: с ближайшей более
-        // ранней датой (при равных — с меньшим id), чтобы порядок «свежесть»
-        // совпадал с UI-сортировкой. Возвращаем ВСЕ его задачи независимо
-        // от статуса — пользователь сам решит, что закрывать/переносить.
-        $prevSql = "SELECT id FROM meeting_protocols WHERE series_id = ?";
-        $prevParams = [$seriesId];
+        // Что показываем на совещании:
+        //  - предыдущий протокол этого формата — ЦЕЛИКОМ (включая выполненные),
+        //    чтобы можно было отчитаться по прошлой встрече;
+        //  - все протоколы этого формата раньше предыдущего — только НЕЗАКРЫТЫЕ
+        //    задачи (в работе и просроченные), иначе долг тонул навсегда:
+        //    раньше бралcя ровно один предыдущий протокол, и всё, что не успели
+        //    закрыть за две встречи назад, исчезало из виду.
+        // Ограничения по давности нет: незакрытая задача висит, пока её не закроют.
+        $olderCond = '';                 // «раньше текущего протокола»
+        $olderParams = [];
         if ($excludeProtocolId) {
             $cur = $pdo->prepare("SELECT meeting_date FROM meeting_protocols WHERE id = ?");
             $cur->execute([$excludeProtocolId]);
             $curDate = $cur->fetchColumn();
             if ($curDate !== false) {
-                $prevSql .= " AND (meeting_date < ? OR (meeting_date = ? AND id < ?))";
-                $prevParams[] = $curDate;
-                $prevParams[] = $curDate;
-                $prevParams[] = $excludeProtocolId;
+                $olderCond = " AND (p.meeting_date < ? OR (p.meeting_date = ? AND p.id < ?))";
+                $olderParams = [$curDate, $curDate, $excludeProtocolId];
             } else {
-                $prevSql .= " AND id != ?";
-                $prevParams[] = $excludeProtocolId;
+                $olderCond = " AND p.id != ?";
+                $olderParams = [$excludeProtocolId];
             }
         }
-        $prevSql .= " ORDER BY meeting_date DESC, id DESC LIMIT 1";
+
+        // Предыдущий протокол: ближайшая более ранняя дата (при равных — меньший id),
+        // чтобы порядок «свежести» совпадал с сортировкой списка на экране.
+        $prevSql = "SELECT p.id FROM meeting_protocols p WHERE p.series_id = ?" . $olderCond
+                 . " ORDER BY p.meeting_date DESC, p.id DESC LIMIT 1";
         $ps = $pdo->prepare($prevSql);
-        $ps->execute($prevParams);
+        $ps->execute(array_merge([$seriesId], $olderParams));
         $prevProtoId = $ps->fetchColumn();
         if (!$prevProtoId) respond([]);
 
@@ -580,10 +586,11 @@
                    p.meeting_date, p.topic
             FROM protocol_decisions d
             JOIN meeting_protocols p ON p.id = d.protocol_id
-            WHERE d.protocol_id = ?
-            ORDER BY d.id
+            WHERE p.series_id = ?" . $olderCond . "
+              AND (d.protocol_id = ? OR d.status <> 'done')
+            ORDER BY p.meeting_date DESC, p.id DESC, d.id
         ");
-        $s->execute([$prevProtoId]);
+        $s->execute(array_merge([$seriesId], $olderParams, [$prevProtoId]));
         $decisions = $s->fetchAll();
         pdAttachCardDescription($pdo, $decisions);
         pdAttachAssigneesProgress($pdo, $decisions);
