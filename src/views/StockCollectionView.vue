@@ -65,7 +65,8 @@
         </div>
         <div class="sc-detail-actions">
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying" title="Отправит напоминание в Telegram только тем ресторанам, кто ещё не заполнил остатки">
-            {{ notifying ? 'Отправка...' : '<BkIcon name="bell" size="sm" /> Напомнить не заполнившим' }}
+            <template v-if="notifying">Отправка...</template>
+            <template v-else><BkIcon name="bell" size="sm" /> Напомнить не заполнившим</template>
           </button>
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="openEditProducts">
             Изменить товары

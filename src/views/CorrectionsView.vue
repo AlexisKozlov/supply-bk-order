@@ -144,7 +144,9 @@
         <div v-else-if="!settingsUsers.length" class="corr-empty">Нет привязанных пользователей</div>
         <div v-else class="corr-settings-list">
           <div v-for="u in settingsUsers" :key="u.name" class="corr-settings-row" @click="toggleNotification(u)">
-            <span class="corr-toggle">{{ u.correction_notifications ? '<BkIcon name="success" size="sm" />' : '⬜' }}</span>
+            <span class="corr-toggle" :class="{ 'corr-toggle-on': u.correction_notifications }" role="checkbox" :aria-checked="u.correction_notifications ? 'true' : 'false'">
+              <BkIcon v-if="u.correction_notifications" name="success" size="sm" />
+            </span>
             <span>{{ u.name }}</span>
           </div>
         </div>
@@ -680,7 +682,8 @@ watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 .corr-settings-list { display: flex; flex-direction: column; gap: 2px; max-width: 400px; }
 .corr-settings-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-radius: 8px; }
 .corr-settings-row:hover { background: var(--bk-cream); }
-.corr-toggle { font-size: 16px; }
+.corr-toggle { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid var(--border); border-radius: 5px; background: #fff; color: #fff; }
+.corr-toggle-on { background: #2E7D32; border-color: #2E7D32; }
 .corr-textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; resize: vertical; box-sizing: border-box; }
 
 /* Мобильная адаптация */
