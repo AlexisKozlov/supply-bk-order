@@ -226,7 +226,7 @@
             <a :href="agUrl(a)" @click.stop class="psc-file-link psc-download-btn" target="_blank"><BkIcon name="import" size="sm"/> Скачать</a>
           </div>
           <div v-if="!isViewer" class="db-card-btns">
-            <button v-if="a.status === 'draft' && hasFullAccess" class="approve-btn" @click.stop="approveAgreement(a)"><BkIcon name="check" size="sm"/> Согласовать</button>
+            <button v-if="a.status === 'draft' && hasFullAccess" class="approve-btn" @click.stop="approveAgreement(a)"><BkIcon name="success" size="sm"/> Согласовать</button>
             <button v-if="a.status === 'active'" class="db-card-btn" @click.stop="archiveAgreement(a)" title="В архив"><BkIcon name="archive" size="sm"/></button>
             <button v-if="a.status === 'archived'" class="db-card-btn" @click.stop="restoreAgreement(a)" title="Вернуть из архива"><BkIcon name="restore" size="sm"/></button>
             <button class="db-card-btn" @click.stop="editAgreement(a)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>

@@ -40,6 +40,8 @@ export const icons = {
 
   send: `<svg viewBox="0 0 24 24" fill="none"><path d="M21.5 3.2 2.8 10.4a.6.6 0 0 0 .05 1.13l4.9 1.63 1.63 4.9a.6.6 0 0 0 1.13.05z" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5" stroke-linejoin="round"/><path d="M21.5 3.2 7.75 13.16" stroke="#E76F51" stroke-width="1.5" stroke-linecap="round"/><path d="M11.4 16.9 14 14.3" stroke="#F4A261" stroke-width="1.5" stroke-linecap="round"/></svg>`,
 
+  mail: `<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="5" width="19" height="14" rx="2.5" fill="#FFF3E0" stroke="#E76F51" stroke-width="1.6"/><path d="M3.6 7.4l7.3 5.2a2 2 0 002.2 0l7.3-5.2" stroke="#E76F51" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.6 17.6l5.4-4.5M20.4 17.6L15 13.1" stroke="#F4A261" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+
   import: `<svg viewBox="0 0 24 24" fill="none" stroke="#E76F51" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
 
   copy: `<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="12" height="12" rx="2" fill="#FFF3E0" stroke="#F4A261" stroke-width="1.8"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="#E76F51" stroke-width="1.8"/></svg>`,
@@ -98,6 +100,7 @@ export const icons = {
   arrowUp: `<svg viewBox="0 0 24 24" fill="none" stroke="#E76F51" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`,
   arrowDown: `<svg viewBox="0 0 24 24" fill="none" stroke="#E76F51" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`,
   arrowRight: `<svg viewBox="0 0 24 24" fill="none" stroke="#F4A261" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`,
+  arrowLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="#F4A261" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`,
   arrowLeftRight: `<svg viewBox="0 0 24 24" fill="none" stroke="#F4A261" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 8 3 12 7 16"/><polyline points="17 8 21 12 17 16"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`,
 
   gear: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="#FFE0B2" stroke="#E76F51" stroke-width="1.5"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#E76F51" stroke-width="1.5"/></svg>`,

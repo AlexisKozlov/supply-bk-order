@@ -471,7 +471,9 @@ function notifyTelegramDataUpdate($pdo, $type, $userName, $legalEntity = '', $co
         'analysis' => '📊 Анализ запасов',
         'shelf_life' => '⏰ Сроки годности',
     ];
-    $label = $typeNames[$type] ?? $type;
+    // Подпись может прийти из параметра $type (когда типа нет в списке) —
+    // экранируем, как и остальные подстановки: сообщение уходит с parse_mode=HTML.
+    $label = htmlspecialchars((string)($typeNames[$type] ?? $type), ENT_QUOTES, 'UTF-8');
     $leInfo = $legalEntity ? " ({$legalEntity})" : '';
 
     $safeUser = htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
@@ -602,24 +604,31 @@ function notifyProtocolParticipants($pdo, $protocolId, $topic, $date, $participa
         $d->execute([$protocolId]);
         $decisions = $d->fetchAll();
 
+        // Сообщение уходит с parse_mode=HTML, поэтому всё, что ввёл человек
+        // (тема, автор, тексты решений, ответственные), экранируем — иначе тема
+        // вида «Планёрка <закупки>» отклоняется Telegram и уведомление не
+        // получает никто, а в логах остаётся только запись об ошибке.
+        $safeTopic = htmlspecialchars((string)$topic, ENT_QUOTES, 'UTF-8');
+        $safeCreatedBy = htmlspecialchars((string)$createdBy, ENT_QUOTES, 'UTF-8');
+
         $text = "📋 <b>Протокол совещания</b>\n";
         $text .= "─────────────────────\n";
         $text .= "📅 {$fmtDate}\n";
-        $text .= "📝 {$topic}\n";
-        $text .= "✍️ Составил: {$createdBy}\n";
+        $text .= "📝 {$safeTopic}\n";
+        $text .= "✍️ Составил: {$safeCreatedBy}\n";
         if ($decisions) {
             $text .= "\n<b>Задачи:</b>\n";
             foreach ($decisions as $i => $dec) {
                 $num = $i + 1;
-                $text .= "{$num}. {$dec['text']}";
-                if ($dec['responsible_person']) $text .= " — {$dec['responsible_person']}";
+                $text .= "{$num}. " . htmlspecialchars((string)$dec['text'], ENT_QUOTES, 'UTF-8');
+                if ($dec['responsible_person']) $text .= " — " . htmlspecialchars((string)$dec['responsible_person'], ENT_QUOTES, 'UTF-8');
                 if ($dec['deadline']) $text .= " (до " . date('d.m', strtotime($dec['deadline'])) . ")";
                 $text .= "\n";
             }
         }
 
-        $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
-        $keyboard = json_encode(['inline_keyboard' => [[['text' => '📋 Открыть протокол', 'url' => "{$siteUrl}/protocols/{$protocolId}"]]]]);
+        $siteUrl = rtrim($_ENV['SITE_URL'] ?? 'https://supply-department.online', '/');
+        $keyboard = json_encode(['inline_keyboard' => [[['text' => '📋 Открыть протокол', 'url' => $siteUrl . '/protocols/' . (int)$protocolId]]]]);
 
         // Находим chat_id участников
         $ph = implode(',', array_fill(0, count($participants), '?'));

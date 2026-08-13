@@ -3,7 +3,7 @@
     <!-- Шапка — как в тендерах -->
     <div class="td-header">
       <div class="td-header-left">
-        <a class="td-back-link" @click.prevent="$router.push({ name: 'marketing' })"><BkIcon name="back" size="sm" /> Маркетинг</a>
+        <a class="td-back-link" @click.prevent="$router.push({ name: 'marketing' })"><BkIcon name="arrowLeft" size="sm" /> Маркетинг</a>
         <h1 v-if="!editingName" class="td-title" @click="!isViewer && (editingName = true)">{{ activity.name || 'Без названия' }}</h1>
         <input v-else v-model="activity.name" class="td-title-input" @blur="editingName = false" @keydown.enter="editingName = false" ref="nameInput" />
         <span class="td-badge" :class="'type-' + activity.type">{{ typeLabel(activity.type) }}</span>
@@ -188,7 +188,7 @@
           <span style="font-weight:700;font-size:13px;color:var(--bk-brown);">Файлы</span>
           <div class="mktd-files-list">
             <span v-for="f in activity.files" :key="f.id" class="mktd-file-chip">
-              <a :href="fileUrl(f)" target="_blank" class="mktd-file-link"><BkIcon name="export" size="xs" /> {{ f.file_name }}</a>
+              <a :href="fileUrl(f)" target="_blank" class="mktd-file-link"><BkIcon name="document" size="xs" /> {{ f.file_name }}</a>
               <button v-if="!isViewer" class="mktd-remove-btn" @click.stop="deleteFile(f)"><BkIcon name="close" size="xs" /></button>
             </span>
             <span v-if="!activity.files.length" class="mktd-muted" style="font-size:12px;">Нет вложений</span>

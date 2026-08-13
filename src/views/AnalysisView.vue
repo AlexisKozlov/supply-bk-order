@@ -203,7 +203,7 @@
 
     <!-- No data -->
     <div v-else-if="!hasData" class="anv-empty">
-      <div style="font-size:28px;margin-bottom:8px;"><BkIcon name="analytics" size="sm" /></div>
+      <div style="margin-bottom:8px;"><BkIcon name="analytics" :size="28" /></div>
       <div style="font-weight:600;margin-bottom:4px;">Загрузите данные</div>
       <div style="font-size:13px;">Нажмите «1С» или «Импорт» чтобы заполнить остатки и расход</div>
     </div>

@@ -370,12 +370,12 @@
                 </td>
                 <td v-if="canEdit" class="col-actions">
                   <template v-if="editingRef === p.id">
-                    <button class="plt-btn-icon green" @click="saveRefProduct(p)"><BkIcon name="check" :size="14" /></button>
+                    <button class="plt-btn-icon green" @click="saveRefProduct(p)"><BkIcon name="success" :size="14" /></button>
                     <button class="plt-btn-icon" @click="editingRef = null"><BkIcon name="close" :size="14" /></button>
                   </template>
                   <template v-else>
                     <button class="plt-btn-icon" @click="startEditRef(p)"><BkIcon name="edit" :size="14" /></button>
-                    <button class="plt-btn-icon red" @click="deleteRefProduct(p)"><BkIcon name="trash" :size="14" /></button>
+                    <button class="plt-btn-icon red" @click="deleteRefProduct(p)"><BkIcon name="delete" :size="14" /></button>
                   </template>
                 </td>
               </tr>

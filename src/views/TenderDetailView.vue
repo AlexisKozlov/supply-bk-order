@@ -3,7 +3,7 @@
     <!-- Шапка -->
     <div class="td-header">
       <div class="td-header-left">
-        <a class="td-back-link" @click.prevent="$router.push({ name: 'tenders' })"><BkIcon name="back" size="sm" /> Тендеры</a>
+        <a class="td-back-link" @click.prevent="$router.push({ name: 'tenders' })"><BkIcon name="arrowLeft" size="sm" /> Тендеры</a>
         <h1 v-if="!editingName" class="td-title" @click="!isViewer && startEditName()">{{ tender.name || 'Без названия' }}</h1>
         <input v-else v-model="tender.name" class="td-title-input" @blur="editingName = false" @keydown.enter="editingName = false" ref="nameInput" />
         <span class="td-badge" :class="'st-' + tender.status">{{ statusLabel(tender.status) }}</span>
@@ -249,7 +249,7 @@
                     <button class="td-cur-btn" :class="{ active: compareCurrency === 'RUB' }" @click="compareCurrency = 'RUB'">RUB</button>
                     <button class="td-cur-btn" :class="{ active: compareCurrency === 'BYN' }" @click="compareCurrency = 'BYN'">BYN</button>
                   </div>
-                  <button class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="exportComparison"><BkIcon name="export" size="sm" /> Excel</button>
+                  <button class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="exportComparison"><BkIcon name="excel" size="sm" /> Excel</button>
                 </div>
               </div>
               <!-- Панель выбора поставщиков -->
@@ -408,7 +408,7 @@
                 </div>
                 <div class="cond-item">
                   <div class="cond-icon">
-                    <BkIcon name="check" size="sm" />
+                    <BkIcon name="success" size="sm" />
                   </div>
                   <div>
                     <div class="cond-text">{{ winnerCheapestCount }} из {{ tender.items.length }} позиций</div>

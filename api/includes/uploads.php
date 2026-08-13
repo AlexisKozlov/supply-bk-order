@@ -482,15 +482,26 @@ if ($endpoint === 'upload' && $subpoint === 'protocol-file') {
         if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
         $su = getSessionUser($pdo);
         if (!$su) respond(['error' => 'Требуется авторизация'], 401);
+        // Правило то же, что у delete_protocol (rpc/protocols.php): модуль
+        // protocols не ниже edit + доступ к юрлицу протокола + создатель
+        // протокола / admin / manager. Раньше здесь не было ни модуля, ни
+        // юрлица, а manager, который вправе снести протокол целиком, не мог
+        // удалить отдельный файл.
+        requireModuleAccess($su, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $fileId = intval($_GET['file_id'] ?? 0);
         if (!$fileId) respond(['error' => 'Не указан ID файла'], 400);
         $frow = $pdo->prepare("SELECT * FROM meeting_protocol_files WHERE id=?");
         $frow->execute([$fileId]); $frow = $frow->fetch();
         if (!$frow) respond(['error' => 'Файл не найден'], 404);
-        // Удалять может создатель протокола или админ
-        $proto = $pdo->prepare("SELECT created_by FROM meeting_protocols WHERE id=?");
+        $proto = $pdo->prepare("SELECT created_by, legal_entity FROM meeting_protocols WHERE id=?");
         $proto->execute([$frow['protocol_id']]); $proto = $proto->fetch();
-        if ($proto && $proto['created_by'] !== $su['name'] && $su['role'] !== 'admin') respond(['error' => 'Нет прав на удаление'], 403);
+        // Файл-сирота (родительский протокол не найден) — отказ. Прежнее
+        // условие «$proto && ...» в этом случае пропускало проверку целиком.
+        if (!$proto) respond(['error' => 'Протокол не найден'], 404);
+        if (!checkLegalEntityAccess($su, $proto['legal_entity'] ?? null)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        if ($proto['created_by'] !== $su['name'] && !in_array($su['role'] ?? '', ['admin', 'manager'], true)) {
+            respond(['error' => 'Удалить может только создатель или админ'], 403);
+        }
         $filepath = __DIR__ . '/../uploads/protocols/' . basename($frow['file_path']);
         if (file_exists($filepath)) unlink($filepath);
         $pdo->prepare("DELETE FROM meeting_protocol_files WHERE id=?")->execute([$fileId]);
@@ -504,8 +515,13 @@ if ($endpoint === 'upload' && $subpoint === 'protocol-file') {
     if (($ACCESS_LEVELS[$p['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
     $protocolId = intval($_POST['protocol_id'] ?? 0);
     if (!$protocolId) respond(['error' => 'Не указан ID протокола'], 400);
-    $chk = $pdo->prepare("SELECT id FROM meeting_protocols WHERE id=?"); $chk->execute([$protocolId]);
-    if (!$chk->fetch()) respond(['error' => 'Протокол не найден'], 404);
+    // Юрлицо протокола проверяем так же, как при скачивании файла ниже: без
+    // этого сотрудник с правом protocols=edit мог подложить документ в протокол
+    // чужого юрлица.
+    $chk = $pdo->prepare("SELECT id, legal_entity FROM meeting_protocols WHERE id=?"); $chk->execute([$protocolId]);
+    $protoRow = $chk->fetch();
+    if (!$protoRow) respond(['error' => 'Протокол не найден'], 404);
+    if (!checkLegalEntityAccess($su, $protoRow['legal_entity'] ?? null)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) respond(['error' => 'Ошибка загрузки файла'], 400);
     $file = $_FILES['file'];
     if ($file['size'] > 10 * 1024 * 1024) respond(['error' => 'Файл слишком большой (макс 10МБ)'], 400);

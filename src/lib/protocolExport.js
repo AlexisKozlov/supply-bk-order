@@ -1,5 +1,7 @@
 // Экспорт протокола совещания в Excel и PDF
 
+import { appAlert } from '@/lib/appDialogs.js';
+
 function fmtDate(d) {
   if (!d) return '';
   const dt = new Date(d + 'T00:00:00');
@@ -142,8 +144,27 @@ ${decisionsHtml}
 ${notesHtml}
 </body></html>`;
 
-  const w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => { w.print(); }, 400);
+  // PDF печатается из нового окна. Если браузер блокирует всплывающие окна
+  // (на телефонах это норма), window.open вернёт null — раньше в этом месте
+  // всё падало молча и человек просто ничего не видел.
+  let w = null;
+  try { w = window.open('', '_blank'); } catch { w = null; }
+  let opened = false;
+  try {
+    if (w && !w.closed && w.document) {
+      w.document.write(html);
+      w.document.close();
+      opened = true;
+    }
+  } catch { opened = false; }
+  if (!opened) {
+    appAlert(
+      'Браузер заблокировал новое окно, поэтому PDF не открылся. Разрешите всплывающие окна для этого сайта и попробуйте снова.',
+      { title: 'Не удалось открыть PDF', type: 'warning' },
+    );
+    return false;
+  }
+  // Окно могли закрыть до печати — тогда w.print() бросает исключение.
+  setTimeout(() => { try { if (!w.closed) w.print(); } catch { /* окно закрыли */ } }, 400);
+  return true;
 }

@@ -19,18 +19,31 @@
         $s = $pdo->prepare("SELECT p.*,
                 COALESCE(d.cnt, 0) AS decisions_count,
                 COALESCE(d.done_cnt, 0) AS decisions_done,
+                COALESCE(d.overdue_cnt, 0) AS overdue_count,
                 s.name as series_name
             FROM meeting_protocols p
             LEFT JOIN meeting_protocol_series s ON s.id = p.series_id
             LEFT JOIN (
-                SELECT protocol_id, COUNT(*) AS cnt, SUM(status = 'done') AS done_cnt
+                SELECT protocol_id,
+                       COUNT(*) AS cnt,
+                       SUM(status = 'done') AS done_cnt,
+                       SUM(status = 'overdue') AS overdue_cnt
                 FROM protocol_decisions
                 GROUP BY protocol_id
             ) d ON d.protocol_id = p.id
             WHERE p.legal_entity = ?
             ORDER BY p.meeting_date DESC, p.created_at DESC LIMIT 500");
         $s->execute([$legalEntity]);
-        respond($s->fetchAll());
+        $protoRows = $s->fetchAll();
+        // PDO отдаёт числа строками, а на экране счётчики складываются:
+        // без приведения к int плюс склеивал их («0» + «15» = «015»).
+        foreach ($protoRows as &$protoRow) {
+            $protoRow['decisions_count'] = (int)$protoRow['decisions_count'];
+            $protoRow['decisions_done']  = (int)$protoRow['decisions_done'];
+            $protoRow['overdue_count']   = (int)$protoRow['overdue_count'];
+        }
+        unset($protoRow);
+        respond($protoRows);
     }
 
     if ($fn === 'get_protocol') {
@@ -101,6 +114,10 @@
         $existingQ->execute([$decId]);
         $existing = [];
         foreach ($existingQ->fetchAll() as $r) $existing[$r['user_name']] = (int)$r['card_id'];
+        // Кто был ответственным по решению ДО этого сохранения. Ниже это
+        // единственный признак «соисполнитель поставлен протоколом»:
+        // отдельного флага источника в tasks_assignees нет.
+        $prevUsers = array_keys($existing);
 
         $toCreate = array_diff($users, array_keys($existing));
         $toRemove = array_diff(array_keys($existing), $users);
@@ -170,15 +187,27 @@
         // tasks.php (external cards): если у пользователя уже есть СВОЯ копия
         // карточки по этому же protocol_decision_id, то «внешняя» копия с
         // чужой доски НЕ подтягивается.
+        //
+        // Раньше здесь стоял «DELETE всех соисполнителей по этим карточкам» и
+        // запись списка заново. Вместе с людьми из протокола стирались те,
+        // кого добавили руками в модуле «Задачи», а у оставшихся обнулялись
+        // колонка, порядок и личная отметка «готово».
+        // Теперь снимаем только тех, кто РАНЬШЕ был ответственным по этому
+        // решению и в новом списке его нет; всех прочих не трогаем.
         $allCardIds = array_values($existing);
         if ($allCardIds) {
-            $phC = implode(',', array_fill(0, count($allCardIds), '?'));
-            $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id IN ($phC)")->execute($allCardIds);
+            $dropped = array_values(array_diff($prevUsers, $users));
+            if ($dropped) {
+                $delAsg = $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ? AND user_name = ?");
+                foreach ($allCardIds as $cardId) {
+                    foreach ($dropped as $goneUser) $delAsg->execute([$cardId, $goneUser]);
+                }
+            }
+            $insAsg = $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)");
             foreach ($existing as $ownerName => $cardId) {
                 foreach ($users as $other) {
                     if ($other === $ownerName) continue;
-                    $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)")
-                        ->execute([$cardId, $other]);
+                    $insAsg->execute([$cardId, $other]);
                 }
             }
         }
@@ -209,25 +238,54 @@
         $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = NULL WHERE id = ?")->execute([$decisionId]);
     }
 
+    /**
+     * Ответственный ли пользователь за решение.
+     *
+     * Имена в responsible_person идут через запятую с пробелами, поэтому
+     * сравниваем целиком после обрезки пробелов — без частичных вхождений,
+     * иначе «Иванов Иван» совпал бы с «Иванов Иванов».
+     * Подстраховка: человек мог остаться ответственным только карточкой
+     * в «Задачах» (protocol_decision_cards).
+     *
+     * Используется там, где ответственному разрешено вести СВОЮ задачу
+     * (статус, срок) при уровне доступа «Просмотр».
+     */
+    function pdIsDecisionResponsible($pdo, $decisionId, $responsiblePerson, $userName) {
+        if ($userName === null || $userName === '') return false;
+        $names = array_map('trim', explode(',', (string)$responsiblePerson));
+        if (in_array($userName, $names, true)) return true;
+        $c = $pdo->prepare("SELECT 1 FROM protocol_decision_cards WHERE decision_id = ? AND user_name = ? LIMIT 1");
+        $c->execute([$decisionId, $userName]);
+        return (bool)$c->fetchColumn();
+    }
+
     if ($fn === 'save_protocol') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        // Право на модуль нужно ЛЮБОМУ сохранению. Раньше автор протокола
+        // проскакивал проверку целиком, и человек с отобранным доступом к
+        // разделу продолжал править свои протоколы.
+        requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
         $id = intval($body['id'] ?? 0);
+        $isNew = !$id;
+        $row = null;
+        $protocolLe = null;
         // Проверяем права: редактировать может создатель или админ
         if ($id) {
-            $existing = $pdo->prepare("SELECT created_by, status as old_status FROM meeting_protocols WHERE id = ?");
+            $existing = $pdo->prepare("SELECT created_by, legal_entity, status as old_status FROM meeting_protocols WHERE id = ?");
             $existing->execute([$id]);
             $row = $existing->fetch();
             if (!$row) respond(['error' => 'Протокол не найден'], 404);
+            // Юрлицо существующего протокола проверяем ВСЕГДА. Раньше проверка
+            // стояла только в ветке нового протокола, и чужой протокол можно
+            // было переписать, просто передав его id.
+            if (!checkLegalEntityAccess($caller, $row['legal_entity'] ?? null)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+            $protocolLe = $row['legal_entity'];
             if ($row['created_by'] !== $caller['name'] && !in_array($caller['role'], ['admin', 'manager'])) {
                 if (($ACCESS_LEVELS[$perms['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) {
                     respond(['error' => 'Редактировать может только создатель или админ'], 403);
                 }
-            }
-        } else {
-            if (($ACCESS_LEVELS[$perms['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
-                respond(['error' => 'Недостаточно прав'], 403);
             }
         }
         $meetingDate = $body['meeting_date'] ?? date('Y-m-d');
@@ -235,7 +293,8 @@
         $participants = $body['participants'] ?? [];
         $questions = trim($body['questions'] ?? '');
         $notes = trim($body['notes'] ?? '');
-        $seriesId = $body['series_id'] ?: null;
+        $seriesId = ($body['series_id'] ?? null) ?: null;
+        if ($seriesId !== null) $seriesId = intval($seriesId) ?: null;
         $status = $body['status'] ?? 'draft';
         $decisions = $body['decisions'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
@@ -243,6 +302,19 @@
         // Для нового протокола юрлицо обязательно; для существующего — сохраняем исходное
         if (!$id && !$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
         if (!$id && !checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        if (!$id) $protocolLe = $legalEntity;
+        // Формат совещаний должен быть того же юрлица: иначе из чужого
+        // юрлица подтягиваются его название и шаблон повестки.
+        if ($seriesId) {
+            $sChk = $pdo->prepare("SELECT legal_entity FROM meeting_protocol_series WHERE id = ?");
+            $sChk->execute([$seriesId]);
+            $seriesLe = $sChk->fetchColumn();
+            if ($seriesLe === false) respond(['error' => 'Формат совещаний не найден'], 400);
+            if (mb_strtolower(trim((string)$seriesLe)) !== mb_strtolower(trim((string)$protocolLe))) {
+                respond(['error' => 'Формат совещаний относится к другому юр. лицу'], 400);
+            }
+        }
+        $syncDecIds = [];
 
         try {
             $pdo->beginTransaction();
@@ -256,7 +328,6 @@
             }
             // Синхронизируем решения
             $existingIds = [];
-            $syncDecIds = [];
             foreach ($decisions as $dec) {
                 $decId = intval($dec['id'] ?? 0);
                 $decText = trim($dec['text'] ?? '');
@@ -292,20 +363,52 @@
                 $pdo->prepare("DELETE FROM protocol_decisions WHERE protocol_id = ?")->execute([$id]);
             }
             $pdo->commit();
-            foreach ($syncDecIds as $syncId) pdSyncDecisionToCard($pdo, $syncId, $caller['name']);
-
-            // Telegram-уведомление участникам только при смене статуса на final
-            $wasAlreadyFinal = isset($row) && ($row['old_status'] ?? '') === 'final';
-            if ($status === 'final' && !$wasAlreadyFinal) {
-                notifyProtocolParticipants($pdo, $id, $topic, $meetingDate, $participants, $caller['name']);
-            }
-
-            respond(['success' => true, 'id' => $id]);
         } catch (PDOException $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) $pdo->rollBack();
             error_log("save_protocol error: " . $e->getMessage());
             respond(['error' => 'Ошибка сохранения'], 500);
         }
+
+        // ── Пост-обработка: транзакция уже зафиксирована ──
+        // Раньше синхронизация карточек и уведомление шли внутри того же try:
+        // любой сбой здесь приводил к rollBack() уже закрытой транзакции,
+        // повторной ошибке и надписи «Ошибка сохранения» — при том, что
+        // протокол в базе уже был записан. Теперь сбои только пишутся в лог.
+        try {
+            foreach ($syncDecIds as $syncId) pdSyncDecisionToCard($pdo, $syncId, $caller['name']);
+        } catch (Throwable $e) {
+            error_log("save_protocol post-sync error (protocol {$id}): " . $e->getMessage());
+        }
+
+        // Telegram-уведомление участникам только при смене статуса на final
+        $wasAlreadyFinal = is_array($row) && (($row['old_status'] ?? '') === 'final');
+        $justFinalized = ($status === 'final' && !$wasAlreadyFinal);
+        try {
+            if ($justFinalized) {
+                notifyProtocolParticipants($pdo, $id, $topic, $meetingDate, $participants, $caller['name']);
+            }
+        } catch (Throwable $e) {
+            error_log("save_protocol notify error (protocol {$id}): " . $e->getMessage());
+        }
+
+        // Журнал: создание / изменение и отдельно финализация.
+        $auditDetails = [
+            'topic'          => $topic,
+            'legal_entity'   => $protocolLe,
+            'meeting_date'   => $meetingDate,
+            'status'         => $status,
+            'decisions_count' => count($syncDecIds),
+        ];
+        auditLog($pdo, $isNew ? 'protocol_created' : 'protocol_updated', 'protocol', (string)$id, $caller['name'], $auditDetails);
+        if ($justFinalized) {
+            auditLog($pdo, 'protocol_finalized', 'protocol', (string)$id, $caller['name'], [
+                'topic'        => $topic,
+                'legal_entity' => $protocolLe,
+                'meeting_date' => $meetingDate,
+            ]);
+        }
+
+        respond(['success' => true, 'id' => $id]);
     }
 
     if ($fn === 'delete_protocol') {
@@ -314,7 +417,7 @@
         requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
-        $existing = $pdo->prepare("SELECT created_by, legal_entity FROM meeting_protocols WHERE id = ?");
+        $existing = $pdo->prepare("SELECT created_by, legal_entity, topic, meeting_date FROM meeting_protocols WHERE id = ?");
         $existing->execute([$id]);
         $row = $existing->fetch();
         if (!$row) respond(['error' => 'Не найден'], 404);
@@ -322,23 +425,75 @@
         if ($row['created_by'] !== $caller['name'] && !in_array($caller['role'], ['admin', 'manager'])) {
             respond(['error' => 'Удалить может только создатель или админ'], 403);
         }
-        $pdo->prepare("DELETE FROM meeting_protocols WHERE id = ?")->execute([$id]);
+        // Имена файлов читаем ДО удаления: каскад в БД унесёт строки, а сами
+        // файлы останутся лежать в api/uploads/protocols/.
+        $filesQ = $pdo->prepare("SELECT file_path FROM meeting_protocol_files WHERE protocol_id = ?");
+        $filesQ->execute([$id]);
+        $protoFiles = array_column($filesQ->fetchAll(), 'file_path');
+
+        try {
+            $pdo->beginTransaction();
+            // Карточки в «Задачах» закрываем и отвязываем ДО удаления протокола:
+            // каскад в БД уносит protocol_decision_cards, а сами карточки
+            // остаются висеть на досках людей уже без пометки «из протокола».
+            $decQ = $pdo->prepare("SELECT id FROM protocol_decisions WHERE protocol_id = ?");
+            $decQ->execute([$id]);
+            foreach ($decQ->fetchAll() as $decRow) {
+                pdArchiveCardForDecision($pdo, (int)$decRow['id']);
+            }
+            // Связи карточек с этим протоколом иначе становятся ссылками в никуда.
+            $pdo->prepare("DELETE FROM tasks_relations WHERE entity_type = 'protocol' AND entity_id = ?")->execute([(string)$id]);
+            $pdo->prepare("DELETE FROM meeting_protocols WHERE id = ?")->execute([$id]);
+            $pdo->commit();
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log("delete_protocol error (protocol {$id}): " . $e->getMessage());
+            respond(['error' => 'Ошибка удаления'], 500);
+        }
+
+        // Файлы с диска — уже после удаления записей.
+        $uploadDir = realpath(__DIR__ . '/../../uploads/protocols');
+        if ($uploadDir) {
+            foreach ($protoFiles as $filePath) {
+                $fname = basename((string)$filePath);
+                if ($fname === '' || $fname === '.' || $fname === '..') continue;
+                $real = realpath($uploadDir . DIRECTORY_SEPARATOR . $fname);
+                // Страховка: удаляем только то, что реально лежит в каталоге загрузок.
+                if ($real && is_file($real) && strpos($real, $uploadDir . DIRECTORY_SEPARATOR) === 0) {
+                    @unlink($real);
+                }
+            }
+        }
+
+        auditLog($pdo, 'protocol_deleted', 'protocol', (string)$id, $caller['name'], [
+            'topic'        => $row['topic'] ?? null,
+            'legal_entity' => $row['legal_entity'] ?? null,
+            'meeting_date' => $row['meeting_date'] ?? null,
+        ]);
         respond(['success' => true]);
     }
 
     if ($fn === 'update_decision_status') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        // Минимум для любого — «Просмотр». Ответственному за решение этого
+        // достаточно, чтобы закрыть СВОЮ задачу (решение пользователя);
+        // всем остальным ниже потребуется «Редактирование».
+        requireModuleAccess($caller, 'protocols', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $decId = intval($body['id'] ?? 0);
         $newStatus = $body['status'] ?? '';
         if (!$decId || !in_array($newStatus, ['pending', 'done', 'overdue'])) respond(['error' => 'Некорректные параметры'], 400);
         // Доступ — на уровне юрлица протокола, к которому относится решение.
-        $accCheck = $pdo->prepare("SELECT p.legal_entity FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.id = ?");
+        $accCheck = $pdo->prepare("SELECT p.legal_entity, d.responsible_person FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.id = ?");
         $accCheck->execute([$decId]);
-        $protLe = $accCheck->fetchColumn();
-        if ($protLe === false) respond(['error' => 'Решение не найдено'], 404);
+        $accRow = $accCheck->fetch();
+        if (!$accRow) respond(['error' => 'Решение не найдено'], 404);
+        $protLe = $accRow['legal_entity'];
         if ($protLe && !checkLegalEntityAccess($caller, $protLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        // Не ответственный — прежнее требование «Редактирование».
+        if (!pdIsDecisionResponsible($pdo, $decId, $accRow['responsible_person'] ?? '', $caller['name'])) {
+            requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        }
         $completedAt = $newStatus === 'done' ? date('Y-m-d H:i:s') : null;
         $pdo->prepare("UPDATE protocol_decisions SET status = ?, completed_at = ? WHERE id = ?")->execute([$newStatus, $completedAt, $decId]);
         pdSyncDecisionToCard($pdo, $decId, $caller['name']);
@@ -348,23 +503,38 @@
     if ($fn === 'update_decision_deadline') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        // Минимум для любого — «Просмотр». Ответственному этого достаточно,
+        // чтобы подвинуть срок СВОЕЙ задачи (решение пользователя);
+        // всем остальным ниже потребуется «Редактирование».
+        requireModuleAccess($caller, 'protocols', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $decId = intval($body['id'] ?? 0);
         $deadline = $body['deadline'] ?: null;
         if (!$decId) respond(['error' => 'id required'], 400);
         if ($deadline && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deadline)) respond(['error' => 'Некорректная дата'], 400);
         // Доступ — на уровне юрлица протокола, к которому относится решение.
-        $accCheck = $pdo->prepare("SELECT p.legal_entity FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.id = ?");
+        $accCheck = $pdo->prepare("SELECT p.legal_entity, d.status, d.responsible_person FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.id = ?");
         $accCheck->execute([$decId]);
-        $protLe = $accCheck->fetchColumn();
-        if ($protLe === false) respond(['error' => 'Решение не найдено'], 404);
+        $accRow = $accCheck->fetch();
+        if (!$accRow) respond(['error' => 'Решение не найдено'], 404);
+        $protLe = $accRow['legal_entity'];
         if ($protLe && !checkLegalEntityAccess($caller, $protLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        // Не ответственный — прежнее требование «Редактирование».
+        if (!pdIsDecisionResponsible($pdo, $decId, $accRow['responsible_person'] ?? '', $caller['name'])) {
+            requireModuleAccess($caller, 'protocols', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        }
         $pdo->prepare("UPDATE protocol_decisions SET deadline = ? WHERE id = ?")->execute([$deadline, $decId]);
+        // Перенос срока вперёд (или снятие срока) возвращает решение в работу.
+        // Крон (api/cron_telegram.php) умеет только ставить «просрочено»
+        // и сам его никогда не снимает, поэтому статус висел после переноса.
+        if (($accRow['status'] ?? '') === 'overdue' && (!$deadline || $deadline >= date('Y-m-d'))) {
+            $pdo->prepare("UPDATE protocol_decisions SET status = 'pending', completed_at = NULL WHERE id = ? AND status = 'overdue'")
+                ->execute([$decId]);
+        }
         pdSyncDecisionToCard($pdo, $decId, $caller['name']);
         respond(['success' => true]);
     }
 
-    // Серии совещаний
+    // Форматы совещаний
     if ($fn === 'get_carryover_tasks') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
@@ -372,14 +542,14 @@
         $seriesId = intval($body['series_id'] ?? 0);
         $excludeProtocolId = intval($body['exclude_protocol_id'] ?? 0);
         if (!$seriesId) respond([]);
-        // Доступ — на уровне юрлица серии.
+        // Доступ — на уровне юрлица формата совещаний.
         $sLeStmt = $pdo->prepare("SELECT legal_entity FROM meeting_protocol_series WHERE id = ?");
         $sLeStmt->execute([$seriesId]);
         $sLe = $sLeStmt->fetchColumn();
         if ($sLe === false) respond([]);
         if ($sLe && !checkLegalEntityAccess($caller, $sLe)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        // Берём ровно один предыдущий протокол серии: с ближайшей более
+        // Берём ровно один предыдущий протокол этого формата: с ближайшей более
         // ранней датой (при равных — с меньшим id), чтобы порядок «свежесть»
         // совпадал с UI-сортировкой. Возвращаем ВСЕ его задачи независимо
         // от статуса — пользователь сам решит, что закрывать/переносить.
@@ -444,13 +614,13 @@
         $recurrence = $body['recurrence'] ?? 'weekly';
         $agendaTemplate = $body['agenda_template'] ?? [];
         $legalEntity = $body['legal_entity'] ?? null;
-        if (!$name) respond(['error' => 'Укажите название серии'], 400);
+        if (!$name) respond(['error' => 'Укажите название формата совещаний'], 400);
         if ($id) {
             // Обновление существующей: проверяем доступ к её фактическому legal_entity.
             $existing = $pdo->prepare("SELECT legal_entity FROM meeting_protocol_series WHERE id = ?");
             $existing->execute([$id]);
             $existingLe = $existing->fetchColumn();
-            if ($existingLe === false) respond(['error' => 'Серия не найдена'], 404);
+            if ($existingLe === false) respond(['error' => 'Формат совещаний не найден'], 404);
             if (!checkLegalEntityAccess($caller, $existingLe)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         } else {
             if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
@@ -472,6 +642,13 @@
         requireModuleAccess($caller, 'protocols', 'full', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $id = intval($body['id'] ?? 0);
         if (!$id) respond(['error' => 'id required'], 400);
+        // Юрлицо формата проверяем так же, как в save_protocol_series: без этого
+        // с одного юрлица можно было снести формат совещаний другого.
+        $sLeStmt = $pdo->prepare("SELECT legal_entity FROM meeting_protocol_series WHERE id = ?");
+        $sLeStmt->execute([$id]);
+        $sLe = $sLeStmt->fetchColumn();
+        if ($sLe === false) respond(['error' => 'Формат совещаний не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $sLe)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         $pdo->prepare("DELETE FROM meeting_protocol_series WHERE id = ?")->execute([$id]);
         respond(['success' => true]);
     }

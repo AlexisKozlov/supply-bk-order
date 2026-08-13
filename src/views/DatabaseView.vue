@@ -38,7 +38,7 @@
         <BkIcon name="schedule" size="sm"/> Рестораны <span class="db-tab-count">{{ restaurantStore.restaurants.length }}</span>
       </button>
       <button class="db-tab" :class="{ active: activeTab==='recipes' }" @click="switchToRecipes">
-        <BkIcon name="plan" size="sm"/> Рецептуры <span class="db-tab-count">{{ recipes.length }}</span>
+        <BkIcon name="note" size="sm"/> Рецептуры <span class="db-tab-count">{{ recipes.length }}</span>
       </button>
     </div>
 

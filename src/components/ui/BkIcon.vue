@@ -8,16 +8,31 @@ import { icons, iconsLight } from '@/lib/icons.js';
 
 const props = defineProps({
   name: { type: String, required: true },
-  size: { type: String, default: 'sm' },
+  // Либо ключ размера (xs/sm/md/lg), либо число пикселей.
+  size: { type: [String, Number], default: 'sm' },
   light: { type: Boolean, default: false },
 });
 
 const sizes = { xs: 12, sm: 16, md: 20, lg: 24 };
 
+// Про неизвестный значок сообщаем только при разработке: раньше такая кнопка
+// просто оставалась без картинки, и заметить это было невозможно.
+const warned = new Set();
+function warnUnknown(name) {
+  if (warned.has(name)) return;
+  warned.add(name);
+  console.warn(`[BkIcon] Нет значка «${name}» — кнопка останется без картинки.` +
+    '\nВыберите существующий значок из src/lib/icons.js или добавьте новый.');
+}
+
 const rendered = computed(() => {
   const source = props.light ? (iconsLight[props.name] || icons[props.name]) : icons[props.name];
-  if (!source) return '';
-  const px = sizes[props.size] || 16;
+  if (!source) {
+    if (import.meta.env.DEV) warnUnknown(props.name);
+    return '';
+  }
+  const num = Number(props.size);
+  const px = Number.isFinite(num) && num > 0 ? num : (sizes[props.size] || 16);
   return source.replace('<svg ', `<svg width="${px}" height="${px}" `);
 });
 </script>

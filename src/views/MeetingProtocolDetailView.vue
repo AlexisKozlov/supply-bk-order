@@ -1,5 +1,5 @@
 <template>
-  <div class="mpd-view">
+  <div class="mpd-view" ref="rootRef">
     <div class="mpd-top-bar">
       <div class="mpd-top-left">
         <button class="mpd-back" @click="goBack">&larr; К списку</button>
@@ -73,13 +73,15 @@
 
       <!-- Перенесённые задачи из предыдущих протоколов -->
       <div v-if="carryoverTasks.length" class="mpd-section mpd-section-carryover">
-        <h3 class="mpd-carryover-title">Задачи из прошлого протокола серии <span class="mpd-count">({{ carryoverTasks.length }})</span></h3>
+        <h3 class="mpd-carryover-title">Задачи из прошлого протокола этого формата <span class="mpd-count">({{ carryoverTasks.length }})</span></h3>
+        <!-- Обёртка нужна, чтобы на телефоне таблицу можно было прокрутить вбок -->
+        <div class="mpd-table-scroll" :class="{ 'is-picker-open': pickerOpen }">
         <table class="mpd-tasks-table">
           <thead>
             <tr>
               <th class="mpd-th-expand"></th>
               <th class="mpd-th-num">№</th>
-              <th>Задача</th>
+              <th class="mpd-th-task">Задача</th>
               <th class="mpd-th-progress">Прогресс</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
@@ -106,15 +108,15 @@
                 </td>
                 <td class="mpd-td-resp-readonly">{{ formatResponsible(t.responsible_person) }}</td>
                 <td class="mpd-td-date">
-                  <button class="mpd-chip mpd-chip-date" :class="dueChipClass(t)" @click="openDate($event, t, 'carryover')">
+                  <button class="mpd-chip mpd-chip-date" :class="[dueChipClass(t), { 'is-disabled': !canChangeCarryover(t) }]" :disabled="!canChangeCarryover(t)" @click="openDate($event)">
                     <svg class="mpd-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 9h18"/></svg>
                     <span>{{ t.deadline ? fmtFullDate(t.deadline) : 'без срока' }}</span>
                   </button>
-                  <input type="date" v-model="t.deadline" @change="onCarryoverDeadlineChange(t)" class="mpd-hidden-date" />
+                  <input type="date" v-model="t.deadline" :disabled="!canChangeCarryover(t)" @change="onCarryoverDeadlineChange(t)" class="mpd-hidden-date" />
                 </td>
                 <td class="mpd-td-status">
                   <div class="mpd-chip-wrap">
-                    <button class="mpd-chip" :class="'mpd-chip-st-' + t.status" @click.stop="toggleStatusPicker(t.id)">
+                    <button class="mpd-chip" :class="['mpd-chip-st-' + t.status, { 'is-disabled': !canChangeCarryover(t) }]" :disabled="!canChangeCarryover(t)" @click.stop="toggleStatusPicker(t.id)">
                       <span class="mpd-chip-dot"></span><span>{{ statusLabel(t.status) }}</span>
                     </button>
                     <div v-if="openStatusPicker === t.id" class="mpd-chip-menu" @click.stop>
@@ -154,17 +156,20 @@
             </template>
           </tbody>
         </table>
+        </div>
       </div>
 
       <!-- Задачи -->
       <div class="mpd-section">
         <h3>Задачи <span class="mpd-count">({{ protocol.decisions.length }})</span></h3>
-        <table v-if="protocol.decisions.length" class="mpd-tasks-table">
+        <!-- Обёртка нужна, чтобы на телефоне таблицу можно было прокрутить вбок -->
+        <div v-if="protocol.decisions.length" class="mpd-table-scroll" :class="{ 'is-picker-open': pickerOpen }">
+        <table class="mpd-tasks-table">
           <thead>
             <tr>
               <th class="mpd-th-expand"></th>
               <th class="mpd-th-num">№</th>
-              <th>Задача</th>
+              <th class="mpd-th-task">Задача</th>
               <th class="mpd-th-progress">Прогресс</th>
               <th class="mpd-th-resp">Ответственный</th>
               <th class="mpd-th-date">Срок</th>
@@ -183,7 +188,7 @@
                 <td class="mpd-td-num">{{ i + 1 }}</td>
                 <td class="mpd-td-text" @dblclick="onTextDblClick($event, dec, i)">
                   <textarea v-if="isEditing(dec, i)" v-model="dec.text" class="mpd-cell-text-edit is-active" rows="1" placeholder="Текст задачи" @input="autoResize($event)" @blur="stopEdit" @click.stop></textarea>
-                  <div v-else class="mpd-cell-text-view" :class="{ 'is-empty': !dec.text, 'is-editable': canEdit }">{{ dec.text || (canEdit ? 'Двойной клик — добавить текст' : '—') }}</div>
+                  <div v-else class="mpd-cell-text-view" :class="{ 'is-empty': !dec.text, 'is-editable': canEdit, 'is-empty-warn': emptyWarning && isEmptyText(dec) }">{{ dec.text || (canEdit ? 'Двойной клик — добавить текст' : '—') }}</div>
                 </td>
                 <td class="mpd-td-progress">
                   <div class="mpd-progress-cell" v-if="(dec.assignees_progress || []).length">
@@ -208,15 +213,15 @@
                   <span v-else class="mpd-td-resp-readonly">{{ dec.responsible_person.join(', ') }}</span>
                 </td>
                 <td class="mpd-td-date">
-                  <button class="mpd-chip mpd-chip-date" :class="[dueChipClass(dec), { 'is-disabled': !canEdit }]" :disabled="!canEdit" @click="openDate($event, dec, 'decision')">
+                  <button class="mpd-chip mpd-chip-date" :class="[dueChipClass(dec), { 'is-disabled': !canChangeDecision(dec) }]" :disabled="!canChangeDecision(dec)" @click="openDate($event)">
                     <svg class="mpd-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 9h18"/></svg>
                     <span>{{ dec.deadline ? fmtFullDate(dec.deadline) : 'без срока' }}</span>
                   </button>
-                  <input type="date" v-model="dec.deadline" :disabled="!canEdit" class="mpd-hidden-date" />
+                  <input type="date" v-model="dec.deadline" :disabled="!canChangeDecision(dec)" @change="onDecisionDeadlineChange(dec)" class="mpd-hidden-date" />
                 </td>
                 <td class="mpd-td-status">
                   <div class="mpd-chip-wrap">
-                    <button class="mpd-chip" :class="['mpd-chip-st-' + dec.status, { 'is-disabled': !canEdit && !isMyTask(dec) }]" :disabled="!canEdit && !isMyTask(dec)" @click.stop="toggleStatusPicker(decKey(dec, i))">
+                    <button class="mpd-chip" :class="['mpd-chip-st-' + dec.status, { 'is-disabled': !canChangeDecision(dec) }]" :disabled="!canChangeDecision(dec)" @click.stop="toggleStatusPicker(decKey(dec, i))">
                       <span class="mpd-chip-dot"></span><span>{{ statusLabel(dec.status) }}</span>
                     </button>
                     <div v-if="openStatusPicker === decKey(dec, i)" class="mpd-chip-menu" @click.stop>
@@ -260,6 +265,7 @@
             </template>
           </tbody>
         </table>
+        </div>
         <button v-if="canEdit" class="mpd-btn mpd-btn-add" @click="addDecision">+ Добавить задачу</button>
       </div>
 
@@ -268,7 +274,8 @@
         <h3>Файлы <span class="mpd-count">({{ files.length }})</span></h3>
         <div v-if="files.length" class="mpd-files">
           <div v-for="f in files" :key="f.id" class="mpd-file">
-            <a :href="fileUrl(f)" target="_blank" class="mpd-file-name">{{ f.file_name }}</a>
+            <a v-if="fileUrl(f)" :href="fileUrl(f)" target="_blank" class="mpd-file-name">{{ f.file_name }}</a>
+            <span v-else class="mpd-file-name mpd-file-name-pending" title="Ссылка готовится...">{{ f.file_name }}</span>
             <span class="mpd-file-meta">{{ f.uploaded_by }}</span>
             <button v-if="canEdit" class="mpd-row-del" @click="deleteFile(f)" title="Удалить файл">&times;</button>
           </div>
@@ -290,13 +297,14 @@
       <!-- Кнопки убраны снизу — они теперь в шапке -->
     </div>
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
+      :ok-text="confirmModal.okText" :cancel-text="confirmModal.cancelText" :danger="confirmModal.danger"
       @confirm="onConfirm" @cancel="onCancel" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch, nextTick, inject } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { useRouter, useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import { db, getDownloadUrl } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -304,6 +312,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 
 const orderStore = useOrderStore();
 import { useConfirm } from '@/composables/useConfirm.js';
+import { confirmProtocolDueChange } from '@/lib/protocolDueGuard.js';
 
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 
@@ -316,6 +325,10 @@ const loading = ref(false);
 const saving = ref(false);
 const dirty = ref(false);
 const savedSnapshot = ref('');
+const rootRef = ref(null);
+// Слепок протокола ровно в том виде, в каком его отдал сервер при последней
+// загрузке. Нужен, чтобы перед сохранением понять, менял ли протокол кто-то ещё.
+const serverBaseline = ref(null);
 const files = ref([]);
 const carryoverTasks = ref([]);
 const questionsRef = ref(null);
@@ -338,7 +351,6 @@ watch(files, () => { refreshDownloadUrls(); }, { immediate: false });
 const allUsers = ref([]);
 const seriesList = ref([]);
 const { confirmModal, confirm, onConfirm, onCancel } = useConfirm();
-const newParticipant = ref('');
 const showUserPicker = ref(false);
 
 const protocol = ref({
@@ -375,13 +387,6 @@ const canDelete = computed(() => {
 const availableUsers = computed(() =>
   allUsers.value.filter(u => !protocol.value.participants.includes(u.name))
 );
-
-function addParticipant() {
-  if (newParticipant.value && !protocol.value.participants.includes(newParticipant.value)) {
-    protocol.value.participants.push(newParticipant.value);
-  }
-  newParticipant.value = '';
-}
 
 function pickUser(name) {
   if (!protocol.value.participants.includes(name)) {
@@ -445,7 +450,7 @@ function dueChipClass(t) {
   return '';
 }
 
-function openDate(event, t, kind) {
+function openDate(event) {
   const btn = event.currentTarget;
   const input = btn?.parentElement?.querySelector('.mpd-hidden-date');
   if (!input || input.disabled) return;
@@ -453,18 +458,23 @@ function openDate(event, t, kind) {
   else input.click();
 }
 
-function changeCarryoverStatus(t, newStatus) {
+async function changeCarryoverStatus(t, newStatus) {
   openStatusPicker.value = null;
+  if (!canChangeCarryover(t)) return;
   if (t.status === newStatus) return;
+  const prev = t.status;
   t.status = newStatus;
-  onCarryoverStatusChange(t);
+  await onCarryoverStatusChange(t, prev);
 }
 
-function changeDecisionStatus(dec, newStatus) {
+async function changeDecisionStatus(dec, newStatus) {
   openStatusPicker.value = null;
+  if (!canChangeDecision(dec)) return;
   if (dec.status === newStatus) return;
+  const prev = dec.status;
+  const prevCompletedAt = dec.completed_at;
   dec.status = newStatus;
-  onDecisionStatusChange(dec);
+  await onDecisionStatusChange(dec, prev, prevCompletedAt);
 }
 
 const editingDescCardId = ref(null);
@@ -558,20 +568,66 @@ async function loadCarryoverTasks() {
     exclude_protocol_id: protocol.value.id || 0,
   });
   carryoverTasks.value = (data || []).map(t => ({ ...t, responsible_person: normalizeResponsible(t.responsible_person) }));
+  rememberDue(carryoverTasks.value);
 }
 
-function onCarryoverStatusChange(t) {
-  const completedAt = t.status === 'done' ? new Date().toISOString() : null;
-  db.rpc('update_decision_status', { id: t.id, status: t.status });
+async function onCarryoverStatusChange(t, prevStatus) {
+  const { error } = await db.rpc('update_decision_status', { id: t.id, status: t.status });
+  if (error) {
+    // Запрос не прошёл — возвращаем статус как было, чтобы экран не врал
+    t.status = prevStatus;
+    toast.error('Ошибка', 'Не удалось изменить статус задачи');
+    return;
+  }
   if (t.status === 'done') {
     // Убираем из списка через секунду
     setTimeout(() => { carryoverTasks.value = carryoverTasks.value.filter(x => x.id !== t.id); }, 800);
   }
 }
 
+// Прежние сроки задач. Поле даты через v-model успевает поменять значение
+// до вызова обработчика, а нам нужно знать, что было до — чтобы вернуть
+// прежний срок, если человек передумал или запрос не прошёл.
+const dueBefore = new Map();
+function rememberDue(list) {
+  for (const t of list || []) if (t.id) dueBefore.set(t.id, t.deadline || null);
+}
+
+// Общий перенос срока: спрашиваем подтверждение (срок общий — сдвинется
+// в решении и у всех соисполнителей), пишем в базу, при отказе/ошибке
+// возвращаем прежнюю дату. true — срок действительно перенесён.
+async function applyDeadlineChange(t) {
+  const prev = dueBefore.has(t.id) ? dueBefore.get(t.id) : null;
+  const next = t.deadline || null;
+  if (next === prev) return false;
+  const ok = await confirmProtocolDueChange({ protocol_decision_id: t.id, due_date: prev }, next, confirm);
+  if (!ok) { t.deadline = prev || ''; return false; }
+  const { error } = await db.rpc('update_decision_deadline', { id: t.id, deadline: next });
+  if (error) {
+    t.deadline = prev || '';
+    toast.error('Ошибка', error === 'Session expired' ? 'Сессия истекла' : 'Не удалось перенести срок');
+    return false;
+  }
+  dueBefore.set(t.id, next);
+  return true;
+}
+
 async function onCarryoverDeadlineChange(t) {
-  const { error } = await db.rpc('update_decision_deadline', { id: t.id, deadline: t.deadline || null });
-  if (error) toast.error('Ошибка', 'Не удалось обновить срок');
+  if (!canChangeCarryover(t)) { t.deadline = dueBefore.get(t.id) || ''; return; }
+  // Перечитываем список: перенос срока вперёд снимает на сервере «Просрочено»
+  if (await applyDeadlineChange(t)) await loadCarryoverTasks();
+}
+
+// Срок задачи текущего протокола обычно уходит в базу по кнопке «Сохранить».
+// Но у ответственного без права «Редактирование» этой кнопки нет — для него
+// переносим срок сразу, иначе изменение просто потерялось бы.
+async function onDecisionDeadlineChange(dec) {
+  if (canEdit.value || !dec.id) return;
+  if (!canChangeDecision(dec)) { dec.deadline = dueBefore.get(dec.id) || ''; return; }
+  if (!await applyDeadlineChange(dec)) return;
+  const base = serverBaseline.value?.decisions?.[dec.id];
+  if (base) base.dl = dec.deadline || '';
+  markClean();
 }
 
 function isMyTask(dec) {
@@ -582,12 +638,45 @@ function isMyTask(dec) {
   return rp === me;
 }
 
+// Ответственный за задачу — сравнение точное, после обрезки пробелов
+// (список ответственных приходит строкой через запятую). Дополнительно
+// считаем ответственным того, у кого есть карточка исполнителя: в «Задачах»
+// человека могли добавить только карточкой — сервер это тоже учитывает.
+function isTaskAssignee(t) {
+  const me = (userStore.currentUser?.name || '').trim();
+  if (!me) return false;
+  const names = Array.isArray(t.responsible_person)
+    ? t.responsible_person
+    : normalizeResponsible(t.responsible_person);
+  if (names.some(n => String(n || '').trim() === me)) return true;
+  return (t.assignees_progress || []).some(a => String(a.user_name || '').trim() === me);
+}
+
+// Право «Редактирование» в разделе (без привязки к автору протокола) —
+// именно это проверяет сервер для чужих задач
+const canEditModule = computed(() => userStore.hasAccess('protocols', 'edit'));
+
+// Статус и срок СВОЕЙ задачи ответственный меняет даже без «Редактирования».
+// Всем остальным без этого права — блокируем, чтобы не жали впустую.
+function canChangeDecision(dec) {
+  return canEdit.value || isTaskAssignee(dec);
+}
+
+// Перенесённые задачи — из чужих протоколов, поэтому авторство здесь ни при чём:
+// сервер требует либо «Редактирование» в разделе, либо быть ответственным
+function canChangeCarryover(t) {
+  return canEditModule.value || isTaskAssignee(t);
+}
+
 function formatResponsible(rp) {
   if (Array.isArray(rp)) return rp.join(', ');
   return rp || '';
 }
 
 const openResponsiblePicker = ref(null);
+// Открыт ли какой-нибудь выпадающий список внутри таблицы: на телефоне таблица
+// прокручивается, и меню нужно место снизу, иначе его обрежет край блока
+const pickerOpen = computed(() => openStatusPicker.value !== null || openResponsiblePicker.value !== null);
 
 function toggleResponsiblePicker(dec) {
   openResponsiblePicker.value = openResponsiblePicker.value === dec ? null : dec;
@@ -613,13 +702,23 @@ function autoResize(e) {
   el.style.height = el.scrollHeight + 'px';
 }
 
-function onDecisionStatusChange(dec) {
+async function onDecisionStatusChange(dec, prevStatus, prevCompletedAt) {
   if (dec.status === 'done' && !dec.completed_at) dec.completed_at = new Date().toISOString();
   if (dec.status !== 'done') dec.completed_at = null;
   // Быстрое обновление статуса для существующих решений
-  if (dec.id) {
-    db.rpc('update_decision_status', { id: dec.id, status: dec.status });
+  if (!dec.id) return;
+  const { error } = await db.rpc('update_decision_status', { id: dec.id, status: dec.status });
+  if (error) {
+    // Запрос не прошёл — возвращаем статус как было, чтобы экран не врал
+    dec.status = prevStatus;
+    dec.completed_at = prevCompletedAt ?? null;
+    toast.error('Ошибка', 'Не удалось изменить статус задачи');
+    return;
   }
+  // Статус ушёл в базу сразу — синхронизируем базовый слепок, иначе
+  // перед следующим сохранением это будет выглядеть как «чужое изменение».
+  const base = serverBaseline.value?.decisions?.[dec.id];
+  if (base) base.s = dec.status || '';
 }
 
 function onSeriesChange() {
@@ -633,8 +732,82 @@ function onSeriesChange() {
   loadCarryoverTasks();
 }
 
+// Слепок «как на сервере»: по нему видно, менял ли протокол кто-то ещё,
+// пока страница была открыта. updated_at ловит правки самого протокола,
+// статусы/сроки решений — правки из модуля «Задачи» (там updated_at не трогается).
+function serverSnapshot(p) {
+  const decisions = {};
+  for (const d of (p.decisions || [])) {
+    if (!d.id) continue;
+    decisions[d.id] = { s: d.status || '', dl: d.deadline || '', t: d.text || '' };
+  }
+  return { u: p.updated_at || '', decisions };
+}
+
+// Проверяем, не изменился ли протокол на сервере с момента загрузки страницы.
+// Возвращает 'ok' — можно сохранять, 'abort' — сохранение отменено.
+async function checkForRemoteChanges() {
+  if (!protocol.value.id || !serverBaseline.value) return 'ok';
+  const { data, error } = await db.rpc('get_protocol', { id: Number(protocol.value.id) });
+  // Не смогли проверить — не блокируем сохранение, иначе работа встанет
+  if (error || !data) return 'ok';
+  const fresh = serverSnapshot(data);
+  if (JSON.stringify(fresh) === JSON.stringify(serverBaseline.value)) return 'ok';
+
+  const overwrite = await confirm(
+    'Протокол изменили',
+    'Протокол изменили, пока страница была открыта: кто-то поправил его или закрыл задачу в модуле «Задачи».\n\nСохранить вашу версию поверх? Чужие изменения при этом пропадут.',
+    { okText: 'Перезаписать', cancelText: 'Нет', danger: true },
+  );
+  if (overwrite) return 'ok';
+
+  const reload = await confirm(
+    'Обновить страницу',
+    'Загрузить свежую версию протокола? Ваши несохранённые правки будут потеряны.',
+    { okText: 'Обновить', cancelText: 'Отмена' },
+  );
+  if (reload) await loadProtocol(protocol.value.id, { silent: true });
+  return 'abort';
+}
+
+// Подсветка задач без текста включается, когда человек отказался их удалять
+const emptyWarning = ref(false);
+function isEmptyText(dec) { return !String(dec.text || '').trim(); }
+
+// «1 пустую задачу» / «2 пустые задачи» / «5 пустых задач»
+function emptyTasksPhrase(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} пустую задачу`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} пустые задачи`;
+  return `${n} пустых задач`;
+}
+
+// Задачи без текста сервер не сохраняет. Раньше они молча исчезали —
+// теперь спрашиваем. Возвращает true, если можно продолжать сохранение.
+async function confirmEmptyTasks() {
+  const empty = protocol.value.decisions.filter(isEmptyText);
+  if (!empty.length) { emptyWarning.value = false; return true; }
+  const ok = await confirm(
+    'Задачи без текста',
+    `Удалить ${emptyTasksPhrase(empty.length)}?\n\nЗадачи без текста не сохраняются: они исчезнут из протокола, а карточки исполнителей по ним уйдут в архив.`,
+    { okText: 'Удалить', cancelText: 'Вернуться к форме', danger: true },
+  );
+  if (ok) { emptyWarning.value = false; return true; }
+  // Отказался — показываем, какие именно строки пустые
+  emptyWarning.value = true;
+  nextTick(() => {
+    const el = rootRef.value?.querySelector('.mpd-cell-text-view.is-empty-warn');
+    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
+  return false;
+}
+
+// Возвращает true, если сохранение прошло (нужно для finalize).
 async function save() {
-  if (!protocol.value.topic.trim()) { toast.error('Укажите тему совещания'); return; }
+  if (!protocol.value.topic.trim()) { toast.error('Укажите тему совещания'); return false; }
+  if (!await confirmEmptyTasks()) return false;
+  if (await checkForRemoteChanges() === 'abort') return false;
   saving.value = true;
   const { data, error } = await db.rpc('save_protocol', {
     id: protocol.value.id || 0,
@@ -649,26 +822,41 @@ async function save() {
     decisions: protocol.value.decisions.map(d => ({ ...d, responsible_person: Array.isArray(d.responsible_person) ? d.responsible_person.join(', ') : (d.responsible_person || '') })),
   });
   saving.value = false;
-  if (error) { toast.error(error); return; }
-  takeSnapshot();
-  dirty.value = false;
+  if (error) { toast.error(error); return false; }
+  markClean();
   toast.success('Протокол сохранён');
-  if (!protocol.value.id && data?.id) {
+  const isNew = !protocol.value.id;
+  const savedId = protocol.value.id || data?.id;
+  if (isNew && data?.id) {
     protocol.value.id = data.id;
+    // Протокол перечитаем сами (без мигания) — watch на route.params.id пропускаем
+    skipRouteLoad = true;
     router.replace({ name: 'protocol-detail', params: { id: data.id } });
   }
+  // ВАЖНО: перечитываем протокол всегда. Иначе у только что добавленных задач
+  // не появится id, и следующее «Сохранить» отправит их как новые — сервер
+  // пересоздаст задачи, а старые уберёт в архив вместе с работой исполнителей.
+  if (savedId) await loadProtocol(savedId, { silent: true });
+  return true;
 }
 
 async function finalize() {
   if (!await confirm('Финализация', 'Финализировать протокол? Участникам будет отправлено уведомление в Telegram.')) return;
+  const prevStatus = protocol.value.status;
   protocol.value.status = 'final';
-  await save();
+  const ok = await save();
+  // Не сохранилось — возвращаем прежний статус, иначе на экране «Финальный»,
+  // а в базе всё ещё «Черновик». Если протокол успели перечитать с сервера,
+  // ничего не трогаем — там уже актуальный статус.
+  if (!ok && protocol.value.status === 'final') protocol.value.status = prevStatus;
 }
 
 async function deleteProtocol() {
   if (!await confirm('Удаление', 'Удалить этот протокол? Это действие нельзя отменить.')) return;
-  await db.rpc('delete_protocol', { id: protocol.value.id });
+  const { error } = await db.rpc('delete_protocol', { id: protocol.value.id });
+  if (error) { toast.error('Ошибка', 'Не удалось удалить протокол'); return; }
   toast.success('Протокол удалён');
+  markClean();
   router.push({ name: 'protocols' });
 }
 
@@ -684,7 +872,10 @@ async function uploadFile(e) {
     const res = await fetch('/api/upload/protocol-file', { method: 'POST', headers: { 'X-Session-Token': token }, body: fd });
     const data = await res.json();
     if (data.success) {
-      files.value.push({ id: data.id, file_name: data.file_name, file_path: data.file_path, uploaded_by: data.uploaded_by });
+      // Массив заменяем целиком: push «на месте» не будит watch,
+      // и у нового файла не появлялась ссылка для скачивания
+      files.value = [...files.value, { id: data.id, file_name: data.file_name, file_path: data.file_path, uploaded_by: data.uploaded_by }];
+      await refreshDownloadUrls();
       toast.success('Файл прикреплён');
     } else {
       toast.error(data.error || 'Ошибка загрузки');
@@ -697,7 +888,17 @@ async function uploadFile(e) {
 async function deleteFile(f) {
   if (!await confirm('Удаление файла', `Удалить файл «${f.file_name}»?`)) return;
   const token = localStorage.getItem('bk_session_token') || '';
-  await fetch(`/api/upload/protocol-file?file_id=${f.id}`, { method: 'DELETE', headers: { 'X-Session-Token': token } });
+  try {
+    const res = await fetch(`/api/upload/protocol-file?file_id=${f.id}`, { method: 'DELETE', headers: { 'X-Session-Token': token } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      toast.error(data.error || 'Не удалось удалить файл');
+      return;
+    }
+  } catch {
+    toast.error('Ошибка сети при удалении файла');
+    return;
+  }
   files.value = files.value.filter(x => x.id !== f.id);
   toast.success('Файл удалён');
 }
@@ -712,48 +913,114 @@ async function exportPdf() {
   exportProtocolPdf(protocol.value);
 }
 
+// Общее подтверждение ухода со страницы: и для кнопки «К списку»,
+// и для перехода по разделу в боковом меню.
+async function confirmLeave() {
+  recalcDirty();
+  if (!dirty.value) return true;
+  return await confirm('Несохранённые изменения', 'Вы не сохранили протокол. Уйти без сохранения?');
+}
+
 async function goBack() {
-  if (dirty.value) {
-    if (!await confirm('Несохранённые изменения', 'Вы не сохранили протокол. Уйти без сохранения?')) return;
-  }
-  dirty.value = false;
+  if (!await confirmLeave()) return;
+  markClean();
   router.push({ name: 'protocols' });
 }
 
-function takeSnapshot() {
-  savedSnapshot.value = JSON.stringify({ t: protocol.value.topic, p: protocol.value.participants, q: protocol.value.questions, n: protocol.value.notes, d: protocol.value.decisions, s: protocol.value.status, si: protocol.value.series_id });
+// Уход со страницы через меню/навигацию тоже спрашивает про несохранённое
+onBeforeRouteLeave(async () => {
+  return await confirmLeave();
+});
+
+// Переход на другой протокол (тот же раздел, другой адрес) — тоже спрашиваем
+onBeforeRouteUpdate(async (to, from) => {
+  if (to.params.id === from.params.id) return true;
+  return await confirmLeave();
+});
+
+// В слепок для признака «Не сохранено» входят ТОЛЬКО поля, которые записывает
+// кнопка «Сохранить». Описание исполнителя и статус задачи уходят в базу сразу,
+// поэтому их здесь нет — иначе экран показывал бы «Не сохранено» на пустом месте.
+function currentSnapshot() {
+  const p = protocol.value;
+  return JSON.stringify({
+    t: p.topic || '',
+    md: p.meeting_date || '',
+    s: p.status || '',
+    si: p.series_id ?? null,
+    p: p.participants || [],
+    q: p.questions || '',
+    n: p.notes || '',
+    d: (p.decisions || []).map(d => ({
+      id: d.id || null,
+      x: d.text || '',
+      r: Array.isArray(d.responsible_person) ? d.responsible_person : normalizeResponsible(d.responsible_person),
+      dl: d.deadline || '',
+    })),
+  });
 }
 
-function currentSnapshot() {
-  return JSON.stringify({ t: protocol.value.topic, p: protocol.value.participants, q: protocol.value.questions, n: protocol.value.notes, d: protocol.value.decisions, s: protocol.value.status, si: protocol.value.series_id });
+function takeSnapshot() {
+  savedSnapshot.value = currentSnapshot();
+}
+
+// Пересчёт «Не сохранено» отложенный: иначе на каждый символ в «Вопросах»
+// сериализуется весь протокол.
+let dirtyTimer = null;
+function recalcDirty() {
+  if (dirtyTimer) { clearTimeout(dirtyTimer); dirtyTimer = null; }
+  if (!savedSnapshot.value) return;
+  dirty.value = currentSnapshot() !== savedSnapshot.value;
+}
+
+// «Всё записано»: снимаем слепок заново и гасим отложенный пересчёт,
+// иначе он тут же вернёт «Не сохранено» и страница переспросит про уход.
+function markClean() {
+  if (dirtyTimer) { clearTimeout(dirtyTimer); dirtyTimer = null; }
+  takeSnapshot();
+  dirty.value = false;
 }
 
 function beforeUnloadHandler(e) {
   if (dirty.value) { e.preventDefault(); e.returnValue = ''; }
 }
 
-async function loadProtocol(id) {
-  loading.value = true;
+// silent: true — перечитать данные без спиннера и с сохранением прокрутки
+// (используется после сохранения, чтобы страница не «прыгала»).
+async function loadProtocol(id, opts = {}) {
+  const silent = !!opts.silent;
+  const scrollTop = silent ? (rootRef.value?.scrollTop || 0) : 0;
+  if (!silent) loading.value = true;
   const { data, error } = await db.rpc('get_protocol', { id: Number(id) });
-  if (error || !data) { toast.error('Протокол не найден'); router.push({ name: 'protocols' }); return; }
+  if (error || !data) {
+    loading.value = false;
+    toast.error('Протокол не найден');
+    markClean();
+    router.push({ name: 'protocols' });
+    return;
+  }
   data.participants = typeof data.participants === 'string' ? JSON.parse(data.participants) : (data.participants || []);
   data.decisions = (data.decisions || []).map(d => ({ ...d, responsible_person: normalizeResponsible(d.responsible_person) }));
   files.value = data.files || [];
   delete data.files;
+  serverBaseline.value = serverSnapshot(data);
+  rememberDue(data.decisions);
   protocol.value = data;
   loading.value = false;
-  takeSnapshot();
+  emptyWarning.value = false;
+  markClean();
   loadCarryoverTasks();
   nextTick(() => {
     if (questionsRef.value) { questionsRef.value.style.height = 'auto'; questionsRef.value.style.height = questionsRef.value.scrollHeight + 'px'; }
     if (notesRef.value) { notesRef.value.style.height = 'auto'; notesRef.value.style.height = notesRef.value.scrollHeight + 'px'; }
+    if (silent && rootRef.value) rootRef.value.scrollTop = scrollTop;
   });
 }
 
 watch(protocol, () => {
-  if (!loading.value && savedSnapshot.value) {
-    dirty.value = currentSnapshot() !== savedSnapshot.value;
-  }
+  if (loading.value || !savedSnapshot.value) return;
+  if (dirtyTimer) clearTimeout(dirtyTimer);
+  dirtyTimer = setTimeout(() => { dirtyTimer = null; recalcDirty(); }, 300);
 }, { deep: true });
 
 function closePickerOnOutsideClick(e) {
@@ -777,33 +1044,62 @@ onMounted(() => {
   document.addEventListener('click', closePickerOnOutsideClick);
 });
 
+// Список форматов зависит от юрлица, список пользователей — нет
+async function loadSeriesList() {
+  const { data } = await db.rpc('get_protocol_series', { legal_entity: orderStore.settings.legalEntity });
+  const list = data || [];
+  // Формат, к которому уже привязан протокол, оставляем в списке даже если он
+  // от другого юрлица — иначе привязка молча слетит при сохранении
+  const bound = protocol.value.series_id;
+  if (bound && !list.some(s => String(s.id) === String(bound))) {
+    list.unshift({ id: bound, name: protocol.value.series_name || 'Текущий формат' });
+  }
+  seriesList.value = list;
+}
+
+async function loadUsersList() {
+  if (allUsers.value.length) return;
+  const { data } = await db.rpc('get_users_list_short');
+  if (data) allUsers.value = data;
+}
+
+// Флаг: протокол только что сохранён и перечитан вручную,
+// повторную загрузку по смене адреса пропускаем
+let skipRouteLoad = false;
+
 // Справочники + загрузка протокола. Watch с immediate вместо onMounted,
 // чтобы при переходе между /protocols/:id с разными id KeepAlive не показывал
 // данные предыдущего протокола (см. AppLayout, ключ — route.name).
 watch(() => route.params.id, async (id) => {
-  if (allUsers.value.length === 0 || seriesList.value.length === 0) {
-    const [usersRes, seriesRes] = await Promise.all([
-      db.rpc('get_users_list_short'),
-      db.rpc('get_protocol_series', { legal_entity: orderStore.settings.legalEntity }),
-    ]);
-    if (usersRes.data) allUsers.value = usersRes.data;
-    if (seriesRes.data) seriesList.value = seriesRes.data;
-  }
+  if (skipRouteLoad) { skipRouteLoad = false; return; }
+  await Promise.all([loadUsersList(), loadSeriesList()]);
   if (id && id !== 'new') {
     await loadProtocol(id);
   } else {
     protocol.value.created_by = userStore.currentUser?.name;
-    if (route.query.series_id) {
-      protocol.value.series_id = Number(route.query.series_id);
+    const qSeries = route.query.series_id;
+    if (qSeries) {
+      // id из адреса — строка, а в списке значения могут быть числами:
+      // берём значение из самого списка, иначе предвыбор не срабатывает
+      const found = seriesList.value.find(s => String(s.id) === String(qSeries));
+      protocol.value.series_id = found ? found.id : qSeries;
       onSeriesChange();
     }
-    takeSnapshot();
+    // Новый протокол: сразу считаем состояние «сохранённым»,
+    // иначе шаблон вопросов из формата сам по себе даст «Не сохранено»
+    markClean();
   }
 }, { immediate: true });
+
+// Юрлицо переключили — перечитываем список форматов,
+// иначе можно привязать протокол к формату другого юрлица
+watch(() => orderStore.settings.legalEntity, () => { loadSeriesList(); });
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', beforeUnloadHandler);
   document.removeEventListener('click', closePickerOnOutsideClick);
+  if (dirtyTimer) { clearTimeout(dirtyTimer); dirtyTimer = null; }
+  if (rowClickTimer) { clearTimeout(rowClickTimer); rowClickTimer = null; }
 });
 </script>
 
@@ -811,7 +1107,7 @@ onBeforeUnmount(() => {
 .mpd-view { padding: 0; }
 .mpd-top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .mpd-top-left { display: flex; align-items: center; gap: 12px; }
-.mpd-top-actions { display: flex; gap: 6px; }
+.mpd-top-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .mpd-back { border: none; background: none; font-size: 13px; cursor: pointer; color: #E76F51; padding: 4px 0; }
 .mpd-back:hover { text-decoration: underline; }
 
@@ -844,19 +1140,27 @@ onBeforeUnmount(() => {
 .mpd-picker-role { font-size: 11px; color: #999; white-space: nowrap; text-align: right; }
 
 /* Tasks table */
+/* Обёртка с боковой прокруткой: на телефоне таблица шире экрана, а страница
+   целиком прокручиваться вбок не может (.content-area > div { overflow-x: hidden }).
+   На больших экранах прокрутку не включаем, чтобы не обрезать выпадающие меню
+   статуса и ответственных. */
+.mpd-table-scroll { max-width: 100%; }
 .mpd-tasks-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 8px; }
 .mpd-tasks-table th { font-size: 10px; color: #8a8a8a; font-weight: 600; text-align: left; padding: 6px 8px; border-bottom: 1px solid #ececec; text-transform: uppercase; letter-spacing: 0.04em; }
 .mpd-th-expand { width: 28px; }
-.mpd-th-num { width: 28px; text-align: center; }
+.mpd-th-num { width: 28px; }
+.mpd-tasks-table th.mpd-th-num { text-align: center; }
 .mpd-th-progress { width: 130px; }
 .mpd-th-resp { width: 200px; }
 .mpd-th-date { width: 130px; }
 .mpd-th-status { width: 130px; }
 .mpd-th-del { width: 36px; }
-.mpd-tasks-table td { padding: 6px 8px; vertical-align: middle; border-bottom: 1px solid #f2f2f2; background: #fff; }
+/* text-align: left обязателен — старые глобальные стили центрируют все td */
+.mpd-tasks-table td { padding: 6px 8px; vertical-align: middle; border-bottom: 1px solid #f2f2f2; background: #fff; text-align: left; }
 .mpd-tasks-table td.mpd-td-text,
 .mpd-tasks-table td.mpd-td-text-readonly { vertical-align: top; padding-top: 8px; }
-.mpd-td-num { text-align: center; font-size: 12px; color: #aaa; font-weight: 600; }
+.mpd-tasks-table td.mpd-td-num { text-align: center; }
+.mpd-td-num { font-size: 12px; color: #aaa; font-weight: 600; }
 .mpd-td-text-readonly { font-size: 13px; color: #2b2b2b; line-height: 1.4; white-space: pre-wrap; word-break: break-word; padding: 8px 8px; }
 .mpd-td-resp-readonly { font-size: 12px; color: #555; }
 
@@ -871,7 +1175,6 @@ onBeforeUnmount(() => {
 .mpd-tr-overdue.mpd-tr-mine td:first-child { box-shadow: inset 3px 0 0 #c62828, inset 6px 0 0 #E76F51; }
 
 .mpd-tr-expanded td { border-bottom-color: transparent; }
-.mpd-tr-details td { border-bottom: 1px solid #ececec; padding: 0 0 10px; background: #fafbfc; }
 
 /* Раскрытие */
 .mpd-expand-btn { width: 22px; height: 22px; border: none; background: transparent; color: #999; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: transform 0.15s, color 0.15s, background 0.15s; }
@@ -881,6 +1184,8 @@ onBeforeUnmount(() => {
 /* Текст задачи: режим просмотра (div) и режим редактирования (textarea) */
 .mpd-cell-text-view { padding: 6px 8px; font-size: 13px; line-height: 1.45; color: #2b2b2b; white-space: pre-wrap; word-break: break-word; border-radius: 5px; min-height: 26px; }
 .mpd-cell-text-view.is-empty { color: #bbb; font-style: italic; }
+/* Пустые задачи, которые человек отказался удалять — чтобы их было видно */
+.mpd-cell-text-view.is-empty-warn { color: #c62828; background: #fdf2f2; box-shadow: inset 0 0 0 1px #f3bcbc; font-style: normal; }
 .mpd-cell-text-edit { padding: 6px 8px; border: 1px solid #E76F51; border-radius: 5px; font-size: 13px; width: 100%; box-sizing: border-box; background: #fff; resize: none; overflow: hidden; min-height: 30px; line-height: 1.45; font-family: inherit; color: #2b2b2b; }
 .mpd-cell-text-edit:focus { outline: none; box-shadow: 0 0 0 2px rgba(231, 111, 81, 0.18); }
 .mpd-td-text { cursor: text; }
@@ -913,7 +1218,7 @@ onBeforeUnmount(() => {
 .mpd-chip-menu-item:hover { filter: brightness(0.96); }
 
 /* Удаление */
-.mpd-td-del { text-align: center; }
+.mpd-tasks-table td.mpd-td-del { text-align: center; }
 .mpd-row-del { border: none; background: transparent; color: #c0c0c0; cursor: pointer; padding: 4px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; }
 .mpd-row-del:hover { color: #c62828; background: #fde2e2; }
 
@@ -939,13 +1244,6 @@ onBeforeUnmount(() => {
 .mpd-carryover-title { color: #e65100; }
 .mpd-td-source { font-size: 11px; color: #999; white-space: nowrap; }
 .mpd-th-source { width: 90px; }
-.mpd-th-comment { width: 220px; }
-.mpd-td-comment {
-  font-size: 12px; color: #555;
-  max-width: 240px;
-  overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .mpd-empty-cell { color: #bbb; }
 
 /* Ячейка "Прогресс" в самой строке */
@@ -956,7 +1254,7 @@ onBeforeUnmount(() => {
 .mpd-progress-bar > span { display: block; height: 100%; background: #4caf50; border-radius: 2px; transition: width 0.2s; }
 
 /* Раскрытая панель: таблица "исполнитель | описание его карточки" */
-.mpd-tr-details td { background: #fff; padding: 0; }
+.mpd-tr-details td { background: #fff; padding: 0; border-bottom: 1px solid #ececec; }
 .mpd-details { padding: 4px 0 10px 0; }
 .mpd-details-empty { padding: 10px 8px; font-size: 13px; }
 .mpd-assignee-table { width: 100%; border-collapse: collapse; background: transparent; table-layout: auto; }
@@ -992,6 +1290,9 @@ onBeforeUnmount(() => {
 .mpd-file:hover { background: #f8f8f8; }
 .mpd-file-name { color: #1565c0; text-decoration: none; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mpd-file-name:hover { text-decoration: underline; }
+/* Ссылка ещё не готова — показываем просто имя, чтобы клик не уводил со страницы */
+.mpd-file-name-pending { color: #999; cursor: default; }
+.mpd-file-name-pending:hover { text-decoration: none; }
 .mpd-file-meta { font-size: 11px; color: #999; white-space: nowrap; }
 .mpd-files-empty { font-size: 12px; color: #aaa; margin-bottom: 8px; }
 .mpd-btn-upload { border-style: dashed; color: #888; padding: 7px 14px; cursor: pointer; display: inline-block; text-align: center; border: 1px dashed #ddd; border-radius: 6px; font-size: 13px; }
@@ -1001,9 +1302,23 @@ onBeforeUnmount(() => {
 .mpd-unsaved { font-size: 11px; color: #e65100; font-weight: 500; background: #fff3e0; padding: 3px 8px; border-radius: 10px; }
 .mpd-loading { text-align: center; padding: 40px; color: #888; }
 
+/* Таблица задач шире узкого экрана — прокручиваем её вбок внутри секции.
+   Страница вбок не едет: .content-area > div { overflow-x: hidden }.
+   На широких экранах прокрутку не включаем, иначе обрезались бы выпадающие
+   меню статуса и списка ответственных. */
+@media (max-width: 900px) {
+  .mpd-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .mpd-table-scroll > .mpd-tasks-table { min-width: 780px; }
+  /* Без этого колонке с текстом задачи достаются крохи и слова рвутся по буквам */
+  .mpd-table-scroll .mpd-th-task { min-width: 260px; }
+  /* Пока открыт выпадающий список — держим снизу место, чтобы его было видно */
+  .mpd-table-scroll.is-picker-open { padding-bottom: 130px; }
+}
+
 @media (max-width: 700px) {
   .mpd-row { grid-template-columns: 1fr; }
   .mpd-top-bar { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .mpd-top-actions { width: 100%; justify-content: flex-start; }
   .mpd-tasks-table { font-size: 11px; }
   .mpd-th-resp, .mpd-th-date { width: auto; }
 }
