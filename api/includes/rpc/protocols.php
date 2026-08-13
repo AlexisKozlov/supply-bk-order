@@ -16,7 +16,14 @@
         if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         // Один JOIN с агрегатами вместо двух коррелированных подзапросов на каждую строку.
         // На 500 протоколах раньше было 1000 подзапросов к protocol_decisions.
-        $s = $pdo->prepare("SELECT p.*,
+        //
+        // Колонки перечислены явно. Раньше здесь стояло p.*, и на каждый из
+        // 500 протоколов ехали длинные тексты questions и notes — на экране
+        // списка они не показываются, их читают уже внутри протокола
+        // (get_protocol отдаёт их целиком). series_id нужен фильтру по формату
+        // совещаний, participants — кружкам с буквами участников.
+        $s = $pdo->prepare("SELECT p.id, p.series_id, p.meeting_date, p.topic, p.status,
+                p.participants, p.created_by,
                 COALESCE(d.cnt, 0) AS decisions_count,
                 COALESCE(d.done_cnt, 0) AS decisions_done,
                 COALESCE(d.overdue_cnt, 0) AS overdue_count,
@@ -334,7 +341,14 @@
                 $responsible = trim($dec['responsible_person'] ?? '');
                 $deadline = $dec['deadline'] ?: null;
                 $decStatus = $dec['status'] ?? 'pending';
-                $completedAt = $decStatus === 'done' ? ($dec['completed_at'] ?? date('Y-m-d H:i:s')) : null;
+                // Дату закрытия чиним на входе: браузер присылал её в виде
+                // «2026-08-13T15:17:29.739Z», и весь запрос падал с ошибкой базы
+                $completedAt = null;
+                if ($decStatus === 'done') {
+                    $raw = trim((string)($dec['completed_at'] ?? ''));
+                    $ts = $raw !== '' ? strtotime($raw) : false;
+                    $completedAt = $ts !== false ? date('Y-m-d H:i:s', $ts) : date('Y-m-d H:i:s');
+                }
                 if (!$decText) continue;
                 if ($decId) {
                     $pdo->prepare("UPDATE protocol_decisions SET text=?, responsible_person=?, deadline=?, status=?, completed_at=? WHERE id=? AND protocol_id=?")
@@ -671,93 +685,6 @@
         respond($s->fetchAll());
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // МОДУЛЬ ОПРОСОВ (surveys)
-    // ═══════════════════════════════════════════════════════════════
-
-    if (!function_exists('surveyGetTargetRestaurants')) {
-        function surveyGetTargetRestaurants($pdo, $group) {
-            $group = in_array($group, ['BK_VM', 'PS'], true) ? $group : 'BK_VM';
-            $stmt = $pdo->prepare("
-                SELECT r.number AS restaurant_number, r.legal_entity_group, r.address, r.city
-                FROM restaurants r
-                WHERE r.active = 1
-                  AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-                  AND (
-                    EXISTS (
-                        SELECT 1
-                        FROM ro_users ru
-                        WHERE ru.restaurant_number = r.number
-                          AND ru.is_active = 1
-                          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = r.legal_entity_group COLLATE utf8mb4_unicode_ci
-                    )
-                    OR EXISTS (
-                        SELECT 1
-                        FROM ro_telegram_subs vs
-                        WHERE vs.restaurant_number = r.number
-                    )
-                  )
-                ORDER BY r.number
-            ");
-            $stmt->execute([$group]);
-            return $stmt->fetchAll();
-        }
-    }
-
-    if (!function_exists('surveyCountTargetsByGroup')) {
-        function surveyCountTargetsByGroup($pdo) {
-            $rows = $pdo->query("
-                SELECT r.legal_entity_group AS grp, COUNT(*) AS cnt
-                FROM restaurants r
-                WHERE r.active = 1
-                  AND (
-                    EXISTS (
-                        SELECT 1
-                        FROM ro_users ru
-                        WHERE ru.restaurant_number = r.number
-                          AND ru.is_active = 1
-                          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = r.legal_entity_group COLLATE utf8mb4_unicode_ci
-                    )
-                    OR EXISTS (
-                        SELECT 1
-                        FROM ro_telegram_subs vs
-                        WHERE vs.restaurant_number = r.number
-                    )
-                  )
-                GROUP BY r.legal_entity_group
-            ")->fetchAll();
-            $out = ['BK_VM' => 0, 'PS' => 0];
-            foreach ($rows as $r) {
-                $g = $r['grp'] ?? '';
-                if (isset($out[$g])) $out[$g] = (int)$r['cnt'];
-            }
-            return $out;
-        }
-    }
-
-    if (!function_exists('surveyGetRecipientChatIds')) {
-        function surveyGetRecipientChatIds($pdo, $group) {
-            $group = in_array($group, ['BK_VM', 'PS'], true) ? $group : 'BK_VM';
-            $chatIds = [];
-
-            $roStmt = $pdo->prepare("
-                SELECT DISTINCT rs.chat_id AS telegram_chat_id
-                FROM ro_telegram_subs rs
-                JOIN restaurants r
-                  ON r.number = rs.restaurant_number
-                 AND r.active = 1
-                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
-                WHERE rs.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-                  AND rs.chat_id IS NOT NULL
-                  AND (rs.verified_at IS NOT NULL
-                       OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
-            ");
-            $roStmt->execute([$group]);
-            foreach ($roStmt->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
-                $chatId = trim((string)$chatId);
-                if ($chatId !== '') $chatIds[$chatId] = true;
-            }
-
-            return array_keys($chatIds);
-        }
-    }
+    // Функции модуля опросов (surveyGetTargetRestaurants, surveyCountTargetsByGroup,
+    // surveyGetRecipientChatIds) переехали отсюда в api/includes/rpc/surveys.php —
+    // к протоколам они отношения не имели.

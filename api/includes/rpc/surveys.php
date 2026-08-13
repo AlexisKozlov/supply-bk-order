@@ -7,6 +7,99 @@
  * $ROLE_TEMPLATES, $ACCESS_LEVELS, $clientIp.
  */
 
+    // ═══════════════════════════════════════════════════════════════
+    // Кому уходит опрос: рестораны и чаты-получатели.
+    // Раньше эти три функции лежали в rpc/protocols.php — перенесены
+    // сюда без изменений логики.
+    // ═══════════════════════════════════════════════════════════════
+
+    if (!function_exists('surveyGetTargetRestaurants')) {
+        function surveyGetTargetRestaurants($pdo, $group) {
+            $group = in_array($group, ['BK_VM', 'PS'], true) ? $group : 'BK_VM';
+            $stmt = $pdo->prepare("
+                SELECT r.number AS restaurant_number, r.legal_entity_group, r.address, r.city
+                FROM restaurants r
+                WHERE r.active = 1
+                  AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                  AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM ro_users ru
+                        WHERE ru.restaurant_number = r.number
+                          AND ru.is_active = 1
+                          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = r.legal_entity_group COLLATE utf8mb4_unicode_ci
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM ro_telegram_subs vs
+                        WHERE vs.restaurant_number = r.number
+                    )
+                  )
+                ORDER BY r.number
+            ");
+            $stmt->execute([$group]);
+            return $stmt->fetchAll();
+        }
+    }
+
+    if (!function_exists('surveyCountTargetsByGroup')) {
+        function surveyCountTargetsByGroup($pdo) {
+            $rows = $pdo->query("
+                SELECT r.legal_entity_group AS grp, COUNT(*) AS cnt
+                FROM restaurants r
+                WHERE r.active = 1
+                  AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM ro_users ru
+                        WHERE ru.restaurant_number = r.number
+                          AND ru.is_active = 1
+                          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = r.legal_entity_group COLLATE utf8mb4_unicode_ci
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM ro_telegram_subs vs
+                        WHERE vs.restaurant_number = r.number
+                    )
+                  )
+                GROUP BY r.legal_entity_group
+            ")->fetchAll();
+            $out = ['BK_VM' => 0, 'PS' => 0];
+            foreach ($rows as $r) {
+                $g = $r['grp'] ?? '';
+                if (isset($out[$g])) $out[$g] = (int)$r['cnt'];
+            }
+            return $out;
+        }
+    }
+
+    if (!function_exists('surveyGetRecipientChatIds')) {
+        function surveyGetRecipientChatIds($pdo, $group) {
+            $group = in_array($group, ['BK_VM', 'PS'], true) ? $group : 'BK_VM';
+            $chatIds = [];
+
+            $roStmt = $pdo->prepare("
+                SELECT DISTINCT rs.chat_id AS telegram_chat_id
+                FROM ro_telegram_subs rs
+                JOIN restaurants r
+                  ON r.number = rs.restaurant_number
+                 AND r.active = 1
+                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
+                WHERE rs.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                  AND rs.chat_id IS NOT NULL
+                  AND (rs.verified_at IS NOT NULL
+                       OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
+            ");
+            $roStmt->execute([$group]);
+            foreach ($roStmt->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+                $chatId = trim((string)$chatId);
+                if ($chatId !== '') $chatIds[$chatId] = true;
+            }
+
+            return array_keys($chatIds);
+        }
+    }
+
     if ($fn === 'surveys_list') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
