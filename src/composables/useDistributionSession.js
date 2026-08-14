@@ -220,12 +220,15 @@ export function useDistributionSession({ toastStore, legalEntityRef, isEditingRe
       await loadSessionData(activeSession.value.id);
       return;
     }
+    // Автообновление раз в 10 секунд (и закрытие карточки) полностью
+    // пересобирает entriesMap. Если это случилось, пока ждали ответ сервера,
+    // ключа уже нет — запись в него падала с «Cannot set properties of undefined».
     if (error) {
-      entriesMap[k].shipped = prev;
+      if (entriesMap[k]) entriesMap[k].shipped = prev;
       toastStore?.show('Ошибка сохранения', 'error');
       return;
     }
-    if (data?.version) entriesMap[k].version = data.version;
+    if (data?.version && entriesMap[k]) entriesMap[k].version = data.version;
     pushUndo({ type: 'shipped', restNum: String(restNum), spId: product.id, prev, next });
   }
 
@@ -247,11 +250,11 @@ export function useDistributionSession({ toastStore, legalEntityRef, isEditingRe
       return;
     }
     if (error) {
-      entriesMap[k].qty = prevQty;
+      if (entriesMap[k]) entriesMap[k].qty = prevQty;
       toastStore?.show('Ошибка', 'error');
       return;
     }
-    if (data?.version) entriesMap[k].version = data.version;
+    if (data?.version && entriesMap[k]) entriesMap[k].version = data.version;
     pushUndo({ type: 'qty', restNum, spId, prev: prevQty, next: val });
   }
 

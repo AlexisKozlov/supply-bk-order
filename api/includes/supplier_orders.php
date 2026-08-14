@@ -41,6 +41,22 @@ function soRespond($data, $code = 200) {
     exit;
 }
 
+/**
+ * Push-уведомление ресторану.
+ *
+ * Файл отправки подключаем лениво: он тянет composer-автолоад, а нужен в
+ * единичных сценариях. Раньше pushSendToRestaurant() вызывали напрямую, файл
+ * подключён не был, и вызовы падали с «Call to undefined function» внутри
+ * try/catch — push-уведомления о принятой заявке и о довозе молча не доходили.
+ */
+function soPushToRestaurant(PDO $pdo, int $restaurantNumber, string $group, array $payload): int {
+    if (!function_exists('pushSendToRestaurant')) {
+        if (!is_file(__DIR__ . '/push_send.php')) return 0;
+        require_once __DIR__ . '/push_send.php';
+    }
+    return pushSendToRestaurant($pdo, $restaurantNumber, $group, $payload);
+}
+
 function soGetRestaurantSession($pdo) {
     // Сессии живут в ro_user_sessions (см. helpers.php roReadActiveSessionRow).
     $user = roReadActiveSessionRow($pdo);
@@ -681,7 +697,7 @@ function soNotifyRestaurantOrders(PDO $pdo, string $botToken, int $rNum, string 
 
     // Push (PWA) — пробуем всегда, даже если токена нет.
     try {
-        $pushSent = pushSendToRestaurant($pdo, $rNum, $rGroup, $push);
+        $pushSent = soPushToRestaurant($pdo, $rNum, $rGroup, $push);
         if ((int)$pushSent > 0) $reached = true;
     } catch (Throwable $e) {
         error_log('[soNotifyRestaurantOrders push] rest=' . $rNum . ' err=' . $e->getMessage());
@@ -1409,7 +1425,7 @@ function soNotifyTempScheduleChanged($pdo, $supplierId, $dateFrom, $dateTo, $tem
 
         // Push (PWA)
         try {
-            $pushSent = pushSendToRestaurant($pdo, $rNum, $rGroup, [
+            $pushSent = soPushToRestaurant($pdo, $rNum, $rGroup, [
                 'title' => "{$supName}: временный график",
                 'body'  => $titlePlain,
                 'url'   => '/restaurant/reminders',
@@ -2525,7 +2541,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             ? "{$confName}, {$confDateFmt}: отмечено, что поставка не нужна."
             : "Заявка {$confName} на {$confDateFmt} принята.";
 
-        pushSendToRestaurant(
+        soPushToRestaurant(
             $pdo,
             (int)$rest['restaurant_number'],
             (string)($rest['legal_entity_group'] ?? ''),
@@ -4161,7 +4177,7 @@ if ($soAction === 'admin') {
         } catch (Exception $e) { /* не критично */ }
         try {
             require_once __DIR__ . '/so_loading_sheets.php';
-            pushSendToRestaurant($pdo, $restNum, $group, [
+            soPushToRestaurant($pdo, $restNum, $group, [
                 'title' => '📦 Внеплановая поставка (довоз)',
                 'body'  => "{$supplierName}: доставка {$deliveryFmt}" . ($editable ? ', можно скорректировать' : ''),
                 // У цеха свой раздел кабинета — страница поставщика для него пустая.

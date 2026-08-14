@@ -246,7 +246,12 @@ function tgClientCall(string $method, array $params, array $opts = []): array
     if (!$ok) {
         $code = isset($data['error_code']) ? (int)$data['error_code'] : null;
         $desc = (string)($data['description'] ?? 'no_description');
-        error_log("[tg-client] {$method}{$chatHint} http={$httpCode} error_code={$code}: {$desc}");
+        // «message is not modified» — не ошибка: человек нажал кнопку, а экран
+        // получился тот же самый. В журнал отправок (tg_send_log) запись всё
+        // равно попадёт, а error_log не засоряем.
+        if (stripos($desc, 'message is not modified') === false) {
+            error_log("[tg-client] {$method}{$chatHint} http={$httpCode} error_code={$code}: {$desc}");
+        }
     }
 
     $result = [
@@ -320,9 +325,27 @@ const TG_MAX_TEXT = 4096;
  */
 const TG_MAX_PARTS = 3;
 
+/**
+ * Длина текста так, как её считает Telegram — в единицах UTF-16.
+ * Эмодзи и прочие редкие знаки занимают ДВЕ единицы, а mb_strlen
+ * считает их за одну. Из-за этого сообщение на «4090 символов» с эмодзи
+ * Telegram отвергал с «text is too long», и человек не видел ответа.
+ */
+function tgTextLen(string $text): int
+{
+    return (int)(strlen(mb_convert_encoding($text, 'UTF-16LE', 'UTF-8')) / 2);
+}
+
 function tgSplitText(string $text, int $limit = TG_MAX_TEXT, int $maxParts = TG_MAX_PARTS): array
 {
-    if (mb_strlen($text) <= $limit) return [$text];
+    // Режем по символам, а лимит у Telegram — в единицах UTF-16. Пересчитываем
+    // лимит по фактической доле «двойных» знаков в этом тексте.
+    $chars = mb_strlen($text);
+    $units = tgTextLen($text);
+    if ($chars > 0 && $units > $chars) {
+        $limit = max(1000, (int)floor($limit * $chars / $units));
+    }
+    if ($chars <= $limit) return [$text];
 
     $parts = [];
     $rest = $text;
