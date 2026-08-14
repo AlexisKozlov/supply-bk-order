@@ -270,6 +270,11 @@ const AUDIT_ACTION_LABELS = {
   so_deadline_rules_updated: 'Дедлайны', so_adhoc_created: 'Внеплановая',
   so_supplier_disconnected: 'Поставщик отключён',
   reminder_keg_toggled: 'Напоминание о кегах', correction_taken: 'Взята в работу',
+  // Загрузка машин
+  tl_plan_created: 'Создан', tl_plan_updated: 'Изменён', tl_plan_deleted: 'Удалён',
+  tl_plan_confirmed: 'Подтверждён', tl_plan_reopened: 'Возвращён в черновик',
+  tl_vehicle_created: 'Создан', tl_vehicle_updated: 'Изменён', tl_vehicle_deleted: 'Удалён',
+  tl_direction_created: 'Создано', tl_direction_updated: 'Изменено', tl_direction_deleted: 'Удалено',
 };
 // Здесь лежат имена таблиц из БД — без перевода они и попадали на экран
 // как «restaurant_main_delivery_subscriptions».
@@ -287,6 +292,8 @@ const AUDIT_ENTITY_LABELS = {
   restaurant_keg_return_subscriptions: 'Напоминание о возврате кег',
   ro_telegram_subs: 'Привязка Telegram',
   so_orders: 'Заявка поставщику', so_templates: 'Шаблон заявки',
+  truck_plan: 'План загрузки машин', truck_vehicle: 'Тип машины',
+  truck_direction: 'Направление доставки',
 };
 
 function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }

@@ -115,6 +115,18 @@ export const ACTIVITY_LABELS = {
   // Овощи
   veg_session_created: 'создал сбор по овощам',
   veg_order_updated: 'изменил заказ овощей',
+  // Загрузка машин
+  tl_plan_created: 'создал план загрузки машин',
+  tl_plan_updated: 'изменил план загрузки машин',
+  tl_plan_confirmed: 'подтвердил план загрузки машин',
+  tl_plan_reopened: 'вернул план загрузки машин в черновик',
+  tl_plan_deleted: 'удалил план загрузки машин',
+  tl_vehicle_created: 'добавил тип машины',
+  tl_vehicle_updated: 'изменил тип машины',
+  tl_vehicle_deleted: 'удалил тип машины',
+  tl_direction_created: 'создал направление доставки',
+  tl_direction_updated: 'изменил направление доставки',
+  tl_direction_deleted: 'удалил направление доставки',
 };
 
 /**
@@ -156,6 +168,9 @@ export const ENTITY_LABELS = {
   settings: 'настройки',
   task: 'задача',
   handover: 'передача дел',
+  truck_plan: 'план загрузки машин',
+  truck_vehicle: 'тип машины',
+  truck_direction: 'направление доставки',
 };
 
 // Человеческое имя объекта. Фолбэк — ключ без подчёркиваний.

@@ -23,15 +23,28 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
 
   // --- State ---
 
+  // Локальные ключи: v-for по индексу переиспользовал не те строки при
+  // удалении машины из середины и при перетаскивании
+  let uidCounter = 0;
+  function nextUid() { return 'u' + (++uidCounter); }
+
   const deliveryDate = ref('');
   const orders = ref([]);
   const vehicles = ref([]);
+  // Направления доставки: «Витебск — Полоцк» и т.п.
+  const directions = ref([]);
   const plan = ref(null);
   const trucks = ref([]);
-  const allowMixedModes = ref(false);
+  // Машины обычно везут ресторану всю продукцию сразу, а не отдельно мороз и
+  // сухой, поэтому смешивание режимов включено по умолчанию
+  const allowMixedModes = ref(true);
   const groupBy = ref('restaurant');
   const loading = ref(false);
   const saving = ref(false);
+  // Несохранённая раскладка: смена даты и уход со страницы раньше стирали её молча
+  const dirty = ref(false);
+  function markDirty() { dirty.value = true; }
+  function markClean() { dirty.value = false; }
   // Фильтры по юрлицам. Если массив пустой — показываем все.
   const entityFilter = ref([]);
 
@@ -54,6 +67,28 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     return entityFilter.value.includes(order.legal_entity);
   }
 
+  // Сколько от заказа ещё не уехало. Автораспределение кладёт заказ по частям
+  // (мороз отдельно, сухой отдельно), поэтому в режиме «целиком по ресторанам»
+  // такой заказ раньше всё равно висел как нераспределённый целиком.
+  function remainingParts(order) {
+    const parts = [];
+    for (const [cat, data] of Object.entries(order.categories || {})) {
+      if (assignedKeys.value.has(`cat_${order.order_id}_${cat}`)) continue;
+      let pallets = +data.pallets || 0;
+      let weight = +data.weight || 0;
+      // Позиции этой категории, уехавшие по отдельности, тоже вычитаем
+      for (const item of (order.items || [])) {
+        if (item.category !== cat) continue;
+        if (!assignedKeys.value.has(`item_${item.item_id}`)) continue;
+        pallets -= +item.pallets || 0;
+        weight -= +item.weight || 0;
+      }
+      if (pallets <= 0.001 && weight <= 0.001) continue;
+      parts.push({ category: cat, pallets: +pallets.toFixed(3), weight: +weight.toFixed(3) });
+    }
+    return parts;
+  }
+
   const unassignedItems = computed(() => {
     const result = [];
     for (const order of orders.value) {
@@ -61,9 +96,23 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
       const commonOrderFields = {
         legal_entity: order.legal_entity,
         legal_entity_group: order.legal_entity_group,
+        direction_id: order.direction_id ?? null,
+        direction_name: order.direction_name || '',
       };
       if (groupBy.value === 'restaurant') {
         if (assignedKeys.value.has(`order_${order.order_id}`)) continue;
+        const parts = remainingParts(order);
+        if (!parts.length) continue;
+        const categories = {};
+        let pallets = 0;
+        let weight = 0;
+        for (const p of parts) {
+          categories[p.category] = { pallets: p.pallets, weight: p.weight };
+          pallets += p.pallets;
+          weight += p.weight;
+        }
+        const partial = parts.length !== Object.keys(order.categories || {}).length
+          || pallets + 0.001 < (+order.total_pallets || 0);
         result.push({
           key: `order_${order.order_id}`,
           assign_type: 'order',
@@ -72,9 +121,13 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
           city: order.city,
           address: order.address,
           region: order.region,
-          pallets: order.total_pallets,
-          weight_kg: order.total_weight,
-          categories: order.categories,
+          pallets: +pallets.toFixed(3),
+          weight_kg: +weight.toFixed(3),
+          categories,
+          // Часть заказа уже в машине: назначать надо оставшиеся куски по
+          // отдельности, иначе уехавшее уедет второй раз
+          partial,
+          parts,
           label: `Рест. ${order.restaurant_number}`,
           ...commonOrderFields,
         });
@@ -82,6 +135,7 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
         for (const [cat, data] of Object.entries(order.categories || {})) {
           const key = `cat_${order.order_id}_${cat}`;
           if (assignedKeys.value.has(key)) continue;
+          if (assignedKeys.value.has(`order_${order.order_id}`)) continue;
           result.push({
             key,
             assign_type: 'category',
@@ -99,6 +153,8 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
         for (const item of (order.items || [])) {
           const key = `item_${item.item_id}`;
           if (assignedKeys.value.has(key)) continue;
+          if (assignedKeys.value.has(`order_${order.order_id}`)) continue;
+          if (assignedKeys.value.has(`cat_${order.order_id}_${item.category}`)) continue;
           result.push({
             key,
             assign_type: 'item',
@@ -175,16 +231,25 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     return {
       pallets: +pallets.toFixed(1),
       weight: +weight.toFixed(1),
+      freePallets: +(cap - pallets).toFixed(1),
+      freeWeight: +(capKg - weight).toFixed(1),
       percentPallets: cap > 0 ? Math.round(pallets / cap * 100) : 0,
       percentWeight: capKg > 0 ? Math.round(weight / capKg * 100) : 0,
       modes,
     };
   }
 
+  // Готовая статистика по всем машинам: шаблон берёт из карты, а не считает заново
+  const statsByTruck = computed(() => {
+    const map = {};
+    for (const t of trucks.value) map[t.uid] = truckStats(t);
+    return map;
+  });
+
   // --- Валидация ---
 
-  function canAssign(truckIndex, item) {
-    const truck = trucks.value[truckIndex];
+  function canAssign(truckUid, item) {
+    const truck = trucks.value.find(t => t.uid === truckUid);
     if (!truck) return { ok: false, reason: 'Машина не найдена' };
     const stats = truckStats(truck);
     const newPallets = stats.pallets + (parseFloat(item.pallets) || 0);
@@ -219,6 +284,29 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     await loadVehicles();
   }
 
+  async function loadDirections() {
+    const data = await api('directions');
+    directions.value = data.directions || [];
+    return data;
+  }
+
+  async function saveDirection(d) {
+    const data = await api('directions', { method: 'POST', body: JSON.stringify(d) });
+    await loadDirections();
+    return data;
+  }
+
+  async function deleteDirection(id) {
+    await api(`directions/${id}`, { method: 'DELETE' });
+    await loadDirections();
+  }
+
+  // Направление ресторана считает сервер, здесь только подпись для интерфейса
+  function directionName(id) {
+    if (!id) return '';
+    return directions.value.find(d => String(d.id) === String(id))?.name || '';
+  }
+
   async function loadOrders(date) {
     loading.value = true;
     try {
@@ -229,16 +317,27 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     }
   }
 
+  // Раскладываем пришедший план в локальную форму: каждой машине и каждому
+  // назначению даём свой ключ, иначе строки в списке путаются местами
+  function adoptTrucks(list) {
+    return (list || []).map(t => ({
+      ...t,
+      uid: nextUid(),
+      assignments: (t.assignments || []).map(a => ({ ...a, uid: nextUid() })),
+    }));
+  }
+
   async function loadPlan(date) {
     const data = await api(`plan?date=${date}`);
     if (data.plan) {
       plan.value = data.plan;
-      trucks.value = (data.plan.trucks || []).map(t => ({ ...t, assignments: t.assignments || [] }));
+      trucks.value = adoptTrucks(data.plan.trucks);
       allowMixedModes.value = !!data.plan.allow_mixed_modes;
     } else {
       plan.value = null;
       trucks.value = [];
     }
+    markClean();
   }
 
   async function loadDate(date) {
@@ -259,8 +358,11 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
         body: JSON.stringify({
           delivery_date: deliveryDate.value,
           allow_mixed_modes: allowMixedModes.value,
+          // Слепок версии плана: сервер откажет, если его успели изменить
+          updated_at: plan.value?.updated_at || null,
           trucks: trucks.value.map((t, i) => ({
             vehicle_id: t.vehicle_id || null,
+            direction_id: t.direction_id || null,
             custom_name: t.custom_name || null,
             capacity_pallets: t.capacity_pallets,
             capacity_kg: t.capacity_kg,
@@ -272,6 +374,7 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
               category: a.category || null,
               order_item_id: a.order_item_id || null,
               restaurant_number: a.restaurant_number,
+              legal_entity_group: a.legal_entity_group || null,
               pallets: a.pallets,
               weight_kg: a.weight_kg,
               sort_order: j,
@@ -280,8 +383,10 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
         }),
       });
       if (data.plan_id) {
-        plan.value = { ...plan.value, id: data.plan_id };
+        plan.value = { ...(plan.value || {}), id: data.plan_id, status: plan.value?.status || 'draft' };
       }
+      if (data.updated_at) plan.value.updated_at = data.updated_at;
+      markClean();
       return data;
     } finally {
       saving.value = false;
@@ -317,15 +422,21 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
       }),
     });
     if (data.trucks) {
-      trucks.value = data.trucks.map(t => ({ ...t, assignments: t.assignments || [] }));
+      trucks.value = adoptTrucks(data.trucks);
+      markDirty();
     }
     return data;
   }
 
   // --- Локальные мутации ---
 
-  function addTruck(vehicle) {
+  function addTruck(vehicle, directionId = null) {
     trucks.value.push({
+      uid: nextUid(),
+      direction_id: directionId,
+      // Подпись направления рисует карточка машины: без неё новый рейс
+      // выглядел бы «без направления» до перезагрузки страницы
+      direction_name: directionName(directionId),
       vehicle_id: vehicle?.id || null,
       custom_name: vehicle?.id ? null : (vehicle?.name || 'Пользовательская'),
       capacity_pallets: vehicle?.capacity_pallets || 33,
@@ -334,21 +445,54 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
       sort_order: trucks.value.length,
       assignments: [],
     });
+    markDirty();
   }
 
-  function removeTruck(index) {
-    trucks.value.splice(index, 1);
+  function removeTruck(truckUid) {
+    const idx = trucks.value.findIndex(t => t.uid === truckUid);
+    if (idx >= 0) trucks.value.splice(idx, 1);
+    markDirty();
   }
 
-  function assignToTruck(truckIndex, item) {
-    const truck = trucks.value[truckIndex];
+  function assignToTruck(truckUid, item) {
+    const truck = trucks.value.find(t => t.uid === truckUid);
     if (!truck) return;
+    // Часть заказа уже уехала — кладём только оставшиеся режимы, каждый своей
+    // строкой, иначе уехавшее задвоится
+    if (item.assign_type === 'order' && item.partial && (item.parts || []).length) {
+      for (const p of item.parts) {
+        pushAssignment(truck, {
+          ...item,
+          assign_type: 'category',
+          category: p.category,
+          pallets: p.pallets,
+          weight_kg: p.weight,
+        });
+      }
+      markDirty();
+      return;
+    }
+    pushAssignment(truck, item);
+    markDirty();
+  }
+
+  function pushAssignment(truck, item) {
     truck.assignments.push({
+      uid: nextUid(),
+      direction_id: item.direction_id ?? null,
+      // Пользователь может положить в рейс ресторан другого направления —
+      // это разрешено, но должно быть видно. Ресторан без направления в рейсе
+      // с направлением тоже «не по пути»: машина едет не туда
+      foreign_direction: !!(truck.direction_id && String(truck.direction_id) !== String(item.direction_id ?? '')),
       assign_type: item.assign_type,
       order_id: item.order_id || null,
       category: item.category || null,
       order_item_id: item.order_item_id || null,
       restaurant_number: item.restaurant_number,
+      legal_entity: item.legal_entity || null,
+      legal_entity_group: item.legal_entity_group || null,
+      sku: item.sku || null,
+      product_name: item.product_name || null,
       pallets: parseFloat(item.pallets) || 0,
       weight_kg: parseFloat(item.weight_kg) || 0,
       sort_order: truck.assignments.length,
@@ -358,20 +502,29 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     }
   }
 
-  function unassign(truckIndex, assignIndex) {
-    const truck = trucks.value[truckIndex];
+  function unassign(truckUid, assignmentUid) {
+    const truck = trucks.value.find(t => t.uid === truckUid);
     if (!truck) return;
-    truck.assignments.splice(assignIndex, 1);
+    const idx = truck.assignments.findIndex(a => a.uid === assignmentUid);
+    if (idx < 0) return;
+    truck.assignments.splice(idx, 1);
     if (truck.assignments.length === 0) truck.mode = 'any';
+    markDirty();
   }
 
-  function moveAssignment(fromTruckIdx, toTruckIdx, assignIdx) {
-    const from = trucks.value[fromTruckIdx];
-    const to = trucks.value[toTruckIdx];
-    if (!from || !to) return;
-    const [item] = from.assignments.splice(assignIdx, 1);
+  function moveAssignment(fromUid, toUid, assignmentUid) {
+    const from = trucks.value.find(t => t.uid === fromUid);
+    const to = trucks.value.find(t => t.uid === toUid);
+    if (!from || !to || from === to) return;
+    const idx = from.assignments.findIndex(a => a.uid === assignmentUid);
+    if (idx < 0) return;
+    const [item] = from.assignments.splice(idx, 1);
     to.assignments.push(item);
     if (from.assignments.length === 0) from.mode = 'any';
+    if (!allowMixedModes.value && to.mode === 'any' && item.category) {
+      to.mode = categoryToMode(item.category) || 'any';
+    }
+    markDirty();
   }
 
   function resetAllAssignments() {
@@ -379,6 +532,29 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
       truck.assignments = [];
       truck.mode = 'any';
     }
+    markDirty();
+  }
+
+  // Куда можно положить эту позицию: список машин с остатком места.
+  // Нужен для назначения кликом — раньше работало только перетаскивание.
+  function assignTargets(item) {
+    return trucks.value.map((t, i) => {
+      const check = canAssign(t.uid, item);
+      const st = statsByTruck.value[t.uid] || truckStats(t);
+      return {
+        uid: t.uid,
+        index: i,
+        name: t.custom_name || ('Машина ' + (i + 1)),
+        mode: t.mode,
+        directionName: t.direction_name || '',
+        // Рейс идёт в другую сторону — положить можно, но человек должен видеть
+        foreign: !!(t.direction_id && String(t.direction_id) !== String(item.direction_id ?? '')),
+        freePallets: st.freePallets,
+        freeWeight: st.freeWeight,
+        ok: check.ok,
+        reason: check.reason || '',
+      };
+    });
   }
 
   // --- Return ---
@@ -388,6 +564,7 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     deliveryDate,
     orders,
     vehicles,
+    directions,
     plan,
     trucks,
     allowMixedModes,
@@ -403,16 +580,25 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     availableEntities,
     filteredOrders,
 
+    dirty,
+    markClean,
+
     // Утилиты
     categoryToMode,
     modeToCategory,
     truckStats,
+    statsByTruck,
     canAssign,
+    assignTargets,
 
     // API
     loadVehicles,
     saveVehicle,
     deleteVehicle,
+    loadDirections,
+    saveDirection,
+    deleteDirection,
+    directionName,
     loadOrders,
     loadPlan,
     loadDate,

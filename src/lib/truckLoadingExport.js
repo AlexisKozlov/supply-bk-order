@@ -14,8 +14,8 @@ export async function exportTruckLoading(trucks, orders, deliveryDate, truckStat
   for (const o of orders) orderMap[o.order_id] = o;
 
   const MODE_LABELS = { dry: 'Сухой', cold: 'Холод', frozen: 'Мороз', any: 'Смешанный' };
-  const HEADER = ['№', 'Ресторан', 'Город', 'Адрес', 'Режим', 'Паллеты', 'Вес, кг'];
-  const COLS = [{ wch: 5 }, { wch: 10 }, { wch: 15 }, { wch: 35 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+  const HEADER = ['№', 'Ресторан', 'Город', 'Адрес', 'Режим', 'Паллеты', 'Вес, кг', 'Примечание'];
+  const COLS = [{ wch: 5 }, { wch: 10 }, { wch: 15 }, { wch: 35 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
 
   let totalPallets = 0;
   let totalWeight = 0;
@@ -32,8 +32,8 @@ export async function exportTruckLoading(trucks, orders, deliveryDate, truckStat
     const modeName = MODE_LABELS[truck.mode] || 'Смешанный';
 
     const rows = [];
-    // Заголовок машины
-    rows.push([`${name} (${modeName})`]);
+    // Заголовок машины: направление рейса водителю важнее всего остального
+    rows.push([truck.direction_name ? `${name} — ${truck.direction_name} (${modeName})` : `${name} (${modeName})`]);
     rows.push([`Паллеты: ${stats.pallets}/${truck.capacity_pallets} (${stats.percentPallets}%)  |  Вес: ${stats.weight}/${parseFloat(truck.capacity_kg).toFixed(0)} кг (${stats.percentWeight}%)`]);
     rows.push([]);
     rows.push(HEADER);
@@ -49,12 +49,13 @@ export async function exportTruckLoading(trucks, orders, deliveryDate, truckStat
         a.category || modeName,
         +(parseFloat(a.pallets) || 0).toFixed(1),
         +(parseFloat(a.weight_kg) || 0).toFixed(1),
+        a.foreign_direction ? 'не по пути' : '',
       ]);
     }
 
     // Итого по машине
     rows.push([]);
-    rows.push(['', '', '', 'Итого:', '', stats.pallets, stats.weight]);
+    rows.push(['', '', '', 'Итого:', '', stats.pallets, stats.weight, '']);
 
     totalPallets += stats.pallets;
     totalWeight += stats.weight;
@@ -95,7 +96,7 @@ export async function exportTruckLoading(trucks, orders, deliveryDate, truckStat
     const summaryRows = [
       [`Загрузка машин — ${dateStr}`],
       [],
-      ['Машина', 'Тип', 'Режим', 'Ресторанов', 'Паллеты', 'Загрузка %', 'Вес, кг', 'Загрузка %'],
+      ['Машина', 'Направление', 'Тип', 'Режим', 'Ресторанов', 'Паллеты', 'Загрузка %', 'Вес, кг', 'Загрузка %'],
     ];
     for (let t = 0; t < trucks.length; t++) {
       const truck = trucks[t];
@@ -105,6 +106,7 @@ export async function exportTruckLoading(trucks, orders, deliveryDate, truckStat
       const restNums = new Set(a.map(x => x.restaurant_number));
       summaryRows.push([
         `Машина ${t + 1}`,
+        truck.direction_name || '',
         truck.custom_name || '',
         MODE_LABELS[truck.mode] || 'Смешанный',
         restNums.size,
@@ -115,23 +117,23 @@ export async function exportTruckLoading(trucks, orders, deliveryDate, truckStat
       ]);
     }
     summaryRows.push([]);
-    summaryRows.push(['ИТОГО', '', '', '', totalPallets.toFixed(1), '', totalWeight.toFixed(1), '']);
+    summaryRows.push(['ИТОГО', '', '', '', '', totalPallets.toFixed(1), '', totalWeight.toFixed(1), '']);
 
     const ws = XLSX.utils.aoa_to_sheet(summaryRows);
     // Стили
     const cell0 = ws[XLSX.utils.encode_cell({ r: 0, c: 0 })];
     if (cell0) cell0.s = { font: { bold: true, sz: 14, color: { rgb: '502314' } } };
-    for (let c = 0; c < 8; c++) {
+    for (let c = 0; c < 9; c++) {
       const cell = ws[XLSX.utils.encode_cell({ r: 2, c })];
       if (cell) cell.s = EXCEL_HEADER_STYLE;
     }
     const totalIdx = summaryRows.length - 1;
-    for (let c = 0; c < 8; c++) {
+    for (let c = 0; c < 9; c++) {
       const cell = ws[XLSX.utils.encode_cell({ r: totalIdx, c })];
       if (cell) cell.s = EXCEL_TOTAL_STYLE;
     }
-    ws['!cols'] = [{ wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
-    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }];
+    ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }];
     XLSX.utils.book_append_sheet(wb, ws, 'Сводка');
   }
 

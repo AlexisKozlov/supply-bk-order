@@ -1,604 +1,474 @@
 <template>
   <div class="tl-page">
-    <!-- Toolbar -->
-    <div class="tl-toolbar">
-      <h1>Загрузка машин</h1>
-      <div class="tl-toolbar-actions">
-        <input type="date" v-model="selectedDate" @change="loadDate" class="tl-date-input" />
-        <button class="tl-btn" @click="setTomorrow">Завтра</button>
-        <button class="tl-btn" @click="setDayAfter">Послезавтра</button>
+    <!-- Вся шапка — одна строка. Раньше здесь было шесть полос подряд,
+         и на ноутбуке под работу оставалось меньше 200 точек -->
+    <div class="tl-bar">
+      <div class="tl-tabs">
+        <button class="tl-tab" :class="{ active: activeTab === 'constructor' }" @click="activeTab = 'constructor'">Конструктор</button>
+        <button class="tl-tab" :class="{ active: activeTab === 'directions' }" @click="goDirections">Направления</button>
+        <button class="tl-tab" :class="{ active: activeTab === 'vehicles' }" @click="goVehicles">Машины</button>
       </div>
-    </div>
 
-    <!-- Tabs -->
-    <div class="tl-page-tabs">
-      <button class="tl-page-tab" :class="{ active: activeTab === 'constructor' }" @click="activeTab = 'constructor'">
-        Конструктор
-      </button>
-      <button class="tl-page-tab" :class="{ active: activeTab === 'vehicles' }" @click="activeTab = 'vehicles'; store.loadVehicles()">
-        Справочник машин
-      </button>
-    </div>
-
-    <!-- ═══ TAB: Конструктор ═══ -->
-    <template v-if="activeTab === 'constructor'">
-      <!-- Loading -->
-      <div v-if="store.loading" class="tl-loading"><BurgerSpinner text="Загрузка..." /></div>
-
-      <!-- No orders -->
-      <div v-else-if="!store.orders.length" class="tl-empty">Нет заказов на эту дату.</div>
-
-      <template v-else>
-        <!-- Stats bar -->
-        <div class="tl-stats">
-          <div class="tl-stat">
-            <span class="tl-stat-value">{{ store.totalStats.orders }}</span>
-            <span class="tl-stat-label">заказов</span>
-          </div>
-          <div class="tl-stat">
-            <span class="tl-stat-value">{{ store.totalStats.pallets.toFixed(1) }}</span>
-            <span class="tl-stat-label">паллет</span>
-          </div>
-          <div class="tl-stat">
-            <span class="tl-stat-value">{{ store.totalStats.weight.toFixed(0) }}</span>
-            <span class="tl-stat-label">кг</span>
-          </div>
-          <div class="tl-stat" v-if="store.plan">
-            <span class="tl-stat-value" :class="store.plan.status === 'confirmed' ? 'tl-stat-confirmed' : 'tl-stat-draft'">
-              {{ store.plan.status === 'confirmed' ? 'Подтверждён' : 'Черновик' }}
-            </span>
-            <span class="tl-stat-label">статус</span>
-          </div>
+      <template v-if="activeTab === 'constructor'">
+        <div class="tl-date">
+          <button class="tl-date-arrow" title="Предыдущий день" @click="shiftDate(-1)">&#8249;</button>
+          <input type="date" v-model="selectedDate" class="tl-date-input" @change="onDateChange">
+          <button class="tl-date-arrow" title="Следующий день" @click="shiftDate(1)">&#8250;</button>
         </div>
 
-        <!-- Controls -->
-        <div class="tl-controls">
-          <div class="tl-controls-left">
-            <span class="tl-controls-label">Группировка:</span>
-            <button class="tl-btn-sm" :class="{ 'tl-btn-active': store.groupBy === 'restaurant' }" @click="store.groupBy = 'restaurant'">По ресторанам</button>
-            <button class="tl-btn-sm" :class="{ 'tl-btn-active': store.groupBy === 'category' }" @click="store.groupBy = 'category'">По режимам</button>
-            <button class="tl-btn-sm" :class="{ 'tl-btn-active': store.groupBy === 'item' }" @click="store.groupBy = 'item'">По позициям</button>
-          </div>
-          <div class="tl-controls-right">
-            <label class="tl-checkbox-label">
-              <input type="checkbox" v-model="store.allowMixedModes" />
-              Разрешить смешивание режимов
-            </label>
-            <div class="tl-add-truck-wrap">
-              <button class="tl-btn tl-btn-primary" @click="toggleAddTruck">Добавить машину</button>
-              <div v-if="showAddTruck" class="tl-dropdown">
-                <div v-for="v in store.vehicles" :key="v.id" class="tl-dropdown-item" @click="selectVehicleForTruck(v)">
-                  {{ v.name }} ({{ v.capacity_pallets }}п / {{ (+v.capacity_kg).toFixed(0) }}кг)
-                </div>
-                <div class="tl-dropdown-item tl-dropdown-custom" @click="addCustomTruck">Пользовательская</div>
-              </div>
-            </div>
-            <button class="tl-btn" @click="handleAutoAssign">Автоматически</button>
-            <button class="tl-btn tl-btn-outline" @click="handleReset">Сбросить</button>
-          </div>
+        <!-- Порядок важен: на ноутбуке полоса узкая. Сначала то, без чего не
+             обойтись, килограммы — последними: на узком экране они прячутся,
+             и целиком сводка остаётся в подсказке -->
+        <div v-if="store.orders.length" class="tl-summary" :title="summaryTitle">
+          <span><b>{{ store.totalStats.orders }}</b> {{ orderWord(store.totalStats.orders) }}</span>
+          <span v-if="unassignedCount" class="tl-summary-left">осталось {{ unassignedCount }}</span>
+          <span v-else-if="store.trucks.length" class="tl-summary-ok">всё разложено</span>
+          <span><b>{{ store.totalStats.pallets.toFixed(1) }}</b> п</span>
+          <span class="tl-summary-kg"><b>{{ Math.round(store.totalStats.weight) }}</b> кг</span>
         </div>
 
-        <!-- Two columns -->
-        <div class="tl-columns">
-          <!-- Left: Unassigned -->
-          <div class="tl-left"
-            @dragover.prevent
-            @drop="onDropUnassigned($event)">
-            <div class="tl-section-header">
-              Нераспределённые <span class="tl-section-count">{{ filteredItems.length }}</span>
-            </div>
+        <!-- Один значок вместо двух: несохранённая работа важнее статуса плана -->
+        <span v-if="store.dirty" class="tl-status is-unsaved">Не сохранено</span>
+        <span v-else-if="store.plan" class="tl-status" :class="store.plan.status === 'confirmed' ? 'is-confirmed' : 'is-draft'">
+          {{ store.plan.status === 'confirmed' ? 'Подтверждён' : 'Черновик' }}
+        </span>
 
-            <!-- Фильтры -->
-            <div class="tl-filters" v-if="store.orders.length">
-              <div class="tl-filter-row">
-                <input type="text" v-model="filterRestaurant" placeholder="Ресторан № (1, PS01…)" class="tl-filter-input" />
-                <div class="tl-filter-cats">
-                  <button class="tl-filter-cat" :class="{ active: !filterCategory }" @click="filterCategory = ''">Все</button>
-                  <button class="tl-filter-cat cat-dry" :class="{ active: filterCategory === 'Сухой' }" @click="filterCategory = filterCategory === 'Сухой' ? '' : 'Сухой'">Сухой</button>
-                  <button class="tl-filter-cat cat-cold" :class="{ active: filterCategory === 'Холод' }" @click="filterCategory = filterCategory === 'Холод' ? '' : 'Холод'">Холод</button>
-                  <button class="tl-filter-cat cat-frozen" :class="{ active: filterCategory === 'Мороз' }" @click="filterCategory = filterCategory === 'Мороз' ? '' : 'Мороз'">Мороз</button>
-                </div>
-                <button class="tl-filter-more" :class="{ active: showAdvancedFilters }" @click="showAdvancedFilters = !showAdvancedFilters" title="Больше фильтров">
-                  Фильтры
-                  <span v-if="activeFiltersCount" class="tl-filter-more-count">{{ activeFiltersCount }}</span>
-                  <span class="tl-filter-more-chev">{{ showAdvancedFilters ? '▴' : '▾' }}</span>
-                </button>
-              </div>
-              <div v-if="store.availableEntities.length > 1" class="tl-filter-row tl-filter-entities">
-                <span class="tl-filter-label">Юрлицо:</span>
-                <button class="tl-filter-entity" :class="{ active: !store.entityFilter.length }" @click="clearEntityFilter">Все</button>
-                <button
-                  v-for="e in store.availableEntities" :key="e.legal_entity"
-                  class="tl-filter-entity"
-                  :class="[{ active: store.entityFilter.includes(e.legal_entity) }, 'tl-entity-' + e.legal_entity_group.toLowerCase()]"
-                  @click="toggleEntityFilter(e.legal_entity)"
-                >
-                  {{ entityShortName(e.legal_entity) }}
-                  <span class="tl-filter-entity-count">{{ e.orders_count }}</span>
-                </button>
-              </div>
-              <div v-if="showAdvancedFilters" class="tl-filter-advanced">
-                <div class="tl-filter-field">
-                  <label>Город</label>
-                  <select v-model="filterCity" class="tl-filter-select">
-                    <option value="">Все</option>
-                    <option v-for="c in availableCities" :key="c" :value="c">{{ c }}</option>
-                  </select>
-                </div>
-                <div class="tl-filter-field">
-                  <label>Регион</label>
-                  <select v-model="filterRegion" class="tl-filter-select">
-                    <option value="">Все</option>
-                    <option v-for="r in availableRegions" :key="r" :value="r">{{ r }}</option>
-                  </select>
-                </div>
-                <div class="tl-filter-field tl-filter-field-range">
-                  <label>Паллеты</label>
-                  <div class="tl-filter-range">
-                    <input type="number" v-model="filterMinPallets" placeholder="от" min="0" step="0.5" class="tl-filter-num" />
-                    <span>–</span>
-                    <input type="number" v-model="filterMaxPallets" placeholder="до" min="0" step="0.5" class="tl-filter-num" />
-                  </div>
-                </div>
-                <div class="tl-filter-field">
-                  <label>Сортировка</label>
-                  <select v-model="sortBy" class="tl-filter-select">
-                    <option value="restaurant">По номеру ресторана</option>
-                    <option value="pallets-desc">Больше паллет сначала</option>
-                    <option value="pallets-asc">Меньше паллет сначала</option>
-                    <option value="weight-desc">Тяжелее сначала</option>
-                    <option value="city">По городу</option>
-                  </select>
-                </div>
-                <button class="tl-filter-reset" @click="resetFilters" :disabled="!activeFiltersCount && sortBy === 'restaurant'">Сбросить</button>
-              </div>
-            </div>
-
-            <div v-if="!filteredItems.length" class="tl-empty-section">
-              {{ store.unassignedItems.length ? 'Ничего не найдено' : 'Все заказы распределены' }}
-            </div>
-
-            <!-- Визуальное разделение по юрлицам: шапка → карточки -->
-            <template v-for="grp in groupedFilteredItems" :key="grp.legal_entity">
-              <div class="tl-entity-header" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()">
-                <span class="tl-entity-badge">{{ entityShortName(grp.legal_entity) }}</span>
-                <span class="tl-entity-name">{{ grp.legal_entity }}</span>
-                <span class="tl-entity-count">{{ grp.items.length }}</span>
-              </div>
-
-              <!-- groupBy = restaurant -->
-              <template v-if="store.groupBy === 'restaurant'">
-                <div v-for="item in grp.items" :key="item.key"
-                  class="tl-card" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()"
-                  draggable="true" @dragstart="onDragStart($event, item)">
-                  <div class="tl-card-header">
-                    <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
-                    <span class="tl-card-city">{{ item.city }}</span>
-                  </div>
-                  <div class="tl-card-stats">
-                    <span v-for="(data, cat) in item.categories" :key="cat"
-                      class="tl-cat-badge" :class="'cat-' + catClass(cat)">
-                      {{ cat }}: {{ data.pallets }}п / {{ (+data.weight).toFixed(0) }}кг
-                    </span>
-                  </div>
-                  <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
-                </div>
-              </template>
-
-              <!-- groupBy = category -->
-              <template v-else-if="store.groupBy === 'category'">
-                <div v-for="item in grp.items" :key="item.key"
-                  class="tl-card" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()"
-                  draggable="true" @dragstart="onDragStart($event, item)">
-                  <div class="tl-card-header">
-                    <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
-                    <span class="tl-cat-badge" :class="'cat-' + catClass(item.category)">{{ item.category }}</span>
-                  </div>
-                  <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
-                </div>
-              </template>
-
-              <!-- groupBy = item -->
-              <template v-else>
-                <div v-for="item in grp.items" :key="item.key"
-                  class="tl-card" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()"
-                  draggable="true" @dragstart="onDragStart($event, item)">
-                  <div class="tl-card-header">
-                    <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
-                    <span class="tl-card-sku">{{ item.sku }} {{ item.product_name }}</span>
-                  </div>
-                  <div class="tl-card-total">{{ item.quantity }} шт. | {{ fmtPallets(item.pallets) }} палл.</div>
-                </div>
-              </template>
-            </template>
-          </div>
-
-          <!-- Right: Trucks -->
-          <div class="tl-right">
-            <div class="tl-section-header">
-              Машины <span class="tl-section-count">{{ store.trucks.length }}</span>
-            </div>
-
-            <div v-if="!store.trucks.length" class="tl-empty-section">
-              Добавьте машину для начала работы
-            </div>
-
-            <div v-for="(truck, tIdx) in store.trucks" :key="tIdx"
-              class="tl-truck"
-              @dragover.prevent="onDragOver($event, tIdx)"
-              @dragleave="onDragLeave($event, tIdx)"
-              @drop="onDrop($event, tIdx)"
-              :class="{ 'tl-truck-dragover': dragOverTruck === tIdx }">
-
-              <!-- Header -->
-              <div class="tl-truck-header">
-                <span class="tl-truck-name">Машина {{ tIdx + 1 }}{{ truck.custom_name ? ' — ' + truck.custom_name : '' }}</span>
-                <span class="tl-truck-mode" :class="'mode-' + truck.mode">{{ modeLabel(truck.mode) }}</span>
-                <button class="tl-btn-remove" @click="store.removeTruck(tIdx)">&#10005;</button>
-              </div>
-
-              <!-- Progress bars -->
-              <div class="tl-truck-bars">
-                <div class="tl-bar-row">
-                  <span class="tl-bar-label">Паллеты</span>
-                  <div class="tl-bar">
-                    <div class="tl-bar-fill"
-                      :style="{ width: Math.min(store.truckStats(truck).percentPallets, 100) + '%' }"
-                      :class="barColor(store.truckStats(truck).percentPallets)"></div>
-                  </div>
-                  <span class="tl-bar-value">{{ store.truckStats(truck).pallets }}/{{ truck.capacity_pallets }}</span>
-                </div>
-                <div class="tl-bar-row">
-                  <span class="tl-bar-label">Вес</span>
-                  <div class="tl-bar">
-                    <div class="tl-bar-fill"
-                      :style="{ width: Math.min(store.truckStats(truck).percentWeight, 100) + '%' }"
-                      :class="barColor(store.truckStats(truck).percentWeight)"></div>
-                  </div>
-                  <span class="tl-bar-value">{{ store.truckStats(truck).weight }}/{{ (+truck.capacity_kg).toFixed(0) }} кг</span>
-                </div>
-              </div>
-
-              <!-- Assigned cards -->
-              <div class="tl-truck-items">
-                <div v-for="(a, aIdx) in truck.assignments" :key="aIdx"
-                  class="tl-assigned-card"
-                  draggable="true" @dragstart="onDragStartFromTruck($event, tIdx, aIdx, a)">
-                  <span class="tl-assigned-rest">{{ formatRestaurantNumber(a.restaurant_number, a.legal_entity_group) }}</span>
-                  <span class="tl-assigned-cat" v-if="a.category" :class="'cat-' + catClass(a.category)">{{ a.category }}</span>
-                  <span class="tl-assigned-stats">{{ fmtPallets(a.pallets) }}п | {{ (+a.weight_kg).toFixed(0) }}кг</span>
-                  <button class="tl-btn-unassign" @click="store.unassign(tIdx, aIdx)">&#10005;</button>
-                </div>
-                <div v-if="!truck.assignments.length" class="tl-truck-empty">
-                  Перетащите заказы сюда
-                </div>
-              </div>
+        <div class="tl-bar-actions">
+          <div v-if="!compact" class="tl-add-wrap">
+            <button class="tl-btn tl-btn-primary" @click.stop="showAddTruck = !showAddTruck">+ Машина</button>
+            <div v-if="showAddTruck" class="tl-menu" @click.stop>
+              <div v-if="store.directions.length" class="tl-menu-group">Направление рейса</div>
+              <select v-if="store.directions.length" v-model="newTruckDirection" class="tl-menu-select">
+                <option :value="null">Без направления</option>
+                <option v-for="d in store.directions" :key="d.id" :value="d.id">{{ d.name }}</option>
+              </select>
+              <div class="tl-menu-group">Тип машины</div>
+              <button v-for="v in store.vehicles" :key="v.id" class="tl-menu-item" @click="pickVehicle(v)">
+                {{ v.name }}<span class="tl-menu-cap">{{ v.capacity_pallets }} п · {{ Math.round(+v.capacity_kg) }} кг</span>
+              </button>
+              <button class="tl-menu-item tl-menu-item-alt" @click="pickVehicle(null)">Своя машина</button>
+              <div v-if="!store.vehicles.length" class="tl-menu-empty">Типов машин нет — заведите их на вкладке «Машины»</div>
             </div>
           </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="tl-footer">
-          <div class="tl-footer-status" v-if="store.plan">
-            Статус: <strong>{{ store.plan.status === 'confirmed' ? 'Подтверждён' : 'Черновик' }}</strong>
-          </div>
-          <div style="flex:1"></div>
-          <button @click="handleReset" class="tl-btn tl-btn-outline">Сбросить</button>
-          <button @click="handleExport" class="tl-btn tl-btn-export" :disabled="!store.trucks.length">Excel</button>
-          <button @click="handleSave" class="tl-btn tl-btn-primary" :disabled="store.saving">
+          <button v-if="!compact" class="tl-btn" :disabled="!store.orders.length" @click="handleAutoAssign">Авто</button>
+          <button v-if="!compact" class="tl-btn tl-btn-save" :disabled="store.saving || !store.trucks.length" @click="handleSave">
             <BurgerSpinner v-if="store.saving" size="xs" />
             <span>{{ store.saving ? 'Сохранение...' : 'Сохранить' }}</span>
           </button>
-          <button v-if="store.plan?.status === 'draft'" @click="handleConfirm" class="tl-btn tl-btn-confirm">Подтвердить</button>
-          <button v-if="store.plan?.status === 'confirmed'" @click="handleUnconfirm" class="tl-btn tl-btn-outline">В черновик</button>
+          <div class="tl-more-wrap">
+            <button class="tl-btn tl-btn-more" title="Ещё" aria-label="Ещё действия" @click.stop="showMore = !showMore">&#8943;</button>
+            <div v-if="showMore" class="tl-menu tl-menu-right" @click.stop>
+              <div class="tl-menu-group">Показывать заказы</div>
+              <button v-for="g in groupOptions" :key="g.value" class="tl-menu-item" :class="{ 'is-on': store.groupBy === g.value }" @click="setGroupBy(g.value)">
+                {{ g.label }}
+              </button>
+              <div class="tl-menu-sep"></div>
+              <button class="tl-menu-item" @click="toggleMixed">
+                <span class="tl-menu-check">{{ store.allowMixedModes ? '☐' : '☑' }}</span> Мороз, холод и сухое — разными машинами
+              </button>
+              <div class="tl-menu-sep"></div>
+              <button class="tl-menu-item" :disabled="!store.trucks.length" @click="runMore(handleExport)">Выгрузить в Excel</button>
+              <button v-if="store.plan?.status === 'draft'" class="tl-menu-item" @click="runMore(handleConfirm)">Подтвердить план</button>
+              <button v-if="store.plan?.status === 'confirmed'" class="tl-menu-item" @click="runMore(handleUnconfirm)">Вернуть в черновик</button>
+              <button class="tl-menu-item tl-menu-danger" :disabled="!store.trucks.length" @click="runMore(handleReset)">Убрать все назначения</button>
+            </div>
+          </div>
         </div>
       </template>
-    </template>
+    </div>
 
-    <!-- ═══ TAB: Справочник машин ═══ -->
-    <template v-if="activeTab === 'vehicles'">
-      <div class="tl-vehicles-section">
-        <table class="tl-table">
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>Паллеты</th>
-              <th>Грузоподъёмность, кг</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="v in store.vehicles" :key="v.id">
-              <td><input v-model="v.name" class="tl-inline-input" /></td>
-              <td><input v-model.number="v.capacity_pallets" type="number" class="tl-inline-input tl-inline-num" /></td>
-              <td><input v-model.number="v.capacity_kg" type="number" class="tl-inline-input tl-inline-num" /></td>
-              <td class="tl-table-actions">
-                <button class="tl-btn-sm tl-btn-primary" @click="handleSaveVehicle(v)">Сохранить</button>
-                <button class="tl-btn-sm tl-btn-danger" @click="handleDeleteVehicle(v.id)">Удалить</button>
-              </td>
-            </tr>
-            <tr v-if="showNewVehicle">
-              <td><input v-model="newVehicle.name" class="tl-inline-input" placeholder="Название" /></td>
-              <td><input v-model.number="newVehicle.capacity_pallets" type="number" class="tl-inline-input tl-inline-num" /></td>
-              <td><input v-model.number="newVehicle.capacity_kg" type="number" class="tl-inline-input tl-inline-num" /></td>
-              <td class="tl-table-actions">
-                <button class="tl-btn-sm tl-btn-primary" @click="handleCreateVehicle">Добавить</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <button v-if="!showNewVehicle" class="tl-btn" @click="showNewVehicle = true; newVehicle = { name: '', capacity_pallets: 33, capacity_kg: 20000 }">+ Добавить тип машины</button>
+    <!-- ═══ Конструктор ═══ -->
+    <template v-if="activeTab === 'constructor'">
+      <div v-if="store.loading" class="tl-state"><BurgerSpinner text="Загрузка..." /></div>
+
+      <div v-else-if="loadError" class="tl-state tl-state-error">
+        <div>Не удалось загрузить данные: {{ loadError }}</div>
+        <button class="tl-btn" @click="loadDate">Повторить</button>
+      </div>
+
+      <div v-else-if="!store.orders.length" class="tl-state">
+        На {{ prettyDate }} заказов ресторанов нет.
+      </div>
+
+      <div v-else class="tl-columns" :class="{ 'is-compact': compact }">
+        <!-- Слева: что ещё не разложено -->
+        <section class="tl-col">
+          <header class="tl-col-head">
+            <h2>Нераспределённые <span class="tl-col-count">{{ filteredItems.length }}</span></h2>
+          </header>
+
+          <div class="tl-filters">
+            <input v-model="filterRestaurant" type="search" class="tl-input" placeholder="Ресторан №">
+            <div class="tl-chips">
+              <button class="tl-chip" :class="{ active: !filterCategory }" @click="filterCategory = ''">Все</button>
+              <button v-for="c in CATEGORIES" :key="c" class="tl-chip" :class="['cat-' + catClass(c), { active: filterCategory === c }]" @click="filterCategory = filterCategory === c ? '' : c">{{ c }}</button>
+            </div>
+            <button class="tl-chip tl-chip-more" :class="{ active: showFilters }" @click="showFilters = !showFilters">
+              Ещё<span v-if="activeFiltersCount" class="tl-chip-num">{{ activeFiltersCount }}</span>
+            </button>
+          </div>
+
+          <div v-if="showFilters" class="tl-filters-more">
+            <label class="tl-field">
+              <span>Город</span>
+              <select v-model="filterCity" class="tl-input"><option value="">Все</option><option v-for="c in availableCities" :key="c">{{ c }}</option></select>
+            </label>
+            <label class="tl-field">
+              <span>Сортировка</span>
+              <select v-model="sortBy" class="tl-input">
+                <option value="restaurant">По номеру</option>
+                <option value="pallets-desc">Больше паллет</option>
+                <option value="pallets-asc">Меньше паллет</option>
+                <option value="weight-desc">Тяжелее</option>
+                <option value="city">По городу</option>
+              </select>
+            </label>
+            <label v-if="store.directions.length" class="tl-field">
+              <span>Направление</span>
+              <select v-model="filterDirection" class="tl-input">
+                <option value="">Все</option>
+                <option v-for="d in store.directions" :key="d.id" :value="String(d.id)">{{ d.name }}</option>
+                <option value="none">Без направления</option>
+              </select>
+            </label>
+            <label v-if="store.availableEntities.length > 1" class="tl-field">
+              <span>Юрлицо</span>
+              <select v-model="entityOne" class="tl-input">
+                <option value="">Все</option>
+                <option v-for="e in store.availableEntities" :key="e.legal_entity" :value="e.legal_entity">{{ entityShortName(e.legal_entity) }} ({{ e.orders_count }})</option>
+              </select>
+            </label>
+            <button class="tl-btn tl-btn-sm" :disabled="!activeFiltersCount && sortBy === 'restaurant'" @click="resetFilters">Сбросить</button>
+          </div>
+
+          <div class="tl-scroll" @dragover.prevent @drop.prevent="onDropUnassigned">
+            <div v-if="!filteredItems.length" class="tl-col-empty">
+              {{ store.unassignedItems.length ? 'Ничего не найдено' : 'Все заказы разложены по машинам' }}
+            </div>
+            <TlOrderCard
+              v-for="item in filteredItems"
+              :key="item.key"
+              :item="item"
+              :mode="store.groupBy"
+              :targets="menuKey === item.key ? store.assignTargets(item) : []"
+              :menu-open="menuKey === item.key"
+              :can-assign="!compact"
+              @toggle-menu="toggleMenu"
+              @assign="onAssign"
+              @dragstart="onDragStartItem"
+            />
+          </div>
+        </section>
+
+        <!-- Справа: машины -->
+        <section class="tl-col">
+          <header class="tl-col-head">
+            <h2>Машины <span class="tl-col-count">{{ store.trucks.length }}</span></h2>
+            <button v-if="compact && store.trucks.length" class="tl-hint-compact">только просмотр</button>
+          </header>
+
+          <div class="tl-scroll">
+            <div v-if="!store.trucks.length" class="tl-col-empty">
+              <template v-if="compact">Машины на этот день ещё не набраны</template>
+              <template v-else>
+                Добавьте машину кнопкой «+ Машина» или нажмите «Авто» — портал разложит заказы сам
+              </template>
+            </div>
+            <TlTruckCard
+              v-for="(truck, i) in store.trucks"
+              :key="truck.uid"
+              :truck="truck"
+              :index="i"
+              :stats="store.statsByTruck[truck.uid] || store.truckStats(truck)"
+              :drag-over="dragOverTruck === truck.uid"
+              :readonly="compact"
+              @remove="handleRemoveTruck(truck)"
+              @unassign="uid => store.unassign(truck.uid, uid)"
+              @dragover="dragOverTruck = truck.uid"
+              @dragleave="onTruckDragLeave"
+              @drop="onDropTruck(truck.uid)"
+              @item-dragstart="p => onDragStartAssignment(p, truck.uid)"
+            />
+          </div>
+        </section>
       </div>
     </template>
+
+    <!-- ═══ Направления ═══ -->
+    <div v-else-if="activeTab === 'directions'" class="tl-vehicles-wrap">
+      <TlDirectionsTab
+        :directions="store.directions"
+        :cities="directionCities"
+        :restaurants="directionRestaurants"
+        :loading="directionsLoading"
+        @save="handleSaveDirection"
+        @delete="handleDeleteDirection"
+      />
+    </div>
+
+    <!-- ═══ Машины ═══ -->
+    <div v-else class="tl-vehicles-wrap">
+      <TlVehiclesTab
+        :vehicles="store.vehicles"
+        :loading="vehiclesLoading"
+        @save="handleSaveVehicle"
+        @create="handleCreateVehicle"
+        @delete="handleDeleteVehicle"
+      />
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue';
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
 import { useTabRoute } from '@/composables/useTabRoute.js';
 import { useTruckLoadingStore } from '@/stores/truckLoadingStore.js';
 import { appConfirm } from '@/lib/appDialogs.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { exportTruckLoading } from '@/lib/truckLoadingExport.js';
-import { formatRestaurantNumber, parseRestaurantInput, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import { parseRestaurantInput, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import TlOrderCard from '@/components/truck-loading/TlOrderCard.vue';
+import TlTruckCard from '@/components/truck-loading/TlTruckCard.vue';
+import TlVehiclesTab from '@/components/truck-loading/TlVehiclesTab.vue';
+import TlDirectionsTab from '@/components/truck-loading/TlDirectionsTab.vue';
 
 const store = useTruckLoadingStore();
 const toast = useToastStore();
+const route = useRoute();
+const router = useRouter();
+
+const CATEGORIES = ['Сухой', 'Холод', 'Мороз'];
+const groupOptions = [
+  { value: 'restaurant', label: 'Целиком по ресторанам' },
+  { value: 'category', label: 'Отдельно по режимам' },
+  { value: 'item', label: 'По позициям' },
+];
 
 const selectedDate = ref('');
-const activeTab = useTabRoute('constructor', ['constructor', 'vehicles']);
+const activeTab = useTabRoute('constructor', ['constructor', 'directions', 'vehicles']);
+const loadError = ref('');
+const vehiclesLoading = ref(false);
 
-// Drag & drop state
-const dragOverTruck = ref(null);
-const dragData = ref(null);
-
-// Vehicle management
-const showNewVehicle = ref(false);
-const newVehicle = ref({ name: '', capacity_pallets: 33, capacity_kg: 20000 });
-
-// Add truck dropdown
 const showAddTruck = ref(false);
+const newTruckDirection = ref(null);
+const directionsLoading = ref(false);
+// Города и рестораны для формы направления приходят вместе со справочником
+const directionCities = ref([]);
+const directionRestaurants = ref([]);
+const showMore = ref(false);
+const showFilters = ref(false);
+const menuKey = ref(null);
 
-// Filters
-const filterCategory = ref('');       // '' = все, 'Сухой', 'Холод', 'Мороз'
-const filterRestaurant = ref('');     // поиск по номеру ресторана
-const filterCity = ref('');           // точный город
-const filterRegion = ref('');         // точный регион
-const filterMinPallets = ref('');     // минимум паллет
-const filterMaxPallets = ref('');     // максимум паллет
-const sortBy = ref('restaurant');     // restaurant | pallets-desc | pallets-asc | weight-desc | city
-const showAdvancedFilters = ref(false);
+// Узкий экран: раскладывать заказы мышью там нельзя, поэтому показываем
+// готовый план только на просмотр
+const compact = ref(false);
+let mq = null;
+function applyMq(e) { compact.value = e.matches; }
 
-function resetFilters() {
-  filterCategory.value = '';
-  filterRestaurant.value = '';
-  filterCity.value = '';
-  filterRegion.value = '';
-  filterMinPallets.value = '';
-  filterMaxPallets.value = '';
-  sortBy.value = 'restaurant';
-  clearEntityFilter();
-}
-
-// Уникальные города и регионы из текущих заказов — для селектов
-const availableCities = computed(() => {
-  const set = new Set();
-  for (const o of store.filteredOrders) if (o.city) set.add(o.city);
-  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+// --- Фильтры ---
+const filterCategory = ref('');
+const filterRestaurant = ref('');
+const filterCity = ref('');
+const filterDirection = ref('');
+const sortBy = ref('restaurant');
+// Один выбранный список юрлиц вместо набора кнопок — в сторе он остался массивом
+const entityOne = computed({
+  get: () => store.entityFilter[0] || '',
+  set: (v) => { store.entityFilter.splice(0); if (v) store.entityFilter.push(v); },
 });
-const availableRegions = computed(() => {
-  const set = new Set();
-  for (const o of store.filteredOrders) if (o.region) set.add(o.region);
-  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
-});
+
 const activeFiltersCount = computed(() => {
   let n = 0;
   if (filterCategory.value) n++;
   if (filterRestaurant.value.trim()) n++;
   if (filterCity.value) n++;
-  if (filterRegion.value) n++;
-  if (filterMinPallets.value) n++;
-  if (filterMaxPallets.value) n++;
+  if (filterDirection.value) n++;
   if (store.entityFilter.length) n++;
   return n;
 });
 
-// Фильтр по юрлицам хранится в сторе, чтобы он пережил переход со вкладки
-// и влиял на статистику сверху.
-function toggleEntityFilter(entity) {
-  const idx = store.entityFilter.indexOf(entity);
-  if (idx >= 0) store.entityFilter.splice(idx, 1);
-  else store.entityFilter.push(entity);
+function resetFilters() {
+  filterCategory.value = '';
+  filterRestaurant.value = '';
+  filterCity.value = '';
+  filterDirection.value = '';
+  sortBy.value = 'restaurant';
+  store.entityFilter.splice(0);
 }
-function clearEntityFilter() { store.entityFilter.splice(0); }
 
-function entityShortName(entity) {
-  return ENTITY_SHORT_NAMES[entity] || entity;
-}
+const availableCities = computed(() => {
+  const set = new Set();
+  for (const o of store.filteredOrders) if (o.city) set.add(o.city);
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+});
 
 const filteredItems = computed(() => {
   let items = store.unassignedItems;
   const cat = filterCategory.value;
   const rest = filterRestaurant.value.trim();
   const city = filterCity.value;
-  const region = filterRegion.value;
-  const minP = parseFloat(filterMinPallets.value);
-  const maxP = parseFloat(filterMaxPallets.value);
 
   if (cat) {
-    items = items.filter(item => {
-      // Для группировки «по ресторанам» — проверяем наличие категории в заказе
-      if (item.categories) return item.categories[cat];
-      // Для группировки «по режимам» / «по позициям» — прямое совпадение
-      return item.category === cat;
-    });
+    items = items.filter(item => (item.categories ? item.categories[cat] : item.category === cat));
   }
-
   if (rest) {
-    // Поддерживаем и сырой номер (1, 1001), и PS-формат (PS01)
     const parsed = parseRestaurantInput(rest);
-    if (parsed) {
-      items = items.filter(item => String(item.restaurant_number) === String(parsed.number));
-    } else {
-      items = items.filter(item => String(item.restaurant_number).includes(rest));
-    }
+    items = parsed
+      ? items.filter(item => String(item.restaurant_number) === String(parsed.number))
+      : items.filter(item => String(item.restaurant_number).includes(rest));
   }
-
   if (city) items = items.filter(item => item.city === city);
-  if (region) items = items.filter(item => item.region === region);
-  if (!Number.isNaN(minP)) items = items.filter(item => (parseFloat(item.pallets) || 0) >= minP);
-  if (!Number.isNaN(maxP)) items = items.filter(item => (parseFloat(item.pallets) || 0) <= maxP);
+  if (filterDirection.value === 'none') items = items.filter(item => !item.direction_id);
+  else if (filterDirection.value) items = items.filter(item => String(item.direction_id) === filterDirection.value);
 
-  // Сортировка
   const arr = [...items];
-  if (sortBy.value === 'pallets-desc') {
-    arr.sort((a, b) => (parseFloat(b.pallets) || 0) - (parseFloat(a.pallets) || 0));
-  } else if (sortBy.value === 'pallets-asc') {
-    arr.sort((a, b) => (parseFloat(a.pallets) || 0) - (parseFloat(b.pallets) || 0));
-  } else if (sortBy.value === 'weight-desc') {
-    arr.sort((a, b) => (parseFloat(b.weight_kg) || 0) - (parseFloat(a.weight_kg) || 0));
-  } else if (sortBy.value === 'city') {
-    arr.sort((a, b) => (a.city || '').localeCompare(b.city || '', 'ru') || (parseInt(a.restaurant_number) || 0) - (parseInt(b.restaurant_number) || 0));
-  } else {
-    // по умолчанию — по номеру ресторана
-    arr.sort((a, b) => (parseInt(a.restaurant_number) || 0) - (parseInt(b.restaurant_number) || 0));
-  }
+  const num = (v) => parseInt(v) || 0;
+  if (sortBy.value === 'pallets-desc') arr.sort((a, b) => (+b.pallets || 0) - (+a.pallets || 0));
+  else if (sortBy.value === 'pallets-asc') arr.sort((a, b) => (+a.pallets || 0) - (+b.pallets || 0));
+  else if (sortBy.value === 'weight-desc') arr.sort((a, b) => (+b.weight_kg || 0) - (+a.weight_kg || 0));
+  else if (sortBy.value === 'city') arr.sort((a, b) => (a.city || '').localeCompare(b.city || '', 'ru') || num(a.restaurant_number) - num(b.restaurant_number));
+  else arr.sort((a, b) => num(a.restaurant_number) - num(b.restaurant_number));
   return arr;
 });
 
-// Группировка отображаемых карточек по юрлицу — нужна для визуального
-// разделения Бургер БК / Воглия Матта / Пицца Стар в списке.
-const ENTITY_ORDER = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
-const groupedFilteredItems = computed(() => {
-  const map = new Map();
-  for (const item of filteredItems.value) {
-    const le = item.legal_entity || 'Без юрлица';
-    if (!map.has(le)) map.set(le, { legal_entity: le, legal_entity_group: item.legal_entity_group || 'BK_VM', items: [] });
-    map.get(le).items.push(item);
-  }
-  const groups = [...map.values()];
-  groups.sort((a, b) => {
-    const ia = ENTITY_ORDER.indexOf(a.legal_entity);
-    const ib = ENTITY_ORDER.indexOf(b.legal_entity);
-    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-  });
-  return groups;
+const unassignedCount = computed(() => store.unassignedItems.length);
+
+// На узком экране килограммы прячутся — подсказка держит всю сводку целиком
+const summaryTitle = computed(() => {
+  const s = store.totalStats;
+  return `${s.orders} ${orderWord(s.orders)} · ${s.pallets.toFixed(1)} паллет · ${Math.round(s.weight)} кг`;
 });
 
-// --- Format helpers ---
+// --- Формат ---
+function entityShortName(entity) { return ENTITY_SHORT_NAMES[entity] || entity; }
+function catClass(cat) { return { 'Сухой': 'dry', 'Холод': 'cold', 'Мороз': 'frozen' }[cat] || ''; }
+function orderWord(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'заказ';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'заказа';
+  return 'заказов';
+}
+const prettyDate = computed(() => {
+  if (!selectedDate.value) return '';
+  return new Date(selectedDate.value + 'T00:00:00').toLocaleDateString('ru-RU', { day: '2-digit', month: 'long' });
+});
 
-function fmtPallets(v) {
-  const n = +v;
-  if (n === 0) return '0';
-  if (n >= 1) return n.toFixed(1);
-  // Меньше 1 — показываем 2 знака, но не «0.00»
-  const s = n.toFixed(2);
-  return s === '0.00' ? n.toFixed(3) : s;
+// --- Дата ---
+function dateStr(d) { return d.toISOString().slice(0, 10); }
+
+// Дата живёт в адресе: ссылку на конкретный день можно отправить коллеге
+function syncDateToUrl() {
+  if (!selectedDate.value || route.query.date === selectedDate.value) return;
+  router.replace({ query: { ...route.query, date: selectedDate.value } }).catch(() => {});
 }
 
-// --- Date helpers ---
-
-function setTomorrow() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  selectedDate.value = d.toISOString().slice(0, 10);
-  loadDate();
+async function shiftDate(days) {
+  if (!await confirmLoseWork()) return;
+  const d = new Date(selectedDate.value + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  selectedDate.value = dateStr(d);
+  await loadDate();
 }
 
-function setDayAfter() {
-  const d = new Date();
-  d.setDate(d.getDate() + 2);
-  selectedDate.value = d.toISOString().slice(0, 10);
-  loadDate();
+let lastLoadedDate = '';
+async function onDateChange() {
+  if (!await confirmLoseWork()) { selectedDate.value = lastLoadedDate; return; }
+  await loadDate();
 }
 
 async function loadDate() {
-  await store.loadDate(selectedDate.value);
-}
-
-// --- Display helpers ---
-
-function modeLabel(mode) {
-  return { any: 'Смешанный', dry: 'Сухой', cold: 'Холод', frozen: 'Мороз' }[mode] || mode;
-}
-
-function catClass(cat) {
-  if (cat === 'Сухой') return 'dry';
-  if (cat === 'Холод') return 'cold';
-  if (cat === 'Мороз') return 'frozen';
-  return '';
-}
-
-function barColor(percent) {
-  if (percent > 95) return 'bar-red';
-  if (percent > 80) return 'bar-orange';
-  return 'bar-green';
-}
-
-// --- Drag & Drop ---
-
-function onDragStart(e, item) {
-  dragData.value = { source: 'unassigned', item };
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', JSON.stringify(item));
-}
-
-function onDragStartFromTruck(e, truckIdx, assignIdx, item) {
-  dragData.value = { source: 'truck', truckIdx, assignIdx, item };
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', '');
-}
-
-function onDragOver(e, truckIdx) {
-  e.preventDefault();
-  dragOverTruck.value = truckIdx;
-}
-
-function onDragLeave(e, truckIdx) {
-  if (!e.currentTarget.contains(e.relatedTarget)) {
-    dragOverTruck.value = null;
+  loadError.value = '';
+  syncDateToUrl();
+  try {
+    await store.loadDate(selectedDate.value);
+    lastLoadedDate = selectedDate.value;
+  } catch (e) {
+    loadError.value = e.message || 'неизвестная ошибка';
   }
 }
 
-function onDrop(e, truckIdx) {
-  e.preventDefault();
+// Несохранённую раскладку раньше стирала любая смена даты — молча
+async function confirmLoseWork() {
+  if (!store.dirty) return true;
+  const ok = await appConfirm('Раскладка не сохранена. Уйти и потерять её?', { okText: 'Уйти', cancelText: 'Остаться', danger: true });
+  if (ok) store.markClean();
+  return ok;
+}
+
+// --- Меню и назначение ---
+function toggleMenu(key) { menuKey.value = menuKey.value === key ? null : key; }
+
+function onAssign({ item, truckUid }) {
+  const check = store.canAssign(truckUid, item);
+  if (!check.ok) { toast.warning(check.reason); return; }
+  store.assignToTruck(truckUid, item);
+  menuKey.value = null;
+}
+
+function setGroupBy(v) { store.groupBy = v; showMore.value = false; }
+function toggleMixed() { store.allowMixedModes = !store.allowMixedModes; }
+function runMore(fn) { showMore.value = false; fn(); }
+
+function pickVehicle(v) {
+  store.addTruck(v, newTruckDirection.value);
+  showAddTruck.value = false;
+}
+
+// --- Перетаскивание (мышью, как и раньше) ---
+const dragOverTruck = ref(null);
+const dragPayload = ref(null);
+
+function onDragStartItem({ event, item }) {
+  dragPayload.value = { source: 'unassigned', item };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', item.key);
+}
+
+function onDragStartAssignment({ event, assignment }, truckUid) {
+  dragPayload.value = { source: 'truck', truckUid, assignment };
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', assignment.uid);
+}
+
+function onTruckDragLeave(e) {
+  if (!e?.currentTarget?.contains(e.relatedTarget)) dragOverTruck.value = null;
+}
+
+function onDropTruck(truckUid) {
   dragOverTruck.value = null;
-  if (!dragData.value) return;
-
-  if (dragData.value.source === 'unassigned') {
-    const check = store.canAssign(truckIdx, dragData.value.item);
+  const p = dragPayload.value;
+  if (!p) return;
+  if (p.source === 'unassigned') {
+    const check = store.canAssign(truckUid, p.item);
     if (!check.ok) { toast.warning(check.reason); return; }
-    store.assignToTruck(truckIdx, dragData.value.item);
-  } else if (dragData.value.source === 'truck') {
-    if (dragData.value.truckIdx === truckIdx) return;
-    const item = store.trucks[dragData.value.truckIdx]?.assignments[dragData.value.assignIdx];
-    if (!item) return;
-    const check = store.canAssign(truckIdx, item);
+    store.assignToTruck(truckUid, p.item);
+  } else if (p.source === 'truck' && p.truckUid !== truckUid) {
+    const check = store.canAssign(truckUid, p.assignment);
     if (!check.ok) { toast.warning(check.reason); return; }
-    store.moveAssignment(dragData.value.truckIdx, truckIdx, dragData.value.assignIdx);
+    store.moveAssignment(p.truckUid, truckUid, p.assignment.uid);
   }
-  dragData.value = null;
+  dragPayload.value = null;
 }
 
-function onDropUnassigned(e) {
-  e.preventDefault();
-  if (dragData.value?.source === 'truck') {
-    store.unassign(dragData.value.truckIdx, dragData.value.assignIdx);
-  }
-  dragData.value = null;
+function onDropUnassigned() {
+  const p = dragPayload.value;
+  if (p?.source === 'truck') store.unassign(p.truckUid, p.assignment.uid);
+  dragPayload.value = null;
 }
 
-// --- Actions ---
-
+// --- Действия ---
 async function handleSave() {
   try { await store.savePlan(); toast.success('План сохранён'); }
-  catch (e) { toast.error('Ошибка', e.message); }
+  catch (e) { toast.error('Не сохранилось', e.message); }
 }
 
 async function handleConfirm() {
-  if (!store.plan?.id) { await handleSave(); }
-  try { await store.confirmPlan(); toast.success('План подтверждён'); }
-  catch (e) { toast.error('Ошибка', e.message); }
+  try {
+    if (store.dirty || !store.plan?.id) await store.savePlan();
+    await store.confirmPlan();
+    toast.success('План подтверждён');
+  } catch (e) { toast.error('Ошибка', e.message); }
 }
 
 async function handleUnconfirm() {
@@ -607,1092 +477,264 @@ async function handleUnconfirm() {
 }
 
 async function handleReset() {
-  if (!(await appConfirm('Сбросить все назначения?', { okText: 'Сбросить', danger: true }))) return;
+  if (!await appConfirm('Убрать все заказы из машин? Сами машины останутся.', { okText: 'Убрать', danger: true })) return;
   store.resetAllAssignments();
 }
 
+async function handleRemoveTruck(truck) {
+  if (truck.assignments.length && !await appConfirm(`Убрать машину вместе с ${truck.assignments.length} назначениями?`, { okText: 'Убрать', danger: true })) return;
+  store.removeTruck(truck.uid);
+}
+
 async function handleAutoAssign() {
-  if (store.trucks.length && !(await appConfirm('Текущее распределение будет заменено. Продолжить?', { okText: 'Заменить', danger: true }))) return;
-  try { await store.autoAssign(); toast.success('Автораспределение выполнено'); }
+  if (store.trucks.length && !await appConfirm('Текущая раскладка будет заменена. Продолжить?', { okText: 'Заменить', danger: true })) return;
+  try { await store.autoAssign(); toast.success('Портал разложил заказы'); }
   catch (e) { toast.error('Ошибка', e.message); }
 }
 
 async function handleExport() {
   try { await exportTruckLoading(store.trucks, store.orders, store.deliveryDate, store.truckStats); }
-  catch (e) { toast.error('Ошибка экспорта', e.message); }
+  catch (e) { toast.error('Ошибка выгрузки', e.message); }
 }
 
-// --- Vehicles ---
+// --- Справочник машин ---
+async function goDirections() {
+  activeTab.value = 'directions';
+  await loadDirections();
+}
+
+// silent — при открытии страницы: если направлений нет, ругаться не о чем
+async function loadDirections({ silent = false } = {}) {
+  directionsLoading.value = true;
+  try {
+    const data = await store.loadDirections();
+    // Сервер отдаёт справочники вместе со списком — отдельный запрос не нужен
+    if (data?.available_cities) directionCities.value = data.available_cities;
+    if (data?.available_restaurants) directionRestaurants.value = data.available_restaurants;
+  } catch (e) {
+    if (!silent) toast.error('Ошибка', e.message);
+  } finally { directionsLoading.value = false; }
+}
+
+async function handleSaveDirection(d) {
+  try { await store.saveDirection(d); await loadDirections(); toast.success('Направление сохранено'); }
+  catch (e) { toast.error('Ошибка', e.message); }
+}
+
+async function handleDeleteDirection(d) {
+  if (!await appConfirm(`Удалить направление «${d.name}»? Машины, которым оно назначено, останутся без направления.`, { okText: 'Удалить', danger: true })) return;
+  try { await store.deleteDirection(d.id); await loadDirections(); toast.success('Удалено'); }
+  catch (e) { toast.error('Ошибка', e.message); }
+}
+
+async function goVehicles() {
+  activeTab.value = 'vehicles';
+  await loadVehicles();
+}
+
+async function loadVehicles() {
+  vehiclesLoading.value = true;
+  try { await store.loadVehicles(); }
+  catch (e) { toast.error('Ошибка', e.message); }
+  finally { vehiclesLoading.value = false; }
+}
 
 async function handleSaveVehicle(v) {
   try { await store.saveVehicle(v); toast.success('Сохранено'); }
   catch (e) { toast.error('Ошибка', e.message); }
 }
 
-async function handleDeleteVehicle(id) {
-  if (!(await appConfirm('Удалить тип машины?', { okText: 'Удалить', danger: true }))) return;
-  try { await store.deleteVehicle(id); }
+async function handleCreateVehicle(v) {
+  try { await store.saveVehicle(v); toast.success('Тип машины добавлен'); }
   catch (e) { toast.error('Ошибка', e.message); }
 }
 
-async function handleCreateVehicle() {
-  try { await store.saveVehicle(newVehicle.value); showNewVehicle.value = false; toast.success('Добавлено'); }
+async function handleDeleteVehicle(v) {
+  if (!await appConfirm(`Удалить «${v.name}» из списка типов машин?`, { okText: 'Удалить', danger: true })) return;
+  try { await store.deleteVehicle(v.id); toast.success('Удалено'); }
   catch (e) { toast.error('Ошибка', e.message); }
 }
 
-// --- Add truck dropdown ---
-
-function toggleAddTruck() {
-  showAddTruck.value = !showAddTruck.value;
+// --- Клик мимо закрывает меню ---
+function closeMenus(e) {
+  if (showAddTruck.value && !e.target.closest('.tl-add-wrap')) showAddTruck.value = false;
+  if (showMore.value && !e.target.closest('.tl-more-wrap')) showMore.value = false;
+  if (menuKey.value && !e.target.closest('.tlc')) menuKey.value = null;
 }
 
-function selectVehicleForTruck(v) {
-  store.addTruck(v);
-  showAddTruck.value = false;
+function beforeUnloadHandler(e) {
+  if (store.dirty) { e.preventDefault(); e.returnValue = ''; }
 }
 
-function addCustomTruck() {
-  store.addTruck(null);
-  showAddTruck.value = false;
-}
+onBeforeRouteLeave(async () => await confirmLoseWork());
 
-// --- Init ---
+// Смена группировки меняет карточки — открытое меню перестаёт им соответствовать
+watch(() => store.groupBy, () => { menuKey.value = null; });
 
 onMounted(async () => {
-  setTomorrow();
-  await store.loadVehicles();
-  await loadDate();
+  mq = window.matchMedia('(max-width: 900px)');
+  compact.value = mq.matches;
+  mq.addEventListener('change', applyMq);
+  window.addEventListener('beforeunload', beforeUnloadHandler);
+
+  const fromUrl = String(route.query.date || '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fromUrl)) {
+    selectedDate.value = fromUrl;
+  } else {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    selectedDate.value = dateStr(d);
+  }
+  await Promise.all([loadVehicles(), loadDirections({ silent: true }), loadDate()]);
+});
+
+// Страница живёт в кэше вкладок: слушатель работает, только пока раздел открыт
+onActivated(() => document.addEventListener('click', closeMenus));
+onDeactivated(() => document.removeEventListener('click', closeMenus));
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeMenus);
+  window.removeEventListener('beforeunload', beforeUnloadHandler);
+  mq?.removeEventListener('change', applyMq);
 });
 </script>
 
 <style scoped>
+/* Экран занимает всю высоту, прокручиваются только колонки внутри */
 .tl-page {
-  padding: 20px 28px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: 100%;
+  padding: 12px 16px 14px;
+  box-sizing: border-box;
+  gap: 10px;
 }
 
-/* Toolbar */
-.tl-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 12px;
-  flex-shrink: 0;
-}
+/* ── Единственная полоса управления ── */
+/* wrap — страховка: лучше вторая строка, чем обрезанное на середине число */
+.tl-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; flex: 0 0 auto; }
 
-.tl-toolbar h1 {
-  font-size: 22px;
-  font-weight: 700;
-  color: #502314;
-  margin: 0;
-}
+.tl-tabs { display: flex; gap: 2px; background: #f1eae2; border-radius: 8px; padding: 2px; }
+.tl-tab { border: none; background: none; padding: 5px 9px; border-radius: 6px; font-size: 13px; color: #8b7355; cursor: pointer; white-space: nowrap; }
+.tl-tab:hover { color: #502314; }
+.tl-tab.active { background: #fff; color: #502314; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 
-.tl-toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.tl-date { display: flex; align-items: center; gap: 2px; }
+.tl-date-arrow { width: 24px; height: 30px; border: 1px solid #e0d5c8; background: #fff; border-radius: 6px; color: #8b7355; font-size: 15px; line-height: 1; cursor: pointer; }
+.tl-date-arrow:hover { border-color: #E76F51; color: #E76F51; }
+.tl-date-input { padding: 5px 8px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 13px; font-family: inherit; color: #502314; }
 
-.tl-date-input {
-  padding: 6px 10px;
-  border: 2px solid #e0d5c8;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #502314;
-  background: white;
-  outline: none;
+/* Сводка сжимается первой: кнопки действий не должны уезжать на вторую строку */
+.tl-summary { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8b7355; white-space: nowrap; min-width: 0; flex-shrink: 1; }
+/* На ноутбуке 1366 полосе не хватает места: килограммы уходят в подсказку,
+   остальное чуть ужимается — чтобы всё уместилось в одну строку */
+@media (max-width: 1500px) {
+  .tl-summary-kg { display: none; }
+  .tl-summary { gap: 8px; }
+  .tl-tab { font-size: 12px; padding: 5px 8px; }
+  .tl-date-input { font-size: 12px; padding: 5px 6px; }
+  .tl-date-arrow { width: 22px; }
+  .tl-btn { font-size: 12px; padding: 5px 9px; }
 }
+.tl-summary b { color: #502314; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tl-summary-left { color: #b35900; font-weight: 600; }
+.tl-summary-ok { color: #2e7d32; font-weight: 600; }
 
-.tl-date-input:focus {
-  border-color: #E76F51;
+.tl-status { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 10px; white-space: nowrap; }
+.tl-status.is-draft { background: #fff3e0; color: #b35900; }
+.tl-status.is-confirmed { background: #e3f6e6; color: #1b5e20; }
+.tl-status.is-unsaved { background: #fdecea; color: #c62828; }
+
+.tl-bar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: 0 0 auto; }
+
+.tl-btn { padding: 6px 10px; border: 1px solid #e0d5c8; border-radius: 6px; background: #fff; font-size: 13px; color: #502314; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.tl-btn:hover:not(:disabled) { background: #faf6f1; border-color: #d8c9b8; }
+.tl-btn:disabled { opacity: 0.5; cursor: default; }
+.tl-btn-sm { padding: 5px 10px; font-size: 12px; }
+.tl-btn-primary { background: #E76F51; border-color: #E76F51; color: #fff; }
+.tl-btn-primary:hover:not(:disabled) { background: #d45f42; border-color: #d45f42; }
+.tl-btn-save { background: #2e7d32; border-color: #2e7d32; color: #fff; }
+.tl-btn-save:hover:not(:disabled) { background: #24631f; border-color: #24631f; }
+.tl-btn-more { padding: 6px 10px; font-size: 15px; line-height: 1; color: #8b7355; }
+
+/* ── Выпадающие меню ── */
+.tl-add-wrap, .tl-more-wrap { position: relative; }
+.tl-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+  display: flex; flex-direction: column; min-width: 230px;
+  background: #fff; border: 1px solid #e0d5c8; border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.12); padding: 4px;
 }
+.tl-menu-right { left: auto; right: 0; }
+.tl-menu-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: none; background: none; border-radius: 6px; font-size: 13px; color: #333; text-align: left; cursor: pointer; white-space: nowrap; }
+.tl-menu-item:hover:not(:disabled) { background: #faf6f1; }
+.tl-menu-item:disabled { opacity: 0.45; cursor: default; }
+.tl-menu-item.is-on { color: #E76F51; font-weight: 600; }
+.tl-menu-item-alt { border-top: 1px solid #f0eae3; color: #8b7355; }
+.tl-menu-cap { margin-left: auto; font-size: 11px; color: #8b7355; }
+.tl-menu-check { width: 14px; }
+.tl-menu-select { margin: 2px 6px 6px; padding: 5px 8px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 12px; font-family: inherit; color: #333; }
+.tl-menu-group { padding: 6px 10px 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #b0a396; }
+.tl-menu-sep { height: 1px; background: #f0eae3; margin: 4px 0; }
+.tl-menu-danger { color: #c62828; }
+.tl-menu-danger:hover:not(:disabled) { background: #fdf2f2; }
+.tl-menu-empty { padding: 10px; font-size: 12px; color: #8b7355; }
 
-/* Tabs */
-.tl-page-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 20px;
-  border-bottom: 2px solid #e0d5c8;
-  flex-shrink: 0;
-}
+/* ── Рабочая область ── */
+.tl-state { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #8b7355; font-size: 14px; }
+.tl-state-error { color: #c62828; }
 
-.tl-page-tab {
-  padding: 10px 20px;
-  background: none;
-  border: none;
-  border-bottom: 3px solid transparent;
-  font-size: 14px;
-  font-weight: 600;
-  color: #8b7355;
-  cursor: pointer;
-  margin-bottom: -2px;
-  transition: all 0.15s;
-}
-
-.tl-page-tab:hover {
-  color: #502314;
-}
-
-.tl-page-tab.active {
-  color: #E76F51;
-  border-bottom-color: #E76F51;
-}
-
-/* Buttons */
-.tl-btn {
-  padding: 7px 14px;
-  border: 2px solid #e0d5c8;
-  border-radius: 8px;
-  background: white;
-  color: #502314;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.tl-btn:hover {
-  border-color: #502314;
-  background: #f5f0eb;
-}
-
-.tl-btn-primary {
-  background: #E76F51;
-  color: white;
-  border-color: #E76F51;
-}
-
-.tl-btn-primary:hover {
-  background: #b51e00;
-  border-color: #b51e00;
-}
-
-.tl-btn-outline {
-  background: white;
-  color: #502314;
-  border-color: #e0d5c8;
-}
-
-.tl-btn-outline:hover {
-  border-color: #502314;
-}
-
-.tl-btn-export {
-  background: #16a34a;
-  color: white;
-  border-color: #16a34a;
-}
-
-.tl-btn-export:hover {
-  background: #15803d;
-  border-color: #15803d;
-}
-
-.tl-btn-export:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.tl-btn-confirm {
-  background: #16a34a;
-  color: white;
-  border-color: #16a34a;
-}
-
-.tl-btn-confirm:hover {
-  background: #15803d;
-  border-color: #15803d;
-}
-
-.tl-btn-danger {
-  background: #dc2626;
-  color: white;
-  border-color: #dc2626;
-}
-
-.tl-btn-danger:hover {
-  background: #b91c1c;
-  border-color: #b91c1c;
-}
-
-.tl-btn-sm {
-  padding: 5px 12px;
-  border: 2px solid #e0d5c8;
-  border-radius: 6px;
-  background: white;
-  color: #502314;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.tl-btn-sm:hover {
-  border-color: #502314;
-}
-
-.tl-btn-sm.tl-btn-primary {
-  background: #E76F51;
-  color: white;
-  border-color: #E76F51;
-}
-
-.tl-btn-sm.tl-btn-danger {
-  background: #dc2626;
-  color: white;
-  border-color: #dc2626;
-}
-
-.tl-btn-active {
-  background: #502314;
-  color: white;
-  border-color: #502314;
-}
-
-.tl-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Loading / Empty */
-.tl-loading, .tl-empty {
-  text-align: center;
-  padding: 40px 20px;
-  color: #8b7355;
-  font-size: 15px;
-}
-
-/* Stats bar */
-.tl-stats {
-  display: flex;
-  gap: 24px;
-  padding: 14px 20px;
-  background: #f5f0eb;
-  border-radius: 10px;
-  margin-bottom: 16px;
-  flex-shrink: 0;
-}
-
-.tl-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.tl-stat-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: #502314;
-}
-
-.tl-stat-label {
-  font-size: 12px;
-  color: #8b7355;
-  margin-top: 2px;
-}
-
-.tl-stat-confirmed {
-  color: #16a34a;
-  font-size: 14px;
-}
-
-.tl-stat-draft {
-  color: #d97706;
-  font-size: 14px;
-}
-
-/* Controls */
-.tl-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
-
-.tl-controls-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.tl-controls-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.tl-controls-label {
-  font-size: 13px;
-  color: #8b7355;
-  font-weight: 600;
-  margin-right: 4px;
-}
-
-.tl-checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #502314;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.tl-checkbox-label input[type="checkbox"] {
-  accent-color: #E76F51;
-}
-
-/* Add truck dropdown */
-.tl-add-truck-wrap {
-  position: relative;
-}
-
-.tl-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
-  background: white;
-  border: 2px solid #e0d5c8;
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  z-index: 100;
-  min-width: 240px;
-  overflow: hidden;
-}
-
-.tl-dropdown-item {
-  padding: 10px 14px;
-  font-size: 13px;
-  color: #502314;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.tl-dropdown-item:hover {
-  background: #f5f0eb;
-}
-
-.tl-dropdown-custom {
-  border-top: 1px solid #e0d5c8;
-  font-weight: 600;
-}
-
-/* Columns layout — обе колонки фиксированы по высоте экрана, скроллятся внутри себя */
 .tl-columns {
-  display: flex;
-  gap: 20px;
-  align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
-}
-
-.tl-left {
-  flex: 0 0 40%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 8px;
-  scrollbar-gutter: stable;
-}
-
-.tl-right {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 8px;
-  scrollbar-gutter: stable;
-}
-
-.tl-section-header {
-  font-size: 15px;
-  font-weight: 700;
-  color: #502314;
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.tl-section-count {
-  background: #e0d5c8;
-  color: #502314;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 10px;
-}
-
-.tl-empty-section {
-  text-align: center;
-  padding: 24px;
-  color: #8b7355;
-  font-size: 13px;
-  border: 2px dashed #e0d5c8;
-  border-radius: 10px;
-}
-
-/* Filters */
-.tl-filters {
-  margin-bottom: 10px;
-}
-
-.tl-filter-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.tl-filter-input {
-  width: 100px;
-  padding: 5px 8px;
-  border: 2px solid #e0d5c8;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #502314;
-  background: white;
-  outline: none;
-  flex-shrink: 0;
-}
-
-.tl-filter-input:focus {
-  border-color: #E76F51;
-}
-
-.tl-filter-cats {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.tl-filter-cat {
-  padding: 4px 10px;
-  border: 2px solid #e0d5c8;
-  border-radius: 6px;
-  background: white;
-  font-size: 11px;
-  font-weight: 600;
-  color: #502314;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.tl-filter-cat:hover {
-  border-color: #502314;
-}
-
-.tl-filter-cat.active {
-  border-color: #502314;
-  background: #502314;
-  color: white;
-}
-
-.tl-filter-cat.cat-dry.active {
-  background: #92400e;
-  border-color: #92400e;
-}
-
-.tl-filter-cat.cat-cold.active {
-  background: #2563eb;
-  border-color: #2563eb;
-}
-
-.tl-filter-cat.cat-frozen.active {
-  background: #7c3aed;
-  border-color: #7c3aed;
-}
-
-/* Кнопка «больше фильтров» */
-.tl-filter-more {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  padding: 5px 10px;
-  border: 1.5px solid #e0d5c8;
-  border-radius: 6px;
-  background: white;
-  color: #502314;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.tl-filter-more:hover { border-color: #E76F51; }
-.tl-filter-more.active {
-  background: #fff2e0;
-  border-color: #E76F51;
-  color: #E76F51;
-}
-.tl-filter-more-count {
-  min-width: 18px;
-  padding: 1px 5px;
-  background: #E76F51;
-  color: white;
-  border-radius: 9px;
-  font-size: 10px;
-  font-weight: 700;
-  text-align: center;
-}
-.tl-filter-more-chev { font-size: 10px; opacity: 0.7; }
-
-.tl-filter-advanced {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(300px, 38%) minmax(0, 1fr);
   gap: 12px;
-  align-items: flex-end;
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: #fbf7f2;
-  border: 1.5px solid #e0d5c8;
-  border-radius: 8px;
-}
-.tl-filter-field { display: flex; flex-direction: column; gap: 3px; }
-.tl-filter-field label {
-  font-size: 10px;
-  font-weight: 700;
-  color: #8b7355;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-.tl-filter-select {
-  padding: 5px 8px;
-  border: 1.5px solid #e0d5c8;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #502314;
-  background: white;
-  outline: none;
-  min-width: 140px;
-}
-.tl-filter-select:focus { border-color: #E76F51; }
-.tl-filter-range { display: flex; align-items: center; gap: 6px; color: #8b7355; }
-.tl-filter-num {
-  width: 60px;
-  padding: 5px 6px;
-  border: 1.5px solid #e0d5c8;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #502314;
-  background: white;
-  outline: none;
-}
-.tl-filter-num:focus { border-color: #E76F51; }
-.tl-filter-reset {
-  margin-left: auto;
-  padding: 5px 12px;
-  border: 1.5px solid #e0d5c8;
-  border-radius: 6px;
-  background: white;
-  color: #8b7355;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.tl-filter-reset:hover:not(:disabled) { border-color: #E76F51; color: #E76F51; }
-.tl-filter-reset:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* Entity filters (legal entity) */
-.tl-filter-entities {
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-.tl-filter-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #6b4f3a;
-  margin-right: 4px;
-}
-.tl-filter-entity {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1.5px solid #e0d5c8;
-  border-radius: 14px;
-  background: white;
-  color: #502314;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.tl-filter-entity:hover { border-color: #E76F51; }
-.tl-filter-entity.active {
-  background: #E76F51;
-  border-color: #E76F51;
-  color: white;
-}
-.tl-filter-entity.tl-entity-ps.active {
-  background: #0e7490;
-  border-color: #0e7490;
-}
-.tl-filter-entity-count {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 8px;
-  background: rgba(0,0,0,0.08);
-}
-.tl-filter-entity.active .tl-filter-entity-count {
-  background: rgba(255,255,255,0.28);
 }
 
-/* Заголовок группы юрлица перед карточками */
-.tl-entity-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 12px 0 6px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: #fff2e0;
-  border-left: 4px solid #E76F51;
-  font-size: 12px;
-  color: #502314;
-}
-.tl-entity-header:first-child { margin-top: 0; }
-.tl-entity-header.tl-entity-ps {
-  background: #ecfeff;
-  border-left-color: #0e7490;
-}
-.tl-entity-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: #E76F51;
-  color: white;
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.3px;
-}
-.tl-entity-header.tl-entity-ps .tl-entity-badge { background: #0e7490; }
-.tl-entity-name { flex: 1; font-weight: 600; }
-.tl-entity-count {
-  font-weight: 700;
-  color: #8b7355;
-}
+.tl-col { display: flex; flex-direction: column; min-height: 0; background: #fff; border: 1px solid #ece4da; border-radius: 10px; padding: 10px; }
+.tl-col-head { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-bottom: 8px; }
+.tl-col-head h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #8b7355; }
+.tl-col-count { background: #f1eae2; color: #502314; border-radius: 8px; padding: 1px 7px; font-size: 12px; margin-left: 4px; }
+.tl-hint-compact { margin-left: auto; border: none; background: #f1eae2; color: #8b7355; font-size: 10px; padding: 2px 8px; border-radius: 8px; }
 
-/* Карточка окрашена под юрлицо — тонкая цветная полоса слева */
-.tl-card.tl-entity-bk_vm { border-left: 4px solid #E76F51; }
-.tl-card.tl-entity-ps { border-left: 4px solid #0e7490; }
+/* Прокручивается только этот блок — за счёт него страница держится в экране */
+.tl-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
+.tl-col-empty { padding: 24px 12px; text-align: center; color: #b0a396; font-size: 13px; }
 
-/* Cards (unassigned) */
-.tl-card {
-  padding: 10px;
-  border: 2px solid #e0d5c8;
-  border-radius: 10px;
-  margin-bottom: 8px;
-  cursor: grab;
-  background: white;
-  transition: all 0.15s;
-}
+/* ── Фильтры ── */
+.tl-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 0 0 auto; margin-bottom: 6px; }
+.tl-input { padding: 5px 8px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 12px; font-family: inherit; color: #333; max-width: 130px; }
+.tl-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,0.15); }
+.tl-chips { display: flex; gap: 3px; }
+.tl-chip { border: 1px solid transparent; background: #f5f0eb; color: #6b6b6b; font-size: 11px; padding: 4px 9px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+.tl-chip:hover { filter: brightness(0.97); }
+.tl-chip.active { border-color: currentColor; font-weight: 600; }
+.tl-chip.cat-dry { background: #fff4e0; color: #8a5a00; }
+.tl-chip.cat-cold { background: #e3f2fd; color: #0d47a1; }
+.tl-chip.cat-frozen { background: #ede7f6; color: #4527a0; }
+.tl-chip-more { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.tl-chip-num { background: #E76F51; color: #fff; border-radius: 8px; padding: 0 5px; font-size: 10px; }
 
-.tl-card:hover {
-  border-color: #E76F51;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
+.tl-filters-more { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; padding: 8px; margin-bottom: 6px; background: #faf7f3; border-radius: 8px; }
+.tl-field { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #8b7355; text-transform: uppercase; letter-spacing: 0.03em; }
+.tl-field .tl-input { max-width: none; min-width: 120px; }
 
-.tl-card:active {
-  cursor: grabbing;
-}
+.tl-vehicles-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
-.tl-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.tl-card-num {
-  font-weight: 700;
-  color: #502314;
-  font-size: 15px;
-}
-
-.tl-card-city {
-  font-size: 12px;
-  color: #8b7355;
-}
-
-.tl-card-sku {
-  font-size: 12px;
-  color: #502314;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tl-card-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 4px;
-}
-
-.tl-card-total {
-  font-size: 12px;
-  color: #8b7355;
-  font-weight: 600;
-}
-
-/* Category badges */
-.tl-cat-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.cat-dry {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.cat-cold {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-.cat-frozen {
-  background: #ede9fe;
-  color: #7c3aed;
-}
-
-/* Trucks */
-.tl-truck {
-  border: 2px dashed #e0d5c8;
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 12px;
-  background: #faf7f4;
-  transition: all 0.2s;
-  min-height: 80px;
-}
-
-.tl-truck-dragover {
-  border-color: #E76F51;
-  background: #fff5f3;
-  border-style: solid;
-}
-
-.tl-truck-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.tl-truck-name {
-  font-weight: 700;
-  font-size: 14px;
-  color: #502314;
-  flex: 1;
-}
-
-.tl-truck-mode {
-  font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.mode-dry {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.mode-cold {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-.mode-frozen {
-  background: #ede9fe;
-  color: #7c3aed;
-}
-
-.mode-any {
-  background: #f5f0eb;
-  color: #502314;
-}
-
-.tl-btn-remove {
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: none;
-  color: #8b7355;
-  font-size: 14px;
-  cursor: pointer;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-}
-
-.tl-btn-remove:hover {
-  background: #dc2626;
-  color: white;
-}
-
-/* Progress bars */
-.tl-truck-bars {
-  margin-bottom: 10px;
-}
-
-.tl-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.tl-bar-label {
-  font-size: 11px;
-  color: #8b7355;
-  width: 55px;
-  flex-shrink: 0;
-}
-
-.tl-bar {
-  flex: 1;
-  height: 8px;
-  background: #e0d5c8;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.tl-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.3s;
-}
-
-.bar-green {
-  background: #16a34a;
-}
-
-.bar-orange {
-  background: #d97706;
-}
-
-.bar-red {
-  background: #dc2626;
-}
-
-.tl-bar-value {
-  font-size: 11px;
-  color: #502314;
-  font-weight: 600;
-  width: 90px;
-  text-align: right;
-  flex-shrink: 0;
-}
-
-/* Assigned cards inside trucks */
-.tl-truck-items {
-  min-height: 20px;
-}
-
-.tl-assigned-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: white;
-  border: 1px solid #e0d5c8;
-  border-radius: 8px;
-  margin-bottom: 4px;
-  font-size: 13px;
-  cursor: grab;
-  transition: all 0.1s;
-}
-
-.tl-assigned-card:hover {
-  border-color: #E76F51;
-}
-
-.tl-assigned-card:active {
-  cursor: grabbing;
-}
-
-.tl-assigned-rest {
-  font-weight: 700;
-  color: #502314;
-  min-width: 36px;
-}
-
-.tl-assigned-cat {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.tl-assigned-stats {
-  flex: 1;
-  text-align: right;
-  color: #8b7355;
-  font-size: 12px;
-}
-
-.tl-btn-unassign {
-  width: 20px;
-  height: 20px;
-  border: none;
-  background: none;
-  color: #8b7355;
-  font-size: 12px;
-  cursor: pointer;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.tl-btn-unassign:hover {
-  background: #dc2626;
-  color: white;
-}
-
-.tl-truck-empty {
-  text-align: center;
-  padding: 16px;
-  color: #8b7355;
-  font-size: 13px;
-  font-style: italic;
-}
-
-/* Footer */
-.tl-footer {
-  position: sticky;
-  bottom: 0;
-  background: white;
-  padding: 12px 20px;
-  border-top: 2px solid #e0d5c8;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  z-index: 10;
-  margin: 20px -20px 0;
-}
-
-.tl-footer-status {
-  font-size: 13px;
-  color: #502314;
-}
-
-/* Vehicles table */
-.tl-vehicles-section {
-  margin-top: 8px;
-}
-
-.tl-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 16px;
-}
-
-.tl-table th {
-  text-align: left;
-  padding: 10px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #8b7355;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-bottom: 2px solid #e0d5c8;
-}
-
-.tl-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid #e0d5c8;
-}
-
-.tl-table-actions {
-  display: flex;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.tl-inline-input {
-  width: 100%;
-  padding: 6px 8px;
-  border: 2px solid #e0d5c8;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #502314;
-  background: white;
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.tl-inline-input:focus {
-  border-color: #E76F51;
-}
-
-.tl-inline-num {
-  width: 100px;
-  text-align: right;
-}
-
-/* Responsive */
-@media (max-width: 560px) {
-  /* Дата и две кнопки-«ярлыка» в одну строку не помещались — «Послезавтра»
-     обрезалась о край экрана. Переносим по строкам. */
-  .tl-toolbar-actions { flex-wrap: wrap; }
-  .tl-toolbar-actions > input[type="date"] { flex: 1 1 100%; min-width: 0; }
-  .tl-toolbar-actions > .tl-btn { flex: 1 1 calc(50% - 4px); }
-}
-
+/* ── Узкий экран: одна колонка, только просмотр ── */
 @media (max-width: 900px) {
-  .tl-columns {
-    flex-direction: column;
-  }
-
-  .tl-left {
-    flex: none;
-    width: 100%;
-  }
-
-  .tl-right {
-    flex: none;
-    width: 100%;
-  }
-
-  .tl-controls {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .tl-toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .tl-footer {
-    flex-wrap: wrap;
-  }
+  /* Высота по содержимому: иначе колонки зажаты в экран и заказы налезают
+     на блок «Машины» */
+  .tl-page { padding: 10px 12px 12px; height: auto; flex: 0 0 auto; }
+  .tl-bar { flex-wrap: wrap; }
+  .tl-columns, .tl-columns.is-compact { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; overflow: visible; gap: 10px; }
+  .tl-col { min-height: 0; }
+  /* Внутренняя прокрутка колонок на телефоне только мешает — едет вся страница */
+  .tl-scroll { overflow: visible; }
+  .tl-bar-actions { margin-left: 0; }
+  .tl-summary { font-size: 11px; gap: 8px; flex-wrap: wrap; }
+  .tl-input { font-size: 16px; max-width: none; flex: 1 1 120px; }
 }
 </style>
