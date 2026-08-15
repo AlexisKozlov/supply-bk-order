@@ -214,15 +214,21 @@ if ($saAction === 'products' && $method === 'GET') {
     $shelfStock = []; // sku => qty
     if ($customer && $skuList) {
         // Загружаем product-справочник (name, external_code) для SKU из шаблона
+        // Справочник общий на группу: по одному юрлицу «Воглия Матта» не
+        // находила карточек, внешние коды оставались пустыми и остатки
+        // из «Сроков годности» не сопоставлялись ни с одним товаром.
+        $piEntities = getEntitiesInGroup(getEntityGroup($le));
+        $piPh = implode(',', array_fill(0, count($piEntities), '?'));
         $prodInfoStmt = $pdo->prepare("
             SELECT sku, name, external_code
             FROM products
-            WHERE legal_entity = ? AND sku IN ($placeholders) AND is_active = 1
+            WHERE legal_entity IN ($piPh) AND sku IN ($placeholders) AND is_active = 1
+            ORDER BY (legal_entity = ?) DESC, id
         ");
-        $prodInfoStmt->execute(array_merge([$le], $skuList));
+        $prodInfoStmt->execute(array_merge($piEntities, $skuList, [$le]));
         $prodInfoBySku = [];
         foreach ($prodInfoStmt->fetchAll() as $p) {
-            $prodInfoBySku[$p['sku']] = $p;
+            if (!isset($prodInfoBySku[$p['sku']])) $prodInfoBySku[$p['sku']] = $p;
         }
 
         // Строим lookup: product_name → sku для матчинга строк stock_malling
@@ -388,13 +394,17 @@ function saStockProductsForEntity($pdo, $le) {
     $customer = roShortCustomerName($le);
     if (!$customer) return [];
 
-    // Справочник товаров
+    // Справочник товаров — по ГРУППЕ юрлиц: физически он лежит под главным
+    // юрлицом, и по одному юрлицу «Воглия Матта» получала пустой список.
+    $spEntities = getEntitiesInGroup(getEntityGroup($le));
+    $spPh = implode(',', array_fill(0, count($spEntities), '?'));
     $prodStmt = $pdo->prepare("
         SELECT sku, external_code, name, analog_group, category
         FROM products
-        WHERE legal_entity = ? AND is_active = 1
+        WHERE legal_entity IN ($spPh) AND is_active = 1
+        ORDER BY (legal_entity = ?) DESC, id
     ");
-    $prodStmt->execute([$le]);
+    $prodStmt->execute(array_merge($spEntities, [$le]));
     $productsBySku      = [];
     $productsByExternal = [];
     $productsByName     = [];
@@ -402,9 +412,11 @@ function saStockProductsForEntity($pdo, $le) {
         $sku  = trim((string)($p['sku'] ?? ''));
         $ext  = trim((string)($p['external_code'] ?? ''));
         $name = roNormalizeLookupText($p['name'] ?? '');
-        if ($sku  !== '') $productsBySku[$sku]      = $p;
-        if ($ext  !== '') $productsByExternal[$ext]  = $p;
-        if ($name !== '') $productsByName[$name]     = $p;
+        // Не перезаписываем: сортировка уже поставила карточку своего юрлица
+        // первой, а следом идут карточки соседнего юрлица той же группы.
+        if ($sku  !== '' && !isset($productsBySku[$sku]))      $productsBySku[$sku]      = $p;
+        if ($ext  !== '' && !isset($productsByExternal[$ext])) $productsByExternal[$ext] = $p;
+        if ($name !== '' && !isset($productsByName[$name]))    $productsByName[$name]    = $p;
     }
 
     // Загружаем все строки stock_malling для данного customer

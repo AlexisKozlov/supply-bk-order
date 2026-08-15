@@ -264,8 +264,19 @@
             // Fallback: analysis_data (тоже по юрлицу)
             if ($qty <= 0 && !empty($uniqueAGs)) {
                 $ph3 = implode(',', array_fill(0, count($uniqueAGs), '?'));
-                $s = $pdo->prepare("SELECT SUM(ad.consumption) as qty FROM analysis_data ad JOIN products p ON p.sku = ad.sku WHERE p.analog_group IN ($ph3) AND ad.legal_entity = ?");
-                $s->execute(array_merge($uniqueAGs, [$legalEntity]));
+                // EXISTS, а не JOIN: один артикул бывает заведён в справочнике
+                // дважды (10 артикулов есть и в BK_VM, и в «Пицце Стар»), и
+                // JOIN считал такой расход по два раза — доли рецептов ехали.
+                $agEntities = getEntitiesInGroup(getEntityGroup($legalEntity));
+                $entPh = implode(',', array_fill(0, count($agEntities), '?'));
+                $s = $pdo->prepare("SELECT SUM(ad.consumption) as qty
+                    FROM analysis_data ad
+                    WHERE ad.legal_entity = ?
+                      AND EXISTS (SELECT 1 FROM products p
+                                   WHERE p.sku = ad.sku
+                                     AND p.analog_group IN ($ph3)
+                                     AND p.legal_entity IN ($entPh))");
+                $s->execute(array_merge([$legalEntity], $uniqueAGs, $agEntities));
                 $qty = floatval($s->fetchColumn() ?: 0);
             }
 

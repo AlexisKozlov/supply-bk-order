@@ -42,15 +42,18 @@
         if (!$deliveryDate) respond(['skip' => true, 'reason' => 'delivery_date_required']);
 
         // Проверяем поставщика — российский + есть отсрочка
-        $sup = $pdo->prepare("SELECT country, payment_delay_days FROM suppliers WHERE short_name = ? AND legal_entity = ?");
-        $sup->execute([$o['supplier'], $o['legal_entity']]);
+        // Справочник поставщиков общий на группу: у «Воглии Матты» своя строка
+        // всего одна, и раньше запасной запрос шёл вообще без юрлица — а
+        // 10+ поставщиков заведены под одним коротким именем и в BK_VM, и в
+        // «Пицце Стар», так что можно было взять чужую страну и отсрочку.
+        $supEntities = getEntitiesInGroup(getEntityGroup($o['legal_entity'] ?? ''));
+        $supPh = implode(',', array_fill(0, count($supEntities), '?'));
+        $sup = $pdo->prepare("SELECT country, payment_delay_days FROM suppliers
+            WHERE short_name = ? AND legal_entity IN ($supPh)
+            ORDER BY (legal_entity = ?) DESC, id
+            LIMIT 1");
+        $sup->execute(array_merge([$o['supplier']], $supEntities, [$o['legal_entity']]));
         $s = $sup->fetch();
-        if (!$s) {
-            // Пробуем без legal_entity
-            $sup2 = $pdo->prepare("SELECT country, payment_delay_days FROM suppliers WHERE short_name = ? LIMIT 1");
-            $sup2->execute([$o['supplier']]);
-            $s = $sup2->fetch();
-        }
         if (!$s || $s['country'] !== 'RU' || !$s['payment_delay_days']) respond(['skip' => true]);
 
         // Проверяем нет ли уже оплаты
