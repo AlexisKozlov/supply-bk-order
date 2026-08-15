@@ -1023,6 +1023,8 @@ function roFindMultiplicityViolations($pdo, $legalEntity, $aggregatedItems) {
 
     // Кратность берём из общего справочника группы: по одному юрлицу у
     // «Воглии Матты» не находилось ничего и кратность молча считалась равной 1.
+    // Архивные карточки тоже учитываем — иначе снятые с каталога, но реально
+    // заказываемые товары проходили проверку кратности вообще без правила.
     $prodEntities = getEntitiesInGroup(getEntityGroup($legalEntity));
     $entPh = implode(',', array_fill(0, count($prodEntities), '?'));
     $productParams = array_merge($prodEntities, $skus, [$legalEntity]);
@@ -1030,9 +1032,8 @@ function roFindMultiplicityViolations($pdo, $legalEntity, $aggregatedItems) {
         SELECT sku, name, COALESCE(multiplicity, 1) AS multiplicity
         FROM products
         WHERE legal_entity IN ({$entPh})
-          AND is_active = 1
           AND sku IN ({$ph})
-        ORDER BY (legal_entity = ?) DESC, id ASC
+        ORDER BY is_active DESC, (legal_entity = ?) DESC, id ASC
     ");
     $s->execute($productParams);
 
@@ -3822,8 +3823,12 @@ if ($roAction === 'products' && $method === 'GET') {
         }
     } else {
         // Сначала из шаблона
+        // Архивные карточки тоже годятся: часть позиций шаблона — товары,
+        // снятые с каталога, но реально заказываемые (8149 строк в заказах).
+        // Без этого ресторан не видел «сколько в упаковке», и заказ по ним
+        // не округлялся по шагу.
         $tplParams = [];
-        $tplPick = productsPickIdSql('t.sku', $group, '?', $tplParams, true);
+        $tplPick = productsPickIdSql('t.sku', $group, '?', $tplParams);
         $tplParams[] = $le;
         $tplQuery = "SELECT t.sku, t.product_name as name, t.category, t.sort_order, p.qty_per_box,
                 COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity
@@ -5705,8 +5710,9 @@ if (strpos($roAction, 'admin') === 0) {
         roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
         // Кратность — из общего справочника группы (см. productsPickIdSql).
+        // Архивные карточки тоже берём: см. пояснение в ro/products.
         $tplParams = [];
-        $tplPick = productsPickIdSql('t.sku', getEntityGroup($le), '?', $tplParams, true);
+        $tplPick = productsPickIdSql('t.sku', getEntityGroup($le), '?', $tplParams);
         $tplParams[] = $le;
         $q = "SELECT t.*, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity
             FROM ro_templates t
