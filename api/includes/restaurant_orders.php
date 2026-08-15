@@ -587,8 +587,14 @@ function roGetStockForSku($pdo, $sku, $legalEntity) {
 
     $productInfo = null;
     try {
-        $p = $pdo->prepare("SELECT external_code, name FROM products WHERE sku = ? AND legal_entity = ? AND is_active = 1 LIMIT 1");
-        $p->execute([$sku, $legalEntity]);
+        // Справочник товаров общий на группу: по одному юрлицу «Воглия Матта»
+        // не находила карточку, внешний код оставался пустым и остатки склада
+        // не подтягивались вовсе.
+        $pParams = [$sku];
+        $pick = productsPickIdSql('?', getEntityGroup($legalEntity), '?', $pParams, true);
+        $pParams[] = $legalEntity;
+        $p = $pdo->prepare("SELECT external_code, name FROM products WHERE id = {$pick}");
+        $p->execute($pParams);
         $productInfo = $p->fetch() ?: null;
     } catch (Exception $e) {
         $productInfo = null;
@@ -1015,19 +1021,26 @@ function roFindMultiplicityViolations($pdo, $legalEntity, $aggregatedItems) {
         }
     }
 
-    $productParams = array_merge([$legalEntity], $skus);
+    // Кратность берём из общего справочника группы: по одному юрлицу у
+    // «Воглии Матты» не находилось ничего и кратность молча считалась равной 1.
+    $prodEntities = getEntitiesInGroup(getEntityGroup($legalEntity));
+    $entPh = implode(',', array_fill(0, count($prodEntities), '?'));
+    $productParams = array_merge($prodEntities, $skus, [$legalEntity]);
     $s = $pdo->prepare("
         SELECT sku, name, COALESCE(multiplicity, 1) AS multiplicity
         FROM products
-        WHERE legal_entity = ?
+        WHERE legal_entity IN ({$entPh})
           AND is_active = 1
           AND sku IN ({$ph})
+        ORDER BY (legal_entity = ?) DESC, id ASC
     ");
     $s->execute($productParams);
 
+    // Первая строка на артикул и есть нужная — сортировка уже расставила
+    // приоритет (активные, потом карточка своего юрлица).
     $productMap = [];
     foreach ($s->fetchAll() as $row) {
-        $productMap[$row['sku']] = $row;
+        if (!isset($productMap[$row['sku']])) $productMap[$row['sku']] = $row;
     }
 
     $violations = [];
@@ -2598,13 +2611,17 @@ if ($roAction === 'warehouse-stock' && $method === 'GET') {
     // Включаем и НЕактивные карточки: часть остатков склада — по товарам, снятым
     // с активного справочника (напр. 51108), но артикул и чистое имя у них есть.
     // Активные в приоритете (ORDER BY is_active DESC + не перезаписываем).
+    // Справочник — по группе юрлиц: у «Воглии Матты» своих карточек почти нет,
+    // и остатки склада ей не с чем было сопоставить.
+    $prodEntities = getEntitiesInGroup(getEntityGroup($legalEntity));
+    $entPh = implode(',', array_fill(0, count($prodEntities), '?'));
     $prodStmt = $pdo->prepare("
         SELECT sku, external_code, gtin, name, analog_group, category
         FROM products
-        WHERE legal_entity = ?
-        ORDER BY is_active DESC
+        WHERE legal_entity IN ({$entPh})
+        ORDER BY is_active DESC, (legal_entity = ?) DESC
     ");
-    $prodStmt->execute([$legalEntity]);
+    $prodStmt->execute(array_merge($prodEntities, [$legalEntity]));
     $productsBySku = [];
     $productsByExternal = [];
     $productsByName = [];
@@ -3782,21 +3799,38 @@ if ($roAction === 'products' && $method === 'GET') {
     $le = $rest['legal_entity'];
 
     $products = [];
+    // Справочник товаров общий на группу (см. productsPickIdSql): по одному
+    // юрлицу «Воглия Матта» не находила ни поиска, ни фасовки с кратностью.
+    $group = $rest['legal_entity_group'] ?? getEntityGroup($le);
+    $prodEntities = getEntitiesInGroup($group);
+    $entPh = implode(',', array_fill(0, count($prodEntities), '?'));
 
     if ($search) {
         // Поиск по всем товарам
         $like = "%{$search}%";
-        $s = $pdo->prepare("SELECT sku, name, category, qty_per_box, multiplicity FROM products WHERE legal_entity = ? AND is_active = 1 AND (name LIKE ? OR sku LIKE ?) ORDER BY name LIMIT 50");
-        $s->execute([$le, $like, $like]);
-        $products = $s->fetchAll();
+        $s = $pdo->prepare("SELECT sku, name, category, qty_per_box, multiplicity FROM products
+            WHERE legal_entity IN ({$entPh}) AND is_active = 1 AND (name LIKE ? OR sku LIKE ?)
+            ORDER BY name LIMIT 50");
+        $s->execute(array_merge($prodEntities, [$like, $like]));
+        // Один и тот же артикул может быть заведён у двух юрлиц группы —
+        // в списке он должен быть один раз.
+        $seenSku = [];
+        foreach ($s->fetchAll() as $row) {
+            if (isset($seenSku[$row['sku']])) continue;
+            $seenSku[$row['sku']] = true;
+            $products[] = $row;
+        }
     } else {
         // Сначала из шаблона
+        $tplParams = [];
+        $tplPick = productsPickIdSql('t.sku', $group, '?', $tplParams, true);
+        $tplParams[] = $le;
         $tplQuery = "SELECT t.sku, t.product_name as name, t.category, t.sort_order, p.qty_per_box,
                 COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity
             FROM ro_templates t
-            LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
+            LEFT JOIN products p ON p.id = {$tplPick}
             WHERE t.legal_entity = ? AND t.is_active = 1";
-        $params = [$le, $le];
+        $params = array_merge($tplParams, [$le]);
         if ($category) {
             $tplQuery .= " AND t.category = ?";
             $params[] = $category;
@@ -3810,10 +3844,10 @@ if ($roAction === 'products' && $method === 'GET') {
         if (empty($products)) {
             $smQuery = "SELECT DISTINCT p.name, p.sku, p.category, p.qty_per_box, p.multiplicity
                 FROM stock_malling sm
-                JOIN products p ON p.legal_entity = ? AND p.is_active = 1
+                JOIN products p ON p.legal_entity IN ({$entPh}) AND p.is_active = 1
                   AND (sm.product_name LIKE CONCAT(p.sku, ' %') OR p.name = sm.product_name OR p.sku = sm.product_name)
                 WHERE 1=1";
-            $params = [$le];
+            $params = $prodEntities;
             if ($category) {
                 $smQuery .= " AND p.category = ?";
                 $params[] = $category;
@@ -4130,6 +4164,11 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
 
     if (!$order) roRespond(['order' => null]);
 
+    // Шаблон — строго по своему юрлицу, справочник товаров — по группе.
+    $itemParams = [$rest['legal_entity']];
+    $pickSql = productsPickIdSql('oi.sku', $group, '?', $itemParams);
+    $itemParams[] = $rest['legal_entity'];
+    $itemParams[] = $order['id'];
     $items = $pdo->prepare("
         SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
                COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity
@@ -4139,17 +4178,11 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
            AND t.category = oi.category
            AND t.sku = oi.sku
            AND t.is_active = 1
-        LEFT JOIN products p ON p.id = (
-            SELECT p2.id
-            FROM products p2
-            WHERE p2.sku = oi.sku AND p2.legal_entity = ?
-            ORDER BY p2.is_active DESC, p2.id ASC
-            LIMIT 1
-        )
+        LEFT JOIN products p ON p.id = {$pickSql}
         WHERE oi.order_id = ?
         ORDER BY oi.category, oi.product_name
     ");
-    $items->execute([$rest['legal_entity'], $rest['legal_entity'], $order['id']]);
+    $items->execute($itemParams);
 
     roRespond([
         'order' => [
@@ -4615,7 +4648,12 @@ if ($roAction === 'repeat-order' && $method === 'POST') {
 
     if (!$sourceOrderId || !$deliveryDate) roRespond(['error' => 'Не указан исходный заказ или дата'], 400);
 
-    // Получаем позиции исходного заказа
+    // Получаем позиции исходного заказа.
+    // Справочник товаров — по группе юрлиц (см. productsPickIdSql).
+    $repeatParams = [];
+    $pickSql = productsPickIdSql('oi.sku', $rest['legal_entity_group'] ?? 'BK_VM', 'o.legal_entity', $repeatParams);
+    $repeatParams[] = $sourceOrderId;
+    $repeatParams[] = $rest['restaurant_number'];
     $s = $pdo->prepare("
         SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
                COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity
@@ -4626,16 +4664,10 @@ if ($roAction === 'repeat-order' && $method === 'POST') {
            AND t.category = oi.category
            AND t.sku = oi.sku
            AND t.is_active = 1
-        LEFT JOIN products p ON p.id = (
-            SELECT p2.id
-            FROM products p2
-            WHERE p2.sku = oi.sku AND p2.legal_entity = o.legal_entity
-            ORDER BY p2.is_active DESC, p2.id ASC
-            LIMIT 1
-        )
+        LEFT JOIN products p ON p.id = {$pickSql}
         WHERE o.id = ? AND o.restaurant_number = ?
     ");
-    $s->execute([$sourceOrderId, $rest['restaurant_number']]);
+    $s->execute($repeatParams);
     $items = $s->fetchAll();
 
     if (empty($items)) roRespond(['error' => 'Исходный заказ не найден или пуст'], 404);
@@ -5104,6 +5136,12 @@ if (strpos($roAction, 'admin') === 0) {
         $weightData = [];
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
+            // Справочник товаров — по группе юрлиц (см. productsPickIdSql):
+            // по одному юрлицу «Воглия Матта» не находила ничего и в сводке
+            // стояли 0 кг и 0 паллет при полном заказе.
+            $wsParams = [];
+            $pickSql = productsPickIdSql('oi.sku', $entityGroup, 'o.legal_entity', $wsParams);
+            foreach ($orderIds as $oid) $wsParams[] = $oid;
             $ws = $pdo->prepare("
                 SELECT oi.order_id, oi.category,
                        SUM(oi.quantity * COALESCE(p.weight_brutto, 0)) as total_weight,
@@ -5119,17 +5157,11 @@ if (strpos($roAction, 'admin') === 0) {
                    AND t.category = oi.category
                    AND t.sku = oi.sku
                    AND t.is_active = 1
-            LEFT JOIN products p ON p.id = (
-                SELECT p2.id
-                FROM products p2
-                WHERE p2.sku = oi.sku AND p2.legal_entity = o.legal_entity
-                ORDER BY p2.is_active DESC, p2.id ASC
-                LIMIT 1
-            )
+            LEFT JOIN products p ON p.id = {$pickSql}
             WHERE oi.order_id IN ({$ph})
             GROUP BY oi.order_id, oi.category
         ");
-            $ws->execute($orderIds);
+            $ws->execute($wsParams);
             foreach ($ws->fetchAll() as $row) {
                 $oid = $row['order_id'];
                 if (!isset($weightData[$oid])) {
@@ -5211,6 +5243,12 @@ if (strpos($roAction, 'admin') === 0) {
             roRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
 
+        // Цены и справочник товаров живут на ГРУППЕ, шаблон — на своём юрлице.
+        $orderGroup = $order['legal_entity_group'] ?? getEntityGroup($order['legal_entity']);
+        $itemParams = [$orderGroup, $order['legal_entity']];
+        $pickSql = productsPickIdSql('oi.sku', $orderGroup, '?', $itemParams);
+        $itemParams[] = $order['legal_entity'];
+        $itemParams[] = $order['id'];
         $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
                    (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity_group = ? AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
             FROM ro_order_items oi
@@ -5219,17 +5257,9 @@ if (strpos($roAction, 'admin') === 0) {
                AND t.category = oi.category
                AND t.sku = oi.sku
                AND t.is_active = 1
-            LEFT JOIN products p ON p.id = (
-                SELECT p2.id
-                FROM products p2
-                WHERE p2.sku = oi.sku AND p2.legal_entity = ?
-                ORDER BY p2.is_active DESC, p2.id ASC
-                LIMIT 1
-            )
+            LEFT JOIN products p ON p.id = {$pickSql}
             WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
-        // Первый параметр — group для product_prices (цены живут на группе),
-        // остальные — конкретное юрлицо для ro_templates и products.
-        $items->execute([$order['legal_entity_group'] ?? getEntityGroup($order['legal_entity']), $order['legal_entity'], $order['legal_entity'], $order['id']]);
+        $items->execute($itemParams);
 
         $order['items'] = $items->fetchAll();
         roRespond(['order' => $order]);
@@ -5674,11 +5704,15 @@ if (strpos($roAction, 'admin') === 0) {
         $category = $_GET['category'] ?? null;
         roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
+        // Кратность — из общего справочника группы (см. productsPickIdSql).
+        $tplParams = [];
+        $tplPick = productsPickIdSql('t.sku', getEntityGroup($le), '?', $tplParams, true);
+        $tplParams[] = $le;
         $q = "SELECT t.*, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity
             FROM ro_templates t
-            LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
+            LEFT JOIN products p ON p.id = {$tplPick}
             WHERE t.legal_entity = ?";
-        $params = [$le, $le];
+        $params = array_merge($tplParams, [$le]);
         if ($category) { $q .= " AND t.category = ?"; $params[] = $category; }
         $q .= " ORDER BY t.category, t.sort_order, t.product_name";
         $s = $pdo->prepare($q);
@@ -5807,17 +5841,22 @@ if (strpos($roAction, 'admin') === 0) {
                 roRespond(['error' => 'Нет данных об остатках склада для «' . $le . '». Сначала загрузите файл остатков на вкладке «Остатки склада».'], 400);
             }
 
+            // Остатки — по своему юрлицу, карточка товара — из общего
+            // справочника группы: у «Воглии Матты» своих карточек нет и
+            // список товаров получался пустым.
+            $sbEntities = getEntitiesInGroup(getEntityGroup($le));
+            $sbPh = implode(',', array_fill(0, count($sbEntities), '?'));
             $s = $pdo->prepare("
                 SELECT DISTINCT p.sku, p.name AS product_name, COALESCE(p.multiplicity, 1) AS multiplicity
                 FROM ro_stock_balances sb
-                JOIN products p ON p.sku = sb.sku AND p.legal_entity = sb.legal_entity AND p.is_active = 1
+                JOIN products p ON p.sku = sb.sku AND p.legal_entity IN ({$sbPh}) AND p.is_active = 1
                 WHERE sb.legal_entity = ?
                   AND sb.balance_date = ?
                   AND sb.quantity > 0
                   AND p.category = ?
                 ORDER BY p.name
             ");
-            $s->execute([$le, $latestDate, $category]);
+            $s->execute(array_merge($sbEntities, [$le, $latestDate, $category]));
             $products = $s->fetchAll();
 
             // DISTINCT снимает только полные повторы строк: если в справочнике на один
@@ -6216,7 +6255,18 @@ if (strpos($roAction, 'admin') === 0) {
                            WHERE pp.sku = oi.sku AND pp.legal_entity_group = o2.legal_entity_group AND pp.price_type = 'deposit'
                            ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
                 FROM ro_order_items oi
-                LEFT JOIN products p ON p.sku = oi.sku
+                -- Артикул без фильтра по юрлицу задваивал строку: 10 артикулов
+                -- заведены и у BK_VM, и у «Пиццы Стар». Берём одну карточку —
+                -- из группы заказа, активную и по возможности своего юрлица.
+                LEFT JOIN products p ON p.id = (
+                    SELECT p2.id
+                    FROM products p2
+                    JOIN ro_orders o3 ON o3.id = oi.order_id
+                    WHERE p2.sku = oi.sku
+                      AND p2.legal_entity_group = o3.legal_entity_group
+                    ORDER BY p2.is_active DESC, (p2.legal_entity = o3.legal_entity) DESC, p2.id ASC
+                    LIMIT 1
+                )
                 WHERE oi.order_id IN ({$ph}){$catWhere} ORDER BY oi.category, oi.product_name");
             $st->execute($catParams);
             $items = $st->fetchAll();
@@ -6323,7 +6373,9 @@ if (strpos($roAction, 'admin') === 0) {
                     FROM products p2
                     WHERE p2.sku = oi.sku
                       AND p2.legal_entity_group = o.legal_entity_group
-                    ORDER BY (p2.legal_entity = o.legal_entity) DESC, p2.is_active DESC, p2.id ASC
+                    -- Активная карточка важнее «своей»: у «Воглии Матты» все
+                    -- её строки в products неактивны и без части параметров.
+                    ORDER BY p2.is_active DESC, (p2.legal_entity = o.legal_entity) DESC, p2.id ASC
                     LIMIT 1
                 )
                 WHERE oi.order_id IN ({$ph}) AND oi.quantity > 0 ORDER BY oi.category, oi.product_name");
@@ -6416,9 +6468,22 @@ if (strpos($roAction, 'admin') === 0) {
         if ($le) roEnsureGroupAccess($sessionUser, getEntityGroup($le));
         if (!$search || strlen($search) < 2 || !$le) roRespond(['products' => []]);
         $like = "%{$search}%";
-        $s = $pdo->prepare("SELECT sku, name, category, qty_per_box, multiplicity FROM products WHERE legal_entity = ? AND is_active = 1 AND (name LIKE ? OR sku LIKE ?) ORDER BY name LIMIT 50");
-        $s->execute([$le, $like, $like]);
-        roRespond(['products' => $s->fetchAll()]);
+        // Справочник общий на группу: при выборе «Воглии Матты» поиск товаров
+        // для шаблона не находил ничего.
+        $sEntities = getEntitiesInGroup(getEntityGroup($le));
+        $sPh = implode(',', array_fill(0, count($sEntities), '?'));
+        $s = $pdo->prepare("SELECT sku, name, category, qty_per_box, multiplicity FROM products
+            WHERE legal_entity IN ({$sPh}) AND is_active = 1 AND (name LIKE ? OR sku LIKE ?)
+            ORDER BY name LIMIT 50");
+        $s->execute(array_merge($sEntities, [$like, $like]));
+        $seen = [];
+        $found = [];
+        foreach ($s->fetchAll() as $row) {
+            if (isset($seen[$row['sku']])) continue;
+            $seen[$row['sku']] = true;
+            $found[] = $row;
+        }
+        roRespond(['products' => $found]);
     }
 
     // --- Список всех сессий ---

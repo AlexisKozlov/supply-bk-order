@@ -199,8 +199,18 @@ if ($fn === 'get_stock_skus') {
             respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
     }
-    $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box, p.analog_group FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.legal_entity = ? AND a.stock > 0");
-    $s->execute([$le]);
+    // Остатки — по своему юрлицу, карточка товара — из общего справочника
+    // группы: у «Воглии Матты» своих карточек в products почти нет, и её
+    // позиции приезжали без названия и фасовки.
+    $stockParams = [];
+    $stockPick = productsPickIdSql('a.sku', getEntityGroup($le), '?', $stockParams, true);
+    $stockParams[] = $le;
+    $stockParams[] = $le;
+    $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box, p.analog_group
+        FROM analysis_data a
+        LEFT JOIN products p ON p.id = {$stockPick}
+        WHERE a.legal_entity = ? AND a.stock > 0");
+    $s->execute($stockParams);
     $rows = $s->fetchAll();
     $result = [];
     foreach ($rows as $r) {
@@ -236,21 +246,32 @@ if ($fn === 'get_group_stock_by_sku') {
         }
     }
     // Группа аналогов искомого артикула (любая активность).
-    $g = $pdo->prepare("SELECT analog_group FROM products WHERE sku = ? AND legal_entity = ? AND analog_group IS NOT NULL AND analog_group != '' LIMIT 1");
-    $g->execute([$sku, $le]);
+    // Справочник общий на группу — иначе у «Воглии Матты» группа аналогов
+    // не находилась никогда.
+    $grpEntities = getEntitiesInGroup(getEntityGroup($le));
+    $grpPh = implode(',', array_fill(0, count($grpEntities), '?'));
+    $g = $pdo->prepare("SELECT analog_group FROM products
+        WHERE sku = ? AND legal_entity IN ({$grpPh}) AND analog_group IS NOT NULL AND analog_group != ''
+        ORDER BY is_active DESC, (legal_entity = ?) DESC, id ASC LIMIT 1");
+    $g->execute(array_merge([$sku], $grpEntities, [$le]));
     $group = $g->fetchColumn();
     if (!$group) respond(['group' => null, 'items' => []]);
     // Активные товары этой группы с остатком.
+    // Остаток берём строго по своему юрлицу, карточку товара — по группе.
     $q = $pdo->prepare("
         SELECT p.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) AS qty_per_box
         FROM products p
-        JOIN analysis_data a ON a.sku = p.sku AND a.legal_entity = p.legal_entity
-        WHERE p.analog_group = ? AND p.legal_entity = ? AND p.is_active = 1 AND a.stock > 0
+        JOIN analysis_data a ON a.sku = p.sku AND a.legal_entity = ?
+        WHERE p.analog_group = ? AND p.legal_entity IN ({$grpPh}) AND p.is_active = 1 AND a.stock > 0
         ORDER BY a.stock DESC
     ");
-    $q->execute([$group, $le]);
+    $q->execute(array_merge([$le, $group], $grpEntities));
     $items = [];
+    $seenSku = [];
     foreach ($q->fetchAll() as $r) {
+        // Один артикул может быть заведён у обоих юрлиц группы — показываем раз.
+        if (isset($seenSku[$r['sku']])) continue;
+        $seenSku[$r['sku']] = true;
         $qpb = floatval($r['qty_per_box']) ?: 1;
         $items[] = ['sku' => $r['sku'], 'name' => $r['name'], 'stock' => round(floatval($r['stock']) / $qpb, 1)];
     }

@@ -976,6 +976,11 @@ if ($saAction === 'admin') {
 
         // is_active по products намеренно не фильтруем — справочные параметры
         // нужны и для скрытых товаров (вкл. в шаблоне).
+        // Справочник общий на группу (см. productsPickIdSql): по одному юрлицу
+        // шаблон «Воглии Матты» приезжал без внешнего кода и группы аналогов.
+        $tplParams = [];
+        $tplPick = productsPickIdSql('t.sku', getEntityGroup($le), '?', $tplParams);
+        $tplParams[] = $le;
         $q      = "
             SELECT
                 t.*,
@@ -983,13 +988,11 @@ if ($saAction === 'admin') {
                 p.external_code,
                 p.analog_group
             FROM ro_templates t
-            LEFT JOIN products p
-                ON p.sku = t.sku
-               AND p.legal_entity = ?
+            LEFT JOIN products p ON p.id = {$tplPick}
             WHERE t.legal_entity = ?
               AND t.is_active = 1
         ";
-        $params = [$le, $le];
+        $params = array_merge($tplParams, [$le]);
 
         if ($category) {
             $q      .= ' AND t.category = ?';

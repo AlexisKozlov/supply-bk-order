@@ -44,6 +44,40 @@ function getEntitiesInGroup($group) {
     return ['ООО "Бургер БК"', 'ООО "Воглия Матта"'];
 }
 
+/**
+ * Подзапрос «взять одну карточку товара из общего справочника products».
+ *
+ * products и suppliers — ОБЩИЙ справочник группы: физически он лежит под
+ * главным юрлицом (у BK_VM это «Бургер БК», 183 активных товара). Если
+ * джойнить его по одному юрлицу, «Воглия Матта» остаётся ни с чем: у неё в
+ * products всего 6 строк и все неактивные. Товар приезжает пустым — без веса,
+ * паллет и кратности, и в сводке по дню у ресторана №3 стояло 0 паллет при
+ * полном заказе на 47 позиций.
+ *
+ * Отдаёт id одной карточки: сначала активные, при равенстве — карточка своего
+ * юрлица. Одна строка на артикул, поэтому JOIN не размножает позиции заказа.
+ *
+ * $skuExpr       — выражение с артикулом из внешнего запроса, например 'oi.sku'
+ * $ownEntityExpr — выражение со «своим» юрлицом: 'o.legal_entity' или '?'.
+ *                  Для '?' параметр дописывает вызывающий код СРАЗУ после
+ *                  вызова — в SQL он идёт следом за списком юрлиц группы.
+ * $params        — массив параметров запроса, функция дописывает юрлица группы
+ * $activeOnly    — брать только активные карточки. Ставить там, где так было
+ *                  и раньше: снятый с каталога товар не должен вдруг начать
+ *                  подсказывать фасовку и кратность там, где их не показывали.
+ */
+function productsPickIdSql(string $skuExpr, string $group, string $ownEntityExpr, array &$params, bool $activeOnly = false): string {
+    $entities = getEntitiesInGroup($group);
+    $ph = implode(',', array_fill(0, count($entities), '?'));
+    foreach ($entities as $e) $params[] = $e;
+    $activeSql = $activeOnly ? ' AND p2.is_active = 1' : '';
+    return "(SELECT p2.id
+               FROM products p2
+              WHERE p2.sku = {$skuExpr} AND p2.legal_entity IN ({$ph}){$activeSql}
+              ORDER BY p2.is_active DESC, ({$ownEntityExpr} = p2.legal_entity) DESC, p2.id ASC
+              LIMIT 1)";
+}
+
 // Применяет фильтр "legal_entity IN (список полных названий группы)" к SQL-запросу.
 // Для таблиц с данными (в которых нет legal_entity_group). $group — 'BK_VM' | 'PS'.
 function applyEntityTextFilter($group, &$where, &$params, $column = 'legal_entity') {

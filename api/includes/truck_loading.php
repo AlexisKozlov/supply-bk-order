@@ -457,7 +457,9 @@ function tlGetOrdersForDate($pdo, $date) {
             FROM products p2
             WHERE p2.sku = oi.sku
               AND p2.legal_entity_group = o.legal_entity_group
-            ORDER BY p2.is_active DESC, p2.id ASC
+            -- Порядок отбора тот же, что в restaurant_orders.php, иначе один
+            -- заказ снова даст разные паллеты в двух разделах.
+            ORDER BY p2.is_active DESC, (p2.legal_entity = o.legal_entity) DESC, p2.id ASC
             LIMIT 1
         )
         WHERE oi.order_id IN ({$ph})
