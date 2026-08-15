@@ -114,7 +114,7 @@ import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
-import { toLocalDateStr } from '@/lib/utils.js';
+import { toLocalDateStr, applyEntityGroupFilter } from '@/lib/utils.js';
 
 const orderStore = useOrderStore();
 const toast = useToastStore();
@@ -184,13 +184,23 @@ async function loadData() {
 
   try {
     // Загружаем товары
-    const { data: products, error: pErr } = await db.from('products').select('sku,name,supplier,qty_per_box,category').eq('legal_entity', le);
+    // Справочник товаров — по ГРУППЕ юрлиц: он общий и физически лежит под
+    // главным юрлицом. По одному юрлицу «Воглия Матта» получала пустой список,
+    // и весь ABC/XYZ у неё был пустым. Рабочие данные ниже (заказы, расход,
+    // product_adu) по-прежнему строго по своему юрлицу.
+    const { data: products, error: pErr } = await applyEntityGroupFilter(
+      db.from('products').select('sku,name,supplier,qty_per_box,category,is_active').order('is_active', { ascending: false }),
+      le,
+    );
     if (gen !== _loadGen) return;
     if (pErr) { toast.error('Ошибка загрузки товаров', pErr); return; }
     if (!products?.length) { items.value = []; return; }
 
     const prodMap = {};
     for (const p of products) {
+      // Один артикул бывает заведён у обоих юрлиц группы — берём первую
+      // карточку, активные идут раньше.
+      if (prodMap[p.sku]) continue;
       prodMap[p.sku] = { sku: p.sku, name: p.name, supplier: p.supplier || '', qtyPerBox: parseFloat(p.qty_per_box) || 1, category: p.category || '', totalQty: 0, cv: null };
     }
 

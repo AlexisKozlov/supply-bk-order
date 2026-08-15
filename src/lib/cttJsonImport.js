@@ -219,11 +219,14 @@ export async function resolveCttPreorderRows({ rows, legalEntity, db, preorderLa
   const productMapByGtin = new Map();
   const productMapBySku = new Map();
 
+  // Справочник товаров ищем по ГРУППЕ юрлиц: он общий и лежит под главным
+  // юрлицом. По одному юрлицу «Воглия Матта» не находила ни одного товара,
+  // и вес в импорте оставался пустым.
   if (gtins.length) {
     const { data, error } = await db
       .from('products')
       .select('sku,name,gtin,category,weight_brutto,legal_entity')
-      .eq('legal_entity', legalEntity)
+      .eq('legal_entity_group', getEntityGroupCode(legalEntity))
       .eq('is_active', 1)
       .in('gtin', gtins);
     if (error) throw new Error(error);
@@ -241,7 +244,7 @@ export async function resolveCttPreorderRows({ rows, legalEntity, db, preorderLa
       const { data, error } = await db
         .from('products')
         .select('sku,name,gtin,category,weight_brutto,legal_entity')
-        .eq('legal_entity', legalEntity)
+        .eq('legal_entity_group', getEntityGroupCode(legalEntity))
         .eq('is_active', 1)
         .in('sku', missingSkus);
       if (error) throw new Error(error);
