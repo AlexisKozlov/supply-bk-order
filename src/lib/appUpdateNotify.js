@@ -5,6 +5,39 @@
 
 const RECHECK_INTERVAL_MS = 30 * 1000;
 
+// Кусок приложения (js-чанк или CSS) не догрузился — обычно потому, что
+// вышла новая версия и старые файлы уже удалены. У каждого браузера свой
+// текст ошибки, поэтому держим все известные варианты в одном месте:
+// раньше список был продублирован в трёх файлах и разъезжался.
+const CHUNK_ERROR_PATTERNS = [
+  'Failed to fetch dynamically imported module',
+  'Unable to preload CSS',
+  'Importing a module script failed',
+  'error loading dynamically imported module',
+];
+
+// Запрос вообще не ушёл: телефон потерял связь, Wi-Fi переключился, iOS
+// усыпила приложение. Это не поломка кода. Safari пишет «Load failed»,
+// Chrome — «Failed to fetch», Firefox — «NetworkError…».
+const NETWORK_ERROR_PATTERNS = [
+  'Load failed',
+  'Failed to fetch',
+  'NetworkError when attempting to fetch',
+  'The network connection was lost',
+  'The Internet connection appears to be offline',
+  'Сервер недоступен',
+  'Сервер не отвечает',
+];
+
+function matchesAny(input, patterns) {
+  const msg = typeof input === 'string' ? input : (input?.message || String(input || ''));
+  if (!msg) return false;
+  return patterns.some(p => msg.includes(p));
+}
+
+export function isChunkLoadError(input) { return matchesAny(input, CHUNK_ERROR_PATTERNS); }
+export function isNetworkError(input) { return matchesAny(input, NETWORK_ERROR_PATTERNS); }
+
 // Идёт ли сейчас сборка на сервере. Если /sw.js ещё не появился (404) или
 // nginx отдаёт 503 — значит билд в процессе и реальной «новой версии» пока
 // нет.

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { useUserStore, loadRbacConfig } from '@/stores/userStore.js';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { syncPwaIdentity } from '@/lib/pwaManifest.js';
+import { isChunkLoadError } from '@/lib/appUpdateNotify.js';
 
 const APP_TITLE = 'Портал закупок';
 
@@ -245,13 +246,10 @@ export const router = createRouter({
 // это сбрасывает несохранённые данные пользователя. Показываем тост и баннер
 // «Обновить», пользователь сам решит, когда перезагрузить.
 router.onError((error) => {
-  const msg = error?.message || '';
-  if (
-    msg.includes('Failed to fetch dynamically imported module') ||
-    msg.includes('Unable to preload CSS') ||
-    msg.includes('Importing a module script failed') ||
-    msg.includes('error loading dynamically imported module')
-  ) {
+  // Тексты ошибок разных браузеров держим в одном месте (appUpdateNotify.js).
+  // Safari пишет просто «Load failed» — его ловит слушатель vite:preloadError
+  // в main.js: здесь по такому тексту чанк от обрыва связи в guard не отличить.
+  if (isChunkLoadError(error)) {
     // Импортируем динамически, чтобы не тащить toastStore в граф router'а
     import('@/lib/appUpdateNotify.js').then(m => m.notifyAppUpdateRequired()).catch(() => {});
   }

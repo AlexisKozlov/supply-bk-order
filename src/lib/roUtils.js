@@ -94,6 +94,9 @@ export async function roFetch(url, opts = {}) {
     res = await fetch(url, { method, headers, body, signal: ctrl.signal });
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('Запрос слишком долгий — попробуйте позже');
+    // Запрос вообще не ушёл (нет связи). Отдаём понятный текст вместо
+    // браузерного «Load failed» / «Failed to fetch».
+    if (e instanceof TypeError) throw new Error('Сервер недоступен');
     throw e;
   } finally {
     clearTimeout(tid);

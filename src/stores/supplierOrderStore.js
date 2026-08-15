@@ -14,7 +14,14 @@ function buildHeaders() {
 
 async function api(path, opts = {}) {
   const url = `${API_BASE}/${path}`;
-  const res = await fetch(url, { headers: buildHeaders(), ...opts });
+  let res;
+  try {
+    res = await fetch(url, { headers: buildHeaders(), ...opts });
+  } catch (e) {
+    // Без этого при обрыве связи наверх уходил браузерный текст («Load failed»
+    // в Safari), и человек видел его как непонятную ошибку.
+    throw new Error('Сервер недоступен');
+  }
   const text = await res.text();
   let data;
   try {

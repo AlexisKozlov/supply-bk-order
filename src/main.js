@@ -5,7 +5,7 @@ import { router } from './router/index.js';
 import { setAuthErrorHandler } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { notifyAppUpdateRequired } from '@/lib/appUpdateNotify.js';
+import { notifyAppUpdateRequired, isChunkLoadError, isNetworkError } from '@/lib/appUpdateNotify.js';
 import { db } from '@/lib/apiClient.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import './styles/tokens.css';
@@ -68,6 +68,10 @@ function shouldIgnoreError(message, source) {
   if (msg.includes('ResizeObserver loop')) return true;
   // AbortError при отмене fetch (например, при навигации или offline) — это норма.
   if (msg === 'AbortError' || msg.includes('The operation was aborted') || msg.includes('signal is aborted')) return true;
+  // Запрос не ушёл из-за связи (телефон в лифте, iOS усыпила приложение).
+  // Это не ошибка портала, а состояние сети — в журнал ошибок не пишем,
+  // иначе он забивается «Load failed» с телефонов и настоящие баги теряются.
+  if (isNetworkError(msg)) return true;
   return false;
 }
 
@@ -84,13 +88,8 @@ window.onunhandledrejection = (event) => {
   const reason = event.reason;
   const msg = reason?.message || String(reason);
   const stack = reason?.stack || '';
-  // Ошибки загрузки модулей/CSS после деплоя новой версии — перезагружаем страницу
-  if (
-    msg.includes('Failed to fetch dynamically imported module') ||
-    msg.includes('Unable to preload CSS') ||
-    msg.includes('Importing a module script failed') ||
-    msg.includes('error loading dynamically imported module')
-  ) {
+  // Ошибки загрузки модулей/CSS после деплоя новой версии — предлагаем обновиться
+  if (isChunkLoadError(msg)) {
     notifyAppUpdateRequired();
     return;
   }
@@ -98,16 +97,22 @@ window.onunhandledrejection = (event) => {
   logErrorToServer('error', `Unhandled rejection: ${msg}`, stack || null);
 };
 
+// Vite сам сообщает о том, что кусок приложения не догрузился, — и делает это
+// одинаково во всех браузерах. Это надёжнее разбора текста ошибки: Safari
+// на iPhone пишет просто «Load failed», по такому тексту чанк от обрыва связи
+// не отличить, и человек вместо кнопки «Обновить» видел пустой экран.
+// preventDefault не зовём: пусть Vite бросит ошибку дальше, как обычно.
+if (typeof window !== 'undefined') {
+  window.addEventListener('vite:preloadError', () => {
+    notifyAppUpdateRequired();
+  });
+}
+
 // Перехват ошибок Vue-компонентов
 app.config.errorHandler = (err, instance, info) => {
   const errMsg = err?.message || String(err || '');
   // Ошибки загрузки модулей/CSS после деплоя — то же поведение, что и в onunhandledrejection
-  if (
-    errMsg.includes('Failed to fetch dynamically imported module') ||
-    errMsg.includes('Unable to preload CSS') ||
-    errMsg.includes('Importing a module script failed') ||
-    errMsg.includes('error loading dynamically imported module')
-  ) {
+  if (isChunkLoadError(errMsg)) {
     notifyAppUpdateRequired();
     return;
   }
