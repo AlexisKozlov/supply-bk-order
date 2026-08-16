@@ -34,11 +34,14 @@
       <button class="db-tab" :class="{ active: activeTab==='analogs' }" @click="switchToAnalogs">
         <BkIcon name="link" size="sm"/> Аналоги <span class="db-tab-count">{{ analogGroups.length }}</span>
       </button>
+      <!-- Рестораны и рецептуры грузятся только при открытии вкладки. Пока не
+           загрузились, счётчик не показываем: раньше висел «0», и казалось,
+           что ресторанов нет вообще (их 59). -->
       <button class="db-tab" :class="{ active: activeTab==='restaurants' }" @click="switchToRestaurants">
-        <BkIcon name="schedule" size="sm"/> Рестораны <span class="db-tab-count">{{ restaurantStore.restaurants.length }}</span>
+        <BkIcon name="schedule" size="sm"/> Рестораны <span v-if="restaurantsLoaded" class="db-tab-count">{{ restaurantStore.restaurants.length }}</span>
       </button>
       <button class="db-tab" :class="{ active: activeTab==='recipes' }" @click="switchToRecipes">
-        <BkIcon name="note" size="sm"/> Рецептуры <span class="db-tab-count">{{ recipes.length }}</span>
+        <BkIcon name="note" size="sm"/> Рецептуры <span v-if="recipesLoaded" class="db-tab-count">{{ recipes.length }}</span>
       </button>
     </div>
 
@@ -496,6 +499,8 @@ function toggleWeekday(idx, checked) {
 }
 let _restModalSnapshot = '';
 const recipes = ref([]);
+const recipesLoaded = ref(false);
+const restaurantsLoaded = ref(false);
 let _recLoadId = 0;
 const recipeDetail = ref({ show: false, recipe: null, ingredients: [], loading: false });
 
@@ -634,14 +639,17 @@ watch(() => route.query, (q) => {
 // Догрузка данных при смене вкладки (включая первую загрузку с URL `?tab=...`).
 watch(activeTab, (t) => {
   if (t === 'suppliers') loadSuppliers();
-  else if (t === 'restaurants') restaurantStore.load(orderStore.settings.legalEntity);
+  else if (t === 'restaurants') loadRestaurants();
   else if (t === 'recipes' && !recipes.value.length) loadRecipes();
 });
 
 watch(() => orderStore.settings.legalEntity, () => {
+  // Данные другой компании — счётчики закрытых вкладок становятся неверными.
+  restaurantsLoaded.value = false;
+  recipesLoaded.value = false;
   if (activeTab.value === 'products' || activeTab.value === 'analogs') loadProducts();
   if (activeTab.value === 'suppliers' || activeTab.value === 'analogs') loadSuppliers();
-  if (activeTab.value === 'restaurants') { restaurantStore.invalidate(); restaurantStore.load(orderStore.settings.legalEntity); }
+  if (activeTab.value === 'restaurants') { restaurantStore.invalidate(); loadRestaurants(); }
   if (activeTab.value === 'recipes') { recipes.value = []; loadRecipes(); }
 });
 
@@ -649,7 +657,7 @@ onMounted(() => {
   loadProducts();
   loadSuppliers();
   // Догружаем данные текущей вкладки, если она пришла из URL `?tab=...`.
-  if (activeTab.value === 'restaurants') restaurantStore.load(orderStore.settings.legalEntity);
+  if (activeTab.value === 'restaurants') loadRestaurants();
   if (activeTab.value === 'recipes' && !recipes.value.length) loadRecipes();
   if (typeof route.query.search === 'string') searchQuery.value = route.query.search;
   if (route.query.action === 'new-product') {
@@ -753,9 +761,14 @@ async function removeFromGroup(p) {
 
 async function switchToAnalogs() { activeTab.value = 'analogs'; if (!products.value.length) await loadProducts(); }
 
+async function loadRestaurants() {
+  await restaurantStore.load(orderStore.settings.legalEntity);
+  restaurantsLoaded.value = true;
+}
+
 async function switchToRestaurants() {
   activeTab.value = 'restaurants';
-  await restaurantStore.load(orderStore.settings.legalEntity);
+  await loadRestaurants();
 }
 
 async function switchToRecipes() {
@@ -785,6 +798,7 @@ async function loadRecipes() {
       }
     });
     recipes.value = (data || []).map(r => ({ ...r, ingredients_count: countMap[r.id] || 0 }));
+    recipesLoaded.value = true;
   } finally { if (myId === _recLoadId) loading.value = false; }
 }
 
@@ -830,7 +844,7 @@ async function saveRestaurant() {
     await restaurantStore.saveRestaurant(data);
     restModal.value.show = false;
     restaurantStore.invalidate();
-    await restaurantStore.load(orderStore.settings.legalEntity);
+    await loadRestaurants();
     toast.success('Ресторан сохранён');
   } catch (e) {
     toast.error('Ошибка сохранения');

@@ -560,7 +560,7 @@ function faqToolStock(string $query, string $entity): string
     $sql = "SELECT a.sku, p.name, a.stock, a.consumption, a.period_days,
                    COALESCE(p.unit_of_measure,'шт') uom
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
+            LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('a.sku', 'a.legal_entity') . "
             WHERE a.legal_entity = ? AND {$where}
             ORDER BY a.stock DESC LIMIT 15";
     $st = $pdo->prepare($sql);

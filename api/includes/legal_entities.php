@@ -78,6 +78,26 @@ function productsPickIdSql(string $skuExpr, string $group, string $ownEntityExpr
               LIMIT 1)";
 }
 
+/**
+ * То же, что productsPickIdSql, но когда юрлицо приходит КОЛОНКОЙ и в одном
+ * запросе могут смешаться разные группы (телеграм-бот, дашборд, аналитика:
+ * `... a.legal_entity ...` без внешнего фильтра). Параметров не требует.
+ *
+ * Заменяет старое условие `p.legal_entity = a.legal_entity`: справочник общий
+ * на группу, у «Воглии Матты» своих карточек в products почти нет (6 штук, все
+ * архивные), и все её строки приезжали без названия и фасовки.
+ *
+ * Группа считается тем же правилом, что и getEntityGroup() выше.
+ */
+function productsPickIdByEntityColSql(string $skuExpr, string $entityColExpr): string {
+    $groupSql = "(CASE WHEN {$entityColExpr} LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)";
+    return "(SELECT p2.id
+               FROM products p2
+              WHERE p2.sku = {$skuExpr} AND p2.legal_entity_group = {$groupSql}
+              ORDER BY p2.is_active DESC, ({$entityColExpr} = p2.legal_entity) DESC, p2.id ASC
+              LIMIT 1)";
+}
+
 // Применяет фильтр "legal_entity IN (список полных названий группы)" к SQL-запросу.
 // Для таблиц с данными (в которых нет legal_entity_group). $group — 'BK_VM' | 'PS'.
 function applyEntityTextFilter($group, &$where, &$params, $column = 'legal_entity') {

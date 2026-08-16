@@ -168,7 +168,7 @@
         }
         $st = $pdo->prepare("SELECT a.sku, p.analog_group, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1)), 1) as days_of_stock
             FROM analysis_data a
-            JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
+            JOIN products p ON p.id = " . productsPickIdByEntityColSql('a.sku', 'a.legal_entity') . "
             WHERE a.consumption > 0 AND a.stock > 0 AND a.stock / (a.consumption / GREATEST(a.period_days, 1)) <= 5 {$leWhere}
             ORDER BY days_of_stock ASC LIMIT 30");
         $st->execute($leArgs);

@@ -266,7 +266,7 @@ function toolStockCritical($maxDays, $entity) {
                    COALESCE(p.unit_of_measure, 'шт') as uom,
                    ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
+            LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('a.sku', 'a.legal_entity') . "
             WHERE a.consumption > 0 AND a.stock > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -310,7 +310,7 @@ function toolGetOrders($supplier, $days, $limit, $entity) {
         $s2 = $pdo->prepare("SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, COALESCE(p.unit_of_measure, 'шт') as uom
                 FROM order_items oi
                 LEFT JOIN orders ord ON ord.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
+                LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('oi.sku', 'ord.legal_entity') . "
                 WHERE oi.order_id = ? ORDER BY oi.name");
         $s2->execute([$o['id']]);
         $items = $s2->fetchAll();
@@ -347,7 +347,7 @@ function toolGetDeliveries($supplier, $product, $entity) {
         $itemSql = "SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, COALESCE(p.unit_of_measure, 'шт') as uom
                 FROM order_items oi
                 LEFT JOIN orders ord ON ord.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
+                LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('oi.sku', 'ord.legal_entity') . "
                 WHERE oi.order_id = ?";
         $itemParams = [$o['id']];
         if ($product) {
@@ -566,12 +566,22 @@ function toolSummary($entity) {
     $ef = $entity ? " AND legal_entity = ?" : "";
     $efW = $entity ? " WHERE legal_entity = ?" : "";
 
-    $prodCount = $pdo->prepare("SELECT COUNT(*) FROM products WHERE is_active = 1" . $ef);
-    $prodCount->execute($params);
+    // Справочник товаров — по ГРУППЕ юрлиц, заказы ниже — по одному юрлицу.
+    // Раньше и то и другое шло по одному юрлицу, и «Воглия Матта» видела нули.
+    $prodFilter = '';
+    $prodParams = [];
+    if ($entity) {
+        $prodEntities = getEntitiesInGroup(getEntityGroup($entity));
+        $prodFilter = " AND legal_entity IN (" . implode(',', array_fill(0, count($prodEntities), '?')) . ")";
+        $prodParams = $prodEntities;
+    }
+
+    $prodCount = $pdo->prepare("SELECT COUNT(DISTINCT sku) FROM products WHERE is_active = 1" . $prodFilter);
+    $prodCount->execute($prodParams);
     $result = "Активных товаров: " . $prodCount->fetchColumn() . "\n";
 
-    $suppCount = $pdo->prepare("SELECT COUNT(DISTINCT supplier) FROM products WHERE is_active = 1" . $ef);
-    $suppCount->execute($params);
+    $suppCount = $pdo->prepare("SELECT COUNT(DISTINCT supplier) FROM products WHERE is_active = 1" . $prodFilter);
+    $suppCount->execute($prodParams);
     $result .= "Поставщиков: " . $suppCount->fetchColumn() . "\n";
 
     $ordCount = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)" . str_replace('legal_entity', 'legal_entity', $ef));

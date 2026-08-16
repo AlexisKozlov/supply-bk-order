@@ -30,10 +30,10 @@
         <BkIcon name="order" size="sm"/> Протоколы (ПСЦ) <span class="db-tab-count">{{ agreements.length }}</span>
       </button>
       <button class="db-tab" :class="{ active: activeTab === 'deposits' }" @click="activeTab = 'deposits'; loadDepositList()">
-        <BkIcon name="pricing" size="sm"/> Залоговые цены <span class="db-tab-count">{{ depositList.length }}</span>
+        <BkIcon name="pricing" size="sm"/> Залоговые цены <span v-if="depositsLoaded" class="db-tab-count">{{ depositList.length }}</span>
       </button>
       <button class="db-tab" :class="{ active: activeTab === 'dynamics' }" @click="activeTab = 'dynamics'; loadDynamics()">
-        <BkIcon name="analytics" size="sm"/> Динамика цен <span class="db-tab-count">{{ dynamicsStats.total }}</span>
+        <BkIcon name="analytics" size="sm"/> Динамика цен <span v-if="dynamicsLoaded" class="db-tab-count">{{ dynamicsStats.total }}</span>
       </button>
     </div>
 
@@ -1505,6 +1505,10 @@ async function doDepositImport() {
 
 // === Вкладка «Залоговые цены» ===
 const depositList = ref([]);
+// Залоги и динамика грузятся только при открытии вкладки. Пока не загрузились,
+// счётчик не показываем: раньше висел «0», хотя залоговых цен 165.
+const depositsLoaded = ref(false);
+const dynamicsLoaded = ref(false);
 const depositLoading = ref(false);
 
 async function loadDepositList() {
@@ -1515,6 +1519,7 @@ async function loadDepositList() {
     const { data, error } = await db.rpc('get_deposit_prices', { legal_entity: le });
     if (error) { toast.error('Ошибка', error); return; }
     depositList.value = data?.prices || [];
+    depositsLoaded.value = true;
   } finally {
     depositLoading.value = false;
   }
@@ -1879,6 +1884,9 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
   prices.value = [];
   agreements.value = [];
   dynamicsData.value = [];
+  // Данные другой компании — счётчики закрытых вкладок становятся неверными.
+  depositsLoaded.value = false;
+  dynamicsLoaded.value = false;
   await supplierStore.loadSuppliers(le);
   await loadPrices();
   loadAgreements();
@@ -1936,6 +1944,7 @@ async function loadDynamics() {
       .limit(200);
     if (error) { toast.error('Ошибка', error); return; }
     dynamicsData.value = data || [];
+    dynamicsLoaded.value = true;
   } catch (e) {
     toast.error('Ошибка загрузки', e.message);
   } finally {

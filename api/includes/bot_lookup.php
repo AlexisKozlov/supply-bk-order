@@ -76,14 +76,25 @@ function gatherContext($user) {
     $params = [];
     if ($entity) { $params[] = $entity; }
 
+    // Справочник товаров — по ГРУППЕ юрлиц, заказы ниже — по одному юрлицу.
+    // Раньше и то и другое шло по одному юрлицу, и «Воглия Матта» получала
+    // «Всего активных товаров: 0».
+    $prodFilter = '';
+    $prodParams = [];
+    if ($entity) {
+        $prodEntities = getEntitiesInGroup(getEntityGroup($entity));
+        $prodFilter = " AND legal_entity IN (" . implode(',', array_fill(0, count($prodEntities), '?')) . ")";
+        $prodParams = $prodEntities;
+    }
+
     // Общая статистика
-    $sql = "SELECT COUNT(*) as cnt FROM products WHERE is_active = 1" . ($entity ? " AND legal_entity = ?" : "");
-    $s = $pdo->prepare($sql); $s->execute($params);
+    $sql = "SELECT COUNT(DISTINCT sku) as cnt FROM products WHERE is_active = 1" . $prodFilter;
+    $s = $pdo->prepare($sql); $s->execute($prodParams);
     $prodCount = $s->fetch()['cnt'];
     $context .= "Всего активных товаров: {$prodCount}\n";
 
-    $sql = "SELECT COUNT(DISTINCT supplier) as cnt FROM products WHERE is_active = 1" . ($entity ? " AND legal_entity = ?" : "");
-    $s = $pdo->prepare($sql); $s->execute($params);
+    $sql = "SELECT COUNT(DISTINCT supplier) as cnt FROM products WHERE is_active = 1" . $prodFilter;
+    $s = $pdo->prepare($sql); $s->execute($prodParams);
     $suppCount = $s->fetch()['cnt'];
     $context .= "Поставщиков: {$suppCount}\n";
 
@@ -110,7 +121,7 @@ function gatherContext($user) {
 
     // Низкие остатки (из analysis_data)
     $sql = "SELECT a.sku, p.name, a.stock FROM analysis_data a
-            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
+            LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('a.sku', 'a.legal_entity') . "
             WHERE a.stock <= 5 AND a.stock >= 0";
     if ($entity) { $sql .= " AND a.legal_entity = ?"; }
     $sql .= " ORDER BY a.stock ASC LIMIT 10";
@@ -159,7 +170,7 @@ function gatherContext($user) {
 
     // Топ расхода
     $sql = "SELECT a.sku, p.name, a.consumption, a.period_days, COALESCE(p.unit_of_measure, 'шт') as uom FROM analysis_data a
-            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
+            LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('a.sku', 'a.legal_entity') . "
             WHERE a.consumption > 0";
     if ($entity) { $sql .= " AND a.legal_entity = ?"; }
     $sql .= " ORDER BY (a.consumption / GREATEST(a.period_days, 1)) DESC LIMIT 10";
@@ -310,8 +321,16 @@ function lookupProduct($question, $entity) {
     $context = "\n== НАЙДЕННЫЕ ТОВАРЫ ==\n";
     $found = false;
 
-    $eFilter = $entity ? " AND p.legal_entity = ?" : "";
-    $eParams = $entity ? [$entity] : [];
+    // Справочник товаров общий на группу юрлиц: по одному юрлицу «Воглия Матта»
+    // не находила НИ ОДНОЙ карточки (своих активных у неё нет), и бот отвечал
+    // «товар не найден» на любой вопрос.
+    $eFilter = '';
+    $eParams = [];
+    if ($entity) {
+        $eEntities = getEntitiesInGroup(getEntityGroup($entity));
+        $eFilter = " AND p.legal_entity IN (" . implode(',', array_fill(0, count($eEntities), '?')) . ")";
+        $eParams = $eEntities;
+    }
 
     // Поиск по артикулам
     foreach ($skus as $sku) {
@@ -596,7 +615,7 @@ function lookupOrders($question, $entity) {
                 COALESCE(p.unit_of_measure, 'шт') as uom
                 FROM order_items oi
                 LEFT JOIN orders ord ON ord.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
+                LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('oi.sku', 'ord.legal_entity') . "
                 WHERE oi.order_id = ? ORDER BY oi.name");
         $s2->execute([$o['id']]);
         $items = $s2->fetchAll();
@@ -641,7 +660,7 @@ function lookupStockDays($question, $entity) {
                    COALESCE(p.unit_of_measure, 'шт') as uom,
                    ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
+            LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('a.sku', 'a.legal_entity') . "
             WHERE a.consumption > 0 AND a.stock > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -787,9 +806,16 @@ function lookupSupplier($question, $entity) {
     }
 
     // Также проверяем, упоминается ли конкретный поставщик
+    // Поставщики и товары — общий справочник группы юрлиц (см. getEntityGroup):
+    // по одному юрлицу «Воглия Матта» видела ровно одного поставщика и ноль
+    // товаров.
     $params = [];
     $eFilter = '';
-    if ($entity) { $eFilter = " AND legal_entity = ?"; $params[] = $entity; }
+    if ($entity) {
+        $supEntities = getEntitiesInGroup(getEntityGroup($entity));
+        $eFilter = " AND legal_entity IN (" . implode(',', array_fill(0, count($supEntities), '?')) . ")";
+        $params = $supEntities;
+    }
 
     $s = $pdo->prepare("SELECT short_name, full_name, telegram, whatsapp, email, dlt, doc FROM suppliers WHERE 1=1" . $eFilter);
     $s->execute($params);
@@ -1049,7 +1075,7 @@ function lookupDeliveries($question, $entity) {
                                     COALESCE(p.unit_of_measure, 'шт') as uom
                              FROM order_items oi
                              LEFT JOIN orders ord ON ord.id = oi.order_id
-                             LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
+                             LEFT JOIN products p ON p.id = " . productsPickIdByEntityColSql('oi.sku', 'ord.legal_entity') . "
                              WHERE oi.order_id IN ({$placeholders})");
         $s2->execute($orderIds);
         $allItems = $s2->fetchAll();
