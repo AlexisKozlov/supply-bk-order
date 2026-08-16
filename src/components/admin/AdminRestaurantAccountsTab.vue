@@ -5,7 +5,7 @@
     <div class="arat-cards">
       <div class="arat-card">
         <div class="arat-card-label">Кабинетов</div>
-        <div class="arat-card-value">{{ usersList.length }}</div>
+        <div class="arat-card-value">{{ scopedUsers.length }}</div>
         <div class="arat-card-sub">{{ withPasswordCount }} с паролем</div>
       </div>
       <div class="arat-card" :class="{ warn: cantLoginCount > 0 }">
@@ -19,44 +19,28 @@
         <div class="arat-card-sub">подтверждена · всего с почтой {{ withEmailCount }}</div>
       </div>
       <div class="arat-card">
-        <div class="arat-card-label">Приложение</div>
+        <div class="arat-card-label">Связь</div>
         <div class="arat-card-value">{{ withPwaCount }}</div>
-        <div class="arat-card-sub">{{ withPushCount }} включили уведомления</div>
+        <div class="arat-card-sub">на телефоне · {{ withPushCount }} с уведомлениями · {{ withTelegramCount }} с Telegram</div>
       </div>
-    </div>
-
-    <!-- Массовая выдача пароля -->
-    <div class="arat-section">
-      <div class="arat-section-title">Массовая выдача пароля</div>
-      <div class="arat-row">
-        <div class="arat-pwd">
-          <input v-model="bulkPassword" :type="showBulkPassword ? 'text' : 'password'"
-                 placeholder="Пароль (мин 8 символов)" class="arat-input" autocomplete="new-password" />
-          <button class="arat-pwd-eye" type="button" @click="showBulkPassword = !showBulkPassword"
-                  :title="showBulkPassword ? 'Скрыть пароль' : 'Показать пароль'">
-            <BkIcon :name="showBulkPassword ? 'eyeOff' : 'eye'" size="sm"/>
-          </button>
-        </div>
-        <select v-model="bulkMode" class="arat-select">
-          <option value="missing">Только тем, у кого нет пароля</option>
-          <option value="all">Всем (затереть существующие)</option>
-        </select>
-        <button class="btn primary" @click="handleBulkCreate" :disabled="!bulkPassword || busy">
-          Применить
-        </button>
-      </div>
-      <div v-if="bulkResult !== null" class="arat-hint">Обновлено учёток: {{ bulkResult }}</div>
     </div>
 
     <!-- Список -->
     <div class="arat-section">
       <div class="arat-section-title">
         Учётные записи
-        <button class="btn" @click="reloadUsers" :disabled="busy">Обновить</button>
+        <div class="arat-title-actions">
+          <button class="btn" @click="reloadUsers" :disabled="busy">Обновить</button>
+          <button class="btn" @click="openBulkModal" :disabled="busy">Выдать пароль сразу многим</button>
+        </div>
       </div>
 
       <div class="arat-filters">
         <input v-model="filter" type="text" placeholder="Поиск по номеру, городу, адресу или email" class="arat-input" />
+        <select v-model="filterEntity" class="arat-select">
+          <option value="">Все компании</option>
+          <option v-for="e in entityOptions" :key="e.value" :value="e.value">{{ e.label }}</option>
+        </select>
         <select v-model="filterStatus" class="arat-select">
           <option value="">Все статусы</option>
           <option value="ready">С паролем, активные</option>
@@ -65,6 +49,8 @@
           <option value="email-none">Без email</option>
           <option value="email-pending">Email не подтверждён</option>
           <option value="email-ok">Email подтверждён</option>
+          <option value="tg">С Telegram</option>
+          <option value="no-tg">Без Telegram</option>
           <option value="pwa">Поставили приложение</option>
           <option value="no-pwa">Без приложения</option>
           <option value="push">С уведомлениями</option>
@@ -81,14 +67,14 @@
               <th class="arat-col-rest">Ресторан</th>
               <th class="arat-col-status">Статус</th>
               <th class="arat-col-email">Email</th>
-              <th class="arat-col-app">Приложение</th>
-              <th class="arat-col-meta">Последний вход</th>
+              <th class="arat-col-app" title="Приложение на телефоне, уведомления, Telegram">Связь</th>
+              <th class="arat-col-meta">Вход и пароль</th>
               <th class="arat-col-actions">Действия</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="u in filteredUsers" :key="(u.legal_entity_group || 'BK_VM') + '-' + u.restaurant_number">
-              <td class="arat-col-num" data-label="Ресторан">№{{ formatRestaurantNumber(u.restaurant_number, u.legal_entity_group) }}</td>
+              <td class="arat-col-num" data-label="Ресторан">{{ restaurantLabel(u) }}</td>
               <td class="arat-col-rest">
                 <span class="arat-rest-addr">{{ placeLabel(u.city, u.address) || '—' }}</span>
                 <span class="arat-rest-le" v-if="u.legal_entity"> · {{ shortLegalEntity(u.legal_entity) }}</span>
@@ -107,32 +93,40 @@
                 </template>
                 <span v-else class="arat-email-empty">не указан</span>
               </td>
-              <td class="arat-col-app" data-label="Приложение">
-                <span v-if="u.has_pwa" class="arat-badge app" :title="'Открывали с иконки: ' + formatTime(u.pwa_last_seen_at)">на телефоне</span>
-                <span v-else class="arat-muted">—</span>
-                <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' устройств(а) с уведомлениями'"><BkIcon name="bell" size="sm" />{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
+              <td class="arat-col-app" data-label="Связь">
+                <span v-if="u.has_pwa" class="arat-badge app" :title="'Приложение на телефоне. Последний раз открывали: ' + formatTime(u.pwa_last_seen_at)">телефон</span>
+                <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' ' + plural(u.push_devices, 'устройство', 'устройства', 'устройств') + ' с уведомлениями'"><BkIcon name="bell" size="sm" />{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
+                <span v-if="u.telegram_chat_id" class="arat-badge tg" title="Кабинет привязан к Telegram">TG</span>
+                <span v-if="!u.has_pwa && !u.push_devices && !u.telegram_chat_id" class="arat-muted">—</span>
               </td>
-              <td class="arat-col-meta" data-label="Последний вход" :title="lastLoginTitle(u)">
-                <span v-if="u.last_login_at">{{ formatRelative(u.last_login_at) }}</span>
-                <span v-else class="arat-muted">ни разу</span>
+              <td class="arat-col-meta" data-label="Вход и пароль">
+                <div class="arat-meta-line" :title="lastLoginTitle(u)">
+                  <span v-if="u.last_login_at">{{ formatTime(u.last_login_at) }}</span>
+                  <span v-else class="arat-muted">ни разу не входил</span>
+                </div>
+                <div class="arat-meta-sub" :title="u.password_changed_at ? 'Пароль в последний раз меняли ' + formatTime(u.password_changed_at) : ''">
+                  <template v-if="u.password_changed_at">пароль {{ formatTime(u.password_changed_at) }}</template>
+                  <template v-else-if="u.has_password">пароль выдан давно</template>
+                  <template v-else>пароля нет</template>
+                </div>
               </td>
               <td class="arat-col-actions">
                 <div class="arat-actions">
-                  <button class="btn" @click="handleSetEmail(u)" :disabled="busy" :title="u.email ? 'Изменить email' : 'Указать email'">
-                    Email
+                  <button class="arat-act" @click="handleSetEmail(u)" :disabled="busy" :title="u.email ? 'Изменить email' : 'Указать email'">
+                    <BkIcon name="mail" size="sm" />
                   </button>
-                  <button class="btn" @click="handleSetPassword(u)" :disabled="busy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
-                    Пароль
+                  <button class="arat-act" @click="handleSetPassword(u)" :disabled="busy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
+                    <BkIcon name="key" size="sm" />
                   </button>
                   <button
                     v-if="u.has_password"
-                    class="btn"
-                    :class="u.is_active ? 'arat-btn-danger' : 'arat-btn-success'"
+                    class="arat-act"
+                    :class="u.is_active ? 'arat-act-danger' : 'arat-act-success'"
                     @click="handleToggleUser(u)"
                     :disabled="busy"
-                    :title="u.is_active ? 'Отключить учётку' : 'Включить учётку'"
+                    :title="u.is_active ? 'Закрыть доступ ресторану' : 'Открыть доступ ресторану'"
                   >
-                    {{ u.is_active ? 'Откл.' : 'Вкл.' }}
+                    <BkIcon :name="u.is_active ? 'eyeOff' : 'eye'" size="sm" />
                   </button>
                 </div>
               </td>
@@ -141,6 +135,17 @@
         </table>
       </div>
     </div>
+
+    <RestaurantPasswordModal
+      v-if="pwdModal.show"
+      :title="pwdModal.title"
+      :message="pwdModal.message"
+      :bulk="pwdModal.bulk"
+      :missing-count="pwdModal.missingCount"
+      :total-count="usersList.length"
+      @ok="onPasswordOk"
+      @cancel="pwdModal.show = false"
+    />
 
   </div>
 </template>
@@ -151,8 +156,9 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
-import { formatMoscowDateTime, formatMoscowRelative, plural } from '@/lib/utils.js';
+import { formatMoscowDateTime, plural } from '@/lib/utils.js';
 import { appConfirm, appPrompt } from '@/lib/appDialogs.js';
+import RestaurantPasswordModal from '@/components/modals/RestaurantPasswordModal.vue';
 
 const store = useRestaurantOrderStore();
 const toast = useToastStore();
@@ -161,35 +167,52 @@ const usersList = ref([]);
 const loading = ref(false);
 const busy = ref(false);
 
-const bulkPassword = ref('');
-const bulkMode = ref('missing');
-const bulkResult = ref(null);
-const showBulkPassword = ref(false);
-
 const filter = ref('');
 const filterStatus = ref('');
+const filterEntity = ref('');
 
-const withPasswordCount = computed(() => usersList.value.filter(u => u.has_password).length);
-const withoutPasswordCount = computed(() => usersList.value.filter(u => !u.has_password).length);
-const disabledCount = computed(() => usersList.value.filter(u => u.has_password && !u.is_active).length);
-const withEmailCount = computed(() => usersList.value.filter(u => !!u.email).length);
-const verifiedEmailCount = computed(() => usersList.value.filter(u => !!u.email_verified_at).length);
+// Окно пароля: одно и то же и для одного ресторана, и для массовой выдачи.
+const pwdModal = ref({ show: false, title: '', message: '', bulk: false, missingCount: null, user: null });
+
+const entityOptions = computed(() => {
+  const seen = new Map();
+  for (const u of usersList.value) {
+    if (u.legal_entity && !seen.has(u.legal_entity)) seen.set(u.legal_entity, shortLegalEntity(u.legal_entity));
+  }
+  return Array.from(seen, ([value, label]) => ({ value, label }));
+});
+
+// Сводка считается по выбранной компании: иначе выбираешь «Пицца Стар»,
+// а наверху всё равно цифры по всем 110 кабинетам сразу.
+const scopedUsers = computed(() =>
+  filterEntity.value ? usersList.value.filter(u => u.legal_entity === filterEntity.value) : usersList.value,
+);
+const withPasswordCount = computed(() => scopedUsers.value.filter(u => u.has_password).length);
+const withoutPasswordCount = computed(() => scopedUsers.value.filter(u => !u.has_password).length);
+const disabledCount = computed(() => scopedUsers.value.filter(u => u.has_password && !u.is_active).length);
+const withEmailCount = computed(() => scopedUsers.value.filter(u => !!u.email).length);
+const verifiedEmailCount = computed(() => scopedUsers.value.filter(u => !!u.email_verified_at).length);
 // Кабинет открывали с иконки на телефоне (установленное приложение).
 // Кабинет без пароля или с закрытым доступом — человек просто не войдёт.
-const cantLoginCount = computed(() => usersList.value.filter(u => !u.has_password || !u.is_active).length);
-const withPwaCount = computed(() => usersList.value.filter(u => u.has_pwa).length);
-const withPushCount = computed(() => usersList.value.filter(u => u.push_devices > 0).length);
+const cantLoginCount = computed(() => scopedUsers.value.filter(u => !u.has_password || !u.is_active).length);
+const withPwaCount = computed(() => scopedUsers.value.filter(u => u.has_pwa).length);
+const withPushCount = computed(() => scopedUsers.value.filter(u => u.push_devices > 0).length);
+const withTelegramCount = computed(() => scopedUsers.value.filter(u => !!u.telegram_chat_id).length);
 
 const filteredUsers = computed(() => {
   const q = (filter.value || '').toLowerCase().trim();
   const st = filterStatus.value;
+  const le = filterEntity.value;
   return usersList.value.filter(u => {
+    if (le && u.legal_entity !== le) return false;
     if (st === 'ready' && !(u.has_password && u.is_active)) return false;
     if (st === 'nopwd' && u.has_password) return false;
     if (st === 'disabled' && !(u.has_password && !u.is_active)) return false;
     if (st === 'email-none' && u.email) return false;
     if (st === 'email-pending' && (!u.email || u.email_verified_at)) return false;
     if (st === 'email-ok' && !u.email_verified_at) return false;
+    if (st === 'tg' && !u.telegram_chat_id) return false;
+    if (st === 'no-tg' && u.telegram_chat_id) return false;
     if (st === 'pwa' && !u.has_pwa) return false;
     if (st === 'no-pwa' && u.has_pwa) return false;
     if (st === 'push' && !(u.push_devices > 0)) return false;
@@ -200,6 +223,31 @@ const filteredUsers = computed(() => {
     return haystack.includes(q);
   });
 });
+
+// Номер ресторана как его называют люди: 1, 2… у БК и PS01, PS02… у Пицца Стар.
+// Раньше к готовой подписи добавляли «№» и выходило «№PS01».
+function restaurantLabel(u) {
+  const n = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
+  return /^\d+$/.test(String(n)) ? '№' + n : String(n);
+}
+
+function openBulkModal() {
+  pwdModal.value = {
+    show: true,
+    bulk: true,
+    user: null,
+    missingCount: withoutPasswordCount.value,
+    title: 'Выдать пароль сразу многим',
+    message: 'Один и тот же пароль будет выдан выбранным кабинетам.',
+  };
+}
+
+async function onPasswordOk({ password, mode }) {
+  const target = pwdModal.value;
+  pwdModal.value = { ...target, show: false };
+  if (target.bulk) await runBulkCreate(password, mode);
+  else await runSetPassword(target.user, password);
+}
 
 function statusBadgeClass(u) {
   if (u.has_password && u.is_active) return 'ok';
@@ -229,7 +277,6 @@ function shortLegalEntity(le) {
 // Время с сервера — московское; formatMoscowDateTime это учитывает,
 // прежняя локальная копия читала его как время браузера.
 const formatTime = formatMoscowDateTime;
-const formatRelative = formatMoscowRelative;
 
 // Точные даты прячем в подсказку — в таблице они занимали половину ширины.
 function lastLoginTitle(u) {
@@ -252,15 +299,10 @@ async function reloadUsers() {
   }
 }
 
-async function handleBulkCreate() {
-  if ((bulkPassword.value || '').length < 8) {
-    toast.error('Слишком короткий пароль', 'Минимум 8 символов');
-    return;
-  }
-  if (bulkMode.value === 'all') {
-    if (!(await appConfirm('Затереть пароли ВСЕМ ресторанам? Все активные сессии будут продолжать работать со старыми паролями (пока не выйдут), но войти заново можно будет только с новым паролем.', { title: 'Сброс паролей всем', okText: 'Затереть', danger: true }))) return;
+async function runBulkCreate(password, mode) {
+  if (mode === 'all') {
+    if (!(await appConfirm('Пароль сменится у всех кабинетов. Кто уже вошёл — продолжит работать до выхода, но заново войдёт только с новым паролем.', { title: 'Сменить пароль всем', okText: 'Сменить', danger: true }))) return;
   } else {
-    // Режим «только без пароля» тоже задевает десятки учёток разом — спрашиваем.
     const n = withoutPasswordCount.value;
     if (!n) {
       toast.error('Некому выдавать', 'У всех ресторанов уже есть пароль');
@@ -271,11 +313,10 @@ async function handleBulkCreate() {
   }
   busy.value = true;
   try {
-    const result = await store.adminCreateBulkUsers(bulkPassword.value, bulkMode.value);
-    bulkResult.value = result?.count ?? 0;
-    bulkPassword.value = '';
+    const result = await store.adminCreateBulkUsers(password, mode);
     await reloadUsers();
-    toast.success('Готово', `Обновлено учёток: ${result?.count ?? 0}`);
+    const n = result?.count ?? 0;
+    toast.success('Готово', `Пароль выдан ${n} ${plural(n, 'кабинету', 'кабинетам', 'кабинетам')}`);
   } catch (e) {
     toast.error('Ошибка', e.message);
   } finally {
@@ -313,18 +354,26 @@ async function handleSetEmail(u) {
   }
 }
 
-async function handleSetPassword(u) {
-  const verb = u.has_password ? 'Новый пароль' : 'Задайте пароль';
+function handleSetPassword(u) {
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
-  const pass = await appPrompt('Минимум 8 символов', '', { title: `${verb} для ресторана ${label}`, okText: 'Сохранить' });
-  if (!pass) return;
-  if (pass.length < 8) {
-    toast.error('Слишком короткий пароль', 'Минимум 8 символов');
-    return;
-  }
+  pwdModal.value = {
+    show: true,
+    bulk: false,
+    user: u,
+    missingCount: null,
+    title: `${u.has_password ? 'Новый пароль' : 'Пароль'} для ресторана ${label}`,
+    message: u.has_password
+      ? 'Старый пароль перестанет работать. Не забудьте передать новый ресторану.'
+      : 'У этого кабинета пароля ещё нет.',
+  };
+}
+
+async function runSetPassword(u, password) {
+  if (!u) return;
+  const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
   busy.value = true;
   try {
-    await store.adminCreateUser(u.restaurant_number, u.legal_entity_group, pass);
+    await store.adminCreateUser(u.restaurant_number, u.legal_entity_group, password);
     toast.success('Готово', `Пароль ресторана ${label} сохранён`);
     await reloadUsers();
   } catch (e) {
@@ -476,11 +525,13 @@ async function handleToggleUser(u) {
 }
 .arat-table tbody tr:hover { background: #fcfaf6; }
 
-.arat-col-num     { width: 80px; font-weight: 700; color: #502314; white-space: nowrap; }
-.arat-col-rest    { min-width: 180px; }
-.arat-col-status  { width: 110px; }
-.arat-col-email   { min-width: 170px; max-width: 230px; }
-.arat-col-meta    { width: 120px; font-size: 12px; color: #6f5948; }
+.arat-col-num     { width: 66px; font-weight: 700; color: #502314; white-space: nowrap; }
+/* Адрес переносим по строкам: без потолка колонка раздувалась до 441 px
+   и вытесняла кнопки действий за край экрана. */
+.arat-col-rest    { min-width: 170px; max-width: 300px; }
+.arat-col-status  { width: 98px; }
+.arat-col-email   { min-width: 150px; max-width: 190px; overflow-wrap: anywhere; }
+.arat-col-meta    { width: 150px; font-size: 12px; color: #6f5948; }
 .arat-col-actions { width: 1%; white-space: nowrap; }
 
 .arat-rest-addr { color: #502314; }
@@ -523,16 +574,32 @@ async function handleToggleUser(u) {
   justify-content: flex-end;
 }
 
-/* Красим только смысл: «отключить» — красным, «включить» — зелёным.
-   Форма кнопки — общая .btn портала. */
-.arat-btn-danger { color: #C62828; border-color: #E57373; }
-.arat-btn-danger:hover:not(:disabled) { background: #FFF0F0; }
-.arat-btn-ok { color: #2E7D32; border-color: #A5D6A7; }
-.arat-btn-ok:hover:not(:disabled) { background: #F1F8F2; }
+/* Кнопки действий — иконками. Тремя текстовыми кнопками таблица разъезжалась
+   до 1408 px при окне 1152 px, и колонка «Действия» уезжала за край экрана:
+   чтобы сменить пароль, приходилось листать таблицу вбок. */
+.arat-act {
+  width: 30px; height: 30px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--border); border-radius: 8px;
+  background: var(--card); color: var(--text-muted);
+  cursor: pointer; transition: all .15s;
+}
+.arat-act:hover:not(:disabled) { border-color: var(--bk-orange); color: var(--bk-brown); background: #FFFBF5; }
+.arat-act:disabled { opacity: .45; cursor: default; }
+.arat-act-danger { color: #C62828; border-color: #E57373; }
+.arat-act-danger:hover:not(:disabled) { background: #FFF0F0; border-color: #C62828; color: #C62828; }
+.arat-act-success { color: #2E7D32; border-color: #A5D6A7; }
+.arat-act-success:hover:not(:disabled) { background: #F1F8F2; border-color: #2E7D32; color: #2E7D32; }
 
 .arat-col-app { white-space: nowrap; }
 .arat-badge.app { background: #FDEBD9; color: #C1502E; }
+.arat-badge.tg  { background: #E3F2FD; color: #1565C0; margin-left: 4px; }
 .arat-push-dot { margin-left: 6px; font-size: 12px; }
+
+.arat-meta-line { white-space: nowrap; }
+.arat-meta-sub { font-size: 11px; opacity: .75; white-space: nowrap; margin-top: 2px; }
+
+.arat-title-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ═══ Телефон: таблица на семь колонок читается только карточками ═══ */
 @media (max-width: 760px) {
@@ -564,11 +631,12 @@ async function handleToggleUser(u) {
   }
   .arat-table td[data-label] > * { grid-column: 2; min-width: 0; }
   /* Ширины колонок нужны только настоящей таблице — в карточках распирают. */
-  .arat-col-rest, .arat-col-email, .arat-col-meta, .arat-col-num { min-width: 0; width: auto; }
+  .arat-col-rest, .arat-col-email, .arat-col-meta, .arat-col-num { min-width: 0; width: auto; max-width: none; }
+  .arat-col-email { overflow-wrap: break-word; }
   .arat-col-num { font-size: 14px; }
   .arat-col-actions { padding-top: 8px; }
   .arat-actions { flex-wrap: wrap; }
-  .arat-actions .btn { flex: 1; min-width: 92px; }
+  .arat-actions .arat-act { width: 36px; height: 36px; }
 
   .arat-row { flex-direction: column; align-items: stretch; }
   .arat-pwd { min-width: 0; }
