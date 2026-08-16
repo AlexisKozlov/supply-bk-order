@@ -13,20 +13,52 @@
       <!-- Аудит -->
       <template v-if="auditMode === 'audit'">
         <div class="adm-audit-filters">
+          <!-- Поиск -->
+          <div class="aud-search-wrap">
+            <span class="aud-search-icon"><BkIcon name="search" size="sm"/></span>
+            <input v-model="auditFilter.search" class="aud-search-input"
+                   placeholder="Найти по сотруднику, ресторану, поставщику, товару..."
+                   @keyup.enter="loadAudit(true); loadGroupCounts()" />
+            <button v-if="auditFilter.search" class="aud-search-clear" @click="auditFilter.search = ''; loadAudit(true); loadGroupCounts()">
+              <BkIcon name="close" size="xs"/>
+            </button>
+          </div>
+
+          <!-- Разделы -->
+          <div class="adm-audit-chips">
+            <button class="adm-audit-chip" :class="{ active: !auditFilter.group }"
+                    @click="auditFilter.group = ''; loadAudit(true)">Все</button>
+            <button v-for="g in visibleGroups" :key="g.value" class="adm-audit-chip"
+                    :class="{ active: auditFilter.group === g.value }"
+                    @click="auditFilter.group = g.value; loadAudit(true)">
+              {{ g.label }}<span v-if="groupCounts[g.value]" class="aud-chip-count">{{ groupCounts[g.value] }}</span>
+            </button>
+          </div>
+
+          <!-- Период + остальное -->
           <div class="adm-audit-filter-row">
             <div class="adm-audit-chips">
-              <button v-for="cat in auditCategories" :key="cat.value" class="adm-audit-chip"
-                :class="{ active: auditFilter.category === cat.value }" @click="auditFilter.category = cat.value; loadAudit(true)">
-                {{ cat.label }}
+              <button v-for="p in auditPeriods" :key="p.value" class="adm-audit-chip aud-chip-sm"
+                      :class="{ active: auditFilter.period === p.value }" @click="setPeriod(p.value)">
+                {{ p.label }}
               </button>
+              <template v-if="auditFilter.period === 'custom'">
+                <input type="date" v-model="auditFilter.dateFrom" @change="loadAudit(true); loadGroupCounts()" class="adm-audit-date" />
+                <input type="date" v-model="auditFilter.dateTo" @change="loadAudit(true); loadGroupCounts()" class="adm-audit-date" />
+              </template>
             </div>
             <div class="adm-audit-right-filters">
-              <select v-model="auditFilter.user" @change="loadAudit(true)" class="adm-audit-select">
-                <option value="">Все пользователи</option>
+              <select v-model="auditFilter.entity" @change="loadAudit(true); loadGroupCounts()" class="adm-audit-select">
+                <option value="">Все юрлица</option>
+                <option v-for="e in auditEntities" :key="e" :value="e">{{ e }}</option>
+              </select>
+              <select v-model="auditFilter.user" @change="loadAudit(true); loadGroupCounts()" class="adm-audit-select">
+                <option value="">Все сотрудники</option>
                 <option v-for="u in auditUsers" :key="u" :value="u">{{ u }}</option>
               </select>
-              <input type="date" v-model="auditFilter.dateFrom" @change="loadAudit(true)" class="adm-audit-date" />
-              <input type="date" v-model="auditFilter.dateTo" @change="loadAudit(true)" class="adm-audit-date" />
+              <button class="btn secondary aud-export-btn" @click="exportAudit" :disabled="auditExporting || !auditEntries.length">
+                <BkIcon name="excel" size="sm"/> {{ auditExporting ? 'Готовлю...' : 'Excel' }}
+              </button>
             </div>
           </div>
         </div>
@@ -41,9 +73,10 @@
         <div v-else class="adm-audit-list">
           <div v-for="log in auditEntries" :key="log.id" class="adm-audit-entry">
             <div class="adm-audit-head">
-              <span class="adm-audit-badge" :class="auditBadgeClass(log.action)">{{ auditBadgeLabel(log.action) }}</span>
+              <span class="adm-audit-badge" :class="auditBadgeClass(log.action)">{{ auditActionLabel(log.action) }}</span>
               <span class="adm-audit-entity-badge" :class="'adm-audit-et-' + log.entity_type">{{ auditEntityLabel(log.entity_type) }}</span>
               <span class="adm-audit-author">{{ authorLabel(log.user_name) }}</span>
+              <span v-if="entityLabelOf(log)" class="aud-le-badge">{{ entityLabelOf(log) }}</span>
               <span class="adm-audit-date-text">{{ formatAuditDate(log.created_at) }}</span>
             </div>
 
@@ -61,8 +94,8 @@
             </div>
 
             <div v-if="log.action === 'received'" class="adm-audit-received">
-              <span>{{ log.details?.items_count || 0 }} позиций</span>
-              <span v-if="log.details?.discrepancies" class="adm-audit-disc">{{ log.details.discrepancies }} расхождений</span>
+              <span>{{ log.details?.items_count || 0 }} {{ plural(log.details?.items_count || 0, 'позиция', 'позиции', 'позиций') }}</span>
+              <span v-if="log.details?.discrepancies" class="adm-audit-disc">{{ log.details.discrepancies }} {{ plural(log.details.discrepancies, 'расхождение', 'расхождения', 'расхождений') }}</span>
               <span v-else class="adm-audit-no-disc">без расхождений</span>
             </div>
             <div v-if="log.action === 'received' && log.details?.items_with_discrepancy?.length" class="adm-audit-changes">
@@ -93,7 +126,7 @@
               </button>
             </div>
 
-            <div v-if="log.details?.items_count && log.action !== 'received' && !log.details?.changes?.length" class="adm-audit-meta">{{ log.details.items_count }} позиций</div>
+            <div v-if="log.details?.items_count && log.action !== 'received' && !log.details?.changes?.length" class="adm-audit-meta">{{ log.details.items_count }} {{ plural(log.details.items_count, 'позиция', 'позиции', 'позиций') }}</div>
             <div v-if="log.details?.name && log.entity_type === 'product'" class="adm-audit-ctx">{{ log.details.name }} <span v-if="log.details?.sku" style="opacity:.6;">({{ log.details.sku }})</span></div>
           </div>
 
@@ -163,15 +196,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
-import { formatMoscowDateTime } from '@/lib/utils.js';
+import { formatMoscowDateTime, plural, toLocalDateStr } from '@/lib/utils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { AUDIT_GROUPS, auditActionLabel, auditEntityLabel, auditGroupTypes, auditBadgeClass } from '@/lib/auditLabels.js';
+import { exportAuditLogXlsx } from '@/lib/excelExport.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 
 // Счётчик у вкладки рисует админка.
@@ -194,124 +229,72 @@ const auditHasMore = ref(false);
 const auditTotal = ref(0);
 const expandedAudit = reactive(new Set());
 const auditUsers = ref([]);
-const auditFilter = reactive({ category: '', user: '', dateFrom: '', dateTo: '' });
+const auditEntities = ref(['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"']);
+const auditExporting = ref(false);
+const groupCounts = ref({});
+// period: '' — всё время, 'today' | '7' | '30' | 'custom'
+const auditFilter = reactive({ group: '', user: '', entity: '', search: '', period: '30', dateFrom: '', dateTo: '' });
 
-
-const auditCategories = [
-  { value: '', label: 'Все' },
-  { value: 'order', label: 'Заказы' },
-  { value: 'plan', label: 'Планы' },
-  { value: 'product', label: 'Товары' },
-  { value: 'delivery_schedule', label: 'Расписание' },
-  { value: 'user', label: 'Пользователи' },
-  { value: 'price_agreement', label: 'Цены и ПСЦ' },
-  { value: 'tender', label: 'Тендеры' },
-  { value: 'marketing', label: 'Маркетинг' },
-  { value: 'correction', label: 'Корректировки' },
-  { value: 'import', label: 'Импорт данных' },
-  { value: 'veg', label: 'Планета Ресторанов' },
-  { value: 'supplier_order', label: 'Заявки поставщикам' },
-  { value: 'stock_collection', label: 'Сбор остатков' },
-  { value: 'distribution', label: 'Распределение' },
-  { value: 'system', label: 'Система' },
+const auditPeriods = [
+  { value: 'today', label: 'Сегодня' },
+  { value: '7',     label: '7 дней' },
+  { value: '30',    label: '30 дней' },
+  { value: '',      label: 'Всё время' },
+  { value: 'custom', label: 'Свой период' },
 ];
 
-const AUDIT_ACTION_LABELS = {
-  // Заказы
-  order_created: 'Создан', order_updated: 'Изменён', order_deleted: 'Удалён', orders_deleted: 'Удалён',
-  delivery_date_changed: 'Дата доставки', received: 'Принят', reception_reverted: 'Отмена приёмки',
-  // Планы
-  plan_created: 'Создан', plan_updated: 'Изменён', plan_deleted: 'Удалён', plans_deleted: 'Удалён',
-  // Товары
-  product_created: 'Создана', product_updated: 'Изменена', products_deleted: 'Удалена',
-  // Расписание
-  schedule_updated: 'График', restaurant_updated: 'Ресторан',
-  // Пользователи
-  user_created: 'Создан', user_updated: 'Изменён', user_deleted: 'Удалён', password_changed: 'Пароль изменён',
-  // Цены и ПСЦ
-  price_agreement_created: 'Создан', price_agreement_updated: 'Изменён',
-  agreement_approved: 'Согласован', agreement_archived: 'Архивирован', agreement_restored: 'Восстановлен',
-  agreement_deleted: 'Удалён', price_imported: 'Импорт цен', price_deleted: 'Цена удалена',
-  exchange_rate_updated: 'Курс обновлён',
-  // Тендеры
-  tender_created: 'Создан', tender_updated: 'Изменён', tender_deleted: 'Удалён',
-  // Маркетинг
-  marketing_created: 'Создана', marketing_updated: 'Изменена', marketing_deleted: 'Удалена',
-  marketing_auto_completed: 'Завершена по дате',
-  // Корректировки
-  correction_created: 'Создана', correction_approved: 'Подтверждена', correction_rejected: 'Отклонена',
-  correction_reviewed: 'Рассмотрена',
-  // Импорт
-  data_imported: 'Импорт', recipe_imported: 'Импорт рецептур',
-  // Овощи
-  veg_session_created: 'Сессия создана', veg_order_updated: 'Заявка изменена', veg_order_submitted: 'Заявка подана',
-  // Заявки поставщикам (so_*)
-  so_order_submitted: 'Заявка подана', so_order_updated: 'Заявка обновлена',
-  so_order_skipped: 'Поставка не нужна', so_order_edited: 'Изменена отделом закупок',
-  so_order_deleted: 'Удалена', so_qty_adjusted: 'Правка количества',
-  so_deadline_extended: 'Дедлайн продлён', so_day_closed: 'День закрыт',
-  so_day_reopened: 'День открыт', so_template_saved: 'Шаблон сохранён',
-  // Напоминания о подаче заявок
-  reminder_sub_toggled: 'Напоминания', reminder_main_toggled: 'Напоминания',
-  // Сбор остатков
-  stock_collection_created: 'Создан', collection_created: 'Создан', collection_closed: 'Закрыт',
-  collection_reopened: 'Переоткрыт', stock_collection_cell_saved: 'Ячейка остатков',
-  collection_deadline_set: 'Срок сдачи',
-  // Залоговые цены
-  deposit_price_updated: 'Залоговая цена', deposit_prices_imported: 'Импорт залог. цен',
-  // Распределение
-  distribution_created: 'Создано',
-  // Корректировки (кабинет ресторана)
-  correction_submit_cabinet: 'Подана из кабинета',
-  correction_deadline_changed: 'Дедлайн изменён',
-  // Система
-  broadcast_sent: 'Рассылка', session_terminated: 'Сессия завершена', maintenance_toggled: 'Тех. работы',
-  // Заявки поставщикам и напоминания — появились уже после словаря.
-  so_deadline_rules_updated: 'Дедлайны', so_adhoc_created: 'Внеплановая',
-  so_supplier_disconnected: 'Поставщик отключён',
-  reminder_keg_toggled: 'Напоминание о кегах', correction_taken: 'Взята в работу',
-  // Загрузка машин
-  tl_plan_created: 'Создан', tl_plan_updated: 'Изменён', tl_plan_deleted: 'Удалён',
-  tl_plan_confirmed: 'Подтверждён', tl_plan_reopened: 'Возвращён в черновик',
-  tl_vehicle_created: 'Создан', tl_vehicle_updated: 'Изменён', tl_vehicle_deleted: 'Удалён',
-  tl_direction_created: 'Создано', tl_direction_updated: 'Изменено', tl_direction_deleted: 'Удалено',
-};
-// Здесь лежат имена таблиц из БД — без перевода они и попадали на экран
-// как «restaurant_main_delivery_subscriptions».
-const AUDIT_ENTITY_LABELS = {
-  order: 'Заказ', plan: 'План', product: 'Товар', delivery_schedule: 'Расписание',
-  user: 'Пользователь', price_agreement: 'Протокол цен',
-  marketing: 'Маркетинг', tender: 'Тендер',
-  correction: 'Корректировка', distribution: 'Распределение', stock_collection: 'Сбор остатков',
-  import: 'Импорт', supplier_order: 'Заявка поставщику', system: 'Система',
-  supplier: 'Поставщик', suppliers: 'Поставщик',
-  restaurant: 'Ресторан', restaurants: 'Ресторан',
-  order_corrections: 'Корректировка', product_prices: 'Цена товара',
-  restaurant_reminder_subscriptions: 'Напоминание поставщику',
-  restaurant_main_delivery_subscriptions: 'Напоминание об основной поставке',
-  restaurant_keg_return_subscriptions: 'Напоминание о возврате кег',
-  ro_telegram_subs: 'Привязка Telegram',
-  so_orders: 'Заявка поставщику', so_templates: 'Шаблон заявки',
-  truck_plan: 'План загрузки машин', truck_vehicle: 'Тип машины',
-  truck_direction: 'Направление доставки',
-};
+// Прячем разделы, по которым записей нет вообще: раньше в фильтре висели
+// «Распределение» и «Цены и ПСЦ», у которых за всё время ноль записей.
+const visibleGroups = computed(() => AUDIT_GROUPS.filter(g => groupCounts.value[g.value] > 0));
 
-function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }
-function auditEntityLabel(et) { return AUDIT_ENTITY_LABELS[et] || et; }
-function auditBadgeClass(action) {
-  if (action === 'received') return 'adm-audit-b-received';
-  if (action === 'reception_reverted') return 'adm-audit-b-reverted';
-  if (action === 'delivery_date_changed') return 'adm-audit-b-delivery';
-  if (action === 'schedule_updated' || action === 'restaurant_updated') return 'adm-audit-b-schedule';
-  if (action.includes('imported') || action === 'data_imported') return 'adm-audit-b-schedule';
-  if (action.includes('approved') || action.includes('restored') || action === 'broadcast_sent') return 'adm-audit-b-received';
-  if (action.includes('archived') || action === 'session_terminated' || action === 'password_changed') return 'adm-audit-b-reverted';
-  if (action.includes('rejected')) return 'adm-audit-b-deleted';
-  if (action.includes('created')) return 'adm-audit-b-created';
-  if (action.includes('updated') || action.includes('changed') || action.includes('reviewed')) return 'adm-audit-b-updated';
-  if (action.includes('deleted') || action.includes('closed')) return 'adm-audit-b-deleted';
+function setPeriod(v) {
+  auditFilter.period = v;
+  if (v !== 'custom') { auditFilter.dateFrom = ''; auditFilter.dateTo = ''; loadAudit(true); loadGroupCounts(); }
+}
+
+// Границы выбранного периода: [с, по] в формате ГГГГ-ММ-ДД или null.
+function periodRange() {
+  const p = auditFilter.period;
+  if (p === 'custom') return [auditFilter.dateFrom || null, auditFilter.dateTo || null];
+  if (!p) return [null, null];
+  const days = p === 'today' ? 0 : parseInt(p, 10);
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  return [toLocalDateStr(from), null];
+}
+
+function periodLabel() {
+  const found = auditPeriods.find(p => p.value === auditFilter.period);
+  if (auditFilter.period === 'custom') {
+    return `период: ${auditFilter.dateFrom || '—'} — ${auditFilter.dateTo || '—'}`;
+  }
+  return found ? `период: ${found.label.toLowerCase()}` : '';
+}
+
+// Юрлицо записи: у общих для БК+ВМ сущностей юрлица нет, показываем группу.
+const GROUP_TITLES = { BK_VM: 'БК + Воглия Матта', PS: 'Пицца Стар' };
+function entityLabelOf(log) {
+  if (log.legal_entity) return String(log.legal_entity).replace(/^ООО\s*/, '').replace(/"/g, '');
+  if (log.legal_entity_group) return GROUP_TITLES[log.legal_entity_group] || log.legal_entity_group;
   return '';
 }
+
+// Короткое описание записи для выгрузки в Excel.
+function contextOf(log) {
+  const d = log.details || {};
+  const parts = [];
+  if (d.supplier) parts.push(d.supplier);
+  if (d.restaurant_number) parts.push('Ресторан ' + formatRestaurantNumber(d.restaurant_number));
+  if (d.name) parts.push(d.name);
+  if (d.sku) parts.push('арт. ' + d.sku);
+  if (d.product_name) parts.push(d.product_name);
+  if (d.delivery_date) parts.push('доставка ' + d.delivery_date);
+  if (d.items_count) parts.push(d.items_count + ' ' + plural(d.items_count, 'позиция', 'позиции', 'позиций'));
+  if (d.count) parts.push(d.count + ' шт.');
+  if (d.type) parts.push(d.type);
+  return parts.join(' · ');
+}
+
 
 const formatAuditDate = formatMoscowDateTime;
 
@@ -327,6 +310,27 @@ function authorLabel(name) {
   return s.replace(/(Ресторан\s+)(\d{3,4})/gi, (_, prefix, num) => prefix + formatRestaurantNumber(num));
 }
 
+// Общая часть фильтров — одна на список и на выгрузку.
+function buildAuditQuery() {
+  let query = db.from('audit_log').select('*').order('created_at', { ascending: false });
+  const types = auditFilter.group ? auditGroupTypes(auditFilter.group) : [];
+  if (types.length) query = query.in('entity_type', types);
+  if (auditFilter.user) query = query.eq('user_name', auditFilter.user);
+  if (auditFilter.entity) query = query.eq('legal_entity', auditFilter.entity);
+  // Один фильтр на колонку: gte + lte по created_at затирали бы друг друга,
+  // поэтому для интервала берём between.
+  const [from, to] = periodRange();
+  if (from && to) query = query.between('created_at', from, to + ' 23:59:59');
+  else if (from) query = query.gte('created_at', from);
+  else if (to) query = query.lte('created_at', to + ' 23:59:59');
+  const q = String(auditFilter.search || '').trim();
+  if (q.length >= 2) {
+    const esc = q.replace(/[*%_,()]/g, '');
+    query = query.or(`user_name.ilike.*${esc}*,details.ilike.*${esc}*,entity_id.ilike.*${esc}*`);
+  }
+  return query;
+}
+
 async function loadAudit(reset = true) {
   if (reset) {
     auditEntries.value = [];
@@ -336,11 +340,7 @@ async function loadAudit(reset = true) {
   }
   try {
     const offset = reset ? 0 : auditEntries.value.length;
-    let query = db.from('audit_log').select('*').order('created_at', { ascending: false }).limit(AUDIT_PAGE_SIZE).offset(offset);
-    if (auditFilter.category) query = query.eq('entity_type', auditFilter.category);
-    if (auditFilter.user) query = query.eq('user_name', auditFilter.user);
-    if (auditFilter.dateFrom) query = query.gte('created_at', auditFilter.dateFrom);
-    if (auditFilter.dateTo) query = query.lte('created_at', auditFilter.dateTo + ' 23:59:59');
+    const query = buildAuditQuery().limit(AUDIT_PAGE_SIZE).offset(offset);
 
     const { data } = await query;
     const parsed = (data || []).map(e => {
@@ -372,6 +372,55 @@ async function loadAuditUsers() {
     const { data } = await db.from('users').select('name').order('name');
     auditUsers.value = (data || []).map(u => u.name).filter(Boolean);
   } catch { /* ok */ }
+}
+
+// Сколько записей в каждом разделе за выбранный период — рисуем рядом с кнопкой
+// и прячем разделы, где записей нет.
+async function loadGroupCounts() {
+  try {
+    const [from, to] = periodRange();
+    const { data } = await db.rpc('audit_group_counts', {
+      date_from: from || '',
+      date_to: to || '',
+      user_name: auditFilter.user || '',
+      legal_entity: auditFilter.entity || '',
+      search: auditFilter.search || '',
+    });
+    const byType = data && !data.error ? data : {};
+    const counts = {};
+    for (const g of AUDIT_GROUPS) {
+      counts[g.value] = g.types.reduce((sum, t) => sum + (byType[t] || 0), 0);
+    }
+    groupCounts.value = counts;
+  } catch { groupCounts.value = {}; }
+}
+
+async function exportAudit() {
+  auditExporting.value = true;
+  try {
+    const { data } = await buildAuditQuery().limit(5000);
+    const rows = (data || []).map(e => {
+      let details = e.details;
+      if (typeof details === 'string') { try { details = JSON.parse(details); } catch { details = null; } }
+      const log = { ...e, details };
+      return {
+        created_at: formatAuditDate(e.created_at),
+        action: e.action,
+        actionLabel: auditActionLabel(e.action),
+        entityLabel: auditEntityLabel(e.entity_type),
+        author: authorLabel(e.user_name),
+        legalEntity: entityLabelOf(e),
+        context: contextOf(log),
+      };
+    });
+    if (!rows.length) { toast.error('Пусто', 'По выбранным фильтрам записей нет'); return; }
+    await exportAuditLogXlsx(rows, periodLabel());
+    toast.success('Готово', `Выгружено ${rows.length} ${plural(rows.length, 'запись', 'записи', 'записей')}`);
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось выгрузить журнал');
+  } finally {
+    auditExporting.value = false;
+  }
 }
 
 // ═══ Логи ошибок ═══
@@ -445,6 +494,7 @@ async function clearErrors() {
 onMounted(() => {
   loadAudit(true);
   loadAuditUsers();
+  loadGroupCounts();
 });
 </script>
 
@@ -462,6 +512,48 @@ onMounted(() => {
 }
 .adm-audit-chip:hover { border-color: var(--bk-orange); color: var(--text); }
 .adm-audit-chip.active { border-color: var(--bk-orange); background: #FFFBF5; color: var(--bk-brown); }
+
+/* Поиск по журналу */
+.aud-search-wrap { position: relative; margin-bottom: 10px; }
+.aud-search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; opacity: .55; }
+.aud-search-input {
+  width: 100%; box-sizing: border-box; padding: 9px 36px;
+  border: 1.5px solid var(--border); border-radius: 8px;
+  font-size: 13px; font-family: inherit; background: var(--card); color: var(--text);
+  transition: border-color .15s, box-shadow .15s;
+}
+.aud-search-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(244,162,97,.12); }
+.aud-search-clear {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; color: var(--text-muted); line-height: 0;
+}
+
+/* Счётчик записей у кнопки раздела */
+.aud-chip-count {
+  margin-left: 6px; padding: 1px 6px; border-radius: 10px;
+  background: var(--bg-muted, #F0EAE4); color: var(--text-muted);
+  font-size: 11px; font-weight: 700;
+}
+.adm-audit-chip.active .aud-chip-count { background: var(--bk-orange); color: #fff; }
+.adm-audit-chip.aud-chip-sm { padding: 4px 11px; font-size: 12px; }
+
+/* Юрлицо записи */
+.aud-le-badge {
+  padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+  background: var(--bg-muted, #F0EAE4); color: var(--text-muted); white-space: nowrap;
+}
+
+.aud-export-btn { font-size: 12px; padding: 5px 12px; display: inline-flex; align-items: center; gap: 5px; }
+
+/* Телефон: фильтры в столбик, дата на всю ширину */
+@media (max-width: 640px) {
+  .adm-audit-filter-row { flex-direction: column; align-items: stretch; }
+  .adm-audit-right-filters { flex-wrap: wrap; }
+  .adm-audit-right-filters .adm-audit-select { flex: 1 1 45%; min-width: 0; }
+  .adm-audit-date { width: auto; flex: 1 1 45%; }
+  .aud-export-btn { flex: 1 1 100%; justify-content: center; }
+  .aud-le-badge { order: 5; }
+}
 
 .adm-audit-right-filters { display: flex; gap: 6px; align-items: center; }
 .adm-audit-select, .adm-audit-date {
@@ -556,13 +648,14 @@ onMounted(() => {
   .adm-audit-date { flex: 1 1 45%; min-width: 0; width: auto; }
   .adm-audit-select { width: 100%; min-width: 0; }
 
-  /* Шестнадцать категорий занимали семь строк, и до самих записей нужно было
-     долго прокручивать. Прокручиваем ленту фильтров вбок. */
+  /* Было шестнадцать категорий — они занимали семь строк, поэтому ленту
+     прокручивали вбок. Теперь разделов девять: переносим по строкам, иначе
+     половина кнопок прячется за краем экрана и о ней никто не знает. */
   .adm-audit-chips {
-    flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px; margin-bottom: 4px;
+    flex-wrap: wrap; overflow-x: visible;
+    padding-bottom: 0; margin-bottom: 6px;
   }
-  .adm-audit-chip { flex-shrink: 0; }
+  .adm-audit-chip { flex-shrink: 1; }
 
   /* Записи журнала: дата уходила вправо и жалась к краю */
   .adm-audit-head { gap: 6px; }

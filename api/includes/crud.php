@@ -269,7 +269,7 @@ $filterWhitelist = [
     'settings'    => ['key'],
     // created_at обязателен: без него фильтр по датам в журнале действий
     // молча отбрасывался — выбираешь январь, а показывались августовские записи.
-    'audit_log'   => ['entity_type','entity_id','action','user_name','legal_entity','legal_entity_group','created_at'],
+    'audit_log'   => ['entity_type','entity_id','action','user_name','legal_entity','legal_entity_group','created_at','details'],
     'stock_1c'    => ['sku','legal_entity'],
     'cards'       => ['id','sku','name','supplier','legal_entity','is_active','analogs','updated_by'],
     'notifications'=> ['id','type','target_user','entity_type','entity_id','legal_entity'],

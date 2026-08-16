@@ -303,6 +303,43 @@ if ($fn === 'terminate_ro_restaurant_sessions') {
     respond(['success' => true, 'count' => $n]);
 }
 
+// Сколько записей журнала действий приходится на каждый тип. Нужен экрану
+// «Журнал» в админке: он рисует счётчик у каждого раздела и прячет пустые.
+// Раньше фронт для этого выкачивал 5000 записей и всё равно недосчитывал —
+// сервер режет выдачу на 5000 строк, а записей уже 5422.
+if ($fn === 'audit_group_counts') {
+    $caller = getSessionUser($pdo);
+    if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+
+    $where = ['1=1'];
+    $params = [];
+    $from = trim((string)($body['date_from'] ?? ''));
+    $to   = trim((string)($body['date_to'] ?? ''));
+    if ($from !== '') { $where[] = 'created_at >= ?'; $params[] = $from; }
+    if ($to !== '')   { $where[] = 'created_at <= ?'; $params[] = $to . ' 23:59:59'; }
+    $user = trim((string)($body['user_name'] ?? ''));
+    if ($user !== '') { $where[] = 'user_name = ?'; $params[] = $user; }
+    $le = trim((string)($body['legal_entity'] ?? ''));
+    if ($le !== '') { $where[] = 'legal_entity = ?'; $params[] = $le; }
+    $q = trim((string)($body['search'] ?? ''));
+    if (mb_strlen($q) >= 2) {
+        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
+        $where[] = '(user_name LIKE ? OR details LIKE ? OR entity_id LIKE ?)';
+        $params[] = $like; $params[] = $like; $params[] = $like;
+    }
+    $sql = 'SELECT entity_type, COUNT(*) AS cnt FROM audit_log WHERE ' . implode(' AND ', $where) . ' GROUP BY entity_type';
+    try {
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $out = [];
+        foreach ($st->fetchAll() as $row) $out[$row['entity_type']] = (int)$row['cnt'];
+        respond($out);
+    } catch (Exception $e) {
+        error_log('audit_group_counts error: ' . $e->getMessage());
+        respond(['error' => 'Не удалось посчитать записи'], 500);
+    }
+}
+
 if ($fn === 'clear_error_logs') {
     $caller = getSessionUser($pdo);
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);

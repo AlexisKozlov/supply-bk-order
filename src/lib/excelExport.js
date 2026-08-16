@@ -1420,3 +1420,48 @@ export async function exportAnalogsXlsx(rows) {
   const d = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `Таблица аналогов ${d}.xlsx`);
 }
+
+/**
+ * Журнал действий (админка → Журнал) — выгрузка того, что отобрано фильтрами.
+ * rows: { created_at, action, actionLabel, entityLabel, author, legalEntity, context }
+ */
+export async function exportAuditLogXlsx(rows, periodLabel = '') {
+  const XLSX = await import('xlsx-js-style');
+  const brown = '502314', cream = 'FFF8F0', borderClr = 'E0D6CC';
+  const b = { style: 'thin', color: { rgb: borderClr } };
+  const borders = { top: b, bottom: b, left: b, right: b };
+  const sTitle = { font: { bold: true, sz: 16, color: { rgb: brown }, name: 'Calibri' }, alignment: { vertical: 'center' } };
+  const sSub = { font: { sz: 11, italic: true, color: { rgb: '8A7A6D' }, name: 'Calibri' } };
+  const sHeader = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' }, fill: { fgColor: { rgb: brown } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: borders };
+  const sHeaderLeft = { ...sHeader, alignment: { ...sHeader.alignment, horizontal: 'left' } };
+  const cell = (stripe, extra = {}) => ({ font: { sz: 11, name: 'Calibri', ...(extra.font || {}) }, fill: stripe ? { fgColor: { rgb: cream } } : undefined, alignment: { vertical: 'center', ...(extra.alignment || {}) }, border: borders });
+
+  const ws = {};
+  const put = (r, c, v, s) => { const ref = XLSX.utils.encode_cell({ r, c }); ws[ref] = { v, t: typeof v === 'number' ? 'n' : 's', s }; };
+
+  let r = 0;
+  put(r, 0, 'Журнал действий', sTitle); r++;
+  put(r, 0, periodLabel || 'все записи', sSub); r += 2;
+  ['Когда', 'Что сделано', 'Раздел', 'Кто', 'Юрлицо', 'Подробности'].forEach((h, c) => put(r, c, h, c >= 1 ? sHeaderLeft : sHeader));
+  r++;
+
+  rows.forEach((row, i) => {
+    const stripe = i % 2 === 1;
+    put(r, 0, row.created_at || '', cell(stripe, { alignment: { horizontal: 'center' } }));
+    put(r, 1, row.actionLabel || row.action || '', cell(stripe, { alignment: { horizontal: 'left' }, font: { bold: true, color: { rgb: brown } } }));
+    put(r, 2, row.entityLabel || '', cell(stripe, { alignment: { horizontal: 'left' } }));
+    put(r, 3, row.author || '', cell(stripe, { alignment: { horizontal: 'left' } }));
+    put(r, 4, row.legalEntity || '', cell(stripe, { alignment: { horizontal: 'left' } }));
+    put(r, 5, row.context || '', cell(stripe, { alignment: { horizontal: 'left', wrapText: true } }));
+    r++;
+  });
+
+  ws['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: Math.max(r - 1, 3), c: 5 });
+  ws['!cols'] = [{ wch: 18 }, { wch: 26 }, { wch: 26 }, { wch: 22 }, { wch: 22 }, { wch: 60 }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } }];
+  ws['!freeze'] = { xSplit: 0, ySplit: 4 };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Журнал');
+  const d = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `Журнал действий ${d}.xlsx`);
+}

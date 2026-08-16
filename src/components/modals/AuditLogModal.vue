@@ -78,6 +78,7 @@ import { onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatDateTime as formatDate } from '@/lib/utils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { auditActionLabel } from '@/lib/auditLabels.js';
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -90,24 +91,10 @@ function onKey(e) { if (e.key === 'Escape' && props.show) emit('close'); }
 onMounted(() => document.addEventListener('keydown', onKey));
 onUnmounted(() => document.removeEventListener('keydown', onKey));
 
-const ACTION_LABELS = {
-  order_created: 'Создан',
-  order_updated: 'Изменён',
-  order_deleted: 'Удалён',
-  plan_created: 'Создан',
-  plan_updated: 'Изменён',
-  plan_deleted: 'Удалён',
-  product_created: 'Создана',
-  product_updated: 'Изменена',
-  delivery_date_changed: 'Дата доставки',
-  received: 'Принят',
-  reception_reverted: 'Приёмка отменена',
-  schedule_updated: 'График',
-  restaurant_updated: 'Ресторан',
-};
-
+// Словарь общий с журналом в админке — раньше здесь была своя копия
+// на 13 действий, и всё остальное показывалось английским кодом.
 function badgeLabel(action) {
-  return ACTION_LABELS[action] || action;
+  return auditActionLabel(action);
 }
 
 function badgeClass(action) {
