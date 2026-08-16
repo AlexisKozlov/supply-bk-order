@@ -272,8 +272,15 @@ if ($fn === 'terminate_ro_session') {
     if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);
     $sessionId = (int)($body['session_id'] ?? 0);
     if ($sessionId <= 0) respond(['success' => false, 'error' => 'Не указан ID сессии'], 400);
+    // Компанию берём ДО удаления — потом связи уже не будет.
+    $roScope = null;
+    try {
+        $rs = $pdo->prepare("SELECT ru.restaurant_number, ru.legal_entity_group FROM ro_user_sessions s JOIN ro_users ru ON ru.id = s.ro_user_id WHERE s.id = ? LIMIT 1");
+        $rs->execute([$sessionId]);
+        if ($rr = $rs->fetch()) $roScope = roGetLegalEntity($pdo, $rr['restaurant_number'], $rr['legal_entity_group']) ?: ($rr['legal_entity_group'] ?: null);
+    } catch (Exception $e) { /* не критично */ }
     $pdo->prepare("DELETE FROM ro_user_sessions WHERE id = ?")->execute([$sessionId]);
-    auditLog($pdo, 'session_terminated', 'restaurant', (string)$sessionId, $caller['name']);
+    auditLog($pdo, 'session_terminated', 'restaurant', (string)$sessionId, $caller['name'], null, null, $roScope);
     respond(['success' => true]);
 }
 
@@ -291,7 +298,8 @@ if ($fn === 'terminate_ro_restaurant_sessions') {
     ");
     $st->execute([$number, $group]);
     $n = $st->rowCount();
-    auditLog($pdo, 'session_terminated', 'restaurant', '№' . $number . ' (' . $n . ')', $caller['name']);
+    auditLog($pdo, 'session_terminated', 'restaurant', '№' . $number . ' (' . $n . ')', $caller['name'], null, null,
+             roGetLegalEntity($pdo, $number, $group) ?: $group);
     respond(['success' => true, 'count' => $n]);
 }
 

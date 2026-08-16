@@ -814,14 +814,40 @@ $TABLE_TO_MODULE = [
 ];
 
 // ═══ Аудит-лог (хелпер для бэкенда) ═══
-function auditLog($pdo, $action, $entityType, $entityId, $userName, $details = null, $changes = null) {
+//
+// $scope — чьё это действие. Принимает ЛИБО полное имя юрлица
+// («ООО "Бургер БК"»), ЛИБО код группы ('BK_VM' | 'PS') — для сущностей,
+// которые общие на БК+ВМ и одного юрлица не имеют в принципе (корректировки,
+// напоминания ресторанов, загрузка машин).
+//
+// Раньше колонку не заполняли вообще: 67 серверных вызовов писали записи без
+// компании, и в журнале администратора 4349 записей из 5422 были «ничьи».
+// Если явно не передали — берём из $details['legal_entity'].
+//
+// Группу legal_entity_group по юрлицу проставляет триггер БД
+// (см. migrations/20260816_audit_log_legal_entity.sql).
+function auditLog($pdo, $action, $entityType, $entityId, $userName, $details = null, $changes = null, $scope = null) {
     try {
-        $pdo->prepare("INSERT INTO audit_log (action, entity_type, entity_id, user_name, details, changes) VALUES (?, ?, ?, ?, ?, ?)")
+        if (!$scope && is_array($details)) {
+            $scope = $details['legal_entity'] ?? ($details['legal_entity_group'] ?? null);
+        }
+        if ($scope !== null && !is_string($scope)) $scope = null;
+        $legalEntity = null;
+        $legalGroup  = null;
+        if ($scope === 'BK_VM' || $scope === 'PS') {
+            $legalGroup = $scope;
+        } elseif ($scope) {
+            $legalEntity = $scope;
+            $legalGroup  = getEntityGroup($scope);
+        }
+        $pdo->prepare("INSERT INTO audit_log (action, entity_type, entity_id, user_name, legal_entity, legal_entity_group, details, changes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             ->execute([
                 $action,
                 $entityType,
                 $entityId,
                 $userName,
+                $legalEntity,
+                $legalGroup,
                 $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null,
                 $changes ? json_encode($changes, JSON_UNESCAPED_UNICODE) : null,
             ]);

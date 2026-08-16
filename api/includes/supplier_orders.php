@@ -913,6 +913,16 @@ function soSendSummaryEmail(PDO $pdo, string $supplierId, string $deliveryDate, 
     return ['success' => $ok, 'error' => $ok ? null : ($res['error'] ?? 'send_failed'), 'restaurants_count' => $rc, 'items_count' => $ic];
 }
 
+/** Юрлицо поставщика — для записи в журнал действий. null, если не нашли. */
+function soSupplierLegalEntity(PDO $pdo, ?string $supplierId): ?string {
+    if (!$supplierId) return null;
+    try {
+        $s = $pdo->prepare("SELECT legal_entity FROM suppliers WHERE id = ? LIMIT 1");
+        $s->execute([$supplierId]);
+        return $s->fetchColumn() ?: null;
+    } catch (Exception $e) { return null; }
+}
+
 /** Включён ли у поставщика недельный приём заявок (один дедлайн на всю неделю). */
 function soSupplierIsWeekly(PDO $pdo, string $supplierId): bool {
     $cfg = soGetSupplierSettings($pdo, $supplierId);
@@ -2798,7 +2808,7 @@ if ($soAction === 'admin') {
             auditLog($pdo, 'so_supplier_reconnected', 'supplier', $supplierId, $updatedBy, [
                 'supplier_id' => $supplierId,
                 'restored'    => $restored,
-            ]);
+            ], null, soSupplierLegalEntity($pdo, $supplierId));
         } catch (Exception $e) { /* не критично */ }
         soRespond(['success' => true, 'supplier' => $supplier, 'restored' => $restored]);
     }
@@ -2830,7 +2840,7 @@ if ($soAction === 'admin') {
             $by = resolveActorName($pdo, $sessionUser);
             auditLog($pdo, 'so_supplier_disconnected', 'supplier', $supplierId, $by, [
                 'supplier_id' => $supplierId,
-            ]);
+            ], null, soSupplierLegalEntity($pdo, $supplierId));
         } catch (Exception $e) { /* не критично */ }
         soRespond(['success' => true]);
     }
@@ -4080,7 +4090,7 @@ if ($soAction === 'admin') {
                     'product_name' => $notify['product_name'] ?? null,
                     'old_val' => $notify['old_val'] ?? null,
                     'new_val' => $notify['new_val'] ?? null,
-                ]);
+                ], null, $notify['legal_entity'] ?? null);
             } catch (Exception $e) { /* не критично */ }
         }
 
@@ -4193,7 +4203,7 @@ if ($soAction === 'admin') {
                 'supplier' => $supplierName, 'restaurant_number' => $restNum,
                 'delivery_date' => $deliveryDate, 'items' => count($validItems),
                 'deadline' => $adhocDeadline, 'editable' => $editable,
-            ]);
+            ], null, soSupplierLegalEntity($pdo, (string)$suppId));
         } catch (Exception $e) { /* не критично */ }
 
         soRespond(['success' => true, 'order_id' => $orderId, 'status' => $status, 'editable' => $editable]);
@@ -4770,7 +4780,7 @@ if ($soAction === 'admin') {
             auditLog($pdo, 'so_deadline_rules_updated', 'supplier', $supplierId, $by, [
                 'supplier_id' => $supplierId,
                 'rules_count' => $inserted,
-            ]);
+            ], null, soSupplierLegalEntity($pdo, $supplierId));
         } catch (Exception $e) { /* не критично */ }
         soRespond(['success' => true, 'count' => $inserted]);
     }
@@ -4817,7 +4827,7 @@ if ($soAction === 'admin') {
                 'delivery_date' => $deliveryDate,
                 'deadline_date' => $deadlineDate,
                 'deadline_time' => $deadlineTime,
-            ]);
+            ], null, soSupplierLegalEntity($pdo, $supplierId));
         } catch (Exception $e) { /* не критично */ }
 
         soRespond(['success' => true, 'supplier_id' => $supplierId, 'delivery_date' => $deliveryDate, 'deadline_date' => $deadlineDate, 'deadline_time' => $deadlineTime]);
@@ -4859,7 +4869,7 @@ if ($soAction === 'admin') {
         try {
             auditLog($pdo, $isClosed ? 'so_day_closed' : 'so_day_reopened', 'supplier', $supplierId, $createdBy, [
                 'delivery_date' => $deliveryDate,
-            ]);
+            ], null, soSupplierLegalEntity($pdo, $supplierId));
         } catch (Exception $e) { /* не критично */ }
 
         soRespond(['success' => true]);

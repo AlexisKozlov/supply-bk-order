@@ -267,7 +267,9 @@ $filterWhitelist = [
     'plans'       => ['id','supplier','legal_entity','created_at'],
     'item_order'  => ['supplier','legal_entity','item_id'],
     'settings'    => ['key'],
-    'audit_log'   => ['entity_type','entity_id','action','user_name'],
+    // created_at обязателен: без него фильтр по датам в журнале действий
+    // молча отбрасывался — выбираешь январь, а показывались августовские записи.
+    'audit_log'   => ['entity_type','entity_id','action','user_name','legal_entity','legal_entity_group','created_at'],
     'stock_1c'    => ['sku','legal_entity'],
     'cards'       => ['id','sku','name','supplier','legal_entity','is_active','analogs','updated_by'],
     'notifications'=> ['id','type','target_user','entity_type','entity_id','legal_entity'],
@@ -325,7 +327,7 @@ $writeWhitelist = [
     'notifications'=> ['id','type','title','message','target_user','entity_type','entity_id','legal_entity','created_by','created_at','read_by','deleted_by'],
     'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','note','doc_type','file_name','file_path','created_by','approved_by','created_at'],
     'product_prices'   => ['id','sku','supplier','legal_entity','price','vat_rate','unit_type','currency','agreement_id','updated_by','updated_at'],
-    'audit_log'    => ['action','entity_type','entity_id','user_name','details','changes','legal_entity','created_at'],
+    'audit_log'    => ['action','entity_type','entity_id','user_name','details','changes','legal_entity','legal_entity_group','created_at'],
     'analysis_data'=> ['id','sku','legal_entity','data','updated_at'],
     'stock_1c'     => ['id','sku','legal_entity','stock','updated_at'],
     'cards'        => ['id','sku','name','supplier','legal_entity','is_active','data','category','analogs','created_by','updated_by'],

@@ -40,7 +40,7 @@
             error_log('[correction_take_batch] tg refresh failed: ' . $e->getMessage());
         }
 
-        auditLog($pdo, 'correction_taken', 'correction', implode(',', $ids), $callerName, ['count' => $taken]);
+        auditLog($pdo, 'correction_taken', 'correction', implode(',', $ids), $callerName, ['count' => $taken], null, $groups[0] ?? null);
         respond(['success' => true, 'taken' => $taken]);
     }
 
@@ -94,7 +94,7 @@
             error_log('[correction_review] notify failed: ' . $e->getMessage());
         }
 
-        auditLog($pdo, 'correction_reviewed', 'correction', $id, $callerName, ['action' => $action, 'restaurant' => $c['restaurant_number'], 'product' => $c['product_name']]);
+        auditLog($pdo, 'correction_reviewed', 'correction', $id, $callerName, ['action' => $action, 'restaurant' => $c['restaurant_number'], 'product' => $c['product_name']], null, $corrGroup ?: null);
         respond(['success' => true]);
     }
 
@@ -157,7 +157,7 @@
             error_log('[correction_review_batch] notify failed: ' . $e->getMessage());
         }
 
-        auditLog($pdo, 'correction_reviewed', 'correction', implode(',', $ids), $callerName, ['action' => $action, 'count' => count($ids)]);
+        auditLog($pdo, 'correction_reviewed', 'correction', implode(',', $ids), $callerName, ['action' => $action, 'count' => count($ids)], null, $groups[0] ?? null);
         respond(['success' => true, 'updated' => count($ids)]);
     }
 
@@ -251,7 +251,7 @@
         ");
         $st->execute([$key, $val, $authUserName]);
         auditLog($pdo, 'correction_deadline_changed', 'correction', null, $authUserName,
-                 ['deadline_time' => $val, 'group' => $group ?: 'все']);
+                 ['deadline_time' => $val, 'group' => $group ?: 'все'], null, $group ?: null);
         respond(['success' => true, 'deadline_time' => $val, 'group' => $group]);
     }
 

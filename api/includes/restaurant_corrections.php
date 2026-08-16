@@ -286,7 +286,8 @@ if ($subpoint === 'save' && $method === 'POST') {
     }
 
     auditLog($pdo, 'correction_submit_cabinet', 'order_corrections', $corrIds[0] ?? 0,
-        'ro:' . $rcRestNum, ['batch_uuid' => $batchUuid, 'count' => count($items), 'date' => $date]);
+        'ro:' . $rcRestNum, ['batch_uuid' => $batchUuid, 'count' => count($items), 'date' => $date],
+        null, roGetLegalEntity($pdo, $rcRestNum, $rcGroup) ?: $rcGroup);
 
     // Уведомление закупкам в Telegram — та же функция, что и из бота.
     try {
@@ -376,7 +377,8 @@ if ($subpoint === 'update' && $method === 'POST') {
     }
 
     auditLog($pdo, 'correction_edit_cabinet', 'order_corrections', $newIds[0] ?? 0,
-        'ro:' . $rcRestNum, ['batch_uuid' => $batchUuid, 'count' => count($items)]);
+        'ro:' . $rcRestNum, ['batch_uuid' => $batchUuid, 'count' => count($items)],
+        null, roGetLegalEntity($pdo, $rcRestNum, $rcGroup) ?: $rcGroup);
 
     // Перерисуем сообщения у закупок в TG (если они были).
     try {
@@ -425,7 +427,8 @@ if ($subpoint === 'cancel' && $method === 'POST') {
     }
 
     auditLog($pdo, 'correction_cancel_cabinet', 'order_corrections', $batchIds[0] ?? 0,
-        'ro:' . $rcRestNum, ['batch_uuid' => $batchUuid]);
+        'ro:' . $rcRestNum, ['batch_uuid' => $batchUuid],
+        null, roGetLegalEntity($pdo, $rcRestNum, $rcGroup) ?: $rcGroup);
 
     // Перерисуем сообщения у закупок: TG увидит, что строки в статусе cancelled.
     try {

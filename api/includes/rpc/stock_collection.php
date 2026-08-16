@@ -102,7 +102,7 @@
         requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'collection_id required'], 400);
-        $collCheck = $pdo->prepare("SELECT legal_entity_group, name FROM stock_collections WHERE id = ?");
+        $collCheck = $pdo->prepare("SELECT legal_entity, legal_entity_group, name FROM stock_collections WHERE id = ?");
         $collCheck->execute([$collId]);
         $collRow = $collCheck->fetch();
         if (!$collRow) respond(['error' => 'Не найден'], 404);
@@ -113,7 +113,7 @@
         $pdo->prepare("UPDATE stock_collections SET deadline_at = ? WHERE id = ?")->execute([$deadlineAt, $collId]);
         auditLog($pdo, 'collection_deadline_set', 'stock_collection', $collId, $authUserName, [
             'name' => $collRow['name'], 'deadline_at' => $deadlineAt,
-        ]);
+        ], null, $collRow['legal_entity'] ?: ($collRow['legal_entity_group'] ?? null));
         respond(['success' => true, 'deadline_at' => $deadlineAt]);
     }
 
@@ -201,7 +201,8 @@
             $pdo->rollBack();
             respond(['error' => 'Ошибка удаления'], 500);
         }
-        auditLog($pdo, 'collection_deleted', 'stock_collection', $collId, $authUserName, ['name' => $collRow['name']]);
+        auditLog($pdo, 'collection_deleted', 'stock_collection', $collId, $authUserName, ['name' => $collRow['name']],
+                 null, ($collRow['legal_entity'] ?? null) ?: ($collRow['legal_entity_group'] ?? null));
         respond(['success' => true]);
     }
 
@@ -368,7 +369,7 @@
                 'restaurant_number' => $restaurantNumber,
                 'batches' => $normalized,
                 'source' => 'manual',
-            ]);
+            ], null, ($collRow['legal_entity'] ?? null) ?: $group);
             respond(['success' => true, 'items' => $item]);
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();

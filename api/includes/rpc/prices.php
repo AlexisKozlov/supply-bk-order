@@ -113,7 +113,7 @@
             error_log('import_deposit_prices error: ' . $e->getMessage());
             respond(['error' => 'Ошибка импорта: ' . $e->getMessage()], 500);
         }
-        auditLog($pdo, 'deposit_prices_imported', 'product_prices', null, $caller['name'], ['matched' => $matched, 'skipped' => count($skipped)]);
+        auditLog($pdo, 'deposit_prices_imported', 'product_prices', null, $caller['name'], ['matched' => $matched, 'skipped' => count($skipped)], null, $le ?: null);
         respond([
             'success' => true,
             'matched' => $matched,
@@ -385,7 +385,7 @@
             error_log('set_deposit_price error: ' . $e->getMessage());
             respond(['error' => 'Ошибка сохранения: ' . $e->getMessage()], 500);
         }
-        auditLog($pdo, $price === null ? 'deposit_price_deleted' : 'deposit_price_updated', 'product_prices', null, $caller['name'], ['sku' => $sku, 'price' => $price, 'group' => $group]);
+        auditLog($pdo, $price === null ? 'deposit_price_deleted' : 'deposit_price_updated', 'product_prices', null, $caller['name'], ['sku' => $sku, 'price' => $price, 'group' => $group], null, ($leForInsert ?? null) ?: ($group ?: null));
         respond(['success' => true]);
     }
 

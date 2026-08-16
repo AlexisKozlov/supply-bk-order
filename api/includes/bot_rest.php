@@ -3253,13 +3253,23 @@ function corrReview($pdo, $chatId, $msgId, $corrIds, $action, $comment = null) {
     }
 
     if ($reviewedIds) {
+        // Группу берём по самим корректировкам: у order_corrections одного
+        // юрлица нет, они общие для БК+ВМ.
+        $corrScope = null;
+        try {
+            $gph = implode(',', array_fill(0, count($reviewedIds), '?'));
+            $gq = $pdo->prepare("SELECT DISTINCT legal_entity_group FROM order_corrections WHERE id IN ($gph)");
+            $gq->execute($reviewedIds);
+            $gl = $gq->fetchAll(PDO::FETCH_COLUMN);
+            if (count($gl) === 1) $corrScope = $gl[0];
+        } catch (Exception $e) { /* не критично */ }
         auditLog($pdo, "correction_{$newStatus}_bot", 'order_corrections', $reviewedIds[0], $user['name'], [
             'ids' => $reviewedIds,
             'count' => count($reviewedIds),
             'action' => $action,
             'comment' => $comment,
             'source' => 'telegram',
-        ]);
+        ], null, $corrScope);
     }
 
     if (empty($batchIds)) {

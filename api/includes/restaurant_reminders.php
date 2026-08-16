@@ -461,7 +461,8 @@ if ($subpoint === 'set' && $method === 'POST') {
         [
             'is_enabled'       => ['from' => (int)($prevState['is_enabled'] ?? 0), 'to' => $isEnabled],
             'telegram_enabled' => ['from' => (int)($prevState['telegram_enabled'] ?? 0), 'to' => $telegramEnabled],
-        ]
+        ],
+        roGetLegalEntity($pdo, $rrUser['restaurant_number'], $rrUser['legal_entity_group'] ?? null)
     );
 
     rrRespond(['success' => true]);
@@ -626,7 +627,8 @@ if ($subpoint === 'main-set' && $method === 'POST') {
         [
             'is_enabled'       => ['from' => (int)($prevMainState['is_enabled'] ?? 0), 'to' => $isEnabled],
             'telegram_enabled' => ['from' => (int)($prevMainState['telegram_enabled'] ?? 0), 'to' => $telegramEnabled],
-        ]
+        ],
+        roGetLegalEntity($pdo, $rrUser['restaurant_number'], $rrUser['legal_entity_group'] ?? null)
     );
 
     rrRespond(['success' => true]);
@@ -735,7 +737,8 @@ if ($subpoint === 'keg-set' && $method === 'POST') {
         [
             'is_enabled'       => ['from' => (int)($prevKegState['is_enabled'] ?? 0), 'to' => $isEnabled],
             'telegram_enabled' => ['from' => (int)($prevKegState['telegram_enabled'] ?? 0), 'to' => $telegramEnabled],
-        ]
+        ],
+        roGetLegalEntity($pdo, $rrUser['restaurant_number'], $rrUser['legal_entity_group'] ?? null)
     );
 
     rrRespond(['success' => true]);

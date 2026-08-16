@@ -139,7 +139,7 @@ if ($fn === 'replace_restaurant_sales') {
             $inserted++;
         }
         $pdo->commit();
-        auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'restaurant_sales', 'count' => $inserted, 'legal_entity_group' => $group]);
+        auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'restaurant_sales', 'count' => $inserted, 'legal_entity_group' => $group], null, $group ?: null);
         // TODO: уведомление в Telegram временно отключено
         // if (!empty($body['notify'])) {
         //     notifyTelegramRestaurantSales($pdo, $caller['name'], $items, $inserted);
@@ -192,7 +192,14 @@ if ($fn === 'replace_stock_malling') {
             $smStmt->execute(array_values($item));
         }
         $pdo->commit();
-        auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'stock_malling', 'count' => count($items)]);
+        // Файл может содержать сразу несколько компаний. Если все строки из одной
+        // группы юрлиц — записываем её, иначе оставляем пустой.
+        $smGroups = [];
+        foreach ($uploadedEntities as $ue) $smGroups[getEntityGroup($ue)] = true;
+        $smScope = count($smGroups) === 1 ? array_key_first($smGroups) : null;
+        auditLog($pdo, 'data_imported', 'import', null, $caller['name'],
+                 ['type' => 'stock_malling', 'count' => count($items), 'customers' => array_values($uploadedEntities)],
+                 null, $smScope);
         notifyTelegramDataUpdate($pdo, 'shelf_life', $caller['name'], '', count($items));
         notifyTelegramExpiringItems($pdo, $caller['name']);
         respond(['success' => true, 'count' => count($items)]);

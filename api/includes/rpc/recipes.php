@@ -49,7 +49,7 @@
             }
 
             $pdo->commit();
-            auditLog($pdo, 'recipe_imported', 'import', null, $caller['name'], ['count' => $imported]);
+            auditLog($pdo, 'recipe_imported', 'import', null, $caller['name'], ['count' => $imported], null, $legalEntity ?: ($group ?? null));
             respond(['success' => true, 'imported' => $imported]);
         } catch (Exception $e) {
             $pdo->rollBack();
