@@ -642,6 +642,9 @@ function toolRunSql($sql, $params, $entity, $user = null) {
     // ── 3. Базовые проверки безопасности ─────────────────────────────────────
     $sqlClean = trim($sql);
     if (!preg_match('/^SELECT\b/i', $sqlClean)) return "Разрешены только SELECT-запросы.";
+    // Комментарии запрещены: `SELECT * FROM/**/users` проходил мимо проверки
+    // таблиц ниже — она требовала пробел после FROM.
+    if (preg_match('~/\*|\*/|--|#~', $sqlClean)) return "Комментарии в запросе запрещены.";
     if (preg_match('/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|CALL|SET)\b/i', $sqlClean)) return "Запрещённая операция.";
     if (preg_match('/INTO\s+(OUTFILE|DUMPFILE)\b|LOAD_FILE\s*\(/i', $sqlClean)) return "Запрещённая операция.";
     if (preg_match('/\b(SLEEP|BENCHMARK|GET_LOCK|RELEASE_LOCK|WAIT_FOR_EXECUTED_GTID_SET)\s*\(/i', $sqlClean)) return "Запрещённая функция.";
@@ -651,18 +654,40 @@ function toolRunSql($sql, $params, $entity, $user = null) {
     }
 
     // ── 4. Извлекаем таблицы из SQL и проверяем whitelist ────────────────────
-    // Ищем имена таблиц после FROM, JOIN, UPDATE, INSERT INTO, DELETE FROM
+    // Ищем имена таблиц после FROM, JOIN, UPDATE, INSERT INTO, DELETE FROM.
+    // Пробел после ключевого слова необязателен: `FROM(users)` — валидный SQL.
+    $sqlKeywords = ['select', 'distinct', 'all', 'straight_join'];
     $mentioned = [];
-    if (preg_match_all('/\b(?:FROM|JOIN|UPDATE|INTO|TABLE)\s+`?([a-zA-Z_][a-zA-Z0-9_]*)`?/i', $sqlClean, $tm)) {
+    if (preg_match_all('/\b(?:FROM|JOIN|UPDATE|INTO|TABLE)\s*\(*\s*`?([a-zA-Z_][a-zA-Z0-9_]*)`?/i', $sqlClean, $tm)) {
         $mentioned = array_map('strtolower', $tm[1]);
     }
-    // Убираем алиасы и дубли
-    $mentioned = array_unique($mentioned);
+    // Убираем алиасы, ключевые слова и дубли
+    $mentioned = array_values(array_diff(array_unique($mentioned), $sqlKeywords));
     foreach ($mentioned as $tbl) {
         if (!in_array($tbl, $allowedTables, true)) {
             error_log("toolRunSql blocked: table '$tbl' not in whitelist. SQL: " . $sqlClean);
             return "Таблица «{$tbl}» не разрешена для запросов через бот. Разрешены только: " . implode(', ', $allowedTables) . ".";
         }
+    }
+
+    // ── 4b. Страховка: ни одно имя реальной таблицы вне whitelist не должно
+    // встречаться в запросе вообще. Ловит любые обходы разбора выше
+    // (`FROM(users)`, вложенные подзапросы, необычные пробелы).
+    try {
+        $allTables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
+        $banned = array_diff(array_map('strtolower', $allTables), $allowedTables);
+        if ($banned && preg_match_all('/[a-zA-Z_][a-zA-Z0-9_]*/', $sqlClean, $wm)) {
+            $words = array_unique(array_map('strtolower', $wm[0]));
+            $hit = array_intersect($words, $banned);
+            if ($hit) {
+                $bad = reset($hit);
+                error_log("toolRunSql blocked (fallback): table '$bad' in SQL: " . $sqlClean);
+                return "Таблица «{$bad}» не разрешена для запросов через бот. Разрешены только: " . implode(', ', $allowedTables) . ".";
+            }
+        }
+    } catch (Exception $e) {
+        error_log("toolRunSql: не удалось получить список таблиц: " . $e->getMessage());
+        return "Проверка запроса не удалась, попробуйте позже.";
     }
 
     // ── 5. Проверяем фильтр legal_entity для таблиц с данными ───────────────
