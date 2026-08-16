@@ -202,8 +202,11 @@ if ($fn === 'get_stock_skus') {
     // Остатки — по своему юрлицу, карточка товара — из общего справочника
     // группы: у «Воглии Матты» своих карточек в products почти нет, и её
     // позиции приезжали без названия и фасовки.
+    // Архивные карточки тоже подходят: товар снят с каталога, но остаток на
+    // складе есть. Без карточки фасовка падала в 1, и штуки показывались
+    // как коробки (88 560 «кор.» вместо 369).
     $stockParams = [];
-    $stockPick = productsPickIdSql('a.sku', getEntityGroup($le), '?', $stockParams, true);
+    $stockPick = productsPickIdSql('a.sku', getEntityGroup($le), '?', $stockParams);
     $stockParams[] = $le;
     $stockParams[] = $le;
     $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box, p.analog_group

@@ -590,8 +590,11 @@ function roGetStockForSku($pdo, $sku, $legalEntity) {
         // Справочник товаров общий на группу: по одному юрлицу «Воглия Матта»
         // не находила карточку, внешний код оставался пустым и остатки склада
         // не подтягивались вовсе.
+        // Архивные карточки тоже годятся: у 57 артикулов остаток на складе есть,
+        // а активной карточки нет — без внешнего кода и названия поиск по
+        // stock_malling не срабатывал и остаток терялся.
         $pParams = [$sku];
-        $pick = productsPickIdSql('?', getEntityGroup($legalEntity), '?', $pParams, true);
+        $pick = productsPickIdSql('?', getEntityGroup($legalEntity), '?', $pParams);
         $pParams[] = $legalEntity;
         $p = $pdo->prepare("SELECT external_code, name FROM products WHERE id = {$pick}");
         $p->execute($pParams);
