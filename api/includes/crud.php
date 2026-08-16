@@ -175,6 +175,44 @@ if ($sessionUser && in_array($table, $GROUP_TABLES)) {
     }
 }
 
+// Общие справочники (products, suppliers): человек работает только со своими
+// группами юрлиц. Здесь — проверка явно переданной группы и юрлица в теле
+// запроса; само условие «только мои группы» дописывается в WHERE ниже
+// (GET / PATCH / DELETE), поэтому клиенту фильтр слать необязательно.
+if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $DICT_GROUP_TABLES)) {
+    $legFilt = $_GET['legal_entity_group'] ?? null;
+    if ($legFilt) {
+        $legVal = urldecode((strpos($legFilt, 'eq.') === 0) ? substr($legFilt, 3) : $legFilt);
+        if (!checkLegalEntityGroupAccess($sessionUser, $legVal)) {
+            respond(['error' => 'Нет доступа к данной группе юр. лиц'], 403);
+        }
+    }
+    // Создание и изменение: юрлицо в карточке должно быть своим.
+    // Колонку legal_entity_group проставит триггер БД, её не проверяем.
+    if ($method !== 'GET' && !empty($body)) {
+        $recsToCheck = (isset($body[0]) && is_array($body[0])) ? $body : [$body];
+        foreach ($recsToCheck as $rec) {
+            if (!is_array($rec)) continue;
+            $bodyLE = $rec['legal_entity'] ?? null;
+            if ($bodyLE && !checkLegalEntityAccess($sessionUser, $bodyLE)) {
+                respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+            }
+        }
+    }
+}
+
+// Условие «только мои группы юрлиц» для общих справочников. Отдаёт готовый
+// кусок SQL и параметры; вызывается в GET, PATCH и DELETE.
+$applyDictGroupScope = function (&$where, &$params) use ($sessionUser, $table, $DICT_GROUP_TABLES) {
+    if (!$sessionUser || ($sessionUser['role'] ?? '') === 'admin') return;
+    if (!in_array($table, $DICT_GROUP_TABLES)) return;
+    $userGroups = userGroupCodes($sessionUser);
+    if (empty($userGroups)) { $where[] = '1=0'; return; }
+    $gph = implode(',', array_fill(0, count($userGroups), '?'));
+    $where[] = "`legal_entity_group` IN($gph)";
+    $params = array_merge($params, $userGroups);
+};
+
 // Дочерние таблицы тендеров — проверяем юрлицо через родительский тендер
 $TENDER_CHILD_TABLES = ['tender_items', 'tender_offers', 'tender_offer_prices', 'tender_files'];
 if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $TENDER_CHILD_TABLES)) {
@@ -439,6 +477,10 @@ if ($method === 'GET') {
         }
     }
 
+    // Общие справочники — всегда только свои группы юрлиц, даже если клиент
+    // прислал свой фильтр по группе (он лишь сузит выборку, но не расширит).
+    $applyDictGroupScope($where, $params);
+
     // Авто-фильтр для дочерних таблиц через родителя (PARENT_LE_CHECK).
     if ($sessionUser && $sessionUser['role'] !== 'admin' && isset($PARENT_LE_CHECK[$table])) {
         $cfg = $PARENT_LE_CHECK[$table];
@@ -627,6 +669,9 @@ if ($method === 'PATCH' || $method === 'PUT') {
             }
         }
     }
+    // Общие справочники: правка ограничена своими группами юрлиц. Чужая
+    // карточка просто не попадёт в WHERE — клиенту фильтр слать не нужно.
+    $applyDictGroupScope($where, $params);
     if (!$where) respond(['error'=>'No filters'], 400);
     // Проверка юрлица для PATCH без ID
     if (!$subpoint && $sessionUser && $sessionUser['role'] !== 'admin') {
@@ -731,6 +776,8 @@ if ($method === 'DELETE') {
             }
         }
     } else { $allowedFields = $filterWhitelist[$table] ?? []; foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue; parseFilter($k, $v, $where, $params, $pdo, $table); } if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields); }
+    // Общие справочники: удаление ограничено своими группами юрлиц.
+    $applyDictGroupScope($where, $params);
     if (!$where) respond(['error'=>'No filters'], 400);
     // Проверка юрлица для DELETE без ID
     if (!$subpoint && $sessionUser && $sessionUser['role'] !== 'admin') {
