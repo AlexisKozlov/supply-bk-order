@@ -21,7 +21,9 @@
       <div class="arat-card">
         <div class="arat-card-label">Связь</div>
         <div class="arat-card-value">{{ withPwaCount }}</div>
-        <div class="arat-card-sub">на телефоне · {{ withPushCount }} с уведомлениями · {{ withTelegramCount }} с Telegram</div>
+        <div class="arat-card-sub">
+          на телефоне · {{ withPushCount }} с уведомлениями · {{ withTelegramCount }} с Telegram<template v-if="tgBlockedCount">, из них {{ tgBlockedCount }} заблокировали бота</template>
+        </div>
       </div>
     </div>
 
@@ -51,6 +53,7 @@
           <option value="email-ok">Email подтверждён</option>
           <option value="tg">С Telegram</option>
           <option value="no-tg">Без Telegram</option>
+          <option value="tg-blocked">Заблокировали бота</option>
           <option value="pwa">Поставили приложение</option>
           <option value="no-pwa">Без приложения</option>
           <option value="push">С уведомлениями</option>
@@ -96,8 +99,10 @@
               <td class="arat-col-app" data-label="Связь">
                 <span v-if="u.has_pwa" class="arat-badge app" :title="'Приложение на телефоне. Последний раз открывали: ' + formatTime(u.pwa_last_seen_at)">телефон</span>
                 <span v-if="u.push_devices" class="arat-push-dot" :title="u.push_devices + ' ' + plural(u.push_devices, 'устройство', 'устройства', 'устройств') + ' с уведомлениями'"><BkIcon name="bell" size="sm" />{{ u.push_devices > 1 ? u.push_devices : '' }}</span>
-                <span v-if="u.telegram_chat_id" class="arat-badge tg" title="Кабинет привязан к Telegram">TG</span>
-                <span v-if="!u.has_pwa && !u.push_devices && !u.telegram_chat_id" class="arat-muted">—</span>
+                <span v-if="u.tg_subs" class="arat-badge tg" :class="{ blocked: u.tg_blocked >= u.tg_subs }" :title="tgTitle(u)">
+                  TG{{ u.tg_subs > 1 ? ' ' + u.tg_subs : '' }}
+                </span>
+                <span v-if="!u.has_pwa && !u.push_devices && !u.tg_subs" class="arat-muted">—</span>
               </td>
               <td class="arat-col-meta" data-label="Вход и пароль">
                 <div class="arat-meta-line" :title="lastLoginTitle(u)">
@@ -197,7 +202,8 @@ const verifiedEmailCount = computed(() => scopedUsers.value.filter(u => !!u.emai
 const cantLoginCount = computed(() => scopedUsers.value.filter(u => !u.has_password || !u.is_active).length);
 const withPwaCount = computed(() => scopedUsers.value.filter(u => u.has_pwa).length);
 const withPushCount = computed(() => scopedUsers.value.filter(u => u.push_devices > 0).length);
-const withTelegramCount = computed(() => scopedUsers.value.filter(u => !!u.telegram_chat_id).length);
+const withTelegramCount = computed(() => scopedUsers.value.filter(u => u.tg_subs > 0).length);
+const tgBlockedCount = computed(() => scopedUsers.value.filter(u => u.tg_blocked > 0).length);
 
 const filteredUsers = computed(() => {
   const q = (filter.value || '').toLowerCase().trim();
@@ -211,8 +217,9 @@ const filteredUsers = computed(() => {
     if (st === 'email-none' && u.email) return false;
     if (st === 'email-pending' && (!u.email || u.email_verified_at)) return false;
     if (st === 'email-ok' && !u.email_verified_at) return false;
-    if (st === 'tg' && !u.telegram_chat_id) return false;
-    if (st === 'no-tg' && u.telegram_chat_id) return false;
+    if (st === 'tg' && !u.tg_subs) return false;
+    if (st === 'no-tg' && u.tg_subs) return false;
+    if (st === 'tg-blocked' && !(u.tg_blocked > 0)) return false;
     if (st === 'pwa' && !u.has_pwa) return false;
     if (st === 'no-pwa' && u.has_pwa) return false;
     if (st === 'push' && !(u.push_devices > 0)) return false;
@@ -247,6 +254,14 @@ async function onPasswordOk({ password, mode }) {
   pwdModal.value = { ...target, show: false };
   if (target.bulk) await runBulkCreate(password, mode);
   else await runSetPassword(target.user, password);
+}
+
+// Подсказка к значку Telegram: сколько человек привязано и не заблокировали ли бота.
+function tgTitle(u) {
+  const n = u.tg_subs || 0;
+  const parts = [`${n} ${plural(n, 'человек привязан', 'человека привязано', 'человек привязано')} к Telegram`];
+  if (u.tg_blocked) parts.push(`${u.tg_blocked} ${plural(u.tg_blocked, 'заблокировал', 'заблокировали', 'заблокировали')} бота — уведомления им не дойдут`);
+  return parts.join('\n');
 }
 
 function statusBadgeClass(u) {
@@ -594,6 +609,7 @@ async function handleToggleUser(u) {
 .arat-col-app { white-space: nowrap; }
 .arat-badge.app { background: #FDEBD9; color: #C1502E; }
 .arat-badge.tg  { background: #E3F2FD; color: #1565C0; margin-left: 4px; }
+.arat-badge.tg.blocked { background: #fef2f2; color: #b91c1c; }
 .arat-push-dot { margin-left: 6px; font-size: 12px; }
 
 .arat-meta-line { white-space: nowrap; }

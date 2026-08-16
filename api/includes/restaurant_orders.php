@@ -5965,7 +5965,18 @@ if (strpos($roAction, 'admin') === 0) {
                 -- Сколько устройств подписано на уведомления.
                 (SELECT COUNT(*) FROM push_subscriptions ps
                   WHERE ps.restaurant_number = r.number
-                    AND ps.legal_entity_group COLLATE utf8mb4_general_ci = r.legal_entity_group) AS push_devices
+                    AND ps.legal_entity_group COLLATE utf8mb4_general_ci = r.legal_entity_group) AS push_devices,
+                -- Привязка к Telegram живёт в ro_telegram_subs: один ресторан —
+                -- несколько человек. Колонка ro_users.telegram_chat_id осталась
+                -- от старой схемы, она заполнена всего у 6 кабинетов из 110,
+                -- и считать привязку по ней нельзя.
+                (SELECT COUNT(*) FROM ro_telegram_subs ts
+                  WHERE ts.restaurant_number = r.number
+                    AND ts.legal_entity_group COLLATE utf8mb4_general_ci = r.legal_entity_group) AS tg_subs,
+                (SELECT COUNT(*) FROM ro_telegram_subs ts
+                  WHERE ts.restaurant_number = r.number
+                    AND ts.legal_entity_group COLLATE utf8mb4_general_ci = r.legal_entity_group
+                    AND ts.tg_blocked_at IS NOT NULL) AS tg_blocked
             FROM restaurants r
             LEFT JOIN ro_users ru
                    ON ru.restaurant_number = r.number
@@ -5988,6 +5999,8 @@ if (strpos($roAction, 'admin') === 0) {
             $row['restaurant_active'] = $restActive;
             $row['has_password'] = (int)$row['has_password'];
             $row['push_devices'] = (int)($row['push_devices'] ?? 0);
+            $row['tg_subs'] = (int)($row['tg_subs'] ?? 0);
+            $row['tg_blocked'] = (int)($row['tg_blocked'] ?? 0);
             $row['has_pwa'] = !empty($row['pwa_last_seen_at']);
         }
         unset($row);
