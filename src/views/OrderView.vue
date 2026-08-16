@@ -1067,7 +1067,11 @@ async function checkSalesVsConsumption() {
     // Собираем группы аналогов из текущих товаров
     const skus = orderStore.items.filter(i => i.sku).map(i => i.sku);
     if (!skus.length) return;
-    const { data: prods } = await db.from('products').select('sku, analog_group').in('sku', skus);
+    // Только своя группа юрлиц: у всех 10 общих артикулов группа аналогов
+    // названа по-разному в БК+ВМ и ПС, и чужое имя ничего не находило.
+    let agq = db.from('products').select('sku, analog_group').in('sku', skus);
+    agq = applyEntityGroupFilter(agq, orderStore.settings.legalEntity);
+    const { data: prods } = await agq;
     if (!prods?.length) return;
 
     const groupsMap = {};

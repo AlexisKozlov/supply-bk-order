@@ -287,6 +287,7 @@ import UiEmptyState from '@/components/ui/UiEmptyState.vue';
 import { db } from '@/lib/apiClient.js';
 import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js';
 import { appConfirm, appPrompt, appAlert } from '@/lib/appDialogs.js';
+import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -878,7 +879,11 @@ function normalizeProductCode(value) {
 
 async function loadProductCategories() {
   const map = {};
-  const { data } = await db.from('products').select('sku,external_code,category').eq('is_active', 1);
+  // Справочник общий на группу юрлиц — без фильтра сюда попадал каталог
+  // обеих групп, а 6 внешних кодов у них пересекаются.
+  let q = db.from('products').select('sku,external_code,category').eq('is_active', 1);
+  q = applyEntityGroupFilter(q, orderStore.settings.legalEntity);
+  const { data } = await q;
   for (const p of data || []) {
     const sku = normalizeProductCode(p.sku);
     const externalCode = normalizeProductCode(p.external_code);

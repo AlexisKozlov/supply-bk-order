@@ -62,13 +62,16 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore.js'
+import { useOrderStore } from '@/stores/orderStore.js'
 import { db } from '@/lib/apiClient.js'
+import { applyEntityGroupFilter } from '@/lib/utils.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { ALL_NAV_ITEMS } from '@/lib/navSections.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
+const orderStore = useOrderStore()
 const open = ref(false)
 const query = ref('')
 const activeIdx = ref(0)
@@ -132,22 +135,25 @@ async function search(q) {
   try {
     const escaped = q.replace(/[*%_]/g, '')
 
-    // Параллельно ищем товары, поставщиков и рестораны
+    // Параллельно ищем товары, поставщиков и рестораны.
+    // Справочники общие на группу юрлиц: без фильтра поиск выдавал чужую
+    // компанию, а лимит в 5-6 строк могла целиком занять другая группа.
+    const le = orderStore.settings.legalEntity
     const [productsRes, suppliersRes, restaurantsRes] = await Promise.allSettled([
-      db.from('products')
+      applyEntityGroupFilter(db.from('products')
         .select('sku, name, supplier, external_code')
         .or(`sku.ilike.*${escaped}*,name.ilike.*${escaped}*,external_code.ilike.*${escaped}*`)
         .eq('is_active', 1)
-        .limit(6),
-      db.from('suppliers')
+        .limit(6), le),
+      applyEntityGroupFilter(db.from('suppliers')
         .select('short_name, full_name')
         .or(`short_name.ilike.*${escaped}*,full_name.ilike.*${escaped}*`)
-        .limit(5),
-      db.from('restaurants')
+        .limit(5), le),
+      applyEntityGroupFilter(db.from('restaurants')
         .select('number, city, address, region, legal_entity_group')
         .or(`number.ilike.*${escaped}*,city.ilike.*${escaped}*,address.ilike.*${escaped}*`)
         .eq('active', 1)
-        .limit(5),
+        .limit(5), le),
     ])
 
     const results = []

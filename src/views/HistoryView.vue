@@ -267,7 +267,7 @@ import { useDraftStore } from '@/stores/draftStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { copyToClipboard, getQpb, getMultiplicity, formatDate, formatDateTime, parseLocalDate as parseDate } from '@/lib/utils.js';
+import { copyToClipboard, getQpb, getMultiplicity, formatDate, formatDateTime, parseLocalDate as parseDate, applyEntityGroupFilter } from '@/lib/utils.js';
 const formatDateShort = formatDate; // в этом файле обе функции показывают дд.мм.гггг
 import { useConfirm } from '@/composables/useConfirm.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -476,7 +476,11 @@ async function openOrderDrawer(order) {
   const skus = order.order_items.map(i => i.sku).filter(Boolean);
   if (!skus.length) return;
   try {
-    const { data } = await db.from('products').select('sku, multiplicity').in('sku', skus);
+    // Справочник товаров общий на группу юрлиц: 10 артикулов заведены и в
+    // BK_VM, и в PS, и без фильтра карточка могла прийти из чужой группы.
+    let mq = db.from('products').select('sku, multiplicity').in('sku', skus);
+    mq = applyEntityGroupFilter(mq, order.legal_entity || orderStore.settings.legalEntity);
+    const { data } = await mq;
     if (!data || drawerOrder.value?.id !== order.id) return;
     const multMap = Object.fromEntries(data.map(p => [p.sku, p.multiplicity || 1]));
     order.order_items.forEach(i => { if (i.multiplicity == null && i.sku) i.multiplicity = multMap[i.sku] || 1; });
@@ -526,7 +530,11 @@ async function copyOrder(order) {
   const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
   let productMap = {};
   if (skus.length) {
-    const { data } = await db.from('products').select('sku, unit_of_measure, multiplicity, qty_per_box').in('sku', skus);
+    // Только своя группа юрлиц: у общих артикулов фасовка различается
+    // (вода «АУРА» — 1 у БК и 12 у ПС), и чужая карточка ломала пересчёт.
+    let cq = db.from('products').select('sku, unit_of_measure, multiplicity, qty_per_box').in('sku', skus);
+    cq = applyEntityGroupFilter(cq, order.legal_entity || orderStore.settings.legalEntity);
+    const { data } = await cq;
     if (data) productMap = Object.fromEntries(data.map(p => [p.sku, p]));
   }
   const lines = (order.order_items || []).map(item => {
@@ -562,7 +570,11 @@ async function openUtFromHistory(order) {
   let productMap = {};
   if (skus.length) {
     try {
-      const { data } = await db.from('products').select('sku, external_code, category').in('sku', skus);
+      // Внешние коды у общих артикулов различаются по группам юрлиц —
+      // без фильтра в выгрузку для УТ мог попасть код чужой компании.
+      let uq = db.from('products').select('sku, external_code, category').in('sku', skus);
+      uq = applyEntityGroupFilter(uq, order.legal_entity || orderStore.settings.legalEntity);
+      const { data } = await uq;
       if (Array.isArray(data)) productMap = Object.fromEntries(data.map(p => [p.sku, p]));
     } catch (e) {
       console.warn('[ut-export history] fetch products failed:', e);

@@ -121,6 +121,7 @@ import { appPrompt, appConfirm } from '@/lib/appDialogs.js'
 import { parseSalesFile } from '@/lib/salesImport.js'
 import { parseCttPreorderXlsx, resolveCttPreorderRows, buildCttPreorderFilename, buildCttPreorderLabel } from '@/lib/cttJsonImport.js'
 import { getEntityGroupCode } from '@/lib/legalEntities.js'
+import { applyEntityGroupFilter } from '@/lib/utils.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useUserStore } from '@/stores/userStore.js'
@@ -349,7 +350,12 @@ function normalizeProductCode(value) {
 
 async function loadProductCategories() {
   const map = {}
-  const { data } = await db.from('products').select('sku,external_code,category').eq('is_active', 1)
+  // Справочник общий на группу юрлиц — без фильтра тянули каталог обеих
+  // групп (455 карточек вместо ~180) и по общим внешним кодам могли взять
+  // категорию чужой компании.
+  let q = db.from('products').select('sku,external_code,category').eq('is_active', 1)
+  q = applyEntityGroupFilter(q, orderStore.settings.legalEntity)
+  const { data } = await q
   for (const p of data || []) {
     const sku = normalizeProductCode(p.sku)
     const externalCode = normalizeProductCode(p.external_code)
@@ -413,8 +419,11 @@ async function uploadFile(type, file) {
 
     } else if (type === 'sales') {
       const le = orderStore.settings.legalEntity
-      // Загружаем карту артикул→группа аналогов
-      const { data: prods } = await db.from('products').select('sku, analog_group').neq('analog_group', '')
+      // Загружаем карту артикул→группа аналогов (только своя группа юрлиц:
+      // у общих артикулов группы аналогов названы по-разному в БК+ВМ и ПС).
+      let agq = db.from('products').select('sku, analog_group').neq('analog_group', '')
+      agq = applyEntityGroupFilter(agq, le)
+      const { data: prods } = await agq
       const skuToGroup = {}
       if (prods) prods.forEach(p => { if (p.sku && p.analog_group) skuToGroup[p.sku] = p.analog_group })
       const result = await parseSalesFile(file, skuToGroup)

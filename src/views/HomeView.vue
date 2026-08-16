@@ -304,7 +304,7 @@ import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import { ALL_NAV_ITEMS } from '@/lib/navSections.js';
 import { getRecentRoutes } from '@/router/index.js';
 import { parseRestaurantInput, formatRestaurantNumber } from '@/lib/legalEntities.js';
-import { plural, escapeHtml } from '@/lib/utils.js';
+import { plural, escapeHtml, applyEntityGroupFilter } from '@/lib/utils.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -486,15 +486,19 @@ async function searchDb(q) {
   if (escaped.length < 2) { dbHits.value = []; return; }
   findLoading.value = true;
   try {
+    // Справочники общие на группу юрлиц. Без фильтра поиск показывал товары,
+    // поставщиков и рестораны чужой компании, а лимит в 5-6 строк могла
+    // целиком занять другая группа — своё уже не помещалось.
+    const le = orderStore.settings.legalEntity;
     const [products, suppliers, restaurants] = await Promise.allSettled([
-      db.from('products').select('sku, name, supplier, external_code')
+      applyEntityGroupFilter(db.from('products').select('sku, name, supplier, external_code')
         .or(`sku.ilike.*${escaped}*,name.ilike.*${escaped}*,external_code.ilike.*${escaped}*`)
-        .eq('is_active', 1).limit(6),
-      db.from('suppliers').select('short_name, full_name')
-        .or(`short_name.ilike.*${escaped}*,full_name.ilike.*${escaped}*`).limit(5),
-      db.from('restaurants').select('number, city, address, legal_entity_group')
+        .eq('is_active', 1).limit(6), le),
+      applyEntityGroupFilter(db.from('suppliers').select('short_name, full_name')
+        .or(`short_name.ilike.*${escaped}*,full_name.ilike.*${escaped}*`).limit(5), le),
+      applyEntityGroupFilter(db.from('restaurants').select('number, city, address, legal_entity_group')
         .or(`number.ilike.*${escaped}*,city.ilike.*${escaped}*,address.ilike.*${escaped}*`)
-        .eq('active', 1).limit(5),
+        .eq('active', 1).limit(5), le),
     ]);
     const val = r => (r.status === 'fulfilled' ? (r.value?.data || []) : []);
     const out = [];
