@@ -179,8 +179,20 @@ export function entityLabel(type) {
   return ENTITY_LABELS[type] || String(type).replace(/_/g, ' ');
 }
 
+const _warned = new Set();
+
 // Текст действия для ленты активности. Фолбэк — ключ без подчёркиваний.
+// Второй словарь, для короткой плашки в журнале админки, лежит в
+// src/lib/auditLabels.js — новое действие дописывайте в ОБА.
 export function activityLabel(action) {
   if (!action) return '';
-  return ACTIVITY_LABELS[action] || String(action).replace(/_/g, ' ');
+  if (ACTIVITY_LABELS[action]) return ACTIVITY_LABELS[action];
+  if (import.meta.env?.DEV && !_warned.has(action)) {
+    _warned.add(action);
+    console.warn(
+      `[лента активности] нет перевода для «${action}». ` +
+      `Добавьте его в src/lib/auditActions.js (ACTIVITY_LABELS) и в src/lib/auditLabels.js.`,
+    );
+  }
+  return String(action).replace(/_/g, ' ');
 }
